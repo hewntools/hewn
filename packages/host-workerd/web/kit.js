@@ -125,7 +125,9 @@ export function actorLabel(id, caps) {
   if (id.startsWith("capability:")) return caps?.get(id.slice(11))?.name ?? id.slice(11);
   return AGENT_LABELS[id] ?? id;
 }
-export const builderLabel = (b) => (b === "agent" ? "your agent" : AGENT_LABELS[b] ?? b);
+/** A builder by name: the CLIs Hewn runs ("claude" is Claude Code, not the claude.ai agent). */
+const BUILDERS = { claude: "Claude Code", codex: "Codex" };
+export const builderLabel = (b) => (b === "agent" ? "your agent" : BUILDERS[b] ?? AGENT_LABELS[b] ?? b);
 
 // ---------- capabilities and their icons ----------
 

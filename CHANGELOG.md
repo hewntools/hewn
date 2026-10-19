@@ -9,6 +9,8 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **A failed build says why everywhere.** The Inbox and Activity show the build's own reason ("1 of 3 tests didn't pass", or what stopped the builder), not just "The builder stopped".
 - **Accounts shows a connection's health detail** ("expired · The session ended on 12 October").
 - **Web client polish:** tool names on Home and widget titles wrap between words (with an ellipsis when they don't fit) and tiles line up; Home starts just under the top bar; bar charts scale to their data; a single call in Activity opens like a group does; the command palette lists name matches first; the passkey page fits a phone.
+- **Hewn says what uses your account.** The proposal card says which agent builds it, on its own account (a subscription, an API key or a cloud provider); a build an agent asked for says so on its page and in Activity ("Codex asked · building with Claude Code, on your account"); Settings › AI says what each job runs on.
+- **`hewn url --listen 0.0.0.0`** puts the public listener on every interface (a container, or a proxy anywhere on the network) instead of failing to bind next to the loopback one.
 
 ## 0.4.0 (2026-10-19)
 

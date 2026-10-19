@@ -2875,6 +2875,8 @@ function proposalCard(kind, list, ctx) {
     { class: "card spec-card proposal" },
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
+    // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
+    kind !== "schedules" && h("div", { class: "small faint" }, `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
     h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
@@ -2936,6 +2938,12 @@ async function buildPage(id) {
  * while it works, collapsed under "Show log" once it succeeds, open by default when it fails (H6).
  * `compact`: in the change drawer (P3); `onPromoted(b)`: what to show there when it's live (P4).
  */
+/** "Codex asked · " when an agent asked for the build (it runs on the owner's builder account all the same). */
+const askedBy = (b) => {
+  const who = actorLabel(b.requestedBy);
+  return who && who !== "You" ? `${who} asked · ` : "";
+};
+
 function buildPanel(id, { compact = false, onPromoted } = {}) {
   const card = h("div", { class: compact ? "build-panel stack-md" : "card build-card" }, skeleton("50%", "80%"));
   const cancelBtn = h("button", {}, "Cancel build");
@@ -3000,7 +3008,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         head(
           appIcon(cap(), { size: compact ? 36 : 56, progress: step?.step === "tests" && step.tests?.total ? step.tests.passed / step.tests.total : 0, waiting: !(step?.step === "tests") }),
           compact && b.kind !== "create" ? `Building v${(base ?? 0) + 1}` : cap().name,
-          waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : compact && base ? `With ${builderLabel(b.builder)} · v${base} keeps working` : `Building with ${builderLabel(b.builder)} · you can leave`,
+          waitingAgent
+            ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave`
+            : `${askedBy(b)}${compact && base ? `With ${builderLabel(b.builder)}, on your account · v${base} keeps working` : `Building with ${builderLabel(b.builder)}, on your account · you can leave`}`,
           clockEl,
         ),
         h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
@@ -3467,7 +3477,7 @@ async function buildsView(head, only, all0) {
     const sub = (b) => {
       if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Waiting for ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, "another build") : "another build");
       if (b.status === "review") return h("span", { class: "sub" }, `${actorLabel(b.requestedBy, all)} changed it: it waits for you`);
-      if (LIVE_BUILD.has(b.status)) return h("span", { class: "sub" }, milestones(b));
+      if (LIVE_BUILD.has(b.status)) return h("span", { class: "sub row tight" }, askedBy(b) && h("span", { class: "faint" }, `${askedBy(b)}on your ${builderLabel(b.builder)}`), milestones(b));
       const first = String(b.request?.request || b.request?.purpose || "").split("\n")[0];
       return h("span", { class: "sub clip-1" }, (b.status === "failed" && b.failure?.title) || (first.length > 140 ? `${first.slice(0, 140)}…` : first) || (b.kind === "widgets" ? "Suggested by the builder" : " "));
     };
@@ -3743,6 +3753,8 @@ async function agentRequestSheet(p, { inline } = {}) {
     const sw = h("input", { type: "checkbox", class: "switch", checked: picked.has(scope), "aria-label": text });
     sw.addEventListener("change", () => (sw.checked ? picked.add(scope) : picked.delete(scope)));
     const added = p.current && !p.current.scopes.includes(scope);
+    // "Change existing ones" stays amber on purpose: an agent that can change tools can change what
+    // the code behind your data does (owner, 2026-10-19).
     return { pill: kindTag(scope === "discover" || scope === "invoke" ? "use" : "make", scope === "modify" ? "warn" : ""), main: h("span", {}, text), sub: added ? "New: it doesn't have this now" : null, control: sw };
   });
   const extra = h(
@@ -4191,6 +4203,7 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
+    h("div", { class: "small faint" }, "Writing the spec and building run on these agents' own accounts (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );
 }

@@ -64,7 +64,7 @@ export function writeConfig(home: Home, change: Partial<Omit<PlatformConfig, "ba
   const bad: string[] = [];
   if (publicListen !== undefined) {
     if (!publicListen) delete next.publicListen;
-    else if (typeof publicListen !== "string" || !IPV4.test(publicListen)) bad.push("publicListen must be an IPv4 address of this machine (e.g. 192.168.1.50)");
+    else if (typeof publicListen !== "string" || !IPV4.test(publicListen)) bad.push("publicListen must be an IPv4 address of this machine (e.g. 192.168.1.50), or 0.0.0.0 for every interface");
     else if (publicListen.startsWith("127.")) delete next.publicListen;
     else next.publicListen = publicListen;
   }

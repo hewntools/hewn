@@ -69,6 +69,8 @@ hewn url --listen 192.168.1.50     # this machine's LAN address
 hewn service restart
 ```
 
+In a container, or to answer on every interface, use `hewn url --listen 0.0.0.0`.
+
 Then point the proxy at `192.168.1.50:7718`. Only the public listener goes on the network; the web client's local port and admin stay on `127.0.0.1`. To allow only the proxy: `sudo ufw allow from <proxy's address> to any port 7718 proto tcp` (with the firewall on). `hewn url --listen off` goes back to this machine only.
 
 ### Only through your proxy (`HEWN_PROXY_SECRET`)

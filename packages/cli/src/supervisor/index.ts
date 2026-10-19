@@ -88,7 +88,8 @@ const workerd = () => {
   }
 };
 
-function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string } }) {
+/** workerd's config (capnp) for this home. Exported for tests. */
+export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string } }) {
   return `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
@@ -102,8 +103,10 @@ const config :Workerd.Config = (
   ],
   sockets = [
     (name = "http", address = "127.0.0.1:${o.port}", http = (), service = "main"),
-    (name = "public", address = "127.0.0.1:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),${
-      o.publicListen ? `\n    (name = "public-network", address = "${o.publicListen}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),` : ""
+    (name = "public", address = "${o.publicListen === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1"}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),${
+      // Another address too (a LAN address for a proxy on another machine). 0.0.0.0 already
+      // covers loopback, and a second socket on the same port would fail to bind.
+      o.publicListen && o.publicListen !== "0.0.0.0" ? `\n    (name = "public-network", address = "${o.publicListen}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),` : ""
     }
   ],
 );

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { config as supervisorConfig } from "@hewntools/cli/supervisor/index.ts";
+import { STORAGE_KEYS } from "@hewntools/cli/supervisor/format.ts";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync } from "node:fs";
@@ -153,6 +155,16 @@ describe("hewn url --listen: the public listener on the network", () => {
     assert.equal(writeConfig(home, { publicListen: "127.0.0.1" }).publicListen, undefined);
     writeConfig(home, { publicListen: "10.0.0.2" });
     assert.equal(writeConfig(home, { publicListen: null }).publicListen, undefined);
+  });
+
+  test("0.0.0.0 (every interface, as in a container) is one socket, not a second one on the same port", () => {
+    const base = { dir: "/d", keys: STORAGE_KEYS, port: 7717, publicPort: 7718, supervisorPort: 1, data: "/d", assets: { web: "/w", ui: "/u" } };
+    const sockets = (publicListen?: string) => [...supervisorConfig({ ...base, publicListen }).matchAll(/address = "([^"]+)", http = \(\), service = \(name = "main", entrypoint = "Public"\)/g)].map((m) => m[1]);
+    assert.deepEqual(sockets(), ["127.0.0.1:7718"]);
+    assert.deepEqual(sockets("192.168.1.50"), ["127.0.0.1:7718", "192.168.1.50:7718"]);
+    assert.deepEqual(sockets("0.0.0.0"), ["0.0.0.0:7718"]);
+    const home = openHome(mkdtempSync(join(tmpdir(), "hewn-listen-")));
+    assert.equal(writeConfig(home, { publicListen: "0.0.0.0" }).publicListen, "0.0.0.0");
   });
 });
 
