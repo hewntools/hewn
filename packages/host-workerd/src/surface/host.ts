@@ -49,7 +49,7 @@ export const jobModel = (s: Pick<Settings, "jobModels">, job: Job, agent: string
 /** Model names agents may pass for builds by `agent`. */
 export const agentModels = (s: Pick<Settings, "agentModels">, agent: string): string[] => s.agentModels?.[agent] ?? DEFAULT_AGENT_MODELS[agent] ?? ["default"];
 
-/** One option in an agent's model list (Settings › AI, the intake's +). */
+/** One option in an agent's model list (Settings › AI, the intake's model menu). */
 export interface ModelChoice {
   /** What Hewn passes to the CLI: "default" (nothing), an alias ("fable"), or a full name. */
   id: string;

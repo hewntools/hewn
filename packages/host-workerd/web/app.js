@@ -2524,24 +2524,16 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));
   const send = h("button", { type: "submit", class: embedded ? "" : "lg" }, "Send");
-  // + : the model and effort for this request (the build it hands off, and the intake when one
-  // agent does both). Unset: Settings › AI. One session id for the whole conversation.
+  // The model and effort for this request (what it builds, and the intake when one agent does
+  // both), picked under the composer. Unset: Settings › AI. One session id for the conversation.
   const models = { build: {}, intake: {} };
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const plus = h("button", { type: "button", class: `plus-btn ${embedded ? "" : "lg"}`, title: "Model and effort for this request", "aria-label": "Model and effort for this request" }, "+");
-  plus.addEventListener("click", async () => {
-    const picked = await requestModelSheet(models);
-    if (!picked) return;
-    Object.assign(models, picked);
-    const set = models.build.model || models.build.effort;
-    plus.textContent = set ? `+ ${modelWords(models.build)}` : "+";
-    plus.classList.toggle("set", !!set);
-  });
-  const composer = embedded ? h("form", { class: "stack-sm composer" }, input, h("div", { class: "row between" }, plus, send)) : h("form", { class: "row tight composer" }, plus, input, send);
+  const picker = requestModelMenu(models);
+  const composer = embedded ? h("form", { class: "stack-sm composer" }, input, h("div", { class: "row between" }, picker, send)) : h("form", { class: "row tight composer" }, input, send);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "card chat-card" }, thread, composer));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "stack-sm" }, h("div", { class: "card chat-card" }, thread, composer), h("div", { class: "row end composer-bar" }, picker)));
   const say = (who, text) => thread.append(h("div", { class: `bubble ${who}` }, text));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim());
   input.addEventListener("input", syncSend);
@@ -2660,54 +2652,126 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
 const buildWidgets = (cap, request, ask = {}) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...ask } });
 
 /**
- * The intake's +: model and effort for this request. "As set" keeps Settings › AI. With one agent
- * doing both halves, the choice is for both; split, the talking-through half has its own.
+ * Under the intake's composer: the model and effort for this request, like a chat app's model
+ * menu. The chip shows what it will use (yours from Settings › AI until you pick another); the menu
+ * lists Default and the families, "More models" the pinned ones (and a full name), "Effort" the
+ * levels. With the two halves split, "Talks it through" picks the intake's model too. `models` is
+ * filled in place: { build, intake }, each { model?, effort? } (empty: Settings › AI).
  */
-async function requestModelSheet(current) {
-  const { tools, settings: s } = await buildJobs();
-  const builder = tools.find((t) => t.name === s.builder);
-  if (!builder) return fail(new Error("Choose who builds tools first (Settings › AI)")), null;
-  const split = s.intake !== s.builder;
-  const intake = tools.find((t) => t.name === s.intake);
-  const [bCat, iCat] = await Promise.all([api(`/tools/${enc(s.builder)}/models`), split && intake ? api(`/tools/${enc(s.intake)}/models`) : null]);
-  const group = (title, catalog, setting, now) => {
-    const model = h("select", { "aria-label": `${title}: model` }, h("option", { value: "" }, `As set (${modelWords({ model: setting.model }, catalog)})`), catalog.models.map((m) => h("option", { value: m.id, selected: m.id === now.model }, m.label)));
-    const other = h("input", { type: "text", class: "mono", placeholder: "full model name", "aria-label": "Model name", hidden: true });
-    if (catalog.other) model.append(h("option", { value: "*" }, "Other…"));
-    if (now.model && !catalog.models.some((m) => m.id === now.model)) ((model.value = "*"), (other.hidden = false), (other.value = now.model));
-    const effort = h("select", { "aria-label": `${title}: effort` });
-    const fill = () => {
-      other.hidden = model.value !== "*";
-      const m = catalog.models.find((x) => x.id === (model.value || setting.model || "default"));
-      const list = m?.efforts ?? catalog.models[0]?.efforts ?? [];
-      put(effort, h("option", { value: "" }, setting.effort && !model.value ? `As set (${setting.effort})` : "Default"), list.map((e) => h("option", { value: e, selected: e === now.effort }, e[0].toUpperCase() + e.slice(1))));
-    };
-    model.addEventListener("change", fill);
-    fill();
-    const read = () => {
-      const id = model.value === "*" ? other.value.trim() : model.value;
-      return { ...(id ? { model: id } : {}), ...(effort.value ? { effort: effort.value } : {}) };
-    };
-    return { el: h("div", { class: "stack-sm" }, split && h("div", { class: "eyebrow" }, title), h("div", { class: "row tight wrap" }, h("label", { class: "field grow" }, h("span", { class: "label" }, "Model"), model), h("label", { class: "field" }, h("span", { class: "label" }, "Effort"), effort)), other), read };
+function requestModelMenu(models) {
+  const chip = h("button", { type: "button", class: "ghost sm model-chip", "aria-haspopup": "menu", title: "Model and effort for this request" }, h("span", {}, "Model"), h("span", { class: "faint" }));
+  let ctx = null;
+  const load = async () => {
+    const { tools, settings: s } = await buildJobs();
+    const split = s.intake !== s.builder;
+    const [bCat, iCat] = await Promise.all([api(`/tools/${enc(s.builder)}/models`), split ? api(`/tools/${enc(s.intake)}/models`).catch(() => null) : null]);
+    ctx = { s, split, bCat, iCat, intakeTool: tools.find((t) => t.name === s.intake) };
+    return ctx;
   };
-  return formSheet({
-    icon: agentTileOf(builder, 44),
-    title: "For this request",
-    sub: split ? `${builder.label} builds · ${intake?.label ?? s.intake} talks it through` : `${builder.label} talks it through and builds it`,
-    build: (close) => {
-      const b = group("Builds", bCat, jobModelOf(s, "builder"), current.build);
-      const i = split && iCat ? group("Talks it through", iCat, jobModelOf(s, "intake"), current.intake) : null;
-      return [
-        b.el,
-        i?.el,
-        h("div", { class: "small faint" }, "Only for this conversation and what it builds. Settings › AI sets the usual one."),
-        sheetActions(
-          h("button", { onclick: () => close(null) }, "Cancel"),
-          h("button", { class: "primary", onclick: () => close({ build: b.read(), intake: i ? i.read() : b.read() }) }, "Use"),
-        ),
+  /** What a half will use: this request's pick, else the setting. */
+  const effective = (half) => {
+    const set = jobModelOf(ctx.s, half === "build" ? "builder" : "intake");
+    const pick = models[half];
+    return { model: pick.model ?? set.model, effort: pick.effort ?? (pick.model ? undefined : set.effort) };
+  };
+  const label = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
+  const paint = () => {
+    const e = effective("build");
+    chip.firstChild.textContent = label(ctx.bCat, e.model);
+    chip.lastChild.textContent = e.effort ? e.effort[0].toUpperCase() + e.effort.slice(1) : "";
+    chip.classList.toggle("set", !!(models.build.model || models.build.effort));
+  };
+  load().then(paint).catch(() => (chip.hidden = true));
+
+  let menu = null;
+  const close = () => {
+    menu?.remove();
+    menu = null;
+    document.removeEventListener("click", outside, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const outside = (e) => menu && !menu.contains(e.target) && !chip.contains(e.target) && close();
+  const onKey = (e) => e.key === "Escape" && (e.stopPropagation(), close(), chip.focus());
+  /** Pick a model for a half: the setting's own model clears the pick; an effort it doesn't take is dropped. */
+  const pickModel = (half, cat, id) => {
+    const set = jobModelOf(ctx.s, half === "build" ? "builder" : "intake");
+    const same = (id === "default" ? undefined : id) === set.model;
+    const efforts = cat.models.find((m) => m.id === id)?.efforts ?? [];
+    const effort = models[half].effort && efforts.includes(models[half].effort) ? models[half].effort : undefined;
+    models[half] = { ...(same ? {} : { model: id }), ...(effort ? { effort } : {}) };
+    if (half === "build" && !ctx.split) models.intake = models.build;
+  };
+  const row = (main, sub, { checked = false, aside, onClick, chevron = false } = {}) =>
+    h(
+      "button",
+      { type: "button", role: "menuitem", class: "mm-row", onclick: (e) => (e.stopPropagation(), onClick?.()) },
+      h("span", { class: "grow col" }, h("span", {}, main), sub && h("span", { class: "sub" }, sub)),
+      aside && h("span", { class: "faint" }, aside),
+      checked && h("span", { class: "model-tick", "aria-label": "chosen" }, "✓"),
+      chevron && h("span", { class: "faint" }, "›"),
+    );
+  const back = (title) => h("button", { type: "button", class: "mm-row back", onclick: (e) => (e.stopPropagation(), show("main")) }, h("span", { class: "faint" }, "‹"), h("span", { class: "grow" }, title));
+  const modelRows = (half, cat, list) => {
+    const cur = effective(half).model ?? "default";
+    const set = jobModelOf(ctx.s, half === "build" ? "builder" : "intake").model ?? "default";
+    return list.map((m) => row(m.label, m.description, { checked: m.id === cur, aside: m.id === set ? "your setting" : null, onClick: () => (pickModel(half, cat, m.id), paint(), half === "build" ? close() : show("main")) }));
+  };
+  const show = (view) => {
+    const { bCat, iCat, split, intakeTool } = ctx;
+    const e = effective("build");
+    const efforts = bCat.models.find((m) => m.id === (e.model ?? "default"))?.efforts ?? bCat.models[0]?.efforts ?? [];
+    const pinned = bCat.models.filter((m) => m.kind === "pinned");
+    let body;
+    if (view === "effort") {
+      const def = bCat.models.find((m) => m.id === (e.model ?? "default"))?.defaultEffort;
+      body = [
+        back("Effort"),
+        row(def ? `Default (${def})` : "Default", null, { checked: !e.effort, onClick: () => ((models.build = { ...models.build, effort: undefined }), delete models.build.effort, !ctx.split && (models.intake = models.build), paint(), show("main")) }),
+        efforts.map((x) => row(x[0].toUpperCase() + x.slice(1), null, { checked: e.effort === x, onClick: () => ((models.build = { ...models.build, effort: x }), !ctx.split && (models.intake = models.build), paint(), show("main")) })),
       ];
-    },
+    } else if (view === "more") {
+      const other = h("input", { type: "text", class: "mono", placeholder: ctx.s.builder === "claude" ? "claude-fable-5-1" : "model name", "aria-label": "Model name" });
+      other.addEventListener("keydown", (ev) => ev.key === "Enter" && (ev.preventDefault(), other.value.trim() && (pickModel("build", bCat, other.value.trim()), paint(), close())));
+      body = [back("More models"), modelRows("build", bCat, pinned), bCat.other && h("div", { class: "model-other stack-xs" }, h("span", { class: "small faint" }, "A full model name (stays on that one), then Enter"), other)];
+    } else if (view === "talk") {
+      body = [back(`Talks it through · ${intakeTool?.label ?? ctx.s.intake}`), iCat ? modelRows("intake", iCat, iCat.models) : h("div", { class: "small faint pad" }, "Its models can't be listed right now.")];
+    } else {
+      body = [
+        modelRows("build", bCat, bCat.models.filter((m) => m.kind !== "pinned")),
+        h("hr"),
+        efforts.length > 0 && row("Effort", null, { aside: e.effort ? e.effort[0].toUpperCase() + e.effort.slice(1) : "Default", chevron: true, onClick: () => show("effort") }),
+        (pinned.length > 0 || bCat.other) && row("More models", null, { chevron: true, onClick: () => show("more") }),
+        split && row("Talks it through", intakeTool?.label, { aside: label(iCat, effective("intake").model), chevron: true, onClick: () => show("talk") }),
+        h("div", { class: "small faint model-note" }, "For this conversation and what it builds. Settings › AI sets the usual one."),
+      ];
+    }
+    put(menu, body);
+    menu.querySelector("button, input")?.focus();
+  };
+  chip.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (menu) return close();
+    try {
+      await (ctx ?? load());
+    } catch (err) {
+      return fail(err);
+    }
+    menu = h("div", { class: "menu model-menu", role: "menu" });
+    // Under the chip, right-aligned to it (above it when there's no room below).
+    chip.parentElement.style.position ||= "relative";
+    chip.after(menu);
+    show("main");
+    // Below the chip, or above it when there's more room there; it scrolls when even that's short.
+    const r = chip.getBoundingClientRect();
+    const below = innerHeight - r.bottom - 16;
+    const above = r.top - 16;
+    if (menu.getBoundingClientRect().height > below && above > below) menu.classList.add("above");
+    menu.style.maxHeight = `${Math.max(160, menu.classList.contains("above") ? above : below)}px`;
+    document.addEventListener("click", outside, true);
+    document.addEventListener("keydown", onKey, true);
   });
+  onLeave(close);
+  return chip;
 }
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
@@ -2875,7 +2939,7 @@ function proposalCard(kind, list, ctx) {
   };
 
   build.addEventListener("click", async () => {
-    // The model and effort picked with the composer's + (read now: it may have changed since this card).
+    // The model and effort picked in the menu under the composer (read now: it may have changed since this card).
     const ask = askOf();
     build.disabled = true;
     rows.forEach((r) => (r.box.disabled = true));

@@ -403,7 +403,7 @@ export class HewnDO extends DurableObject<Env> {
         let reply: any;
         let error: string | undefined;
         const s = this.settings();
-        // The intake's model: what the owner picked for this conversation (the +), else the setting.
+        // The intake's model: what the owner picked for this conversation (the model menu under its chat), else the setting.
         const run = req.run ?? jobModel(s, "intake", s.intake);
         await sv.stream("/intake", { intake: s.intake, req: { ...req, run } }, (e) => {
           if (e.progress) onProgress?.(e.progress);

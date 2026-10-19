@@ -386,10 +386,24 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .title-ref { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; } .title-ref .cap-ref { font-weight: inherit; }
 .ref-end { display: inline-flex; align-items: center; }
 
-/* The intake's +: model and effort for this request; it shows the choice once one is made. */
-.plus-btn { min-width: 44px; justify-content: center; font-size: 18px; white-space: nowrap; }
-.plus-btn.set { min-width: 0; font-size: var(--fs-sm); color: var(--text); }
-.composer .plus-btn:not(.lg) { min-height: 32px; }
+/* Under the intake's composer: the model for this request, and its menu (a chat app's model menu). */
+.composer-bar { position: relative; padding: 0 var(--s2); }
+.model-chip { gap: 6px; color: var(--text-2); font-weight: 450; }
+.model-chip.set { color: var(--text); background: var(--surface-2); }
+.model-menu { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; width: min(380px, 92vw); padding: 6px; overflow-y: auto; }
+.model-menu.above { top: auto; bottom: calc(100% + 6px); }
+.model-menu > * { flex-shrink: 0; }
+.drawer .model-menu { left: 0; right: auto; }
+.model-menu .mm-row { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 8px; background: none; text-align: left; font: 450 var(--fs)/1.35 var(--font); white-space: normal; }
+.model-menu .mm-row:hover, .mm-row:focus-visible { background: var(--surface-2); }
+.model-menu .mm-row .col { gap: 3px; }
+.model-menu .mm-row .sub { font-size: var(--fs-sm); color: var(--text-2); }
+.model-menu .mm-row .faint { font-size: var(--fs-sm); white-space: nowrap; }
+.model-menu .mm-row.back { min-height: 34px; font-size: var(--fs-sm); color: var(--text-2); }
+.model-tick { color: var(--accent-ink); font-weight: 600; }
+.model-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
+.model-note { padding: 6px 10px 4px; }
+.model-other { padding: 6px 10px; }
 
 /* Settings › AI › Advanced: the two halves of building, each with its own agent and model. */
 .advanced > summary { cursor: pointer; padding: 12px 0; list-style-position: inside; }
