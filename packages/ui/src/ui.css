@@ -449,7 +449,8 @@ input[type=range].hue-range { width: 100%; accent-color: var(--accent); }
 .jw-body > * { flex-shrink: 0; }
 .jw-body > .jw-chart { flex: 1 1 0; min-height: 40px; }
 .jw-t-stat .jw-body, .jw-t-progress .jw-body { justify-content: center; }
-.jw-value { font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.03em; line-height: 1.05; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* Values and progress labels (a book's title) wrap between words, two lines at most; a word wider than the widget ends in an ellipsis. */
+.jw-value { font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.03em; line-height: 1.05; font-variant-numeric: tabular-nums; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-overflow: ellipsis; }
 .jw-large .jw-value { font-size: var(--fs-3xl); }
 .jw .jw-value.jw-value-sm { font-size: var(--fs-lg); letter-spacing: -0.01em; }
 .jw-unit { margin-left: 4px; font-size: var(--fs); font-weight: 500; color: var(--text-2); letter-spacing: 0; }

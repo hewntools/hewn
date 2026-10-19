@@ -152,7 +152,14 @@ export async function runDoctor(d: DoctorDeps): Promise<Check[]> {
   for (const h of d.harnesses) {
     if (!h.detect()) add({ name: h.label, state: "ok", detail: "not installed on this machine (skipped)" });
     else if (!h.registered(d.userHome)) add({ name: h.label, state: "warn", detail: "installed, but Hewn isn't connected", fix: "Agents → Connect an agent (web client), or hewn setup" });
-    else add({ name: h.label, state: "ok", detail: `Hewn registered (if it asks to sign in: hewn setup --agents ${h.agentId})` });
+    else {
+      // Registered with *a* Hewn; check it's this one (another home, another port).
+      const at = h.registeredUrl?.(d.userHome);
+      const url = at && URL.canParse(at) ? new URL(at) : undefined;
+      if (at && url && Number(url.port || 80) !== d.port && /^(127\.0\.0\.1|localhost|\[::1\])$/.test(url.hostname))
+        add({ name: h.label, state: "warn", detail: `Hewn is registered at ${at}, another Hewn (this one is on port ${d.port})`, fix: `hewn setup --agents ${h.agentId}, to point it at this one` });
+      else add({ name: h.label, state: "ok", detail: `Hewn registered (if it asks to sign in: hewn setup --agents ${h.agentId})` });
+    }
   }
   const waiting = up ? await d.pendingAgents?.().catch(() => 0) : 0;
   if (waiting) add({ name: "Approvals", state: "warn", detail: `${waiting} agent${waiting > 1 ? "s" : ""} waiting to connect`, fix: "Agents in the web client, or hewn agents pending" });

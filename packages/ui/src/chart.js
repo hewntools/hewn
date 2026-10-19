@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Hewn chart helper (v4: short charts fit, axes: false; v3: optional viewBox width; v2 added lineChart), served at /_platform/chart.js on every Hewn origin.
+// Hewn chart helper (v5: bar axes end near the tallest bar; v4: short charts fit, axes: false; v3: optional viewBox width; v2 added lineChart), served at /_platform/chart.js on every Hewn origin.
 // SVG built with DOM APIs (no innerHTML); colours come from ui.css tokens (--c1..--c8).
 //
 //   import { barChart } from "/_platform/chart.js";
@@ -26,6 +26,16 @@ function niceMax(v) {
   return [1, 2, 2.5, 5, 10].map((m) => m * p).find((x) => x >= v);
 }
 
+/**
+ * A bar chart's y axis: the largest total rounded up to the next round step, so the tallest bar
+ * nearly reaches the top (10.1 → 12.5 in steps of 2.5, not 20), and that step for the ticks.
+ */
+export function barAxis(v) {
+  if (!(v > 0)) return { max: 1, step: 0.25 };
+  const step = niceMax(v / 5);
+  return { max: Number((Math.ceil(v / step - 1e-9) * step).toPrecision(12)), step };
+}
+
 /** A line's y range: the data's own (temperatures can be negative, and 2–4° shouldn't look flat), on round ticks. */
 function lineRange(values) {
   const vs = values.filter((v) => Number.isFinite(v));
@@ -42,10 +52,10 @@ function lineRange(values) {
  * Room for the axes. A short chart gets two y ticks (0 and max) and tight padding, so the plot
  * keeps most of the height; `axes: false` draws the plot alone (a tiny chart).
  */
-function frame({ width, height, axes, max, labels, min = 0 }) {
+function frame({ width, height, axes, max, labels, min = 0, every = (max - min) / 4 }) {
   if (!axes) return { pad: { top: 4, right: 4, bottom: 4, left: 4 }, ticks: [], step: 0, labelY: 0 };
   const short = height < 120;
-  const ticks = short ? [min, max] : [0, 1, 2, 3, 4].map((t) => min + ((max - min) / 4) * t);
+  const ticks = short ? [min, max] : Array.from({ length: Math.round((max - min) / every) + 1 }, (_, t) => Number((min + every * t).toPrecision(12)));
   const pad = { top: short ? 6 : 12, right: 8, bottom: short ? 18 : 28, left: 10 + 6.5 * Math.max(...ticks.map((v) => fmt(v).length)) };
   const widest = 6.5 * Math.max(1, ...labels.map((l) => String(l).length)) + 6;
   const step = Math.max(1, Math.ceil(labels.length / Math.max(2, Math.floor((width - pad.left - pad.right) / widest))));
@@ -55,8 +65,8 @@ function frame({ width, height, axes, max, labels, min = 0 }) {
 /** Vertical bar chart, grouped or stacked. Replaces the container's contents. */
 export function barChart(container, { labels, series, stacked = false, unit = "", height = 240, width = 640, axes = true }) {
   const totals = labels.map((_, i) => (stacked ? series.reduce((a, s) => a + (s.values[i] || 0), 0) : Math.max(0, ...series.map((s) => s.values[i] || 0))));
-  const max = niceMax(Math.max(0, ...totals));
-  const { pad, ticks, step, labelY } = frame({ width, height, axes, max, labels });
+  const { max, step: every } = barAxis(Math.max(0, ...totals));
+  const { pad, ticks, step, labelY } = frame({ width, height, axes, max, labels, every });
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const y = (v) => pad.top + innerH - (v / max) * innerH;

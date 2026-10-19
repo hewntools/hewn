@@ -67,6 +67,7 @@ describe("web client (owner surface)", () => {
     const builder: CapabilityBuilder = {
       name: "fake",
       build: async (job) => {
+        if (job.capabilityId === "stops-early") throw new Error("hit the usage limit");
         appendFileSync(job.logPath, "00:00:00 → Write src/index.ts\n");
         job.onActivity?.("→ Write src/index.ts");
         cpSync(SEED, job.workspace, { recursive: true });
@@ -340,6 +341,22 @@ describe("web client (owner surface)", () => {
       const again = await api(`/builds/${fix.json.buildId}/fix`, { method: "POST" });
       assert.equal(again.json.request.requirements.split("--- Fix request ---").length, 2);
       await platform.settle(again.json.buildId);
+    });
+
+    test("a failed build's reason reaches the Inbox and Activity, as its build page leads with it", async () => {
+      const [last] = platform.registry.recentBuilds(1);
+      const title = (await api(`/builds/${last}`)).json.failure.title;
+      const inbox = (await api("/inbox")).json.needs.find((n: any) => n.buildId === last);
+      assert.equal(inbox.detail, `Build failed · ${title}`);
+      // The builder itself stopped: the title alone ("The builder stopped") says nothing; what it stopped on does.
+      const b = await api("/capabilities", { method: "POST", body: { name: "Stops Early", purpose: "p", requirements: "r" } });
+      await platform.settle(b.json.buildId);
+      const failure = (await api(`/builds/${b.json.buildId}`)).json.failure;
+      assert.deepEqual([failure.title, failure.detail], ["The builder stopped", "hit the usage limit"]);
+      assert.equal((await api("/inbox")).json.needs.find((n: any) => n.buildId === b.json.buildId).detail, "Build failed · hit the usage limit");
+      const row = (await api("/activity")).json.items.find((i: any) => i.buildId === b.json.buildId);
+      assert.equal(row.reason, "hit the usage limit");
+      assert.equal((await api("/activity")).json.items.find((i: any) => i.buildId === last).reason, title);
     });
 
     test("home data: hue, icon kind, last build, in-flight builds", async () => {

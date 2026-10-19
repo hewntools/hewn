@@ -60,8 +60,8 @@ code.token { overflow-wrap: anywhere; }
 @media (max-width: 720px) { .first-run { padding: 0 var(--s5) var(--s7); } .first-run .first-display { font-size: var(--fs-3xl); } }
 
 /* A2 Home: a 6-column grid of 124px cells, centred */
-/* Grid sits in the upper part of the screen (a single row shouldn't float dead centre). */
-.home { flex: 1; display: flex; align-items: flex-start; justify-content: center; padding: clamp(var(--s6), 20vh, 200px) var(--s4) var(--s7); }
+/* Grid starts just under the top bar (a band of empty wallpaper above it reads as a gap). */
+.home { flex: 1; display: flex; align-items: flex-start; justify-content: center; padding: var(--s6) var(--s4) var(--s7); }
 /* Up to 6 columns; big screens get 8 or 10, still with wide margins (an iPad home screen, not a wall
    of icons). The grid is only as wide as its tiles (--n, set by the page), so a short row stays centred. */
 .home-grid { --col: 124px; display: grid; grid-template-columns: repeat(auto-fill, var(--col)); width: min(calc(var(--n, 6) * var(--col)), calc(6 * var(--col))); max-width: 100%; row-gap: 36px; }
@@ -71,7 +71,8 @@ code.token { overflow-wrap: anywhere; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: var(--s1); color: var(--text); text-decoration: none; cursor: pointer; border-radius: var(--radius); touch-action: manipulation; -webkit-touch-callout: none; user-select: none; }
 .tile:hover { color: var(--text); }
 .tile-icon { display: inline-flex; }
-.tile-label { font-size: var(--fs-sm); text-align: center; max-width: 112px; overflow-wrap: anywhere; line-height: 1.3; }
+/* Two lines at most, broken between words; a word too long for the tile ends in an ellipsis. */
+.tile-label { font-size: var(--fs-sm); text-align: center; max-width: 112px; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-overflow: ellipsis; }
 .tile input.rename { width: 116px; min-height: 28px; padding: 2px 6px; font-size: var(--fs-sm); text-align: center; }
 .tile .more { opacity: 0; cursor: pointer; transition: opacity var(--dur) var(--ease); }
 .tile:hover .more, .tile:focus-visible .more { opacity: 1; }
@@ -80,6 +81,8 @@ code.token { overflow-wrap: anywhere; }
 /* Widgets share the icon grid: small 1×1, medium 2×1, large 2×2 cells; icons fill the gaps around them.
    Icons (with labels) and widgets sit centred on their row, so a widget lines up with the icons beside it. */
 .home-grid { grid-auto-flow: row dense; grid-auto-rows: minmax(116px, auto); align-items: center; }
+/* Icons line up at the top: a two-line label grows down, it doesn't lift its tile. */
+.home-grid > .tile { align-self: start; }
 .tile-widget { position: relative; display: flex; height: 116px; min-width: 0; margin: 0 6px; cursor: pointer; border-radius: var(--radius-lg); user-select: none; -webkit-touch-callout: none; }
 .tile-widget.w-medium { grid-column: span 2; }
 .tile-widget.w-large { grid-column: span 2; grid-row: span 2; height: auto; align-self: stretch; }
@@ -287,6 +290,7 @@ fieldset.job legend .sub { color: var(--text-2); }
 .info-row { min-height: 52px; }
 .info-key { width: 110px; flex: none; font-weight: 600; }
 .account-row { min-height: 64px; }
+.account-row .health-detail { min-width: 0; max-width: 100%; }
 .agent-row { min-height: 72px; }
 .add-choice { min-height: 72px; }
 .settings-save { padding: 10px 0 12px; }
@@ -325,6 +329,10 @@ fieldset.job legend .sub { color: var(--text-2); }
 .signin-brand .brand-name { font-size: 22px; }
 .signin .signin-title { font-size: 28px; }
 .signin-ascii { left: -60px; top: 80px; opacity: .3; }
+/* M3: the art fills what the form leaves above it (out to the column's edges), fading out before the heading. */
+.signin-art { flex: 1 1 0; min-height: 0; position: relative; margin: 0 -24px; overflow: hidden; pointer-events: none; mask-image: linear-gradient(transparent, #000 10%, #000 80%, transparent); }
+.signin-art pre { position: absolute; left: -36px; top: 50%; transform: translateY(-50%); margin: 0; font: 13px/13px var(--mono); color: var(--accent-ink); opacity: .3; white-space: pre; }
+@media (prefers-reduced-motion: reduce) { .signin-art pre { display: none; } }
 .signin-spot { --h: 125; --x: -20%; --y: -10%; --w: 420px; }
 
 /* M4 Home on a phone: 4 columns of 60px icons; widgets span the row */
@@ -333,7 +341,7 @@ fieldset.job legend .sub { color: var(--text-2); }
   .nav-menu { display: inline-flex; }
   .home-grid, .home-grid.editing { grid-template-columns: repeat(4, 1fr); row-gap: 18px; justify-items: center; }
   .home-grid .tile .app-icon { --size: 60px !important; }
-  .home-grid .tile-label { font-size: 11px; max-width: 72px; }
+  .home-grid .tile-label { font-size: 11px; max-width: 84px; }
   .home-grid .tile-widget { grid-column: 1 / -1; width: 100%; margin: 0; }
   .home-grid .tile-widget.w-large { grid-row: span 2; }
   .settings-layout { width: calc(100% - var(--s5)); }

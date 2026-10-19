@@ -416,7 +416,10 @@ async function commandPalette() {
       const render = () => {
         const q = input.value.trim().toLowerCase();
         const words = q.split(/\s+/).filter(Boolean);
-        shown = items.filter((it) => (q ? words.every((w) => it.words.includes(w)) : !it.more)).slice(0, 40);
+        // Names first ("run" finds Running Log before a tool whose purpose mentions a long run), then the rest.
+        const named = (it) => words.every((w) => it.label.toLowerCase().includes(w));
+        const hits = items.filter((it) => (q ? words.every((w) => it.words.includes(w)) : !it.more));
+        shown = (q ? [...hits.filter(named), ...hits.filter((it) => !named(it))] : hits).slice(0, 40);
         at = Math.min(at, Math.max(0, shown.length - 1));
         let group = null;
         put(
@@ -2223,6 +2226,8 @@ async function accountsPage() {
           { class: "sub row tight wrap" },
           h("span", { class: `dot ${dot}` }),
           word.toLowerCase(),
+          // What health@1 says about it ("The session ended on 12 October"), when it says more than the word.
+          !b && x.health?.detail && [h("span", { class: "faint" }, "·"), h("span", { class: "clip-1 health-detail" }, x.health.detail)],
           !b && [h("span", { class: "faint" }, "·"), "used by", x.usedBy?.length ? x.usedBy.map((u) => capRef(all.get(u.id), u.id, { size: 18 })) : h("span", {}, "nothing yet")],
         ),
       ),
@@ -3303,12 +3308,13 @@ function activityRow(g, all, showCap) {
     } else {
       dot = errors.length === g.items.length ? "danger" : errors.length ? "warn" : "ok";
       text = on(`${who} made ${g.items.length} calls`, ref && ["to", ref], errors.length ? h("span", { class: "faint" }, `${errors.length} failed`) : "", modelNote);
-      expand = h(
-        "ul",
-        { class: "list nested", hidden: true },
-        g.items.map((c) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, ""))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
-      );
     }
+    // One call or several, the row opens the same way: each call's version, error, time taken.
+    expand = h(
+      "ul",
+      { class: "list nested", hidden: true },
+      g.items.map((c) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, ""))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
+    );
   } else if (g.kind === "models") {
     const failed = g.items.filter((x) => x.outcome === "failed");
     const cost = g.items.reduce((n, x) => n + x.costUsd, 0);
@@ -3329,7 +3335,7 @@ function activityRow(g, all, showCap) {
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref]);
-    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.failure?.title ?? "see log"}`, ref && ["·", ref]));
+    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref]));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
   } else if (g.kind === "lifecycle") {
@@ -4660,12 +4666,17 @@ async function passkeyPage() {
   });
   const device = /iPhone/.test(navigator.userAgent) ? "iPhone" : /iPad/.test(navigator.userAgent) ? "iPad" : /Android/.test(navigator.userAgent) ? "phone" : "device";
   const unlock = /iPhone|iPad/.test(navigator.userAgent) ? "Face ID" : /Mac/.test(navigator.userAgent) ? "Touch ID" : "a fingerprint or the screen lock";
+  // The art takes the room above the form, in the page's flow: on a phone it would run under the heading.
+  const art = h("pre", {});
+  if (window.hewnAscii) onLeave(window.hewnAscii(art, { cols: 64, rows: 40 }));
   view(
-    moment(
-      { left: "-60px", top: "80px", opacity: 0.3 },
+    h(
+      "div",
+      { class: "moment" },
       h(
         "main",
         { class: "signin" },
+        h("div", { class: "signin-art", "aria-hidden": "true" }, art),
         h("div", { class: "display signin-title" }, `Add this ${device}`),
         h("div", { class: "muted" }, `Next time it signs in with ${unlock}.`),
         passkeysSupported() ? [h("label", { class: "field" }, h("span", { class: "label" }, "Name"), name), add, h("a", { class: "btn ghost wide", href: "#/" }, "Not now"), status] : [h("div", { class: "muted" }, "This browser can't make passkeys."), h("a", { class: "btn lg wide", href: "#/" }, "Continue")],

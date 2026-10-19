@@ -2,7 +2,8 @@
 // The example tools in seeds/ install through the full validation (manifest, bundle, contracts,
 // migrations, their own test cases, widgets drawn in every size), and do what they say.
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
@@ -23,6 +24,18 @@ describe("seeds", () => {
       assert.equal(r.status, "promoted");
     });
   }
+
+  test("macOS metadata files (._*, .DS_Store) are ignored, not refused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hewn-appledouble-"));
+    try {
+      cpSync(join(SEEDS, "running-log"), dir, { recursive: true });
+      for (const f of ["._capability.json", "migrations/._001_init.sql", ".DS_Store", "src/.DS_Store"]) writeFileSync(join(dir, f), "\u0000\u0005\u0016\u0007Mac OS X");
+      const r = await installFrom(t.platform, dir);
+      assert.equal(r.status, "promoted");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   test("reading list: progress, finishing, the nightstand", async () => {
     await installFrom(t.platform, join(SEEDS, "reading-list"));

@@ -248,3 +248,34 @@ test("WSL: a hidden user bus is explained, with the fix, in errors, status and d
     t.cleanup();
   }
 });
+
+test("doctor: an agent registered with another Hewn (another port) is a warning, with the fix", async () => {
+  const t = setup();
+  try {
+    const agent = (url: string) => ({ agentId: "claude-code", label: "Claude Code", detect: () => true, registered: () => true, registeredUrl: () => url }) as any;
+    const run = (url: string) =>
+      runDoctor({ home: t.home, port: 7850, userHome: t.home.root, harnesses: [agent(url)], health: async () => false, service: () => ({ installed: false, running: false }), bundle: async () => undefined, hasWorkerd: () => true, sandbox: () => ({ ok: true, how: "x" }), keySource: () => "file", browser: () => "x", which: () => true, loggedIn: () => true });
+    const other = (await run("http://127.0.0.1:7717/mcp")).find((c) => c.name === "Claude Code")!;
+    assert.equal(other.state, "warn");
+    assert.match(other.detail, /another Hewn \(this one is on port 7850\)/);
+    assert.match(other.fix!, /hewn setup --agents claude-code/);
+    assert.equal((await run("http://127.0.0.1:7850/mcp")).find((c) => c.name === "Claude Code")!.state, "ok");
+    assert.equal((await run("not a url")).find((c) => c.name === "Claude Code")!.state, "ok", "an address it can't read isn't an error");
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("Codex's config: the address Hewn is registered at", async () => {
+  const { harnesses } = await import("@hewntools/cli/setup/harnesses.ts");
+  const home = mkdtempSync(join(tmpdir(), "hewn-codex-"));
+  try {
+    const codex = harnesses().find((h) => h.agentId === "codex")!;
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "config.toml"), '[mcp_servers.other]\nurl = "http://x/mcp"\n\n[mcp_servers.hewn]\nurl = "http://127.0.0.1:7717/mcp"\n\n[profile]\nmodel = "y"\n');
+    assert.equal(codex.registeredUrl!(home), "http://127.0.0.1:7717/mcp");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

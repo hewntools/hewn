@@ -652,6 +652,12 @@ export function unresolvedFailures<T extends { buildId: string; capabilityId: st
   );
 }
 
+/**
+ * A failed build's reason in one line, as its build page leads with it: the failure's title ("1 of
+ * 3 tests didn't pass"), or, when the title only says the builder stopped, what it stopped on.
+ */
+export const failureReason = (f?: { title: string; detail: string }) => (!f ? "" : f.title === "The builder stopped" && f.detail ? f.detail : f.title);
+
 export interface InboxItem {
   kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection";
   id: string;
@@ -688,7 +694,7 @@ async function inbox(platform: Platform, owner: Agent, recent: boolean) {
   for (const b of builds.filter((x) => x.status === "review"))
     needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} changed it: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
   for (const b of unresolvedFailures(builds))
-    needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), detail: `Build failed${b.failure?.title ? ` · ${b.failure.title}` : ""}`, severity: "danger", action: "Show", at: b.updatedAt });
+    needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger", action: "Show", at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
     needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, agentId: x.createdBy, title: nameOf(x.capabilityId), detail: `${who(x.createdBy)} wants to run ${x.operation.split("@")[0]} ${x.cadence}`, severity: "warn", action: "Review", at: x.createdAt });
 
@@ -773,7 +779,7 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildKind: b.kind,
       builder: b.builder,
       version: row.resultVersion,
-      ...(b.failure ? { failure: b.failure } : {}),
+      ...(b.failure ? { failure: b.failure, reason: failureReason(b.failure) } : {}),
     });
   }
   for (const c of recentCalls(platform, owner, 5000, 2000)) {

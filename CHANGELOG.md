@@ -5,6 +5,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## Unreleased
 
 - **Linux and WSL: the secrets key stays where it is.** Hewn keeps its key in a keyring only when one actually answers `secret-tool`; WSL and servers have a session bus but no keyring, and installing `libsecret-tools` there made Hewn restart over and over ("Could not connect"). A home that already has `master.key` keeps using it, even if a keyring appears later. `hewn doctor` no longer suggests `libsecret-tools` on machines without a keyring.
+- **`hewn doctor` checks Claude Code and Codex point at this Hewn.** An agent registered with another Hewn (another home on another port) is now a warning with the fix, instead of "Hewn registered".
+- **A failed build says why everywhere.** The Inbox and Activity show the build's own reason ("1 of 3 tests didn't pass", or what stopped the builder), not just "The builder stopped".
+- **Accounts shows a connection's health detail** ("expired · The session ended on 12 October").
+- **Web client polish:** tool names on Home and widget titles wrap between words (with an ellipsis when they don't fit) and tiles line up; Home starts just under the top bar; bar charts scale to their data; a single call in Activity opens like a group does; the command palette lists name matches first; the passkey page fits a phone.
 
 ## 0.4.0 (2026-10-19)
 

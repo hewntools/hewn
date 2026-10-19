@@ -70,6 +70,21 @@ describe("widgets: pure parts", () => {
     assert.equal(viewText("Top", { template: "list", items: [{ title: "a", value: 1 }], empty: "none" }), "Top\n- a: 1");
   });
 
+  test("bar charts: the y axis ends on a round step just above the tallest bar", async () => {
+    // A browser module (no types): imported by URL.
+    const { barAxis } = (await import(new URL("../packages/ui/src/chart.js", import.meta.url).href)) as { barAxis: (v: number) => { max: number; step: number } };
+    assert.deepEqual(barAxis(10.1), { max: 12.5, step: 2.5 }, "not 20");
+    assert.deepEqual(barAxis(12.4), { max: 12.5, step: 2.5 });
+    assert.deepEqual(barAxis(10), { max: 10, step: 2 });
+    assert.deepEqual(barAxis(3), { max: 3, step: 1 });
+    assert.deepEqual(barAxis(0.3), { max: 0.3, step: 0.1 });
+    assert.deepEqual(barAxis(0), { max: 1, step: 0.25 });
+    for (let v = 0.07; v < 5000; v *= 1.37) {
+      const { max, step } = barAxis(v);
+      assert.ok(max >= v && max - v < step + 1e-9 && max / step <= 5 + 1e-9, `${v} → ${max} by ${step}`);
+    }
+  });
+
   test("read-only SQL: reads pass, anything that writes is refused", () => {
     for (const ok of ["SELECT * FROM t", " select count(*) from t where name = 'delete me'", "WITH x AS (SELECT 1) SELECT * FROM x", 'SELECT "update" FROM t', "SELECT replace(a, 'x', 'y') FROM t", "PRAGMA table_info(t)", "select updated_at from t -- insert"]) {
       assert.equal(isReadOnlySql(ok), true, ok);

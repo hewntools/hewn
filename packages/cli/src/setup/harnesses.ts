@@ -39,6 +39,8 @@ export interface Harness {
   detect(): boolean;
   /** Whether the harness has Hewn registered (reads its own config; never runs it). */
   registered(userHome: string): boolean;
+  /** The address Hewn is registered at, when the harness's config says (to tell which Hewn it is). */
+  registeredUrl?(userHome: string): string | undefined;
   steps(ctx: SetupContext): Step[];
   /** The harness's own OAuth sign-in to Hewn (opens the browser at Hewn's approval page). */
   login(url: string): string[];
@@ -81,6 +83,14 @@ export function harnesses(exec: Exec = realExec): Harness[] {
           return false;
         }
       },
+      registeredUrl: (home) => {
+        try {
+          const url = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers?.hewn?.url;
+          return typeof url === "string" ? url : undefined;
+        } catch {
+          return undefined;
+        }
+      },
       login: () => withPty(["claude", "mcp", "login", "hewn"]),
       // `claude mcp login` is recent; older versions sign in from inside a session.
       loginFix: (output) =>
@@ -114,6 +124,12 @@ export function harnesses(exec: Exec = realExec): Harness[] {
       registered: (home) => {
         const config = join(home, ".codex", "config.toml");
         return existsSync(config) && /^\[mcp_servers\.hewn\]/m.test(readFileSync(config, "utf8"));
+      },
+      registeredUrl: (home) => {
+        const config = join(home, ".codex", "config.toml");
+        if (!existsSync(config)) return undefined;
+        const section = /^\[mcp_servers\.hewn\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(readFileSync(config, "utf8"))?.[1] ?? "";
+        return /^\s*url\s*=\s*"([^"]+)"/m.exec(section)?.[1];
       },
       // `codex mcp add` signs in by itself when the server speaks OAuth: adding is the login.
       login: (url) => ["codex", "mcp", "add", "hewn", "--url", url],
