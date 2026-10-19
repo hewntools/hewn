@@ -7,7 +7,7 @@
     </picture>
   </a>
 </p>
-<p align="center">Your own tools. Every agent.</p>
+<p align="center">Your own tools. Every agent.<br><a href="https://hewn.tools"><b>hewn.tools</b></a></p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@hewntools/cli"><img alt="npm" src="https://img.shields.io/npm/v/@hewntools/cli?style=flat-square"></a>
   <a href="https://github.com/hewntools/hewn/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/hewntools/hewn/ci.yml?style=flat-square&branch=main"></a>
@@ -19,6 +19,14 @@
 <p align="center"><img src="docs/images/home.png" alt="Hewn's Home: your tools and widgets" width="840"></p>
 
 Hewn keeps small [tools](docs/concepts.md#tools) of your own (a running log, a reading list, a word quiz) on your machine, each with its own data. Describe a tool, and your coding agent builds it in a sandbox; Hewn tests it on a copy of your data before it goes live. Claude, ChatGPT, Codex and any MCP client can then use it, once you've approved them: what you record in one, you can read in another.
+
+<p align="center">
+  <picture>
+    <source srcset="docs/images/agents-share-dark.png" media="(prefers-color-scheme: dark)">
+    <source srcset="docs/images/agents-share-light.png" media="(prefers-color-scheme: light)">
+    <img src="docs/images/agents-share-light.png" alt="Claude Code records a run with a Hewn tool; ChatGPT, asked how the running is going, shows the same tool's weekly chart" width="600">
+  </picture>
+</p>
 
 ### Installation
 
