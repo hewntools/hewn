@@ -1,0 +1,9 @@
+node_modules/
+data/
+.DS_Store
+.smoke-home/
+design/*.zip
+/backups/
+/data.before-restore-*/
+/*.png
+/build/

@@ -1,0 +1,14 @@
+{
+  "id": "probe",
+  "name": "Probe",
+  "purpose": "Test: tries to reach things it must not.",
+  "abi": "2.0",
+  "requires": { "hosts": ["api.github.com"] },
+  "operations": [
+    { "name": "probe", "description": "Run one probe", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "required": ["what"], "properties": { "what": { "type": "string" }, "port": { "type": "integer" } } },
+      "outputSchema": { "type": "object" } },
+    { "name": "spin", "description": "Never returns (CPU loop)", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" } }
+  ]
+}

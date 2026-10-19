@@ -1,0 +1,1 @@
+[{"name":"get","operation":"get","input":{},"expect":{"count":0}},{"name":"inc","operation":"increment","input":{},"expect":{"count":1}}]

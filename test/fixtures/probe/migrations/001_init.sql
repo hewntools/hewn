@@ -1,0 +1,1 @@
+CREATE TABLE notes (text TEXT NOT NULL);

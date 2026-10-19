@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 32px;position:relative;z-index:2">
+  <div style="display:flex;align-items:center;gap:10px">
+    <dc-import name="AppIcon" glyph="hewn" hue="125" size="28" hint-size="28px,28px" style="display:flex"></dc-import>
+    <span style="font-size:17px;font-weight:650;letter-spacing:-.02em">Hewn</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="glass-bar">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4"><button aria-pressed="{{ t.on }}">{{ t.label }}</button></sc-for>
+    </div>
+    <button aria-label="Inbox" aria-pressed="{{ inboxOpen }}" style="position:relative;width:40px;min-height:40px;padding:0;border-radius:999px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--hl), var(--shadow);-webkit-backdrop-filter:var(--blur-strong);backdrop-filter:var(--blur-strong)">
+      <span style="display:grid;grid-template-columns:repeat(5,3px);gap:1px"><sc-for list="{{ bell }}" as="c" hint-placeholder-count="25"><span style="width:3px;height:3px;background:{{ c }}"></span></sc-for></span>
+      <sc-if value="{{ hasCount }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:5px;background:var(--warn);color:var(--bg);font:700 10px/18px var(--mono);text-align:center;border:2px solid var(--bg)">{{ count }}</span></sc-if>
+    </button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:80},&quot;active&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Home&quot;,&quot;Agents&quot;,&quot;Accounts&quot;,&quot;Settings&quot;,&quot;&quot;],&quot;default&quot;:&quot;Home&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;inbox&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;3&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;inboxOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const a = this.props.active ?? 'Home';
+    const bell = ['..#..', '.###.', '.###.', '#####', '..#..'].join('').split('').map(ch => ch === '#' ? 'currentColor' : 'transparent');
+    return {
+      tabs: ['Home', 'Agents', 'Accounts', 'Settings'].map(label => ({ label, on: label === a ? 'true' : 'false' })),
+      bell, count: this.props.inbox ?? '', hasCount: !!this.props.inbox, inboxOpen: this.props.inboxOpen ? 'true' : 'false',
+    };
+  }
+}
+</script>
+</body>
+</html>

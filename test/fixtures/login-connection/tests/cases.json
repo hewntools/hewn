@@ -1,0 +1,5 @@
+[
+  { "name": "sign in", "operation": "connect", "input": { "email": "a@example.com", "password": "hunter2" }, "expect": { "status": "connected" } },
+  { "name": "wrong password", "operation": "connect", "input": { "email": "a@example.com", "password": "x" }, "expectError": true },
+  { "name": "health", "operation": "health", "input": {}, "secrets": { "TOKENS": "{\"user\":\"a\"}" }, "expect": { "status": "connected" } }
+]

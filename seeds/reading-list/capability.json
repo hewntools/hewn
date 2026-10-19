@@ -1,0 +1,147 @@
+{
+  "id": "reading-list",
+  "name": "Reading List",
+  "purpose": "Keep the books the owner wants to read, is reading and has finished, so any authorized agent can add a book, log progress or say what's next.",
+  "description": "Books with a status (want, reading, finished), page progress and a 1–5 rating when finished. The nightstand widget shows what's being read.",
+  "abi": "2.3",
+  "hue": 15,
+  "tags": ["books", "reading"],
+  "operations": [
+    {
+      "name": "add_book",
+      "description": "Add a book. status defaults to want.",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "author": { "type": "string", "maxLength": 200 },
+          "pages": { "type": "integer", "minimum": 1 },
+          "status": { "enum": ["want", "reading"] }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["bookId"],
+        "properties": { "bookId": { "type": "string" } }
+      }
+    },
+    {
+      "name": "set_progress",
+      "description": "Set the page the owner is on. A book still on the want list moves to reading.",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bookId", "page"],
+        "properties": {
+          "bookId": { "type": "string" },
+          "page": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["bookId", "page", "percent"],
+        "properties": {
+          "bookId": { "type": "string" },
+          "page": { "type": "integer" },
+          "percent": { "type": ["integer", "null"] }
+        }
+      }
+    },
+    {
+      "name": "finish_book",
+      "description": "Mark a book finished, optionally with a 1–5 rating. date defaults to today.",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bookId"],
+        "properties": {
+          "bookId": { "type": "string" },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["bookId", "finishedOn"],
+        "properties": { "bookId": { "type": "string" }, "finishedOn": { "type": "string" } }
+      }
+    },
+    {
+      "name": "list_books",
+      "description": "List books, newest first, optionally only one status.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "status": { "enum": ["want", "reading", "finished"] } }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["books"],
+        "properties": {
+          "books": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["bookId", "title", "status", "page"],
+              "properties": {
+                "bookId": { "type": "string" },
+                "title": { "type": "string" },
+                "author": { "type": "string" },
+                "status": { "enum": ["want", "reading", "finished"] },
+                "pages": { "type": "integer" },
+                "page": { "type": "integer" },
+                "rating": { "type": "integer" },
+                "finishedOn": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_book",
+      "description": "Remove a book from the list for good.",
+      "version": 1,
+      "sideEffect": "destructive",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bookId"],
+        "properties": { "bookId": { "type": "string" } }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["removed"],
+        "properties": { "removed": { "type": "boolean" } }
+      }
+    },
+    {
+      "name": "widget_nightstand",
+      "description": "Widget: the books being read, with how far along each is.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object" }
+    }
+  ],
+  "widgets": [
+    {
+      "name": "nightstand",
+      "version": 1,
+      "title": "On the nightstand",
+      "operation": "widget_nightstand@1",
+      "sizes": ["small", "medium"],
+      "refresh": { "every": "1h" }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@hewntools/spec",
+  "version": "2.3.0",
+  "description": "The Hewn capability spec: the contract between a tool, the agents that use it and the host that runs it. Types and JSON Schemas; versioned by the ABI, not by Hewn releases.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json",
+    "./schemas/*": "./schemas/*",
+    "./*": "./src/*"
+  },
+  "files": [
+    "src",
+    "schemas",
+    "*.md",
+    "LICENSE"
+  ]
+}

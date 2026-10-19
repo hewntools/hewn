@@ -1,0 +1,1 @@
+[{"name":"feeds","operation":"feed","input":{"runs":[{"date":"2026-10-01","distanceKm":5,"durationSeconds":1500}]},"calls":{"running-log/list_runs@1":{"runs":[]},"running-log/record_run@1":{"runId":"x"}},"expect":{"added":1}}]

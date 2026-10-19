@@ -1,0 +1,20 @@
+[
+  { "name": "empty nightstand", "operation": "widget_nightstand", "input": {},
+    "expect": { "small": { "template": "stat", "value": 0 }, "medium": { "template": "list", "items": [] } } },
+  { "name": "add a book to read later", "operation": "add_book",
+    "input": { "title": "The Left Hand of Darkness", "author": "Ursula K. Le Guin", "pages": 304 },
+    "expect": { "bookId": "$any" } },
+  { "name": "add one being read", "operation": "add_book",
+    "input": { "title": "Middlemarch", "author": "George Eliot", "pages": 880, "status": "reading" },
+    "expect": { "bookId": "$any" } },
+  { "name": "list what's being read", "operation": "list_books", "input": { "status": "reading" },
+    "expect": { "books": [{ "title": "Middlemarch", "status": "reading", "page": 0 }] } },
+  { "name": "nightstand shows it", "operation": "widget_nightstand", "input": {},
+    "expect": { "small": { "template": "progress", "value": 0, "max": 880, "label": "Middlemarch" },
+                "medium": { "template": "list", "items": [{ "title": "Middlemarch", "detail": "George Eliot", "value": "0%" }] } } },
+  { "name": "unknown book", "operation": "set_progress", "input": { "bookId": "nope", "page": 10 }, "expectError": true },
+  { "name": "rejects a rating out of range", "operation": "finish_book", "input": { "bookId": "nope", "rating": 6 }, "expectError": true },
+  { "name": "rejects unknown field", "operation": "add_book", "input": { "title": "X", "genre": "sf" }, "expectError": true },
+  { "name": "list everything", "operation": "list_books", "input": {},
+    "expect": { "books": [{ "title": "Middlemarch" }, { "title": "The Left Hand of Darkness", "status": "want" }] } }
+]

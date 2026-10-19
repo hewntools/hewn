@@ -1,0 +1,27 @@
+[
+  {
+    "name": "uses fake secret",
+    "operation": "whoami",
+    "input": {},
+    "secrets": {
+      "API_TOKEN": "fake-token"
+    },
+    "expect": {
+      "prefix": "fake",
+      "secretNames": [
+        "API_TOKEN"
+      ]
+    }
+  },
+  {
+    "name": "health with a token",
+    "operation": "health",
+    "input": {},
+    "secrets": {
+      "API_TOKEN": "x"
+    },
+    "expect": {
+      "status": "connected"
+    }
+  }
+]

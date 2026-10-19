@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Counter</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+</head>
+<body>
+  <main class="page stack">
+    <div class="row between">
+      <h1>Counter</h1>
+      <button id="inc" class="primary">+1</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="value" id="n">…</div><div class="label">Current count</div></div>
+      <div class="stat"><div class="value" id="clicks">0</div><div class="label">Clicks this visit</div></div>
+    </div>
+    <div class="card"><h3>This visit</h3><div id="chart"></div></div>
+  </main>
+  <script type="module">
+    import { barChart } from "/_platform/chart.js";
+    const call = (operation) =>
+      fetch("/api/invoke", { method: "POST", headers: { "content-type": "application/json", "x-hewn-ui": "1" }, body: JSON.stringify({ operation, input: {} }) }).then((r) => r.json());
+    const history = [];
+    const show = (r) => {
+      document.getElementById("n").textContent = r.result.count;
+      history.push(r.result.count);
+      document.getElementById("clicks").textContent = history.length - 1;
+      barChart(document.getElementById("chart"), { labels: history.map((_, i) => `#${i}`), series: [{ name: "count", values: history }] });
+    };
+    call("get").then(show);
+    document.getElementById("inc").onclick = () => call("increment").then(show);
+  </script>
+</body>
+</html>

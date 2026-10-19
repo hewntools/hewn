@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<sc-if value="{{ isChip }}" hint-placeholder-val="{{ false }}"><span class="chip" style="display:inline-flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;vertical-align:middle"><dc-import name="AppIcon" glyph="{{ glyph }}" hue="{{ hue }}" size="{{ chipSize }}" badge="{{ badge }}" hint-size="24px,24px" style="display:flex"></dc-import><span style="line-height:1">{{ name }}</span></span></sc-if><sc-if value="{{ isInline }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle;font-weight:600;white-space:nowrap;line-height:1"><dc-import name="AppIcon" glyph="{{ glyph }}" hue="{{ hue }}" size="{{ size }}" badge="{{ badge }}" hint-size="20px,20px" style="display:flex"></dc-import><span>{{ name }}</span></span></sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:240,&quot;height&quot;:60},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Running Log&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;glyph&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;run&quot;,&quot;read&quot;,&quot;heart&quot;,&quot;week&quot;,&quot;lock&quot;,&quot;one&quot;,&quot;cup&quot;,&quot;words&quot;,&quot;check&quot;,&quot;cal&quot;,&quot;plug&quot;],&quot;default&quot;:&quot;run&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hue&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:30,&quot;min&quot;:0,&quot;max&quot;:360,&quot;tsType&quot;:&quot;number&quot;},&quot;chip&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;size&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:20,&quot;tsType&quot;:&quot;number&quot;},&quot;badge&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;warn&quot;,&quot;danger&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const chip = !!this.props.chip;
+    return { isChip: chip, isInline: !chip, glyph: this.props.glyph ?? 'run', hue: this.props.hue ?? 30, name: this.props.label ?? 'Running Log', size: this.props.size ?? 20, chipSize: this.props.size ?? 24, badge: this.props.badge ?? '' };
+  }
+}
+</script>
+</body>
+</html>

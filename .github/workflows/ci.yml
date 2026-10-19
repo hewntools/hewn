@@ -1,0 +1,54 @@
+name: CI
+
+# Linux on every push and PR. macOS (10× the minutes on a private repo) on the release
+# branch, main, tags and by hand.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS runners are expensive: only on a manual run (Actions → CI → Run workflow). Linux runs on everything.
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-24.04", "macos-15"]') || fromJSON('["ubuntu-24.04"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Sandbox (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor; bubblewrap needs them.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != package.json version"; exit 1; }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - name: Doctor (install builds)
+        run: node --disable-warning=ExperimentalWarning packages/cli/src/cli.ts doctor || true
+      - name: Tests (unit, sandbox and escape, workerd)
+        run: npm test
+      - name: Browser for the E2E
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw" && npm init -y >/dev/null
+          npm i --no-audit --no-fund playwright-core@1.62.1
+          npx playwright-core install --with-deps chromium-headless-shell
+      - name: E2E (first run, approvals, schedules, confirmations)
+        run: PLAYWRIGHT_NODE_MODULES="$RUNNER_TEMP/pw/node_modules/" npm run e2e
+      - name: E2E screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.os }}
+          path: /tmp/e2e-fr-*.png
+          if-no-files-found: ignore

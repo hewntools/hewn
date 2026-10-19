@@ -1,0 +1,34 @@
+{
+  "id": "login-connection",
+  "name": "Login Connection",
+  "purpose": "Test fixture: a connection the owner signs in to (password, then a code).",
+  "abi": "2.1",
+  "kind": "connection",
+  "requires": {
+    "secrets": [{ "name": "TOKENS", "description": "Session tokens, stored by signing in" }],
+    "hosts": ["login.example.com"]
+  },
+  "operations": [
+    {
+      "name": "health", "description": "Whether the session is valid", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["connected", "expired", "broken"] }, "detail": { "type": "string" } } }
+    },
+    {
+      "name": "connect", "description": "Sign in", "version": 1, "sideEffect": "write",
+      "inputSchema": {
+        "type": "object", "additionalProperties": false,
+        "properties": { "email": { "type": "string" }, "password": { "type": "string", "format": "password" }, "code": { "type": "string" }, "state": { "type": "string" } }
+      },
+      "outputSchema": {
+        "type": "object", "required": ["status"],
+        "properties": { "status": { "type": "string", "enum": ["connected", "needs_input"] }, "message": { "type": "string" }, "inputSchema": { "type": "object" }, "state": { "type": "string" } }
+      }
+    },
+    {
+      "name": "me", "description": "Who is signed in", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["user"], "properties": { "user": { "type": "string" } } }
+    }
+  ]
+}

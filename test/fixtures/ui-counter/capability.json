@@ -1,0 +1,15 @@
+{
+  "id": "ui-counter",
+  "name": "UI Counter",
+  "purpose": "Test fixture: a counter with a UI.",
+  "abi": "2.0",
+  "ui": { "available": true },
+  "operations": [
+    { "name": "increment", "description": "Add one", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["count"], "properties": { "count": { "type": "integer" } } } },
+    { "name": "get", "description": "Current count", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["count"], "properties": { "count": { "type": "integer" } } } }
+  ]
+}

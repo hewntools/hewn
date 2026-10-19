@@ -1,0 +1,4 @@
+[
+  { "name": "inc", "operation": "increment", "input": {}, "expect": { "count": 1 } },
+  { "name": "widget", "operation": "widget_count", "input": {}, "expect": { "template": "stat", "value": 1, "caption": "taps" } }
+]

@@ -1,0 +1,12 @@
+{
+  "id": "run-feeder",
+  "name": "Run Feeder",
+  "purpose": "Test fixture: feeds runs into Running Log through its public operations.",
+  "abi": "2.0",
+  "requires": { "capabilities": [{ "id": "running-log", "operations": ["record_run@1", "list_runs@1"] }] },
+  "operations": [
+    { "name": "feed", "description": "Record runs that Running Log doesn't have yet", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "required": ["runs"], "properties": { "runs": { "type": "array", "items": { "type": "object" } } } },
+      "outputSchema": { "type": "object", "required": ["added"], "properties": { "added": { "type": "integer" } } } }
+  ]
+}

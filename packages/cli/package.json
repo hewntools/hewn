@@ -1,0 +1,20 @@
+{
+  "name": "@hewntools/cli",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "hewn: the CLI, the supervisor, setup and builders",
+  "license": "AGPL-3.0-or-later",
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@hewntools/core": "*",
+    "@hewntools/host-workerd": "*",
+    "@hewntools/ui": "*"
+  },
+  "bin": {
+    "hewn": "src/cli.ts"
+  }
+}

@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# A pull request that changes what users see or do must say so: in CHANGELOG.md, and in the user
+# docs (docs/*.md) or the spec docs (spec/*.md). A maintainer can waive it with the "no-docs"
+# label (refactors, tests, internal fixes with no visible change).
+name: Docs
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-docs') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: User-facing changes come with docs and a changelog entry
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE...$HEAD")"
+          # What users see or do: the web client, the CLI, the platform's behaviour, the contract,
+          # the UI kit tools load, the install script.
+          facing="$(printf '%s\n' "$changed" | grep -E '^(packages/(host-workerd/web|cli/src|core/src|host-workerd/src|ui/src)/|spec/src/|scripts/web-install\.sh$)' | grep -vE '\.test\.ts$' || true)"
+          if [ -z "$facing" ]; then echo "No user-facing changes."; exit 0; fi
+          echo "User-facing changes:"; printf '  %s\n' $facing
+          fail=0
+          if ! printf '%s\n' "$changed" | grep -qx 'CHANGELOG.md'; then
+            echo "::error::Add a CHANGELOG.md entry under the next version (what changed, for users)."
+            fail=1
+          fi
+          if ! printf '%s\n' "$changed" | grep -qE '^(docs/[^/]+\.md|spec/[^/]+\.md|README\.md)$'; then
+            echo "::error::Update the docs this change affects (docs/*.md for users, spec/*.md for tool authors). If none are affected, ask a maintainer for the no-docs label."
+            fail=1
+          fi
+          exit "$fail"

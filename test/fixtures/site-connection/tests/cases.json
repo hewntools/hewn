@@ -1,0 +1,4 @@
+[
+  { "name": "config reaches the code", "operation": "site", "input": {}, "config": { "SITE_URL": "https://example.com" }, "expect": { "config": { "SITE_URL": "https://example.com" } } },
+  { "name": "health", "operation": "health", "input": {}, "secrets": { "API_KEY": "k" }, "config": { "SITE_URL": "https://example.com" }, "expect": { "status": "connected" } }
+]

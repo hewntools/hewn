@@ -1,0 +1,15 @@
+[
+  { "name": "nothing yet", "operation": "widget_today", "input": {},
+    "expect": { "small": { "template": "progress", "value": 0 }, "medium": { "template": "list", "items": [], "buttons": [] } } },
+  { "name": "add a habit", "operation": "add_habit", "input": { "name": "Stretch" }, "expect": { "habitId": "$any" } },
+  { "name": "add another", "operation": "add_habit", "input": { "name": "Read 20 pages" }, "expect": { "habitId": "$any" } },
+  { "name": "a day with nothing done", "operation": "get_day", "input": { "date": "2026-10-01" },
+    "expect": { "date": "2026-10-01", "habits": [{ "name": "Stretch", "done": false, "streak": 0 }, { "name": "Read 20 pages", "done": false, "streak": 0 }] } },
+  { "name": "today's widget offers the first one", "operation": "widget_today", "input": {},
+    "expect": { "small": { "value": 0, "max": 2, "caption": "0 of 2", "buttons": [{ "label": "Done: Stretch", "operation": "check_in@1" }] },
+                "medium": { "items": [{ "title": "○ Stretch", "value": "0 d" }, { "title": "○ Read 20 pages" }] } } },
+  { "name": "unknown habit", "operation": "check_in", "input": { "habitId": "nope" }, "expectError": true },
+  { "name": "rejects a bad date", "operation": "get_day", "input": { "date": "1 October" }, "expectError": true },
+  { "name": "rejects an empty name", "operation": "add_habit", "input": { "name": "" }, "expectError": true },
+  { "name": "undo of nothing", "operation": "undo_check_in", "input": { "habitId": "nope" }, "expect": { "undone": false } }
+]

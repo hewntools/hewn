@@ -1,0 +1,24 @@
+{
+  "id": "site-connection",
+  "name": "Site Connection",
+  "purpose": "Test fixture: a connection whose host comes from the owner's config.",
+  "abi": "2.1",
+  "kind": "connection",
+  "config": [{ "name": "SITE_URL", "description": "The site's base URL, e.g. https://example.com" }],
+  "requires": {
+    "secrets": [{ "name": "API_KEY", "description": "Admin API key" }],
+    "hosts": ["config:SITE_URL"]
+  },
+  "operations": [
+    {
+      "name": "health", "description": "Checks the site", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["connected", "expired", "broken"] }, "detail": { "type": "string" } } }
+    },
+    {
+      "name": "site", "description": "Report the configured site and try to reach a host", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": { "fetch": { "type": "string" } } },
+      "outputSchema": { "type": "object", "required": ["config"], "properties": { "config": { "type": "object" }, "status": { "type": "integer" } } }
+    }
+  ]
+}

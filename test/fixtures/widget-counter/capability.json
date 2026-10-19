@@ -1,0 +1,17 @@
+{
+  "id": "widget-counter",
+  "name": "Widget Counter",
+  "purpose": "Test fixture: a counter with a widget.",
+  "abi": "2.3",
+  "operations": [
+    { "name": "increment", "description": "Add one", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["count"], "properties": { "count": { "type": "integer" } } } },
+    { "name": "widget_count", "description": "The count as a widget", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": { "caption": { "type": "string" }, "sneak": { "type": "boolean" } } },
+      "outputSchema": { "type": "object", "required": ["template"], "properties": { "template": { "type": "string" } } } }
+  ],
+  "widgets": [
+    { "name": "count", "version": 1, "title": "Count", "operation": "widget_count@1", "sizes": ["small", "medium"], "refresh": { "every": "15m" } }
+  ]
+}

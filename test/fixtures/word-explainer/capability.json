@@ -1,0 +1,24 @@
+{
+  "id": "word-explainer",
+  "name": "Word Explainer",
+  "purpose": "Test fixture: explains words and describes images with the platform's model.",
+  "abi": "2.2",
+  "requires": { "model": { "tier": "light", "input": ["text", "image"] } },
+  "operations": [
+    {
+      "name": "explain", "description": "Explain a word in one sentence", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "required": ["word"], "additionalProperties": false, "properties": { "word": { "type": "string" } } },
+      "outputSchema": { "type": "object", "required": ["explanation", "cost", "model"], "properties": { "explanation": { "type": "string" }, "cost": { "type": "number" }, "model": { "type": "string" } } }
+    },
+    {
+      "name": "describe", "description": "Describe an image", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "required": ["data", "mediaType"], "additionalProperties": false, "properties": { "data": { "type": "string" }, "mediaType": { "type": "string" } } },
+      "outputSchema": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } }
+    },
+    {
+      "name": "probe", "description": "Whether ctx.model is there", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["hasModel"], "properties": { "hasModel": { "type": "boolean" } } }
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "id": "habits",
+  "name": "Habits",
+  "purpose": "Check off a few daily habits and keep the streaks going, from Home or from any authorized agent.",
+  "description": "A short list of daily habits with one check-in per day each, streaks, and a widget for today with a Done button. Dates are local calendar dates, YYYY-MM-DD.",
+  "abi": "2.3",
+  "hue": 280,
+  "tags": ["habits", "daily", "streaks"],
+  "operations": [
+    {
+      "name": "add_habit",
+      "description": "Add a daily habit.",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 60 } }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["habitId"],
+        "properties": { "habitId": { "type": "string" } }
+      }
+    },
+    {
+      "name": "check_in",
+      "description": "Mark a habit done for a day (default today). Checking in twice is the same as once.",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["habitId"],
+        "properties": {
+          "habitId": { "type": "string" },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["habitId", "date", "streak"],
+        "properties": { "habitId": { "type": "string" }, "date": { "type": "string" }, "streak": { "type": "integer" } }
+      }
+    },
+    {
+      "name": "undo_check_in",
+      "description": "Take back a check-in for a day (default today).",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["habitId"],
+        "properties": {
+          "habitId": { "type": "string" },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["undone"],
+        "properties": { "undone": { "type": "boolean" } }
+      }
+    },
+    {
+      "name": "get_day",
+      "description": "Every habit for a day (default today): done or not, and its streak up to that day.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" } }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["date", "habits"],
+        "properties": {
+          "date": { "type": "string" },
+          "habits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["habitId", "name", "done", "streak"],
+              "properties": {
+                "habitId": { "type": "string" },
+                "name": { "type": "string" },
+                "done": { "type": "boolean" },
+                "streak": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "widget_today",
+      "description": "Widget: today's habits, with a button for the next one not done yet.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object" }
+    }
+  ],
+  "widgets": [
+    {
+      "name": "today",
+      "version": 1,
+      "title": "Today",
+      "operation": "widget_today@1",
+      "sizes": ["small", "medium", "large"],
+      "refresh": { "every": "15m" }
+    }
+  ]
+}

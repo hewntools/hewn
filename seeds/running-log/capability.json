@@ -1,0 +1,91 @@
+{
+  "id": "running-log",
+  "name": "Running Log",
+  "purpose": "Maintain a durable personal running history that any authorized agent can record into and summarize.",
+  "description": "Records runs (date, distance, duration, optional notes) and summarizes training over a date range. Dates are local calendar dates, YYYY-MM-DD.",
+  "abi": "2.0",
+  "tags": ["running", "exercise", "training", "fitness"],
+  "operations": [
+    {
+      "name": "record_run",
+      "description": "Record one run. date defaults to today.",
+      "version": 1,
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["distanceKm", "durationSeconds"],
+        "properties": {
+          "distanceKm": { "type": "number", "exclusiveMinimum": 0 },
+          "durationSeconds": { "type": "integer", "exclusiveMinimum": 0 },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "notes": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["runId"],
+        "properties": { "runId": { "type": "string" } }
+      }
+    },
+    {
+      "name": "list_runs",
+      "description": "List runs, oldest first, optionally within an inclusive date range.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "to": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["runs"],
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["runId", "date", "distanceKm", "durationSeconds"],
+              "properties": {
+                "runId": { "type": "string" },
+                "date": { "type": "string" },
+                "distanceKm": { "type": "number" },
+                "durationSeconds": { "type": "integer" },
+                "notes": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_summary",
+      "description": "Summary statistics over an optional inclusive date range. Pace is seconds per km.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "to": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["runCount", "totalDistanceKm", "totalDurationSeconds", "averageDistanceKm", "averagePaceSecondsPerKm"],
+        "properties": {
+          "runCount": { "type": "integer" },
+          "totalDistanceKm": { "type": "number" },
+          "totalDurationSeconds": { "type": "integer" },
+          "averageDistanceKm": { "type": ["number", "null"] },
+          "averagePaceSecondsPerKm": { "type": ["number", "null"] }
+        }
+      }
+    }
+  ]
+}

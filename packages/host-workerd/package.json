@@ -1,0 +1,16 @@
+{
+  "name": "@hewntools/host-workerd",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Hewn on workerd: the Worker, the capability runtime, the HTTP and MCP surface, the web client",
+  "license": "AGPL-3.0-or-later",
+  "exports": {
+    "./package.json": "./package.json",
+    "./web/*": "./web/*",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@hewntools/core": "*"
+  }
+}

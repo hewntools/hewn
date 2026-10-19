@@ -1,0 +1,16 @@
+{
+  "name": "@hewntools/test-host",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "An in-process Hewn host for fast tests (no isolation; never shipped)",
+  "license": "AGPL-3.0-or-later",
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@hewntools/core": "*",
+    "@hewntools/host-workerd": "*"
+  }
+}

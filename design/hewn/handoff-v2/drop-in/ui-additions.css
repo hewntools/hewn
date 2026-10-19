@@ -1,0 +1,57 @@
+/* Hewn design pass 2: additions to packages/ui/src/ui.css (append at the end).
+   Tokens only; same conventions as the rest of the file. Pairs with design/hewn/handoff-v2/README.md. */
+
+/* ---------- Inbox: one button for "needs you" + activity (replaces the builds chip and the Agents dot) ---------- */
+.inbox-btn { position: relative; width: 40px; min-height: 40px; padding: 0; border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--hl), var(--shadow); -webkit-backdrop-filter: var(--blur-strong); backdrop-filter: var(--blur-strong); }
+.inbox-btn[aria-expanded="true"] { background: var(--surface-3); }
+.inbox-btn svg.glyph { width: 18px; height: 18px; }
+.inbox-count { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 5px; background: var(--warn); color: var(--bg); font: 700 10px/14px var(--mono); text-align: center; border: 2px solid var(--bg); }
+.inbox-count.danger { background: var(--danger); }
+/* The panel is a .menu, but solid: it sits over a busy Home. */
+.inbox-panel { position: fixed; top: 76px; right: var(--s6); width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 100px); overflow: auto; padding: 10px; gap: 2px; background: var(--surface-solid); z-index: 40; }
+.inbox-panel .inbox-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 8px; }
+.inbox-row { display: flex; align-items: center; gap: var(--s3); padding: 8px 10px; border-radius: 10px; }
+.inbox-row:hover { background: var(--surface-2); }
+.inbox-row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.inbox-row .title { font-size: var(--fs); font-weight: 600; }
+/* The one exception: an agent blocked on a destructive call also shows on any page. */
+.blocking-banner { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 45; border-color: var(--danger); }
+
+/* ---------- Change drawer: Change… keeps the tool visible ---------- */
+.with-drawer { display: flex; min-height: 0; flex: 1; }
+.with-drawer > .drawer-main { flex: 1; min-width: 0; }
+.drawer { width: 400px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface-overlay); -webkit-backdrop-filter: var(--blur-strong); backdrop-filter: var(--blur-strong); }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s4) 20px; }
+.drawer-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s3); padding: 0 20px 20px; }
+.drawer .spec-card { border-radius: var(--radius-lg); padding: var(--s4); }
+@media (max-width: 860px) { .drawer { position: fixed; inset: auto 0 0 0; width: auto; max-height: 75vh; border-left: 0; border-top: 1px solid var(--border); border-radius: var(--radius-xl) var(--radius-xl) 0 0; z-index: 30; } }
+
+/* ---------- Edit Home: gentle wiggle, remove and size controls ---------- */
+@keyframes ws-wiggle { from { transform: rotate(-0.6deg); } to { transform: rotate(0.6deg); } }
+.home-grid.editing > .tile, .home-grid.editing > .tile-widget { animation: ws-wiggle .34s ease-in-out infinite alternate; }
+.home-grid.editing > :nth-child(3n+1) { animation-delay: -.11s; } .home-grid.editing > :nth-child(3n+2) { animation-delay: -.23s; }
+.home-grid.editing .more, .home-grid.editing .badge { display: none; }
+.edit-x { position: absolute; top: -6px; left: 14px; width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 8px; font-size: 13px; background: var(--surface-overlay); border: 1px solid var(--border-strong); box-shadow: var(--shadow); z-index: 2; }
+.tile-widget .edit-x { top: -8px; left: -8px; }
+.size-tag { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); min-height: 0; padding: 3px 8px; font: 600 var(--fs-2xs)/1 var(--mono); border-radius: 6px; background: var(--surface-overlay); border: 1px solid var(--border-strong); z-index: 2; }
+@media (prefers-reduced-motion: reduce) { .home-grid.editing > * { animation: none; outline: 1px dashed var(--border-strong); outline-offset: 4px; border-radius: var(--radius-lg); } }
+
+/* ---------- Widgets: corner icon ---------- */
+.jw-mark { top: 10px; right: 10px; line-height: 0; }
+.jw-mark.app-icon, .jw-mark .app-icon { --size: 20px; }
+.jw-stale-note { position: absolute; bottom: 10px; right: 16px; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--warn); }
+
+/* ---------- Settings with sections ---------- */
+.settings-layout { width: min(900px, calc(100% - var(--s5))); margin: 0 auto; display: flex; gap: 28px; align-items: flex-start; }
+.settings-layout > .side-list { width: 180px; position: sticky; top: var(--s4); }
+.settings-layout > .settings-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s4); }
+@media (max-width: 760px) { .settings-layout { flex-direction: column; } .settings-layout > .side-list { width: 100%; flex-direction: row; overflow-x: auto; position: static; } }
+
+/* ---------- Small parts ---------- */
+.role-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.milestones { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.sheet-steps { display: flex; gap: 6px; }
+.command-block { display: flex; align-items: center; gap: var(--s2); padding: 8px 8px 8px 12px; border-radius: 10px; background: var(--log-bg); color: var(--log-text); font: var(--fs-sm) var(--mono); }
+.command-block > span { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
+/* Small app icons: square pixels (no rounding under 56px) and the glyph at ~56% of the tile. */
+.app-icon svg.glyph rect { rx: 0; }

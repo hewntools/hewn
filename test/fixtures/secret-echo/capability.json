@@ -1,0 +1,20 @@
+{
+  "id": "secret-echo",
+  "name": "Secret Echo",
+  "purpose": "Test fixture: a connection that uses a declared secret and can rotate it.",
+  "abi": "2.1",
+  "kind": "connection",
+  "requires": { "secrets": [{ "name": "API_TOKEN", "description": "Token for the fake API" }] },
+  "operations": [
+    {
+      "name": "health", "description": "Whether a token is set", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} },
+      "outputSchema": { "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["connected", "expired", "broken"] }, "detail": { "type": "string" } } }
+    },
+    {
+      "name": "whoami", "description": "Report on the token it received", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": { "rotate": { "type": "boolean" }, "leak": { "type": "string", "enum": ["result", "error", "log"] } } },
+      "outputSchema": { "type": "object", "required": ["tokenLength", "prefix", "secretNames"], "properties": { "tokenLength": { "type": "integer" }, "prefix": { "type": "string" }, "secretNames": { "type": "array", "items": { "type": "string" } } } }
+    }
+  ]
+}

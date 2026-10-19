@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>body{margin:0;background:#efeff2;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#1c1c1e}a{color:#3f6212}a:hover{color:#1c1c1e}</style>
+</helmet>
+<section style="padding:64px;display:flex;flex-direction:column;gap:48px;width:2440px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:980px">
+    <div style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:#6b6b72">HEWN — CURRENT STATE · main @ bd8f5f1 · v0.3.3</div>
+    <div style="font-size:30px;font-weight:650;letter-spacing:-.02em">Every screen and dialog as built today</div>
+    <div style="font-size:15px;color:#55555c;text-wrap:pretty">From <span style="font-family:ui-monospace,Menlo,monospace;font-size:13px">packages/host-workerd/web/app.js</span>. Each card lists what's on the screen and where you reach it from. Tags mark issues; <b>new</b> marks things added since design pass 1.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+      <sc-for list="{{ legend }}" as="l" hint-placeholder-count="7"><span style="font:600 11px ui-monospace,Menlo,monospace;padding:4px 8px;border-radius:5px;background:{{ l.bg }};color:{{ l.fg }}">{{ l.label }}</span></sc-for>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:24px;align-items:stretch">
+    <div style="flex:1.3;display:flex;flex-direction:column;gap:14px;padding:22px 24px;border-radius:14px;background:#fff;border:1.5px solid #c9cad0">
+      <div style="font-size:18px;font-weight:650">Site map: how you reach things today</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+        <sc-for list="{{ sitemap }}" as="n" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:10px;background:#f6f6f8;border:1px solid #e3e4e8">
+            <div style="display:flex;align-items:center;gap:6px"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:2px 6px;border-radius:4px;background:#1c1c1e;color:#fff">NAV</span><span style="font-size:14px;font-weight:650">{{ n.name }}</span></div>
+            <sc-for list="{{ n.kids }}" as="k" hint-placeholder-count="4">
+              <div style="display:flex;gap:6px;font-size:12px;color:#3a3a40;padding-left:{{ k.pad }}"><span style="color:#a0a2aa">{{ k.mark }}</span><span>{{ k.t }}</span></div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:12px;color:#6b6b72;line-height:1.5">Also reachable only by keyboard shortcut or from the Settings list: Activity (a), Builds (b). The "2 building / 1 failed" chip in the top bar links to Builds.</div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:12px;padding:22px 24px;border-radius:14px;background:#1c1c1e;color:#f0f0f2">
+      <div style="font-size:18px;font-weight:650">Cross-cutting findings</div>
+      <sc-for list="{{ findings }}" as="f" hint-placeholder-count="8">
+        <div style="display:flex;gap:10px;align-items:baseline">
+          <span style="font:600 11px ui-monospace,Menlo,monospace;color:#c6ef5a;width:20px;flex:none">{{ f.n }}</span>
+          <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px;font-weight:600">{{ f.t }}</span><span style="font-size:12.5px;color:#b4b6be;line-height:1.45;text-wrap:pretty">{{ f.d }}</span></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <sc-for list="{{ areas }}" as="a" hint-placeholder-count="8">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">{{ a.key }}</div><div style="font-size:20px;font-weight:650">{{ a.title }}</div><div style="font-size:13px;color:#6b6b72">{{ a.sub }}</div></div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+        <sc-for list="{{ a.screens }}" as="s" hint-placeholder-count="4">
+          <div id="{{ s.id }}" style="width:370px;display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:12px;background:#fff;border:1.5px solid {{ s.border }}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font:600 11px ui-monospace,Menlo,monospace;color:#6b6b72">{{ s.id }}</span>
+              <span style="font-size:15px;font-weight:650;flex:1;min-width:0">{{ s.name }}</span>
+              <sc-if value="{{ s.isNew }}" hint-placeholder-val="{{ false }}"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:2px 6px;border-radius:4px;background:#c6ef5a;color:#1f2a0f">NEW</span></sc-if>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;font:11px ui-monospace,Menlo,monospace;color:#55555c">
+              <span style="padding:2px 6px;border-radius:4px;background:#f0f0f3">{{ s.route }}</span>
+              <span style="padding:2px 0;color:#8a8d98">from {{ s.from }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <sc-for list="{{ s.has }}" as="x" hint-placeholder-count="3"><div style="font-size:12.5px;color:#3a3a40;line-height:1.4;display:flex;gap:6px"><span style="color:#b0b2ba">·</span><span>{{ x }}</span></div></sc-for>
+            </div>
+            <sc-if value="{{ s.hasIssues }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px solid #ececf0">
+                <sc-for list="{{ s.issues }}" as="i" hint-placeholder-count="2">
+                  <div style="display:flex;gap:8px;align-items:baseline"><span style="font:600 10px ui-monospace,Menlo,monospace;padding:2px 6px;border-radius:4px;background:{{ i.bg }};color:{{ i.fg }};flex:none">{{ i.tag }}</span><span style="font-size:12.5px;color:#3a3a40;line-height:1.4;text-wrap:pretty">{{ i.t }}</span></div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-for>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const TAGS = {
+      IA: ['#dbe7fb', '#1e4b8f', 'IA · where it lives'],
+      SIGNAL: ['#fde8c8', '#8a4b06', 'SIGNAL · attention'],
+      COPY: ['#efe3fa', '#5b2a86', 'COPY · too long'],
+      RULE: ['#fbdcd8', '#9b2318', 'RULE · breaks a design rule'],
+      DENSE: ['#f3e6d6', '#6b4a1f', 'DENSE · too much at once'],
+      GAP: ['#e4e5e9', '#3a3a40', 'GAP · missing'],
+      OK: ['#e2f3e6', '#1f6b3a', 'OK · matches pass 1'],
+    };
+    const legend = Object.values(TAGS).map(([bg, fg, label]) => ({ bg, fg, label }));
+    const I = (tag, t) => ({ tag: tag, t, bg: TAGS[tag][0], fg: TAGS[tag][1] });
+    const S = (id, name, route, from, has, issues = [], isNew = false) => ({
+      id, name, route, from, has, issues, isNew, hasIssues: issues.length > 0,
+      border: issues.some(i => i.tag !== 'OK') ? '#c9cad0' : '#bfe3c9',
+    });
+
+    const sitemap = [
+      { name: 'Home', kids: [['Tool tiles → Open / Run / Info', 0], ['Widgets (S/M/L)', 0], ['New ▸ New tool… / Widgets…', 0], ['Tile ••• (11 items)', 0], ['Info → Change, Run, Model, Schedules', 1], ['Build page', 1]] },
+      { name: 'Agents', kids: [['Waiting for you (new agents)', 0], ['Connected agents ▸ Edit', 0], ['Builder · Intake ▸ Change…', 0], ['Connect an agent (4 branches)', 0]] },
+      { name: 'Accounts', kids: [['Connection cards', 0], ['Set up / Sign in / Credentials', 1], ['Operations · Change…', 1], ['Connection Info', 1]] },
+      { name: 'Settings', kids: [['Activity ›', 0], ['Builds ›', 0], ['Models › (5 sub-dialogs)', 0], ['Sandbox · Logs · Appearance', 0], ['Backups · Signed in · Sign in from anywhere', 0], ['Version · Deleted tools', 0]] },
+    ].map(n => ({ name: n.name, kids: n.kids.map(([t, d]) => ({ t, pad: d ? '14px' : '0', mark: d ? '└' : '·' })) }));
+
+    const findings = [
+      ['Navigation and where things are found', 'Activity and Builds are things you check often, but they sit as rows inside Settings. Settings has 11 groups that range from daily to once a year. Models is a whole sub-app inside Settings.'],
+      ['Six ways to say "needs you"', 'Tile badges, a failed-build notice on Home, the top-bar builds chip, a notice on Info, agent confirmations on Home, a dot on the Agents tab, and toasts for schedule proposals. There\'s no single model for attention.'],
+      ['The notice strip on Home came back', 'Failed builds and agent confirmations now stack above the grid. That\'s the strip we removed in pass 1.'],
+      ['Around 20 dialogs, each built its own way', 'Grants, approved, sign-in, widgets, icon, versions, delete, purge, model choice, tier picker, switch provider, cap, price, model setup, schedule proposal, who builds, connect (4 branches), shortcuts, confirm. Headers, widths and footers vary.'],
+      ['The intake has 5 kinds of reply card', 'Questions, draft, ideas, widget proposals and schedule suggestions are each laid out differently, and some can show up together.'],
+      ['Explanations crept back in', 'The Welcome, Accounts, Models, Widgets, Connect, and model-choice screens all open with an explanatory sentence or two.'],
+      ['Rule breaks', 'Emoji starters and an emoji icon option; typing the id to confirm Delete forever; terminal commands in Connect; a trash SVG icon in Widgets (pass 1 used no UI icons).'],
+      ['Gaps', 'Nothing is designed for phones yet, but passkeys and remote sign-in happen on phones. There\'s no owner timezone setting (post-launch). Accounts has no way to add a connection directly.'],
+    ].map(([t, d], i) => ({ n: String(i + 1).padStart(2, '0'), t, d }));
+
+    const areas = [
+      { key: 'S', title: 'Shell', sub: 'on every page', screens: [
+        S('S1', 'Top bar', 'all main pages', 'n/a', ['Hewn lock-up', 'Builds chip: "2 building" / "1 failed" (for a day)', 'Nav: Home · Agents · Accounts · Settings', 'Agents tab gets a dot when an agent is waiting'], [I('IA', 'Activity was removed from the nav in 0.2.1; Accounts was added.'), I('SIGNAL', 'The chip, the Agents dot and the Home notices can all fire for overlapping things.')], true),
+        S('S2', 'Global notices and toasts', 'everywhere', 'system', ['Sandbox-off notice on Home and Info', '"Hewn was updated · Reload"', 'Toasts with Undo or an action'], [I('OK', 'Uses the toast and notice patterns from pass 1.')]),
+        S('S3', 'Shortcuts dialog', '?', 'keyboard', ['a Activity, b Builds, g Agents, u Accounts, "," Settings, "/" Search'], [I('IA', 'Shortcuts are currently the fastest way to reach Activity and Builds.')], true),
+      ]},
+      { key: 'H', title: 'First run & Home', sub: 'A1–A3 in pass 1', screens: [
+        S('H1', 'Welcome (first run)', '#/ (first run)', 'fresh install', ['Step 1: look for agents on this computer, connect them', 'Step 2: choose who builds and who runs the intake (radio lists)', 'Step 3: three starters (with emoji) or describe your own', 'Skip in the top bar'], [I('RULE', 'Emoji starters, plus a heading and a lead paragraph explaining Hewn.'), I('DENSE', 'Three stacked cards, each with explanatory sub-copy; step 2 asks a technical question very early.'), I('IA', 'There are two first runs: this one, and the empty Home (A1) shown after Skip.')], true),
+        S('H2', 'Empty Home', '#/', 'after Skip', ['"Nothing here yet." · Make something · Connect an agent', 'ASCII H'], [I('OK', 'Built as designed in A1.')]),
+        S('H3', 'Home grid', '#/', 'nav', ['Icon tiles and widgets in one grid; drag to reorder', 'Search, hidden until there are more than 12 tools (or press "/")', 'Above the grid: failed-builds notice and agent confirmation cards', 'Building tiles fill in as tests pass', 'New tile is a menu: New tool… / Widgets…'], [I('SIGNAL', 'The notices above the grid duplicate the red badge and push Home down.'), I('IA', '"New" now takes two clicks to reach the core action.'), I('GAP', 'Resizing a widget is only possible from the right-click menu; nothing on screen suggests it.')], true),
+        S('H4', 'Tile menu', '••• / right-click', 'tile', ['Open · Info · Change… · Widgets… · Activity · Builds or Failed build…', 'Rename · Set icon… · Versions… · Export data · Delete…'], [I('DENSE', '11 items with no grouping; it has doubled since pass 1.')], true),
+        S('H5', 'Widget on Home', 'grid', 'Widgets dialog', ['Small, medium or large; drawn by the platform', 'Up to 3 buttons that run operations (destructive ones are confirmed)', '"!" when a refresh fails; the last view is kept', 'Menu: Open · Refresh · Change… · sizes · Remove'], [I('GAP', 'Never designed: widget anatomy, its stale and missing states, and the button styles inside it.')], true),
+        S('H6', 'Widgets dialog', 'New ▸ Widgets… / tile ••• / Info', 'Home', ['A live preview of each widget, a size switch, its settings, Add to Home', 'Trash: delete the widget from the tool (makes a new version, then jumps to its build)', 'Make new widgets: pick a tool, describe it, go to the intake'], [I('DENSE', 'One dialog does three jobs: add to Home, delete from the tool, and make new ones.'), I('RULE', 'A destructive action that changes the tool sits inside a picker and navigates away; it also uses a trash SVG icon.'), I('COPY', 'Has an explanatory paragraph.')], true),
+        S('H7', 'Set icon', 'tile ••• ▸ Set icon…', 'menu', ['Choose glyph editor (5×5) / image / emoji', 'Hue slider · Use default'], [I('RULE', 'The emoji option sits outside the pixel-glyph system.')], true),
+        S('H8', 'Versions', 'tile ••• ▸ Versions…', 'menu', ['List of versions · Roll back, with an Undo toast'], [I('IA', 'Only reachable from the menu; not shown on Info.')], true),
+      ]},
+      { key: 'U', title: 'Using a tool', sub: 'A4, A5, C1, C4', screens: [
+        S('U1', 'Opened tool UI', '#/app/:id', 'tile', ['Glass app bar: back · icon + name · Change… · •••', 'Sandboxed iframe; ?at= opens a section'], [I('OK', 'Matches A4. The back target switches to Accounts for connections.')]),
+        S('U2', 'Run view', '#/run/:id', 'tile (no UI) / Info op', ['List of operations · form · result', '"Needs your authorization" notice + Review'], [I('OK', 'Matches A5.')]),
+        S('U3', 'Info', '#/c/:id', 'tile ••• / Accounts', ['Header · notice for a running or failed build · pills', 'Change it composer', 'Operations · Allowed to · Model card · Schedules card · Connected'], [I('DENSE', 'The right column has grown from 2 cards to 4, and pending grants appear as pills inside "Allowed to".'), I('IA', 'Widgets, Versions and Export are not shown on Info, only in the ••• menu.')]),
+        S('U4', 'Delete / Deleted / Purge', 'dialog · Settings ▸ Deleted', 'menu', ['Delete keeps the data (as designed)', 'Settings lists deleted tools: Restore · Delete forever…', 'Delete forever: type the id to confirm'], [I('RULE', 'Typing the id to confirm is the pattern pass 1 removed; it may be justified for an irreversible delete, but that\'s a decision to make deliberately.')], true),
+      ]},
+      { key: 'M', title: 'Making & changing', sub: 'B1–B4, C2', screens: [
+        S('M1', 'Intake', '#/new · #/change/:id · #/widgets/:id', 'New / Change… / Widgets', ['Possible replies: questions, draft, ideas (up to 5), widgets, a schedule-only offer', '"Keep talking" revises; the old draft stays, faded', '?widget= opens Change… for that widget'], [I('DENSE', 'Five reply card types, each with a different layout.')], true),
+        S('M2', 'Spec card', 'in intake', 'draft reply', ['Name · purpose · operation pills · needs', 'Line saying which connection it uses or builds', 'Schedule ticks · model tier · Show spec (the raw requirements)'], [I('DENSE', 'It has grown from 4 rows to 8 and now reads more like a form than a summary.')]),
+        S('M3', 'Ideas card (build several)', 'in intake', '"suggest some tools"', ['Ticks, each with an icon, purpose, pills, needs, and what it builds on', 'Ticking one also ticks what it depends on; its schedule ticks sit inside', '"Build N tools" → toast → Home'], [I('DENSE', 'Each idea is a full spec card; five of them make a very long scroll.'), I('GAP', 'Building several tools has no screen of its own; it only happens on Home.')], true),
+        S('M4', 'Widget proposals / schedule offer', 'in intake', 'widgets / schedule reply', ['Widget previews in every size, with ticks', 'Schedule-only offer: one click, nothing to build'], [I('GAP', 'Never designed.')], true),
+        S('M5', 'Build page', '#/b/:id', 'tile / chip / Builds', ['Steps · blocks · log · ready · failed + "Ask builder to fix"', 'Waiting for another build · widget build previews · builds that only change the manifest', 'Model setup dialog when the build finishes'], [I('OK', 'The core matches B3–B4.'), I('GAP', 'The new variants (waiting, widgets-only, manifest-only, connection) were never designed.')]),
+        S('M6', 'Builds page', '#/builds', 'Settings ▸ Builds / chip / b', ['In progress (live) · Failed · Earlier', 'Each row: icon, name · kind, what it\'s doing now, a progress bar, time, pill'], [I('IA', 'You check this often, but it sits two levels deep in Settings.')], true),
+      ]},
+      { key: 'T', title: 'Trust: grants, agents, schedules', sub: 'D1–D3, E1–E2', screens: [
+        S('T1', 'Grants sheet', 'dialog', 'badge / Info / build end / Accounts', ['Pending: kind pills, capability refs, secrets', 'Approved: Revoke with Undo', 'Connections: their settings as well as secrets'], [I('OK', 'Matches D1–D2.')]),
+        S('T2', 'Agent confirmation card', 'Home (above grid)', 'agent calls a destructive op', ['Which agent, which operation on which tool, its input · Allow / Stop'], [I('SIGNAL', 'Sits inline on Home. Never designed; it\'s the most urgent kind of request but has no stronger treatment.')], true),
+        S('T3', 'Schedules', 'Info card · proposal sheet · intake', 'Info / toast "Review"', ['Info card: the schedules, paused after 3 failures', 'An agent\'s proposal: "Run X on a timetable?" Enable / Decline', 'Intake: schedule ticks'], [I('GAP', 'Never designed: cadence editing, the paused state, and the proposal sheet.'), I('SIGNAL', 'A proposal is announced only by a 15-second toast.')], true),
+        S('T4', 'Agents page', '#/agents', 'nav', ['Waiting for you: new agent (editable name, scopes) · Approve', 'Connected: card per agent, where it connects from, Edit ▸ switches, "Only some tools", Disconnect', 'Builder · Intake: status dots · Change… sheet'], [I('IA', 'Choosing who builds is mixed in with connected agents (it moved here from Settings).'), I('DENSE', 'Edit expands inline and pushes the page down.')]),
+        S('T5', 'Connect an agent', 'dialog', 'Agents / first run', ['List: found on this Mac, shares another agent\'s settings, through the tunnel · Connect / How / Address', 'In the cloud: claude.ai, ChatGPT → steps + text to paste', 'On your computer (via the public URL) → terminal command', 'Connecting: steps + approve the new agent without leaving the dialog'], [I('COPY', 'The branches are mostly numbered instructions and terminal commands.'), I('DENSE', 'Four branches inside one 520px dialog.')], true),
+      ]},
+      { key: 'C', title: 'Connections', sub: 'new in 0.2', screens: [
+        S('C1', 'Accounts', '#/accounts', 'nav', ['Card per connection: health dot · Set up / Sign in / Credentials / Show build', 'Used by: cap-refs · Operations · Change…', 'Its settings appear inline in each card, each with its own Save button', 'Building cards for new connections'], [I('COPY', 'Opens with an explanatory sentence.'), I('DENSE', 'The main button changes label with state (4 variants); each setting has its own Save.'), I('GAP', 'No way to add a connection directly; one is only created when something you build needs it.')], true),
+        S('C2', 'Sign-in dialog', 'dialog', 'Accounts ▸ Sign in', ['The connection\'s own steps (e.g. email, password, then a code)'], [I('GAP', 'Never designed: a multi-step sign-in inside a dialog.')], true),
+        S('C3', 'Connection Info / Run', '#/c/:id · #/run/:id', 'Accounts', ['Same as a tool; back goes to Accounts', 'Not on Home'], [I('OK', 'Reuses U2 and U3.')], true),
+      ]},
+      { key: 'Mo', title: 'Models', sub: 'new in 0.2.2', screens: [
+        S('Mo1', 'Connect a provider', '#/models (no provider)', 'Settings ▸ Models / model setup', ['Choose Anthropic / OpenAI / OpenRouter · paste a key · Connect', 'Starting budget'], [I('COPY', 'Has an intro paragraph about keys and the budget.')], true),
+        S('Mo2', 'Models', '#/models', 'Settings ▸ Models', ['Provider · whether the key works · Switch provider…', 'This month: spend bar, cap edited in place, caps per tool', 'Tiers (light, standard, strong, max) · Change · Use suggested', 'Pinned models · Replace… · prices footer'], [I('DENSE', 'Four cards of very different weight: spend you check monthly next to tiers you set once.'), I('IA', 'A whole area hidden under Settings, with a "‹ Settings" back link.')], true),
+        S('Mo3', 'Model dialogs', 'dialogs', 'Models / Info', ['Switch provider (what moves, what stays)', 'Tier picker · Cap · Price', 'Model for a tool: a tier or a specific model', 'Model setup after authorizing'], [I('DENSE', 'Six dialogs that are each built differently.'), I('COPY', 'The model-choice dialog explains tiers in a paragraph.')], true),
+      ]},
+      { key: 'Se', title: 'Settings, Activity, remote access', sub: 'E3 + 0.3', screens: [
+        S('Se1', 'Settings', '#/settings', 'nav', ['Links: Activity › Builds › Models ›', 'Sandbox · Keep call logs · Appearance', 'Backups + folder · Signed in (browsers) · Sign in from anywhere', 'Version · Deleted'], [I('IA', 'Three rows are just links to whole pages; things you change daily sit next to things you change yearly.'), I('GAP', 'No owner timezone yet (post-launch) and no warning when backups share a disk with the data.')]),
+        S('Se2', 'Sign in from anywhere', 'Settings card', 'Settings', ['Public URL · DNS records · Caddy block', 'Passkeys: list · remove · Add one here'], [I('DENSE', 'Server setup (DNS) sits on the same card as passkeys for your own devices.')], true),
+        S('Se3', 'Add a passkey', '#/passkey', 'one-time link from `hewn open --print`', ['Add a passkey for this device · then Home'], [I('GAP', 'Happens on phones, but there\'s no phone layout.')], true),
+        S('Se4', 'Public sign-in page', 'public URL', 'another device', ['Passkeys only'], [I('GAP', 'Served outside app.js; never designed. It\'s the first screen a remote user sees.')], true),
+        S('Se5', 'Activity', '#/activity', 'Settings ▸ Activity / a / tile ••• Activity', ['One timeline · filters for tool and agent', 'Model spend shown with calls · authority trail'], [I('OK', 'Matches C3.'), I('IA', 'It was in the top bar in pass 1; now it\'s reached through Settings.')]),
+      ]},
+    ];
+    return { legend, sitemap, findings, areas };
+  }
+}
+</script>
+</body>
+</html>

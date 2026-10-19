@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="../../styles.css">
+<script src="../../ui/ascii.js"></script>
+<style>body{margin:0;background:#0d0e11}a{color:var(--accent-ink)}a:hover{color:var(--text)}@keyframes hw{from{transform:rotate(-.6deg)}to{transform:rotate(.6deg)}}</style>
+</helmet>
+<section style="padding:64px;display:flex;flex-direction:column;gap:72px">
+  <div style="display:flex;flex-direction:column;gap:6px;color:#e8e9ee;font-family:-apple-system,system-ui,sans-serif">
+    <div style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:#8a8d98">HEWN — HI-FI, DESIGN PASS 2</div>
+    <div style="font-size:30px;font-weight:650;letter-spacing:-.02em">New and changed screens</div>
+    <div style="font-size:15px;color:#8a8d98">Frame ids match UX Flows turn 2. Unchanged screens stay in the pass 1 screens. Use Tweaks to switch theme or wallpaper.</div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">F</div><div style="font-size:22px;font-weight:650">Home, widgets and attention</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="F1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">F1 · First run</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="F1 First run" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:55%;--y:-15%;--w:600px"></i><i style="--h:250;--x:-10%;--y:55%;--w:480px"></i></div>
+          <div class="ascii-field"><pre ref="{{ asciiRef }}" style="right:20px;top:140px;opacity:.28"></pre></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:10px;padding:20px 32px"><dc-import name="AppIcon" glyph="hewn" hue="125" size="28" hint-size="28px,28px"></dc-import><span style="font-size:17px;font-weight:650;letter-spacing:-.02em">Hewn</span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:20px;padding:0 120px 40px;max-width:820px">
+              <div style="display:flex;flex-direction:column;gap:10px"><div class="display" style="font-size:44px">Make your own tools.</div><div class="muted" style="font-size:18px">Every agent you connect can use them.</div></div>
+              <div class="card" style="padding:6px 18px">
+                <div class="eyebrow" style="padding:12px 0 4px">1 · Agents on this Mac</div>
+                <ul class="list">
+                  <li><span class="app-icon md" style="--hue:30">CC</span><div class="grow"><span>Claude Code</span><span class="sub">Found · signed in</span></div><button class="primary sm">Connect</button></li>
+                  <li><span class="app-icon md" style="--hue:200">CX</span><div class="grow"><span>Codex</span><span class="sub">Connected</span></div><span class="pill ok with-dot">connected</span></li>
+                </ul>
+              </div>
+              <div class="card" style="padding:6px 18px">
+                <div class="eyebrow" style="padding:12px 0 4px">2 · Who works for Hewn</div>
+                <ul class="list">
+                  <li><div class="grow"><span>Builds tools</span><span class="sub">Not chosen</span></div><button class="sm">Choose…</button></li>
+                  <li><div class="grow"><span>Asks the questions</span><span class="sub">Not chosen</span></div><button class="sm">Choose…</button></li>
+                </ul>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;opacity:.5">
+                <div class="eyebrow">3 · Make something</div>
+                <div style="display:flex;gap:8px"><input type="text" placeholder="Describe it…" disabled="{{ true }}" style="flex:1"><button class="primary" disabled="{{ true }}">Next</button></div>
+                <div style="display:flex;gap:6px"><span class="chip plain">Reading list</span><span class="chip plain">Habit tracker</span><span class="chip plain">Running log</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="F2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">F2 · Home: one grid, nothing above it</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="F2 Home" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i><i style="--h:30;--x:8%;--y:68%;--w:380px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Home" inbox="3" hint-size="100%,76px"></dc-import>
+            <div style="flex:1;display:flex;justify-content:center;padding-top:36px"><dc-import name="HomeBoard" hint-size="744px,520px"></dc-import></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="F3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">F3 · Needs you</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="F3 Needs you" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i><i style="--h:30;--x:8%;--y:68%;--w:380px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Home" inbox="3" inbox-open="{{ true }}" hint-size="100%,76px"></dc-import>
+            <div style="flex:1;display:flex;justify-content:center;padding-top:36px"><dc-import name="HomeBoard" hint-size="744px,520px"></dc-import></div>
+          </div>
+          <div class="menu" style="position:absolute;top:76px;right:32px;width:440px;padding:10px;gap:2px;z-index:5;background:var(--surface-solid)">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 8px"><div class="segmented"><button aria-pressed="true">Needs you · 3</button><button>Activity</button></div><button class="link sm">All activity ›</button></div>
+            <sc-for list="{{ needs }}" as="n" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px">
+                <span class="dot {{ n.dot }}"></span><dc-import name="AppIcon" glyph="{{ n.glyph }}" hue="{{ n.hue }}" size="36" hint-size="36px,36px" style="display:flex"></dc-import>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-size:14px;font-weight:600">{{ n.title }}</span><span class="small muted">{{ n.sub }}</span></div>
+                <button class="sm">{{ n.act }}</button>
+              </div>
+            </sc-for>
+            <hr>
+            <div class="eyebrow" style="padding:6px 10px">Building</div>
+            <div style="display:flex;align-items:center;gap:12px;padding:6px 10px"><span class="dot live"></span><dc-import name="AppIcon" glyph="read" hue="250" size="36" progress="0.6" hint-size="36px,36px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column"><span style="font-size:14px;font-weight:600">Reading List</span><span class="small muted">Testing 4/6</span></div><button class="ghost sm">Show</button></div>
+            <hr>
+            <div class="eyebrow" style="padding:6px 10px">Recent</div>
+            <div class="small" style="display:flex;align-items:center;gap:8px;padding:6px 10px"><span class="dot"></span><span style="flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Codex made 14 calls to <dc-import name="CapRef" glyph="run" hue="30" label="Running Log" size="18" hint-size="110px,18px"></dc-import></span><span class="mono faint">14:02</span></div>
+            <div class="small" style="display:flex;align-items:center;gap:8px;padding:6px 10px"><span class="dot ok"></span><span style="flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap">You authorized <dc-import name="CapRef" glyph="words" hue="200" label="Word List" size="18" hint-size="100px,18px"></dc-import></span><span class="mono faint">11:45</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="F4" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">F4 · Edit Home (tiles wiggle)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="F4 Edit Home" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i><i style="--h:30;--x:8%;--y:68%;--w:380px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 32px">
+              <div class="glass-bar"><button>+ Add widget</button></div>
+              <span class="small muted">Drag to move · tap S/M/L to resize</span>
+              <div class="glass-bar"><button class="primary" style="background:var(--accent);color:var(--accent-text)">Done</button></div>
+            </div>
+            <div style="flex:1;display:flex;justify-content:center;padding-top:36px"><dc-import name="HomeBoard" edit="{{ true }}" badges="{{ false }}" building="{{ false }}" hint-size="744px,520px"></dc-import></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="F5" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">F5 · Add a widget</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="F5 Add widget" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i></div>
+          <div style="position:absolute;inset:0;display:flex;justify-content:center;padding-top:112px"><dc-import name="HomeBoard" edit="{{ true }}" badges="{{ false }}" building="{{ false }}" blur="{{ true }}" hint-size="744px,520px"></dc-import></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:24px;display:flex;flex-direction:column;gap:16px">
+              <h2 style="margin:0">Add a widget</h2>
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip plain" style="background:var(--surface-3)">All</span><dc-import name="CapRef" chip="{{ true }}" glyph="words" hue="200" label="Word List" size="20" hint-size="140px,32px"></dc-import><dc-import name="CapRef" chip="{{ true }}" glyph="run" hue="30" label="Running Log" size="20" hint-size="140px,32px"></dc-import><dc-import name="CapRef" chip="{{ true }}" glyph="cup" hue="55" label="Coffee Log" size="20" hint-size="140px,32px"></dc-import></div>
+              <div style="padding:22px;border-radius:18px;background:var(--surface-2);display:flex;justify-content:center">
+                <div class="jw jw-medium jw-marked" style="width:236px;height:116px"><div class="jw-title">This week</div><div class="jw-body"><div class="jw-value">31.6<span class="jw-unit">km</span></div><div class="jw-caption">4 runs · avg 5:24/km</div></div><span style="position:absolute;top:10px;right:10px;display:flex;line-height:0"><dc-import name="AppIcon" glyph="run" hue="30" size="20" hint-size="20px,20px" style="display:flex"></dc-import></span></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><div style="display:flex;flex-direction:column"><span style="font-weight:600">This week</span><span class="small muted">Running Log · distance and pace</span></div><div class="segmented"><button>Small</button><button aria-pressed="true">Medium</button></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between"><button class="link">Describe a new one ›</button><div style="display:flex;gap:8px"><button>Cancel</button><button class="primary">Add to Home</button></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">P · G</div><div style="font-size:22px;font-weight:650">Changing while you use it · asking for several tools</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="P1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">P1 · Change… opens a drawer</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="P1 Change drawer" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--border)">
+            <div class="glass-bar"><button>‹ Home</button></div>
+            <div style="flex:1;display:flex;justify-content:center;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="run" hue="30" size="28" hint-size="28px,28px"></dc-import><span style="font-size:15px;font-weight:600">Running Log</span><span class="pill">v3</span></div>
+            <div class="glass-bar"><button aria-pressed="true">Change…</button><button>•••</button></div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="flex:1;min-width:0;overflow:hidden"><dc-import name="RunningLogUI" hint-size="820px,640px"></dc-import></div>
+            <div style="width:400px;flex:none;border-left:1px solid var(--border);background:var(--surface-overlay);-webkit-backdrop-filter:var(--blur-strong);backdrop-filter:var(--blur-strong);display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px"><span style="display:flex;align-items:center;gap:8px"><span class="eyebrow">Change</span><dc-import name="CapRef" glyph="run" hue="30" label="Running Log" hint-size="120px,20px"></dc-import></span><button class="ghost sm icon-only">×</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;padding:0 20px 20px">
+                <div style="font-size:24px;font-weight:650;letter-spacing:-.02em">What should change?</div>
+                                <div style="display:flex;gap:8px"><textarea placeholder="e.g. show pace per km in the table" style="min-height:72px;flex:1"></textarea></div>
+                <div style="display:flex;justify-content:flex-end"><button class="primary">Send</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="P2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">P2 · Proposal in the drawer</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="P2 Proposal drawer" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--border)">
+            <div class="glass-bar"><button>‹ Home</button></div>
+            <div style="flex:1;display:flex;justify-content:center;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="run" hue="30" size="28" hint-size="28px,28px"></dc-import><span style="font-size:15px;font-weight:600">Running Log</span><span class="pill">v3</span></div>
+            <div class="glass-bar"><button aria-pressed="true">Change…</button><button>•••</button></div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="flex:1;min-width:0;overflow:hidden"><dc-import name="RunningLogUI" hint-size="820px,640px"></dc-import></div>
+            <div style="width:400px;flex:none;border-left:1px solid var(--border);background:var(--surface-overlay);-webkit-backdrop-filter:var(--blur-strong);backdrop-filter:var(--blur-strong);display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px"><span style="display:flex;align-items:center;gap:8px"><span class="eyebrow">Change</span><dc-import name="CapRef" glyph="run" hue="30" label="Running Log" hint-size="120px,20px"></dc-import></span><button class="ghost sm icon-only">×</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;padding:0 20px 20px">
+                <div class="thread">
+                  <div class="bubble me">Show pace per km in the table, and let me sort by it</div>
+                  <div class="bubble them">Sort fastest first by default?</div>
+                  <div class="bubble me">Yes</div>
+                </div>
+                <div class="card" style="border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px">
+                  <div class="eyebrow">Proposal · change</div>
+                  <div style="display:flex;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="run" hue="30" size="36" hint-size="36px,36px"></dc-import><div style="display:flex;flex-direction:column"><span style="font-weight:600">Running Log · v4</span><span class="small muted">Pace column, sortable, fastest first</span></div></div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill">list_runs + pace</span><span class="pill">UI: table</span></div>
+                  <div style="display:flex;justify-content:flex-end;gap:8px"><button>Keep talking</button><button class="primary">Build change</button></div>
+                </div>
+                <div style="display:flex;gap:8px"><input type="text" placeholder="Reply…" style="flex:1"><button>Send</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="P3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">P3 · Building beside the tool → P4 ready in place</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="P3 Building drawer" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--border)">
+            <div class="glass-bar"><button>‹ Home</button></div>
+            <div style="flex:1;display:flex;justify-content:center;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="run" hue="30" size="28" hint-size="28px,28px"></dc-import><span style="font-size:15px;font-weight:600">Running Log</span><span class="pill">v3</span></div>
+            <div class="glass-bar"><button aria-pressed="true">Change…</button><button>•••</button></div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="flex:1;min-width:0;overflow:hidden"><dc-import name="RunningLogUI" hint-size="820px,640px"></dc-import></div>
+            <div style="width:400px;flex:none;border-left:1px solid var(--border);background:var(--surface-overlay);-webkit-backdrop-filter:var(--blur-strong);backdrop-filter:var(--blur-strong);display:flex;flex-direction:column;gap:16px;padding:16px 20px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><span style="display:flex;align-items:center;gap:8px"><span class="eyebrow">Change</span><dc-import name="CapRef" glyph="run" hue="30" label="Running Log" hint-size="120px,20px"></dc-import></span><button class="ghost sm icon-only">×</button></div>
+              <div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:20px;font-weight:650;letter-spacing:-.02em">Building v4</div><div class="small muted">With Claude Code · v3 keeps working</div></div>
+              <ol class="steps">
+                <li class="step done">Spec agreed<span class="meta">0:03</span></li>
+                <li class="step done">Writing code<span class="meta">1:40</span></li>
+                <li class="step live">Running tests<span class="meta">3 / 6</span></li>
+                <li class="step todo">Live<span class="meta"></span></li>
+              </ol>
+              <pre class="log" style="max-height:150px"><span class="t">10:41:02</span> edited src/index.ts
+<span class="t">10:41:30</span> edited ui/index.html
+<span class="t">10:41:52</span> list_runs pace <span class="ok">pass</span>
+<span class="t">10:41:53</span> sort fastest <span class="ok">pass</span>
+<span class="t">10:41:55</span> running 3 more…</pre>
+              <div style="flex:1"></div>
+              <div class="notice ok" style="align-items:center"><span class="grow" style="flex:1"><b>v4 is ready.</b> Reload to see it.</span><button class="sm primary">Reload</button><button class="sm ghost">Undo</button></div>
+              <div class="small faint" style="text-align:center">↑ P4: when the change goes live</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="P5" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">P5 · No UI: Operations + drawer</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="P5 Run drawer" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 24px;border-bottom:1px solid var(--border)">
+            <div class="glass-bar"><button>‹ Home</button></div>
+            <div style="flex:1;display:flex;justify-content:center;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="week" hue="150" size="28" hint-size="28px,28px"></dc-import><span style="font-size:15px;font-weight:600">Weekly Review</span><span class="pill">v2</span></div>
+            <div class="glass-bar"><button aria-pressed="true">Change…</button><button>•••</button></div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="flex:1;min-width:0;display:flex;gap:24px;padding:28px 32px">
+              <div style="width:220px;display:flex;flex-direction:column;gap:4px">
+                <div class="eyebrow" style="padding:0 12px 8px">Operations</div>
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:var(--surface-3)"><span class="mono" style="flex:1;font-size:14px">generate_review</span><span class="pill accent">write</span></div>
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--text-2)"><span class="mono" style="flex:1;font-size:14px">get_last</span><span class="pill">read</span></div>
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;color:var(--text-2)"><span class="mono" style="flex:1;font-size:14px">list_reviews</span><span class="pill">read</span></div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0">
+                <div class="card" style="padding:20px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><label class="field" style="margin:0"><span class="label">from</span><input type="date" value="2026-10-12"></label><label class="field" style="margin:0"><span class="label">to</span><input type="date" value="2026-10-18"></label></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="primary">Run</button></div></div>
+                <div class="card" style="padding:20px"><div style="display:flex;justify-content:space-between;margin-bottom:12px"><div class="eyebrow">Result</div><span class="pill ok with-dot">ok · 212ms</span></div><dl class="kv"><dt>runs</dt><dd>4 · 31.6 km</dd><dt>books</dt><dd>142 pages</dd><dt>summary</dt><dd>Steady week. Long run up 2 km.</dd></dl></div>
+              </div>
+            </div>
+            <div style="width:400px;flex:none;border-left:1px solid var(--border);background:var(--surface-overlay);-webkit-backdrop-filter:var(--blur-strong);backdrop-filter:var(--blur-strong);display:flex;flex-direction:column">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px"><span style="display:flex;align-items:center;gap:8px"><span class="eyebrow">Change</span><dc-import name="CapRef" glyph="week" hue="150" label="Weekly Review" hint-size="130px,20px"></dc-import></span><button class="ghost sm icon-only">×</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;padding:0 20px 20px">
+                <div style="font-size:24px;font-weight:650;letter-spacing:-.02em">What should change?</div>
+                <textarea placeholder="e.g. add coffee to the summary" style="min-height:72px"></textarea>
+                <div style="display:flex;justify-content:space-between;align-items:center"><button class="link" style="padding:0">Give it a proper screen</button><button class="primary">Send</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="G1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">G1 · New tools: one proposal card</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="G1 Proposal" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:55;--x:55%;--y:-20%;--w:560px"></i><i style="--h:250;--x:-10%;--y:50%;--w:480px"></i></div>
+          <div class="ascii-field"><pre ref="{{ asciiRef }}" style="right:-40px;top:60px"></pre></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="padding:20px 32px"><div class="glass-bar"><button>‹ Home</button></div></div>
+            <div style="flex:1;width:660px;margin:0 auto;display:flex;flex-direction:column;justify-content:flex-end;gap:14px;padding-bottom:40px">
+              <div class="thread"><div class="bubble me">Suggest some tools for my coffee habit</div></div>
+              <div class="card" style="border-radius:24px;padding:20px 22px;display:flex;flex-direction:column;gap:6px">
+                <div class="eyebrow" style="margin-bottom:6px">Proposal · 3 tools</div>
+                <ul class="list">
+                  <sc-for list="{{ ideas }}" as="d" hint-placeholder-count="3">
+                    <li style="align-items:flex-start;padding:12px 0">
+                      <input type="checkbox" checked="{{ d.on }}" style="margin-top:12px">
+                      <dc-import name="AppIcon" glyph="{{ d.glyph }}" hue="{{ d.hue }}" size="40" hint-size="40px,40px"></dc-import>
+                      <div class="grow" style="gap:6px"><span style="font-weight:600">{{ d.name }}</span><span class="sub">{{ d.purpose }}</span>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{ d.chips }}" as="c" hint-placeholder-count="3"><span class="pill {{ c.cls }}">{{ c.t }}</span></sc-for></div>
+                        <sc-if value="{{ d.open }}" hint-placeholder-val="{{ false }}">
+                          <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;padding:10px 12px;border-radius:12px;background:var(--surface-2)">
+                            <div class="small" style="display:flex;align-items:center;gap:8px"><span class="dot warn"></span>Builds on <dc-import name="CapRef" glyph="cup" hue="55" label="Coffee Log" size="20" hint-size="120px,20px"></dc-import>, so it's built after</div>
+                            <label class="check"><input type="checkbox" checked="{{ true }}"> Weekly summary · Sun 18:00</label>
+                            <label class="check"><input type="checkbox" checked="{{ true }}"> Widget: Brews this week (S, M)</label>
+                            <button class="link" style="align-self:flex-start;padding:0">Show spec</button>
+                          </div>
+                        </sc-if>
+                      </div>
+                      <span class="faint" style="margin-top:10px">{{ d.caret }}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px"><button>Keep talking</button><button class="primary lg">Build 2 tools</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">H · I</div><div style="font-size:22px;font-weight:650">Builds · connections</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="H1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">H1 · Activity › Builds (real milestones only)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="H1 Activity Builds" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:250;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="" inbox="3" hint-size="100%,76px"></dc-import>
+            <div style="width:760px;margin:0 auto;padding-top:8px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><h1 style="margin:0">Activity</h1><div class="segmented"><button>All</button><button aria-pressed="true">Builds</button><button>Calls</button><button>Access</button></div></div>
+              <div class="card" style="padding:6px 20px 10px">
+                <div class="eyebrow" style="padding:12px 0 2px">In progress</div>
+                <ul class="list">
+                  <li><dc-import name="AppIcon" glyph="read" hue="250" size="36" progress="0.6" hint-size="36px,36px"></dc-import><div class="grow"><span>Reading List · new</span><span class="sub" style="display:flex;gap:6px;align-items:center"><span class="pill ok">spec ✓</span><span class="pill ok">code ✓</span><span class="pill accent with-dot">tests 4/6</span><span class="pill">you</span></span></div><span class="mono faint small">2:14</span></li>
+                  <li><dc-import name="AppIcon" glyph="cal" hue="35" size="36" hint-size="36px,36px"></dc-import><div class="grow"><span>Brew Stats · new</span><span class="sub">Waiting for <dc-import name="CapRef" glyph="cup" hue="55" label="Coffee Log" size="20" hint-size="120px,20px"></dc-import></span></div><span class="pill warn">waiting</span></li>
+                </ul>
+                <div class="eyebrow" style="padding:16px 0 2px">Failed</div>
+                <ul class="list"><li><dc-import name="AppIcon" glyph="week" hue="150" size="36" badge="danger" hint-size="36px,36px"></dc-import><div class="grow"><span>Weekly Review · change</span><span class="sub">2 of 6 tests didn't pass</span></div><button class="sm">Retry</button></li></ul>
+                <div class="eyebrow" style="padding:16px 0 2px">Earlier</div>
+                <ul class="list">
+                  <li><dc-import name="AppIcon" glyph="heart" hue="350" size="36" hint-size="36px,36px"></dc-import><div class="grow"><span>Garmin Training · quick change</span><span class="sub">Model → strong tier · no builder</span></div><span class="pill ok">v4</span></li>
+                  <li><dc-import name="AppIcon" glyph="words" hue="200" size="36" hint-size="36px,36px"></dc-import><div class="grow"><span>Word List · widgets</span><span class="sub">Next word (M, L)</span></div><span class="pill ok">v7</span></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="H6" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">H6 · Finished build keeps its log (failed: open by default)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="H6 Build log" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:25;--x:20%;--y:10%;--w:620px"></i><i style="--h:250;--x:60%;--y:55%;--w:420px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="padding:20px 32px"><div class="glass-bar"><button>‹ Activity</button></div></div>
+            <div style="flex:1;display:flex;justify-content:center;padding-top:10px">
+              <div class="card" style="width:620px;border-radius:24px;padding:28px;display:flex;flex-direction:column;gap:18px;align-self:flex-start">
+                <div style="display:flex;align-items:center;gap:16px">
+                  <dc-import name="AppIcon" glyph="week" hue="150" size="56" badge="danger" hint-size="56px,56px"></dc-import>
+                  <div style="flex:1;display:flex;flex-direction:column;gap:2px"><div style="font-size:24px;font-weight:650;letter-spacing:-.02em">2 of 6 tests didn't pass</div><div class="small muted">Weekly Review · change · attempt 3 of 3 · 4:02</div></div>
+                </div>
+                <div class="notice danger">generate_review counted runs from the following week.</div>
+                <div style="display:flex;gap:8px"><button class="primary">Ask builder to fix</button><button>Retry</button></div>
+                <div style="display:flex;align-items:center;justify-content:space-between"><span class="eyebrow">Log</span><button class="link sm">Hide log</button></div>
+                <pre class="log" style="max-height:220px"><span class="t">09:12:01</span> spec agreed
+<span class="t">09:12:40</span> edited src/review.ts
+<span class="t">09:14:02</span> generate_review: one week <span class="ok">pass</span>
+<span class="t">09:14:03</span> generate_review: week boundary <span class="err">fail</span>
+<span class="t">        </span>  expected 4 runs, got 5 (2026-10-19 included)
+<span class="t">09:14:03</span> empty week <span class="ok">pass</span>
+<span class="t">09:14:04</span> books total <span class="err">fail</span>
+<span class="t">09:15:10</span> attempt 3 of 3 failed · v2 stays live</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="I1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">I1 · Accounts</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="I1 Accounts" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:260;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Accounts" inbox="3" hint-size="100%,76px"></dc-import>
+            <div style="width:720px;margin:0 auto;padding-top:8px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><h1 style="margin:0">Accounts</h1><button>Add a connection</button></div>
+              <div class="card" style="padding:4px 20px">
+                <ul class="list">
+                  <sc-for list="{{ accounts }}" as="a" hint-placeholder-count="4">
+                    <li class="link" style="min-height:64px">
+                      <dc-import name="AppIcon" glyph="plug" hue="{{ a.hue }}" size="40" progress="{{ a.progress }}" hint-size="40px,40px"></dc-import>
+                      <div class="grow"><span style="font-weight:600">{{ a.name }}</span><span class="sub" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="dot {{ a.dot }}"></span>{{ a.health }}<span class="faint">·</span>used by <sc-for list="{{ a.usedBy }}" as="u" hint-placeholder-count="2"><dc-import name="CapRef" glyph="{{ u.g }}" hue="{{ u.h }}" label="{{ u.n }}" size="18" hint-size="110px,18px"></dc-import></sc-for><span style="display:{{ a.noneD }}">nothing yet</span></span></div>
+                      <sc-if value="{{ a.hasAct }}" hint-placeholder-val="{{ false }}"><button class="sm primary">{{ a.act }}</button></sc-if>
+                    </li>
+                  </sc-for>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="I2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">I2 · Connection page</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="I2 Connection" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:260;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;padding:20px 32px"><div class="glass-bar"><button>‹ Accounts</button></div><div class="glass-bar"><button>Change…</button><button>•••</button></div></div>
+            <div style="width:900px;margin:0 auto;display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;align-items:center;gap:18px"><dc-import name="AppIcon" glyph="plug" hue="200" size="64" hint-size="64px,64px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:30px;font-weight:650;letter-spacing:-.025em">Garmin</div><div class="muted" style="display:flex;align-items:center;gap:6px"><span class="dot ok"></span>Connected · checked 5 min ago</div></div></div>
+              <div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;align-items:start">
+                <div class="card" style="padding:4px 20px">
+                  <div class="eyebrow" style="padding:14px 0 4px">Operations</div>
+                  <ul class="list">
+                    <li class="link"><div class="grow"><span class="mono" style="font-size:14px">list_activities</span><span class="sub">Activities in a date range</span></div><span class="pill">read</span></li>
+                    <li class="link"><div class="grow"><span class="mono" style="font-size:14px">get_sleep</span><span class="sub">Sleep for one night</span></div><span class="pill">read</span></li>
+                    <li class="link"><div class="grow"><span class="mono" style="font-size:14px">get_user</span><span class="sub">Who is signed in</span></div><span class="pill">read</span></li>
+                    <li><div class="grow"><span class="mono" style="font-size:14px">health</span><span class="sub">Checked every 15 min · ok</span></div><span class="pill ok">ok</span></li>
+                  </ul>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:16px">
+                  <div class="card" style="padding:14px 20px;display:flex;flex-direction:column;gap:10px"><div class="eyebrow">Used by</div><div style="display:flex;gap:8px;flex-wrap:wrap"><dc-import name="CapRef" chip="{{ true }}" glyph="heart" hue="350" label="Garmin Training" size="24" hint-size="150px,32px"></dc-import><dc-import name="CapRef" chip="{{ true }}" glyph="week" hue="150" label="Weekly Review" size="24" hint-size="140px,32px"></dc-import></div></div>
+                  <div class="card" style="padding:4px 20px">
+                    <div class="setting"><div class="grow"><span>Sign-in</span><span class="sub">you@example.com · 12 days ago</span></div><button class="sm">Sign in again</button></div>
+                    <div class="setting" style="flex-wrap:wrap"><div class="grow"><span>Site</span></div><input type="text" value="https://connect.garmin.com" style="width:100%"></div>
+                    <div style="display:flex;justify-content:flex-end;padding:10px 0 12px"><button class="primary sm">Save</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="I4" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">I4 · Sign-in sheet (stepped)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="I4 Sign in" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:260;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:440px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="plug" hue="200" size="44" hint-size="44px,44px"></dc-import><div style="display:flex;flex-direction:column"><div style="font-size:18px;font-weight:650">Sign in to Garmin</div><div class="small faint">Step 2 of 2</div></div></div>
+              <div style="display:flex;gap:6px"><span class="pill ok">1 · Account ✓</span><span class="pill accent">2 · Code</span></div>
+              <label class="field" style="margin:0"><span class="label">Code from your email</span><input type="text" value="48 21" class="code" style="font-size:22px;letter-spacing:.3em;text-align:center"></label>
+              <div class="small faint">Your password goes only to Garmin; Hewn keeps the token.</div>
+              <div class="actions" style="margin-top:4px"><button>Back</button><button class="primary">Sign in</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">O · J</div><div style="font-size:22px;font-weight:650">Who does what: agents, jobs and models</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="O1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">O1 · Settings › AI</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="O1 Settings AI" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Settings" hint-size="100%,76px"></dc-import>
+            <div style="width:900px;margin:0 auto;padding-top:8px;display:flex;gap:28px">
+              <div class="side-list" style="width:180px"><div class="eyebrow">Settings</div><button>General</button><button aria-pressed="true">AI</button><button>Remote access</button><button>Data</button><button>About</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0">
+                <div style="display:flex;align-items:center;justify-content:space-between"><h1 style="margin:0">AI</h1><button>Add…</button></div>
+                <div class="card" style="padding:4px 20px">
+                  <div class="setting"><div class="grow"><span style="font-weight:600">Asks the questions</span><span class="sub" style="display:flex;align-items:center;gap:6px"><span class="app-icon sm" style="--hue:30">CC</span>Claude Code on this Mac · your subscription</span></div><button class="sm">Change</button></div>
+                  <div class="setting"><div class="grow"><span style="font-weight:600">Builds tools</span><span class="sub" style="display:flex;align-items:center;gap:6px"><span class="app-icon sm" style="--hue:30">CC</span>Claude Code on this Mac · your subscription · 3 attempts</span></div><button class="sm">Change</button></div>
+                  <div class="setting"><div class="grow"><span style="font-weight:600">Thinks inside tools</span><span class="sub" style="display:flex;align-items:center;gap:6px"><span class="app-icon sm" style="--hue:30">A</span>Anthropic API · your key · $1.84 of $5 this month</span></div><button class="sm">Models ›</button></div>
+                </div>
+                <div class="small faint">Agents that use your tools are on <a href="#">Agents</a>.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="J1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">J1 · Settings › AI › Models (providers, spend, tiers)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="J1 Models" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Settings" hint-size="100%,76px"></dc-import>
+            <div style="width:900px;margin:0 auto;padding-top:8px;display:flex;gap:28px">
+              <div class="side-list" style="width:180px"><div class="eyebrow">Settings</div><button>General</button><button aria-pressed="true">AI</button><button>Remote access</button><button>Data</button><button>About</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:14px;min-width:0">
+                <div style="display:flex;align-items:baseline;gap:12px"><button class="link" style="padding:0">‹ AI</button><h1 style="margin:0">Models</h1></div>
+                <div class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between"><span class="eyebrow">This month</span><button class="link sm">Change cap</button></div>
+                  <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:24px;font-weight:650;letter-spacing:-.02em">$1.84</span><span class="muted">of $5</span></div>
+                  <div class="blocks" style="--cols:40"><sc-for list="{{ spend }}" as="b" hint-placeholder-count="40"><i class="{{ b }}"></i></sc-for></div>
+                </div>
+                <div class="card" style="padding:4px 20px">
+                  <div class="setting"><div class="grow"><span style="font-weight:600">Anthropic</span><span class="sub"><span class="dot ok"></span> In use · key works</span></div><span class="pill ok">in use</span></div>
+                  <div class="setting"><div class="grow"><span>OpenAI</span><span class="sub">Key saved</span></div><button class="sm">Use</button></div>
+                  <div class="setting"><div class="grow"><span>OpenRouter</span><span class="sub">No key</span></div><button class="sm">Add key</button></div>
+                </div>
+                <div class="card" style="padding:4px 20px">
+                  <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="4"><div class="setting" style="min-height:52px"><div style="width:90px;font-weight:600">{{ t.tier }}</div><div class="grow"><span>{{ t.model }}</span><span class="sub">{{ t.sub }}</span></div><button class="ghost sm">Change</button></div></sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="O5" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">O5 · Add… (from Agents or Settings › AI)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="O5 Add" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:300;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:24px;display:flex;flex-direction:column;gap:12px">
+              <h2 style="margin:0">Add</h2>
+              <ul class="list">
+                <li class="link" style="min-height:72px"><span class="app-icon md" style="--hue:30">↘</span><div class="grow"><span style="font-weight:600">An agent that uses your tools</span><span class="sub">Claude Code, Codex, claude.ai, ChatGPT, any MCP client</span></div></li>
+                <li class="link" style="min-height:72px"><span class="app-icon md" style="--hue:125">↗</span><div class="grow"><span style="font-weight:600">An agent that works for Hewn</span><span class="sub">Builds tools or asks the questions · runs on this Mac</span></div></li>
+                <li class="link" style="min-height:72px"><span class="app-icon md" style="--hue:200">·</span><div class="grow"><span style="font-weight:600">A model provider</span><span class="sub">Anthropic, OpenAI, OpenRouter · for tools that think</span></div></li>
+              </ul>
+              <div class="actions" style="margin-top:4px"><button>Close</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="O6" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">O6 · Connected, then offered jobs</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="O6 Offer jobs" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:300;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:480px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><span class="app-icon md" style="--hue:30">CC</span><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:18px;font-weight:650">Claude Code is connected</div><span class="pill accent" style="align-self:flex-start">uses your tools</span></div></div>
+              <div class="blocks" style="--cols:24"><sc-for list="{{ connectDone }}" as="b" hint-placeholder-count="24"><i class="{{ b }}"></i></sc-for></div>
+              <div class="eyebrow">It can also work for Hewn</div>
+              <div>
+                <label class="setting" style="min-height:52px;cursor:pointer"><div class="grow"><span>Build tools</span><span class="sub">Today: Codex</span></div><input type="checkbox" class="switch"></label>
+                <label class="setting" style="min-height:52px;cursor:pointer"><div class="grow"><span>Ask the questions</span><span class="sub">Today: nobody</span></div><input type="checkbox" class="switch"></label>
+              </div>
+              <div class="actions" style="margin-top:0"><button class="primary">Done</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="O4" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">O4 · J2 · A model is a grant (key inline)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="O4 Model grant" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:200;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:480px;padding:28px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="words" hue="200" size="48" hint-size="48px,48px"></dc-import><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Word List wants to</div><div class="small faint">Requested by Claude Code</div></div></div>
+              <ul class="list">
+                <li><span class="pill accent">model</span><div class="grow"><span>Use a model</span><span class="sub">Asked for Standard · about $0.002 a call</span></div><select style="width:150px"><option>Standard tier</option><option>Light tier</option><option>Strong tier</option><option>Max tier</option></select></li>
+                <li><span class="pill">host</span><div class="grow"><span>Reach api.dictionaryapi.dev</span></div></li>
+              </ul>
+              <div style="display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:14px;background:var(--surface-2)">
+                <div class="small">Tools call a model directly with an API key, not through an agent, so your Claude subscription can't pay for this.</div>
+                <div style="display:flex;gap:8px"><select style="width:150px"><option>Anthropic</option></select><input type="password" placeholder="Paste API key" style="flex:1"></div>
+              </div>
+              <div class="actions" style="margin-top:0"><button>Not now</button><button class="primary" disabled="{{ true }}">Authorize</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">N · K · L</div><div style="font-size:22px;font-weight:650">Info, schedules, agents</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="N4" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">N4 · Info, settled</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="N4 Info" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:350;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:30;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;padding:20px 32px"><div class="glass-bar"><button>‹ Home</button></div><div class="glass-bar"><button>•••</button></div></div>
+            <div style="width:760px;margin:0 auto;display:flex;flex-direction:column;gap:20px">
+              <div style="display:flex;align-items:center;gap:20px"><dc-import name="AppIcon" glyph="heart" hue="350" size="72" hint-size="72px,72px"></dc-import><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:32px;font-weight:650;letter-spacing:-.025em;line-height:1.1">Garmin Training</div><div class="muted" style="display:flex;align-items:center;gap:6px">Syncs watch runs into <dc-import name="CapRef" glyph="run" hue="30" label="Running Log" size="20" hint-size="120px,20px"></dc-import></div></div><button class="lg">Open</button></div>
+              <div style="display:flex;gap:6px"><span class="pill warn with-dot">needs you</span><span class="pill">v4</span><span class="pill">built by Claude Code</span><span class="pill">2 days ago</span></div>
+              <form class="card composer-card"><span class="eyebrow accent">Change it</span><input type="text" class="bare" placeholder="What should Garmin Training also do?"><button class="primary lg" type="button">Ask</button></form>
+              <div class="card" style="padding:4px 20px">
+                <ul class="list">
+                  <sc-for list="{{ infoRows }}" as="r" hint-placeholder-count="6"><li class="link" style="min-height:52px"><span style="width:110px;font-weight:600">{{ r.k }}</span><div class="grow" style="flex-direction:row;align-items:center;gap:8px"><span class="dot {{ r.dot }}" style="display:{{ r.dotD }}"></span><span class="muted">{{ r.v }}</span></div></li></sc-for>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="K2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">K1 → K2 · Schedules row → schedule sheet</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="K2 Schedule" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:350;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:30;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:480px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="heart" hue="350" size="44" hint-size="44px,44px"></dc-import><div style="font-size:18px;font-weight:650">Schedules · Garmin Training</div></div>
+              <ul class="list">
+                <li><div class="grow"><span class="mono">sync_runs</span><span class="sub">Daily 07:00 · next in 3 h</span></div><input type="checkbox" class="switch" checked="{{ true }}"></li>
+                <li><div class="grow"><span class="mono">weekly_digest</span><span class="sub" style="color:var(--danger)">Paused after 3 failures</span></div><button class="sm">Resume</button></li>
+              </ul>
+              <div style="display:flex;flex-direction:column;gap:12px;padding:16px;border-radius:14px;background:var(--surface-2)">
+                <div class="eyebrow">New schedule</div>
+                <select><option>sync_runs</option></select>
+                <div class="segmented" style="align-self:flex-start"><button>Hourly</button><button aria-pressed="true">Daily</button><button>Weekly</button><button>Custom</button></div>
+                <div style="display:flex;gap:8px;align-items:center"><input type="text" value="07:00" style="width:100px"><span class="small faint">Europe/Stockholm · your time zone</span></div>
+              </div>
+              <div class="actions" style="margin-top:0"><button>Cancel</button><button class="primary">Add schedule</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="L1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">L1 · Agents (one identity, several roles)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="L1 Agents" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:300;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Agents" inbox="3" hint-size="100%,76px"></dc-import>
+            <div style="width:720px;margin:0 auto;padding-top:8px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><h1 style="margin:0">Agents</h1><button class="primary">Add…</button></div>
+              <div class="card" style="padding:4px 20px">
+                <ul class="list">
+                  <sc-for list="{{ agents }}" as="a" hint-placeholder-count="3">
+                    <li class="link" style="min-height:72px;align-items:center">
+                      <span class="app-icon md" style="--hue:{{ a.hue }}">{{ a.mono }}</span>
+                      <div class="grow" style="gap:6px"><span style="display:flex;align-items:center;gap:8px;font-weight:600"><span class="dot {{ a.dot }}"></span>{{ a.name }}</span><span class="sub">{{ a.sub }}</span>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap"><sc-for list="{{ a.roles }}" as="r" hint-placeholder-count="2"><span class="pill {{ r.cls }}">{{ r.t }}</span></sc-for></div>
+                      </div>
+                    </li>
+                  </sc-for>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="L3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">L3 · An agent is waiting (banner on any page → Request)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="L3 Confirmation" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:30;--x:70%;--y:60%;--w:480px"></i></div>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column"><dc-import name="TopBar" active="Home" inbox="4" hint-size="100%,76px"></dc-import><div style="flex:1;display:flex;justify-content:center;padding-top:36px"><dc-import name="HomeBoard" blur="{{ true }}" hint-size="744px,520px"></dc-import></div></div>
+          <div class="toast" style="position:absolute;top:84px;left:50%;transform:translateX(-50%);z-index:4;border-color:var(--danger)"><span class="dot danger"></span>Codex is waiting for you<button class="sm">Review</button></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:480px;padding:28px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><span class="app-icon md" style="--hue:200">CX</span><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Codex wants to delete 3 runs</div><div class="small faint">It's waiting · 0:42</div></div></div>
+              <ul class="list"><li><span class="pill danger">destructive</span><div class="grow"><span style="display:flex;align-items:center;gap:6px">delete_runs on <dc-import name="CapRef" glyph="run" hue="30" label="Running Log" size="20" hint-size="120px,20px"></dc-import></span><span class="sub mono">ids: 41, 42, 43</span></div></li></ul>
+              <div class="quote small">"Remove the duplicate runs from Tuesday"</div>
+              <div class="actions" style="margin-top:0"><button>Stop</button><button class="danger solid">Allow once</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">M · N</div><div style="font-size:22px;font-weight:650">Phone, remote access, data</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="M2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">M2 · Public sign-in</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="M2 Sign in" style="width:390px;height:800px;border-radius:44px;overflow:hidden;position:relative;border:8px solid #26272b">
+          <div class="wallpaper dim"><i style="--h:125;--x:-20%;--y:-10%;--w:420px"></i></div>
+          <div class="ascii-field"><pre ref="{{ asciiRef }}" style="left:-60px;top:80px;font-size:9px;line-height:9px"></pre></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column;justify-content:flex-end;gap:16px;padding:0 24px 48px">
+            <div style="display:flex;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="hewn" hue="125" size="36" hint-size="36px,36px"></dc-import><span style="font-size:22px;font-weight:650;letter-spacing:-.02em">Hewn</span></div>
+            <button class="primary lg" style="width:100%">Sign in with a passkey</button>
+            <div class="small faint" style="text-align:center">New device? On the server run <span class="mono">hewn open --print</span> and scan the code.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="M3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">M3 · Add a passkey</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="M3 Passkey" style="width:390px;height:800px;border-radius:44px;overflow:hidden;position:relative;border:8px solid #26272b">
+          <div class="wallpaper dim"><i style="--h:125;--x:-20%;--y:-10%;--w:420px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column;justify-content:flex-end;gap:16px;padding:0 24px 48px">
+            <div style="font-size:28px;font-weight:650;letter-spacing:-.025em">Add this iPhone</div>
+            <div class="muted">Next time it signs in with Face ID.</div>
+            <label class="field" style="margin:0"><span class="label">Name</span><input type="text" value="iPhone"></label>
+            <button class="primary lg" style="width:100%">Add passkey</button>
+            <button class="ghost" style="width:100%">Not now</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="M4" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">M4 · Home on a phone</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="M4 Phone Home" style="width:390px;height:800px;border-radius:44px;overflow:hidden;position:relative;border:8px solid #26272b">
+          <div class="wallpaper"><i style="--h:250;--x:-30%;--y:-10%;--w:360px"></i><i style="--h:350;--x:50%;--y:60%;--w:320px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column;gap:20px;padding:52px 18px 18px">
+            <div style="display:flex;align-items:center;justify-content:space-between"><dc-import name="AppIcon" glyph="hewn" hue="125" size="28" hint-size="28px,28px"></dc-import><div style="display:flex;gap:8px;align-items:center"><button class="sm" style="border-radius:999px;background:var(--warn-soft);border-color:transparent;gap:6px"><span class="dot warn"></span>3</button><div class="glass-bar"><button>☰</button></div></div></div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);row-gap:18px;justify-items:center">
+              <sc-for list="{{ phoneIcons }}" as="p" hint-placeholder-count="4"><div style="display:flex;flex-direction:column;align-items:center;gap:6px"><dc-import name="AppIcon" glyph="{{ p.g }}" hue="{{ p.h }}" size="60" badge="{{ p.b }}" hint-size="60px,60px"></dc-import><span style="font-size:11px">{{ p.n }}</span></div></sc-for>
+            </div>
+            <div class="jw jw-medium jw-marked" style="height:150px"><div class="jw-title">Next word</div><div class="jw-body"><div class="jw-value jw-value-sm">lucid</div><div class="jw-caption">adj. · easy to understand; clear</div></div><div class="jw-buttons"><button class="jw-button">Again</button><button class="jw-button">Good</button><button class="jw-button">Easy</button></div><span style="position:absolute;top:10px;right:10px;display:flex;line-height:0"><dc-import name="AppIcon" glyph="words" hue="200" size="20" hint-size="20px,20px" style="display:flex"></dc-import></span></div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);row-gap:18px;justify-items:center">
+              <sc-for list="{{ phoneIcons2 }}" as="p" hint-placeholder-count="4"><div style="display:flex;flex-direction:column;align-items:center;gap:6px"><dc-import name="AppIcon" glyph="{{ p.g }}" hue="{{ p.h }}" size="60" badge="{{ p.b }}" hint-size="60px,60px"></dc-import><span style="font-size:11px">{{ p.n }}</span></div></sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="N2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">M1 · N2 · Settings › Remote access / Data</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="N2 Data" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:200;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Settings" hint-size="100%,76px"></dc-import>
+            <div style="width:900px;margin:0 auto;padding-top:8px;display:flex;gap:28px">
+              <div class="side-list" style="width:180px"><div class="eyebrow">Settings</div><button>General</button><button>AI</button><button>Remote access</button><button aria-pressed="true">Data</button><button>About</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0">
+                <h1 style="margin:0">Data</h1>
+                <div class="notice">Backups are on the same disk as your data. If the disk fails, both are lost.</div>
+                <div class="card" style="padding:4px 20px">
+                  <div class="setting"><div class="grow"><span>Backups</span><span class="sub">Last 3 h ago · 412 KB · nightly, 7 daily and 4 weekly kept</span></div><button class="sm">Back up now</button></div>
+                  <div class="setting"><div class="grow"><span>Folder</span><span class="sub mono">~/hewn/backups</span></div><button class="sm">Change</button></div>
+                  <div class="setting"><div class="grow"><span>Keep call logs</span><span class="sub">Builds, grants and access changes are always kept</span></div><select style="width:150px"><option>2 weeks</option></select></div>
+                </div>
+                <div class="card" style="padding:4px 20px">
+                  <div class="eyebrow" style="padding:14px 0 4px">Deleted tools</div>
+                  <div class="setting"><dc-import name="AppIcon" glyph="one" hue="80" size="32" hint-size="32px,32px"></dc-import><div class="grow"><span>UI Counter</span><span class="sub">Deleted 3 days ago · data kept</span></div><button class="ghost sm danger">Delete forever…</button><button class="sm">Restore</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="N5" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">N5 · Settings › About (version, upgrade)</div>
+        <div data-theme="{{ theme }}" data-wallpaper="{{ wallpaper }}" data-screen-label="N5 About" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Settings" inbox="3" hint-size="100%,76px"></dc-import>
+            <div style="width:900px;margin:0 auto;padding-top:8px;display:flex;gap:28px">
+              <div class="side-list" style="width:180px"><div class="eyebrow">Settings</div><button>General</button><button>AI</button><button>Remote access</button><button>Data</button><button aria-pressed="true">About</button></div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:16px;min-width:0">
+                <h1 style="margin:0">About</h1>
+                <div class="card" style="padding:20px;display:flex;align-items:center;gap:18px">
+                  <dc-import name="AppIcon" glyph="hewn" hue="125" size="56" hint-size="56px,56px" style="display:flex"></dc-import>
+                  <div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:20px;font-weight:650;letter-spacing:-.01em">Hewn 0.3.3</span><span class="small muted">Data format 4 · ABI 2.3 · on this Mac</span></div>
+                  <span class="pill ok with-dot">up to date</span>
+                </div>
+                <div class="card" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-weight:600">0.3.4 is out</span><a class="small" href="#">What's new ›</a></div>
+                  <div class="small muted">Upgrade from a terminal. Backups run first; your tools and data stay.</div>
+                  <div style="display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;border-radius:10px;background:var(--log-bg);color:var(--log-text)"><span class="mono" style="flex:1;font-size:13px">hewn upgrade</span><button class="sm">Copy</button></div>
+                </div>
+                <div class="card" style="padding:4px 20px">
+                  <div class="setting"><div class="grow"><span>Keyboard shortcuts</span></div><button class="sm">Show</button></div>
+                  <div class="setting"><div class="grow"><span>Docs</span><span class="sub">hewn.tools/docs</span></div><a class="btn sm" href="#">Open ↗</a></div>
+                  <div class="setting"><div class="grow"><span>Licence</span><span class="sub">AGPL-3.0-or-later · spec and UI kit Apache-2.0</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark'|'light'&quot;},&quot;wallpaper&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dim&quot;,&quot;off&quot;],&quot;default&quot;:&quot;dim&quot;,&quot;tsType&quot;:&quot;'dim'|'off'&quot;}}">
+class Component extends DCLogic {
+  els = new Set();
+  asciiRef = el => { if (el) this.els.add(el); };
+  componentDidMount() {
+    const start = () => {
+      if (!window.hewnAscii) return (this.wait = setTimeout(start, 50));
+      const src = document.createElement('pre');
+      this.stop = window.hewnAscii(src, { cols: 64, rows: 40 });
+      const copy = () => { const t = src.textContent; this.els.forEach(el => { if (el.isConnected) el.textContent = t; }); this.raf = requestAnimationFrame(copy); };
+      copy();
+    };
+    start();
+  }
+  componentWillUnmount() { clearTimeout(this.wait); cancelAnimationFrame(this.raf); this.stop && this.stop(); }
+  renderVals() {
+    const chip = (t, cls = '') => ({ t, cls });
+    return {
+      theme: this.props.theme ?? 'dark', wallpaper: this.props.wallpaper ?? 'dim', asciiRef: this.asciiRef,
+      needs: [
+        { glyph: 'heart', hue: 350, dot: 'warn', title: 'Garmin Training', sub: 'wants to write to Running Log', act: 'Review' },
+        { glyph: 'week', hue: 150, dot: 'danger', title: 'Weekly Review', sub: 'Build failed · 2 of 6 tests', act: 'Show' },
+        { glyph: 'plug', hue: 260, dot: 'warn', title: 'Codex on MacBook', sub: 'wants to connect', act: 'Review' },
+      ],
+      accounts: [
+        { name: 'Garmin', hue: 200, dot: 'ok', health: 'connected', usedBy: [{ g: 'heart', h: 350, n: 'Garmin Training' }, { g: 'week', h: 150, n: 'Weekly Review' }], noneD: 'none', hasAct: false, act: '', progress: null },
+        { name: 'Todoist', hue: 10, dot: 'danger', health: 'key expired', usedBy: [{ g: 'words', h: 200, n: 'Word List' }], noneD: 'none', hasAct: true, act: 'Sign in', progress: null },
+        { name: 'Ghost', hue: 290, dot: 'ok', health: 'connected', usedBy: [{ g: 'read', h: 320, n: 'Brimside Seeds' }], noneD: 'none', hasAct: false, act: '', progress: null },
+        { name: 'Tradera', hue: 260, dot: 'live', health: 'building · writing code', usedBy: [], noneD: 'inline', hasAct: false, act: '', progress: 0 },
+      ],
+      spend: Array.from({ length: 40 }, (_, i) => i < 15 ? 'on' : ''),
+      connectDone: Array.from({ length: 24 }, () => 'on'),
+      tiers: [['Light', 'Claude Haiku', '$1 / $5 per M · used by 2'], ['Standard', 'Claude Sonnet', '$3 / $15 per M · used by 4'], ['Strong', 'Claude Opus', '$15 / $75 per M · used by 1'], ['Max', 'Not set', '']].map(([tier, model, sub]) => ({ tier, model, sub })),
+      infoRows: [['Operations', '3 · sync_runs, get_status, list_devices', ''], ['Allowed to', '3 · 1 pending', 'warn'], ['Model', 'Strong tier · $0.42 this month', ''], ['Schedules', 'Daily 07:00 · 1 paused', 'danger'], ['Widgets', '2 · 1 on Home', ''], ['Versions', 'v4 · 2 days ago', '']].map(([k, v, d]) => ({ k, v, dot: d, dotD: d ? 'inline-block' : 'none' })),
+      agents: [
+        { name: 'Claude Code', mono: 'CC', hue: 30, dot: 'live', sub: 'On this Mac · see, use, make · 2 min ago', roles: [{ t: 'uses your tools', cls: 'accent' }, { t: 'builds tools', cls: '' }, { t: 'asks the questions', cls: '' }] },
+        { name: 'claude.ai', mono: 'AI', hue: 160, dot: '', sub: 'Through hewn.example.com · see, use · yesterday', roles: [{ t: 'uses your tools', cls: 'accent' }] },
+        { name: 'Codex 2', mono: 'CX', hue: 200, dot: '', sub: 'MacBook · see, use · 3 days ago', roles: [{ t: 'uses your tools', cls: 'accent' }] },
+      ],
+      phoneIcons: [['run', 30, 'Running', ''], ['read', 250, 'Reading', 'warn'], ['heart', 350, 'Garmin', ''], ['week', 150, 'Weekly', 'danger']].map(([g, h, n, b]) => ({ g, h, n, b })),
+      phoneIcons2: [['cup', 55, 'Coffee', ''], ['words', 200, 'Words', ''], ['check', 160, 'Todo', ''], ['plus', 260, 'New', '']].map(([g, h, n, b]) => ({ g, h, n, b })),
+      ideas: [
+        { on: true, glyph: 'cup', hue: 55, name: 'Coffee Log', purpose: 'Brews, beans and grind, with how each tasted', chips: [chip('3 operations'), chip('1 widget', 'accent')], open: false, caret: '▸' },
+        { on: true, glyph: 'cal', hue: 35, name: 'Brew Stats', purpose: 'Trends from your brews: what works, what doesn\'t', chips: [chip('builds on Coffee Log', 'warn'), chip('1 schedule', 'accent'), chip('standard model')], open: true, caret: '▾' },
+        { on: false, glyph: 'plug', hue: 260, name: 'Bean Shop', purpose: 'Watch a roaster for new beans', chips: [chip('needs a new connection', 'warn')], open: false, caret: '▸' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

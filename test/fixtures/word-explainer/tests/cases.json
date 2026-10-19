@@ -1,0 +1,57 @@
+[
+  {
+    "name": "explains with a fake reply",
+    "operation": "explain",
+    "input": {
+      "word": "gruntled"
+    },
+    "model": [
+      {
+        "json": {
+          "explanation": "Pleased."
+        }
+      }
+    ],
+    "expect": {
+      "explanation": "Pleased.",
+      "model": "test/fake"
+    }
+  },
+  {
+    "name": "a model error surfaces",
+    "operation": "explain",
+    "input": {
+      "word": "x"
+    },
+    "model": [
+      {
+        "error": "over budget"
+      }
+    ],
+    "expectError": true
+  },
+  {
+    "name": "describes an image",
+    "operation": "describe",
+    "input": {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "mediaType": "image/png"
+    },
+    "model": [
+      {
+        "text": "A dot."
+      }
+    ],
+    "expect": {
+      "text": "A dot."
+    }
+  },
+  {
+    "name": "has a model",
+    "operation": "probe",
+    "input": {},
+    "expect": {
+      "hasModel": true
+    }
+  }
+]
