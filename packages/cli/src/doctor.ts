@@ -51,7 +51,7 @@ export interface DoctorDeps {
   /** The running supervisor's status (hewn serve), if any. */
   control?: () => Promise<{ restarts: number; keySource: KeySource; sandbox: boolean } | undefined>;
   /** The owner's builder and intake settings (from the running Hewn, else platform.json). */
-  settings?: () => Promise<{ builder: string; intake: string }>;
+  settings?: () => Promise<{ builder: string; intake: string; jobModels?: { builder?: Record<string, { model?: string; effort?: string }>; intake?: Record<string, { model?: string; effort?: string }> } }>;
   service?: () => { installed: boolean; running: boolean; busLost?: boolean };
   hasWorkerd?: () => boolean;
   /** Can this install build the workerd host? The first error, or undefined. */
@@ -134,15 +134,25 @@ export async function runDoctor(d: DoctorDeps): Promise<Check[]> {
     add({ name: "Secrets", state: "warn", detail: `${lost.length} can't be read with this home's key (restored from another machine or home?): ${lost.map((s) => `${s.capabilityId} ${s.name}`).join(", ")}`, fix: "set them again (open each tool), or start Hewn with the old key: see docs/data.md" });
   }
 
-  // Builder and intake
+  // Who builds tools: one line when one agent does both halves (talking it through, building), else one each.
   const cfg = await (d.settings ?? (async () => readConfig(d.home)))();
   const loggedIn = d.loggedIn ?? toolLoggedIn;
-  if (!which(cfg.builder)) add({ name: "Builder", state: "fail", detail: `${cfg.builder} isn't on PATH`, fix: `install ${cfg.builder}, or pick another builder in Settings` });
+  const model = (job: "builder" | "intake", agent: string) => {
+    const m = cfg.jobModels?.[job]?.[agent];
+    return m?.model || m?.effort ? ` · ${[m.model, m.effort && `${m.effort} effort`].filter(Boolean).join(", ")}` : "";
+  };
+  const jobLine = (name: string, job: "builder" | "intake", agent: string): Check => {
+    if (agent === "remote") return { name, state: "ok", detail: `the host's builder (HEWN_BUILD_URL)${model(job, agent)}` };
+    if (!which(agent)) return { name, state: "fail", detail: `${agent} isn't on PATH`, fix: `install ${agent}, or pick another in Settings › AI` };
+    const li = loggedIn(agent);
+    if (li === false) return { name, state: "fail", detail: `${agent} isn't logged in`, fix: `run ${agent} once and log in` };
+    return { name, state: "ok", detail: `${agent} found${li ? ", logged in" : ""}${model(job, agent)}` };
+  };
+  if (cfg.builder === cfg.intake) add(jobLine("Builds tools", "builder", cfg.builder));
   else {
-    const li = loggedIn(cfg.builder);
-    add(li === false ? { name: "Builder", state: "fail", detail: `${cfg.builder} isn't logged in`, fix: `run ${cfg.builder} once and log in` } : { name: "Builder", state: "ok", detail: `${cfg.builder} found${li ? ", logged in" : ""}` });
+    add(jobLine("Talks it through", "intake", cfg.intake));
+    add(jobLine("Builds", "builder", cfg.builder));
   }
-  add(which(cfg.intake) ? { name: "Intake", state: "ok", detail: `${cfg.intake} found` } : { name: "Intake", state: "fail", detail: `${cfg.intake} isn't on PATH`, fix: `install ${cfg.intake}, or pick another in Settings` });
 
   // Visual check
   const browser = (d.browser ?? findBrowser)();

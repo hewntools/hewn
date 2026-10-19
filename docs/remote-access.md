@@ -16,7 +16,7 @@ What the server needs:
 
 Install Hewn on the server with the [quickstart](quickstart.md) (`hewn service install` keeps it running after you log out and across reboots).
 
-The [builder and the intake](concepts.md#hewns-three-jobs) run Claude Code or Codex **on the machine Hewn runs on**, so the server needs one of them installed and signed in (a subscription, an API key, or a cloud provider), as the same user that runs Hewn. Over SSH:
+The agent that [builds your tools](concepts.md#hewns-two-jobs) runs Claude Code or Codex **on the machine Hewn runs on**, so the server needs one of them installed and signed in (a subscription, an API key, or a cloud provider), as the same user that runs Hewn. Over SSH:
 
 ```sh
 npm install -g @anthropic-ai/claude-code && claude   # follow the sign-in link on any device

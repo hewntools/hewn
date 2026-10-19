@@ -13,9 +13,13 @@ import { DATA_FORMAT, VERSION } from "@hewntools/cli/supervisor/format.ts";
 import { harnessStatuses } from "@hewntools/cli/setup/harnesses.ts";
 import { sourceAsset } from "@hewntools/cli/assets.ts";
 import type { SetupHooks } from "@hewntools/cli/setup/hooks.ts";
-import type { SurfaceHost } from "@hewntools/host-workerd/surface/host.ts";
+import type { ModelCatalog, SurfaceHost } from "@hewntools/host-workerd/surface/host.ts";
+import { claudeCatalog } from "@hewntools/cli/builders/models.ts";
 
-export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: string) => void; intake?: Intake; setup?: SetupHooks }): SurfaceHost {
+/** Model lists without asking a CLI: Claude Code's families, Default for the rest (tests pass their own). */
+const offlineCatalog = async (agent: string): Promise<ModelCatalog> => (agent === "claude" ? claudeCatalog() : { agent, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }], other: true });
+
+export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: string) => void; intake?: Intake; setup?: SetupHooks; models?: (agent: string) => Promise<ModelCatalog> }): SurfaceHost {
   const log = opts.log ?? ((l: string) => console.error(`[${new Date().toISOString()}] ${l}`));
   const setup = opts.setup;
   return {
@@ -33,6 +37,7 @@ export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: s
       appendFileSync(join(dir, `${new Date().toISOString().slice(0, 10)}.log`), JSON.stringify(entry) + "\n");
     },
     tools: async () => toolStatus(),
+    modelCatalog: opts.models ?? offlineCatalog,
     status: async () => {
       const { dir } = backupLocation(home, readConfig(home).backupDir);
       return { version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(dir)[0]?.at ?? null, backupDir: dir };

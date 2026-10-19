@@ -312,6 +312,7 @@ fieldset.job legend .sub { color: var(--text-2); }
 .setting-with-extra .attempts { justify-content: flex-end; padding: 0 0 10px; }
 .setting-with-extra .setting { border-top: 0; }
 .setting-with-extra { border-top: 1px solid var(--border); }
+.setting-with-extra:first-child { border-top: 0; }
 
 /* Sheets */
 .tier-select, .provider-select { width: 150px; flex: none; }
@@ -384,3 +385,16 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .stop-btn { min-width: 44px; justify-content: center; } .stop-square { display: block; width: 12px; height: 12px; border-radius: 2px; background: currentColor; }
 .title-ref { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; } .title-ref .cap-ref { font-weight: inherit; }
 .ref-end { display: inline-flex; align-items: center; }
+
+/* The intake's +: model and effort for this request; it shows the choice once one is made. */
+.plus-btn { min-width: 44px; justify-content: center; font-size: 18px; white-space: nowrap; }
+.plus-btn.set { min-width: 0; font-size: var(--fs-sm); color: var(--text); }
+.composer .plus-btn:not(.lg) { min-height: 32px; }
+
+/* Settings › AI › Advanced: the two halves of building, each with its own agent and model. */
+.advanced > summary { cursor: pointer; padding: 12px 0; list-style-position: inside; }
+.advanced[open] > summary { padding-bottom: 4px; }
+.advanced > .small { padding-bottom: var(--s2); }
+
+/* About's upgrade card: the new version's notes from the changelog. */
+.release-notes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }

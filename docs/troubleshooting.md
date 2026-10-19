@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Start with `hewn doctor`. It checks Hewn, the service, the install, the sandbox, the secrets key, the builder and intake, the browser for visual checks, your agents, approvals waiting, the tunnel and backups. Each problem comes with the fix.
+Start with `hewn doctor`. It checks Hewn, the service, the install, the sandbox, the secrets key, the agent that builds your tools, the browser for visual checks, your agents, approvals waiting, the tunnel and backups. Each problem comes with the fix.
 
 For example, with Claude Code missing from `PATH` (trimmed):
 
@@ -9,12 +9,10 @@ For example, with Claude Code missing from `PATH` (trimmed):
 ✔ Service       starts at login, restarts on crash
 ✔ Install       Hewn 0.4.0
 …
-✖ Builder       claude isn't on PATH
-                → install claude, or pick another builder in Settings
-✖ Intake        claude isn't on PATH
-                → install claude, or pick another in Settings
+✖ Builds tools  claude isn't on PATH
+                → install claude, or pick another in Settings › AI
 …
-2 problems.
+1 problem.
 ```
 
 The log is `~/.hewn/logs/hewn.log` (`<home>/logs/hewn.log` if you set `HEWN_HOME`). `hewn logs <tool>` shows one tool's calls.
@@ -93,6 +91,12 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 
 **A build fails**
 The build says why (the failing test, the invalid manifest, the error on its screen), with its log, and offers **Ask builder to fix**. When the builder itself is unavailable (signed out, out of usage), Hewn stops instead of retrying.
+
+**"… isn't available any more; builds use the default"** (Inbox)
+The model you pinned for building is gone (retired, or not on your account), so builds run on the agent's default model. Pick another in Settings › AI (**Builds tools › Model…**), or a family such as Fable, which follows the newest.
+
+**An agent's build fails with "the owner doesn't let agents ask for …"**
+The agent asked for a model you haven't allowed. Tick it under **Agents may ask for** in Settings › AI, or let the agent leave the model out (your choice is used then).
 
 **"Visual check: no Chromium-based browser"**
 Built UIs aren't rendered before promotion. Install one: `npx playwright install chromium-headless-shell` (on Linux and WSL, `npx playwright install --with-deps chromium-headless-shell`).

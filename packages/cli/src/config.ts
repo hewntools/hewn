@@ -2,18 +2,18 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { ownerPrefProblems } from "@hewntools/host-workerd/surface/host.ts";
+import { type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import type { Home } from "./home.ts";
 
 /** User-owned platform settings. Agents have no API to change them. */
 export interface PlatformConfig {
-  /** Who builds candidates: a platform-assigned builder, or the requesting agent itself. */
-  builder: "codex" | "claude";
+  /** Who builds candidates: Claude Code or Codex on this machine, or "remote" (the host's, HEWN_BUILD_URL). */
+  builder: string;
   maxBuildAttempts: number;
   /** Confine capability code (Seatbelt + egress proxy). Turn off only to debug. */
   sandbox: boolean;
   /** Turns rough intent from non-agent clients (the web) into structured create/modify requests. */
-  intake: "claude" | "codex";
+  intake: string;
   /** Where nightly backups go. Unset: backups/ next to the platform home (data/). */
   backupDir?: string;
   /** The owner finished (or skipped) the web client's first run. */
@@ -29,6 +29,10 @@ export interface PlatformConfig {
   timeZone?: string;
   /** Hewn's jobs the owner has picked an agent for ("builder", "intake"). */
   jobsChosen?: string[];
+  /** Model and effort per job, remembered per agent (see Settings in surface/host.ts). */
+  jobModels?: { builder?: Record<string, JobModel>; intake?: Record<string, JobModel> };
+  /** Model names agents may ask builds to use, per builder agent. */
+  agentModels?: Record<string, string[]>;
 }
 
 export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14 };
@@ -42,7 +46,7 @@ export function readConfig(home: Home): PlatformConfig {
   const p = path(home);
   if (!existsSync(p)) return { ...DEFAULT_CONFIG };
   // Unknown keys (e.g. the retired "discovery") are ignored.
-  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen } = { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(p, "utf8")) };
+  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels } = { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(p, "utf8")) };
   return {
     builder,
     maxBuildAttempts,
@@ -54,6 +58,8 @@ export function readConfig(home: Home): PlatformConfig {
     ...(typeof publicListen === "string" && IPV4.test(publicListen) ? { publicListen } : {}),
     ...(typeof timeZone === "string" && timeZone && !ownerPrefProblems({ timeZone }).length ? { timeZone } : {}),
     ...(Array.isArray(jobsChosen) && !ownerPrefProblems({ jobsChosen }).length ? { jobsChosen } : {}),
+    ...(jobModels !== undefined && !modelPrefProblems({ jobModels }).length ? { jobModels } : {}),
+    ...(agentModels !== undefined && !modelPrefProblems({ agentModels }).length ? { agentModels } : {}),
   };
 }
 
@@ -84,13 +90,7 @@ export function writeConfig(home: Home, change: Partial<Omit<PlatformConfig, "ba
       }
     }
   }
-  if (!["codex", "claude"].includes(next.builder)) bad.push("builder must be codex or claude");
-  if (next.firstRunDone !== undefined && typeof next.firstRunDone !== "boolean") bad.push("firstRunDone must be true or false");
-  if (!Number.isInteger(next.logRetentionDays) || next.logRetentionDays < 0 || next.logRetentionDays > 3650) bad.push("logRetentionDays must be 0 (forever) to 3650");
-  if (!["claude", "codex"].includes(next.intake)) bad.push("intake must be claude or codex");
-  if (!Number.isInteger(next.maxBuildAttempts) || next.maxBuildAttempts < 1 || next.maxBuildAttempts > 5) bad.push("maxBuildAttempts must be 1–5");
-  if (typeof next.sandbox !== "boolean") bad.push("sandbox must be true or false");
-  bad.push(...ownerPrefProblems(next));
+  bad.push(...settingsProblems(next as unknown as Record<string, unknown>, { remote: !!process.env.HEWN_BUILD_URL, changed: Object.keys(rest) }));
   if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
   writeFileSync(path(home), JSON.stringify(next, null, 2) + "\n");
   return next;

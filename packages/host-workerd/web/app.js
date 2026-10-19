@@ -254,7 +254,8 @@ async function openNeed(n) {
       const c = (await caps(true)).get(n.capabilityId);
       if (n.action === "Replace…" && c) await toolModelSheet(c, { replace: true });
       else await grantsSheet(n.capabilityId);
-    } else if (n.kind === "spend") {
+    } else if (n.kind === "builder-model") go("#/settings/ai");
+    else if (n.kind === "spend") {
       const c = n.capabilityId && (await caps()).get(n.capabilityId);
       if (c) await toolModelSheet(c);
       else go("#/settings/ai/models");
@@ -382,8 +383,7 @@ async function paletteItems() {
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
     act("Connect an agent", () => connectDialog(), "claude codex chatgpt mcp", "agent"),
     act("Add a connection", () => addConnectionSheet(), "account service", "link"),
-    act("Who builds tools…", () => jobPicker("builder"), "builder job", "hammer"),
-    act("Who writes the spec…", () => jobPicker("intake"), "intake job", "ask"),
+    act("Who builds tools…", () => jobPicker(null, { thenModel: true }), "builder intake job model", "hammer"),
     act("Back up now", () => api("/backups", { method: "POST" }).then((b) => toast(`Backed up · ${Math.round(b.bytes / 1024)} KB`), fail), "backup", "backup"),
     act(`Switch to ${isDark() ? "light" : "dark"} appearance`, () => {
       const t = isDark() ? "light" : "dark";
@@ -691,12 +691,26 @@ async function iconDialog(c) {
 
 // ---------- F1 first run / F2 Home / F4 Edit Home ----------
 
-/** Who does each of Hewn's jobs (Settings › AI): owner-facing words, and the settings key. */
+/**
+ * Hewn's jobs, shown as one ("Builds tools"): the intake talks a request through and proposes it,
+ * the builder builds it. Settings › AI › Advanced splits them: [settings key, title, picker question].
+ */
 const JOBS = [
-  ["builder", "Builds tools", "Who builds tools?", "Build tools"],
-  ["intake", "Writes the spec", "Who writes the spec?", "Write the spec"],
+  ["intake", "Talks it through", "Who talks requests through?"],
+  ["builder", "Builds", "Who builds?"],
 ];
 const jobChosen = (s, key) => !!s && (s.jobsChosen?.includes(key) || s.firstRunDone === true);
+/** Both jobs have an agent (the first run asks until they do). */
+const buildsChosen = (s) => jobChosen(s, "builder") && jobChosen(s, "intake");
+/** The model and effort the owner picked for a job on an agent ({} = the agent's default). */
+const jobModelOf = (s, key, agent = s?.[key]) => s?.jobModels?.[key]?.[agent] ?? {};
+/** One agent on the same model does both jobs: the one "Builds tools" row says it all. */
+const jobsSame = (s) => s.builder === s.intake && JSON.stringify(jobModelOf(s, "builder")) === JSON.stringify(jobModelOf(s, "intake"));
+/** A model choice in words: "Default model", "Fable" (a family), or the full name. */
+const modelWords = (m = {}, catalog) => {
+  const name = !m.model ? "Default model" : catalog?.models.find((x) => x.id === m.model)?.label ?? (/^[a-z]+$/.test(m.model) ? m.model[0].toUpperCase() + m.model.slice(1) : m.model);
+  return m.effort ? `${name} · ${m.effort} effort` : name;
+};
 
 async function home({ editing = false } = {}) {
   // Redrawn in place (a layout save, a build starting or ending): stop the last drawing's timers first.
@@ -1221,24 +1235,23 @@ async function firstRun() {
   };
   const renderJobs = async () => {
     const [{ tools, ready }, s] = await Promise.all([buildJobs(), loadSettings()]);
-    builderOk = jobChosen(s, "builder") && ready(tools.find((t) => t.name === s.builder));
+    builderOk = buildsChosen(s) && ready(tools.find((t) => t.name === s.builder));
+    const t = tools.find((x) => x.name === s?.builder);
+    const chosen = buildsChosen(s);
+    const split = chosen && s.builder !== s.intake;
     put(
       jobsCard,
-      h("div", { class: "eyebrow card-eyebrow" }, "2 · Who works for Hewn"),
+      h("div", { class: "eyebrow card-eyebrow" }, "2 · Who builds your tools"),
       h(
         "ul",
         { class: "list" },
-        JOBS.map(([key, title]) => {
-          const t = tools.find((x) => x.name === s?.[key]);
-          const chosen = jobChosen(s, key);
-          return h(
-            "li",
-            {},
-            chosen && t ? agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, 28) : null,
-            h("div", { class: "grow" }, h("span", {}, title), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}` : "Not chosen")),
-            h("button", { class: "sm", onclick: () => jobPicker(key).then(renderAll) }, "Choose…"),
-          );
-        }),
+        h(
+          "li",
+          {},
+          chosen && t ? agentTileOf(t, 28) : null,
+          h("div", { class: "grow" }, h("span", {}, "Builds tools"), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}${split ? " · split in Settings › AI" : ""}` : "Not chosen")),
+          h("button", { class: "sm", onclick: () => jobPicker(null).then(renderAll) }, "Choose…"),
+        ),
       ),
     );
     renderMake();
@@ -2511,7 +2524,20 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));
   const send = h("button", { type: "submit", class: embedded ? "" : "lg" }, "Send");
-  const composer = embedded ? h("form", { class: "stack-sm composer" }, input, h("div", { class: "row end" }, send)) : h("form", { class: "row tight composer" }, input, send);
+  // + : the model and effort for this request (the build it hands off, and the intake when one
+  // agent does both). Unset: Settings › AI. One session id for the whole conversation.
+  const models = { build: {}, intake: {} };
+  const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const plus = h("button", { type: "button", class: `plus-btn ${embedded ? "" : "lg"}`, title: "Model and effort for this request", "aria-label": "Model and effort for this request" }, "+");
+  plus.addEventListener("click", async () => {
+    const picked = await requestModelSheet(models);
+    if (!picked) return;
+    Object.assign(models, picked);
+    const set = models.build.model || models.build.effort;
+    plus.textContent = set ? `+ ${modelWords(models.build)}` : "+";
+    plus.classList.toggle("set", !!set);
+  });
+  const composer = embedded ? h("form", { class: "stack-sm composer" }, input, h("div", { class: "row between" }, plus, send)) : h("form", { class: "row tight composer" }, plus, input, send);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -2568,14 +2594,15 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     try {
       let reply = null;
       let failure = null;
-      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages }, stop.signal);
+      const run = models.intake.model || models.intake.effort ? { run: models.intake } : {};
+      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session, ...run }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       typing.remove();
       live.remove();
       activity.remove();
       if (reply.message) say("them", reply.message);
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
-      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
+      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, ask: () => models.build, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n") });
         reply.questions.forEach((x) => say("them", x));
@@ -2610,7 +2637,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       }
       thread.append(errorBox(err));
       // Widgets don't need the intake: the builder can still make what was asked (or pick itself).
-      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text).then(onBuilt, fail) }, "Build without suggestions")));
+      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, models.build).then(onBuilt, fail) }, "Build without suggestions")));
     } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
@@ -2629,8 +2656,59 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   };
 }
 
-/** Start a widgets build (only widgets change). */
-const buildWidgets = (cap, request) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: request ? { request } : {} });
+/** Start a widgets build (only widgets change). `ask`: the model and effort picked with + (or none). */
+const buildWidgets = (cap, request, ask = {}) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...ask } });
+
+/**
+ * The intake's +: model and effort for this request. "As set" keeps Settings › AI. With one agent
+ * doing both halves, the choice is for both; split, the talking-through half has its own.
+ */
+async function requestModelSheet(current) {
+  const { tools, settings: s } = await buildJobs();
+  const builder = tools.find((t) => t.name === s.builder);
+  if (!builder) return fail(new Error("Choose who builds tools first (Settings › AI)")), null;
+  const split = s.intake !== s.builder;
+  const intake = tools.find((t) => t.name === s.intake);
+  const [bCat, iCat] = await Promise.all([api(`/tools/${enc(s.builder)}/models`), split && intake ? api(`/tools/${enc(s.intake)}/models`) : null]);
+  const group = (title, catalog, setting, now) => {
+    const model = h("select", { "aria-label": `${title}: model` }, h("option", { value: "" }, `As set (${modelWords({ model: setting.model }, catalog)})`), catalog.models.map((m) => h("option", { value: m.id, selected: m.id === now.model }, m.label)));
+    const other = h("input", { type: "text", class: "mono", placeholder: "full model name", "aria-label": "Model name", hidden: true });
+    if (catalog.other) model.append(h("option", { value: "*" }, "Other…"));
+    if (now.model && !catalog.models.some((m) => m.id === now.model)) ((model.value = "*"), (other.hidden = false), (other.value = now.model));
+    const effort = h("select", { "aria-label": `${title}: effort` });
+    const fill = () => {
+      other.hidden = model.value !== "*";
+      const m = catalog.models.find((x) => x.id === (model.value || setting.model || "default"));
+      const list = m?.efforts ?? catalog.models[0]?.efforts ?? [];
+      put(effort, h("option", { value: "" }, setting.effort && !model.value ? `As set (${setting.effort})` : "Default"), list.map((e) => h("option", { value: e, selected: e === now.effort }, e[0].toUpperCase() + e.slice(1))));
+    };
+    model.addEventListener("change", fill);
+    fill();
+    const read = () => {
+      const id = model.value === "*" ? other.value.trim() : model.value;
+      return { ...(id ? { model: id } : {}), ...(effort.value ? { effort: effort.value } : {}) };
+    };
+    return { el: h("div", { class: "stack-sm" }, split && h("div", { class: "eyebrow" }, title), h("div", { class: "row tight wrap" }, h("label", { class: "field grow" }, h("span", { class: "label" }, "Model"), model), h("label", { class: "field" }, h("span", { class: "label" }, "Effort"), effort)), other), read };
+  };
+  return formSheet({
+    icon: agentTileOf(builder, 44),
+    title: "For this request",
+    sub: split ? `${builder.label} builds · ${intake?.label ?? s.intake} talks it through` : `${builder.label} talks it through and builds it`,
+    build: (close) => {
+      const b = group("Builds", bCat, jobModelOf(s, "builder"), current.build);
+      const i = split && iCat ? group("Talks it through", iCat, jobModelOf(s, "intake"), current.intake) : null;
+      return [
+        b.el,
+        i?.el,
+        h("div", { class: "small faint" }, "Only for this conversation and what it builds. Settings › AI sets the usual one."),
+        sheetActions(
+          h("button", { onclick: () => close(null) }, "Cancel"),
+          h("button", { class: "primary", onclick: () => close({ build: b.read(), intake: i ? i.read() : b.read() }) }, "Use"),
+        ),
+      ];
+    },
+  });
+}
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
@@ -2658,7 +2736,7 @@ function scheduleTicks(list = []) {
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
  * set up once the draft's build promotes.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [] } = {}) {
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], ask = {} } = {}) {
   const conn = d.connection;
   let first = null;
   if (conn) {
@@ -2667,12 +2745,12 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
     const wait = after ?? prev?.buildId;
     first =
       conn.mode === "create"
-        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}) } }))
-        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}) } });
+        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}), ...ask } }))
+        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}), ...ask } });
     connections.set(key, first);
   }
   const wait = first?.buildId ?? after;
-  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}) };
+  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...ask };
   return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w } });
 }
 
@@ -2707,7 +2785,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  * are several, icon, name, purpose, summary pills), ▸ opens its details (G2). Returns [card, summary].
  */
 function proposalCard(kind, list, ctx) {
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, done } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, done, ask: askOf = () => ({}) } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -2797,6 +2875,8 @@ function proposalCard(kind, list, ctx) {
   };
 
   build.addEventListener("click", async () => {
+    // The model and effort picked with the composer's + (read now: it may have changed since this card).
+    const ask = askOf();
     build.disabled = true;
     rows.forEach((r) => (r.box.disabled = true));
     const reenable = () => (rows.forEach((r) => (r.box.disabled = false)), count());
@@ -2804,7 +2884,7 @@ function proposalCard(kind, list, ctx) {
       if (kind === "widgets") {
         const picked = chosen().map((r) => r.d);
         // A replacement keeps its widget's name, so it stays where it is on Home.
-        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`);
+        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`, ask);
         return onBuilt(b);
       }
       if (kind === "schedules") {
@@ -2825,12 +2905,12 @@ function proposalCard(kind, list, ctx) {
         // Only the connection: the intake may have drafted a tool around it.
         const d = list[0];
         const c = d.connection?.mode === "create" ? d.connection : d;
-        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection" } });
+        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection", ...ask } });
         invalidateCaps();
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen() });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), ask });
         invalidateCaps();
         return onBuilt(b);
       }
@@ -2848,7 +2928,7 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen() });
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), ask });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {
@@ -2876,7 +2956,7 @@ function proposalCard(kind, list, ctx) {
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
-    kind !== "schedules" && h("div", { class: "small faint" }, `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
+    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it, on the host's keys.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
     h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
@@ -2938,11 +3018,23 @@ async function buildPage(id) {
  * while it works, collapsed under "Show log" once it succeeds, open by default when it fails (H6).
  * `compact`: in the change drawer (P3); `onPromoted(b)`: what to show there when it's live (P4).
  */
+/** What a build runs on, in words ("Fable · high effort"; the model it ran on, once the builder says). */
+const buildModelWords = (b) => (b.model && (b.model.ran || b.model.model || b.model.effort) ? modelWords({ model: b.model.ran ?? b.model.model, effort: b.model.effort }) : "");
+/** Whose account a build spends: the builder agent's own, or the host's keys. */
+const accountWords = (builder) => (builder === "remote" ? "on the host's keys" : "on your account");
+
 /** "Codex asked · " when an agent asked for the build (it runs on the owner's builder account all the same). */
 const askedBy = (b) => {
   const who = actorLabel(b.requestedBy);
   return who && who !== "You" ? `${who} asked · ` : "";
 };
+
+/** "Built with Claude Code · claude-fable-5-5 · high effort", and why it wasn't the model asked for. */
+const builtWith = (b) =>
+  b.builder &&
+  !["keep", "agent"].includes(b.builder) &&
+  !b.builder.startsWith("copy:") &&
+  h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}`, b.model?.note && h("span", {}, ` · ${b.model.note.text}`));
 
 function buildPanel(id, { compact = false, onPromoted } = {}) {
   const card = h("div", { class: compact ? "build-panel stack-md" : "card build-card" }, skeleton("50%", "80%"));
@@ -3010,7 +3102,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           compact && b.kind !== "create" ? `Building v${(base ?? 0) + 1}` : cap().name,
           waitingAgent
             ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave`
-            : `${askedBy(b)}${compact && base ? `With ${builderLabel(b.builder)}, on your account · v${base} keeps working` : `Building with ${builderLabel(b.builder)}, on your account · you can leave`}`,
+            : `${askedBy(b)}${compact && base ? `With ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}, ${accountWords(b.builder)} · v${base} keeps working` : `Building with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}, ${accountWords(b.builder)} · you can leave`}`,
           clockEl,
         ),
         h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
@@ -3076,6 +3168,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       put(
         card,
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
+        builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
         logBlock(false),
       );
@@ -3084,8 +3177,10 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const failed = () => {
       const f = b.failure ?? { title: "The build didn't pass", detail: b.log.at(-1) ?? "" };
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
-      const fix = h("button", { class: "primary" }, "Ask builder to fix");
-      const retry = h("button", {}, "Retry");
+      // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
+      const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
+      const fix = !refused && h("button", { class: "primary" }, "Ask builder to fix");
+      const retry = h("button", { class: refused ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {
         btn.disabled = true;
         try {
@@ -3096,13 +3191,14 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           fail(e);
         }
       };
-      fix.addEventListener("click", again("fix", fix));
+      if (fix) fix.addEventListener("click", again("fix", fix));
       retry.addEventListener("click", again("retry", retry));
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "danger" }), f.title, `${cap().name} · ${kindWord(b)}${attempt}`),
         f.detail && h("div", { class: "notice danger" }, h("span", {}, f.detail)),
+        builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         h("div", { class: "row tight" }, fix, retry),
         logBlock(true),
@@ -3344,7 +3440,9 @@ function activityRow(g, all, showCap) {
     }
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
-    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref]);
+    // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
+    const ran = buildModelWords({ model: g.buildModel });
+    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref]));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
@@ -3578,42 +3676,149 @@ const toolOf = (a) => catalogOf(a)?.tool;
 /** Hewn's jobs: who does them, and the CLIs that can (installed, signed in). */
 async function buildJobs() {
   const [tools, s] = await Promise.all([api("/tools").catch(() => []), api("/settings")]);
+  for (const t of tools) if (t.remote) rememberAgents([{ id: t.name, name: t.label }]);
   const ready = (t) => !!t?.found && t.loggedIn !== false;
   const label = (name) => tools.find((t) => t.name === name)?.label ?? name;
   return { tools, settings: s, ready, label };
 }
 
-/** Save who does a job (and that the owner chose it). */
-async function setJob(key, tool) {
+/** Save who does these jobs (and that the owner chose them). */
+async function setJobs(keys, tool) {
   const s = await api("/settings");
-  settings = await api("/settings", { method: "PUT", body: { [key]: tool, jobsChosen: [...new Set([...(s.jobsChosen ?? []), key])] } });
+  settings = await api("/settings", { method: "PUT", body: { ...Object.fromEntries(keys.map((k) => [k, tool])), jobsChosen: [...new Set([...(s.jobsChosen ?? []), ...keys])] } });
   return settings;
 }
 
+const ALL_JOBS = ["intake", "builder"];
+/** What an agent does in words: "builds tools", or one half of it ("talks it through"). */
+const jobsWords = (keys) => (keys.length > 1 ? "builds tools" : JOBS.find(([k]) => k === keys[0])[1].toLowerCase());
+const agentTileOf = (t, size) => agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, size);
+
 /**
- * O2 Picker for one of Hewn's jobs: the signed-in agents on this machine; the subtitle says what
- * else each already does. One agent can do every job.
+ * O2 Who builds tools: the signed-in agents on this machine (and the host's builder, if it runs
+ * one). `key` picks one half under Advanced; without it the agent does both. `thenModel`: open
+ * the model sheet next (switching agent means choosing its model; it remembers the last one).
  */
-async function jobPicker(key) {
+async function jobPicker(key, { thenModel = false } = {}) {
+  const keys = key ? [key] : ALL_JOBS;
   const [{ tools, settings: s, ready }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
-  const [, , question] = JOBS.find(([k]) => k === key);
-  const others = (t) => JOBS.filter(([k]) => k !== key && s[k] === t.name && jobChosen(s, k)).map(([, title]) => title.toLowerCase());
+  const question = key ? JOBS.find(([k]) => k === key)[2] : "Who builds tools?";
+  const others = (t) => (key ? JOBS.filter(([k]) => k !== key && s[k] === t.name && jobChosen(s, k)).map(([, title]) => title.toLowerCase()) : []);
   const options = [
     ...tools.map((t) => ({
       value: t.name,
       label: t.label,
-      tile: agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, 28),
+      tile: agentTileOf(t, 28),
       disabled: !ready(t),
-      sub: !ready(t) ? t.fix ?? "Not installed" : [`On ${machine.word} · signed in`, ...others(t).map((o) => `also ${o}`)].join(" · "),
+      sub: !ready(t) ? t.fix ?? "Not installed" : [t.remote ? "Runs on the host's own keys" : `On ${machine.word} · signed in`, ...others(t).map((o) => `also ${o}`)].join(" · "),
     })),
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
-  const chosen = jobChosen(s, key) ? s[key] : null;
-  const pick = await pickerSheet({ title: question, options, value: chosen, note: "One agent can do every job.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
+  const chosen = keys.every((k) => jobChosen(s, k)) && keys.every((k) => s[k] === s[keys[0]]) ? s[keys[0]] : null;
+  const pick = await pickerSheet({ title: question, options, value: chosen, note: key ? undefined : "It talks each request through with you, then builds it. Settings › AI › Advanced splits the two.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
   if (!pick) return null;
-  await setJob(key, pick);
-  toast(`${tools.find((t) => t.name === pick)?.label ?? pick} ${key === "builder" ? "builds tools" : "writes the spec"}`);
+  await setJobs(keys, pick);
+  const t = tools.find((x) => x.name === pick);
+  toast(`${t?.label ?? pick} ${jobsWords(keys)}`);
+  if (thenModel && pick !== chosen) await modelSheet(keys, t ?? { name: pick, label: pick });
   return pick;
+}
+
+/**
+ * O3 The model and effort for a job (or both) on one agent, from the agent's own list: Default
+ * lets the CLI decide, a family (Fable) follows the newest, a pinned model stays put (and falls
+ * back to the default, with a notice, once it's gone). Other… takes a full name.
+ */
+async function modelSheet(keys, t) {
+  const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
+  const cur = jobModelOf(s, keys[0], t.name);
+  const kindWords = { default: "lets it decide", family: "follows the newest", pinned: "stays on this one" };
+  return formSheet({
+    icon: agentTileOf(t, 44),
+    title: keys.length > 1 ? "Model for building tools" : keys[0] === "intake" ? "Model for talking it through" : "Model for building",
+    sub: t.label,
+    width: 520,
+    build: (close) => {
+      let chosen = cur.model ?? "default";
+      const listed = catalog.models.some((m) => m.id === chosen);
+      const name = `model-${Math.random().toString(36).slice(2)}`;
+      const other = h("input", { type: "text", placeholder: t.name === "claude" ? "claude-fable-5-1" : "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
+      const effort = h("select", { "aria-label": "Effort" });
+      const efforts = () => (chosen === "" ? catalog.models[0]?.efforts ?? [] : catalog.models.find((m) => m.id === chosen)?.efforts ?? catalog.models[0]?.efforts ?? []);
+      const fillEffort = (keep) => {
+        const list = efforts();
+        const def = catalog.models.find((m) => m.id === chosen)?.defaultEffort;
+        put(effort, h("option", { value: "" }, def ? `Default (${def})` : "Default"), list.map((e) => h("option", { value: e, selected: e === keep }, e[0].toUpperCase() + e.slice(1))));
+        effort.disabled = !list.length;
+      };
+      const rows = catalog.models.map((m) => {
+        const radio = h("input", { type: "radio", name, checked: m.id === chosen });
+        radio.addEventListener("change", () => ((chosen = m.id), fillEffort(effort.value)));
+        // A family's or the default's own description says it; a pinned model also says it stays put.
+        const sub = [m.description ?? kindWords[m.kind], m.kind === "pinned" && m.description && kindWords.pinned, m.upgrade && `${m.upgrade} replaces it`].filter(Boolean).join(" · ");
+        return h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, m.label), sub && h("span", { class: "sub" }, sub)));
+      });
+      if (catalog.other) {
+        const radio = h("input", { type: "radio", name, checked: !listed });
+        const pickOther = () => ((radio.checked = true), (chosen = other.value.trim()), fillEffort(effort.value));
+        radio.addEventListener("change", pickOther);
+        other.addEventListener("input", pickOther);
+        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, "A full model name: stays on that one"), other)));
+      }
+      fillEffort(cur.effort);
+      const save = h("button", { class: "primary" }, "Save");
+      save.addEventListener("click", async () => {
+        const model = chosen && chosen !== "default" ? chosen : undefined;
+        const next = structuredClone(s.jobModels ?? {});
+        for (const k of keys) next[k] = { ...(next[k] ?? {}), [t.name]: { ...(model ? { model } : {}), ...(effort.value ? { effort: effort.value } : {}) } };
+        try {
+          settings = await api("/settings", { method: "PUT", body: { jobModels: next } });
+          toast(`${keys.length > 1 ? "Builds tools" : JOBS.find(([k]) => k === keys[0])[1]}: ${modelWords({ model, effort: effort.value || undefined }, catalog)}`);
+          close(true);
+        } catch (e) {
+          fail(e);
+        }
+      });
+      return [
+        h("fieldset", { class: "job" }, rows),
+        h("label", { class: "field" }, h("span", { class: "label" }, "Effort"), effort),
+        h("div", { class: "small faint" }, "Agents that ask for a build can pick a model too, from the ones you allow (Settings › AI)."),
+        sheetActions(h("button", { onclick: () => close() }, "Cancel"), save),
+      ];
+    },
+  });
+}
+
+/** O4 The models agents may ask a build to use, for the agent that builds (Default always). */
+async function agentModelsSheet(t) {
+  const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
+  const allowed = new Set(s.agentModels?.[t.name] ?? catalog.models.filter((m) => m.kind !== "pinned").map((m) => m.id));
+  const extra = [...allowed].filter((id) => !catalog.models.some((m) => m.id === id)).map((id) => ({ id, label: id, kind: "pinned" }));
+  return formSheet({
+    icon: agentTileOf(t, 44),
+    title: "Models agents may ask for",
+    sub: `When an agent asks ${t.label} for a build`,
+    width: 520,
+    build: (close) => {
+      const boxes = [...catalog.models, ...extra].map((m) => ({ m, box: h("input", { type: "checkbox", checked: m.id === "default" || allowed.has(m.id), disabled: m.id === "default" }) }));
+      const save = h("button", { class: "primary" }, "Save");
+      save.addEventListener("click", async () => {
+        const list = boxes.filter((b) => b.box.checked).map((b) => b.m.id);
+        try {
+          settings = await api("/settings", { method: "PUT", body: { agentModels: { ...(s.agentModels ?? {}), [t.name]: list } } });
+          toast(`Agents may ask for ${list.length === 1 ? "the default only" : `${list.length} models`}`);
+          close(true);
+        } catch (e) {
+          fail(e);
+        }
+      });
+      return [
+        h("div", { class: "stack-xs" }, boxes.map(({ m, box }) => h("label", { class: "check" }, box, h("span", {}, m.label, m.description && h("span", { class: "faint" }, ` · ${m.description}`))))),
+        h("div", { class: "small faint" }, "An agent asking for one you haven't ticked gets told which it may use; nothing is built. Your own choices aren't limited."),
+        sheetActions(h("button", { onclick: () => close() }, "Cancel"), save),
+      ];
+    },
+  });
 }
 
 /** L1 Agents: one row per agent identity, with the parts it plays (role chips). */
@@ -3626,8 +3831,9 @@ async function agentsPage() {
   const from = (a) => (a.via === "local" ? `On ${machine.word}` : a.via === "tunnel" ? `Through ${a.address ?? "the public address"}` : "Connected");
   const roleChips = (a) => {
     const tool = toolOf(a);
-    const jobChips = a.via === "local" && tool ? JOBS.filter(([k]) => s[k] === tool && jobChosen(s, k)).map(([, title]) => h("a", { class: "pill", href: "#/settings/ai", onclick: (e) => e.stopPropagation() }, title.toLowerCase())) : [];
-    return h("div", { class: "role-chips" }, h("span", { class: "pill accent" }, "uses your tools"), jobChips);
+    const does = a.via === "local" && tool ? JOBS.filter(([k]) => s[k] === tool && jobChosen(s, k)).map(([k]) => k) : [];
+    const jobChip = does.length > 0 && h("a", { class: "pill", href: "#/settings/ai", onclick: (e) => e.stopPropagation() }, jobsWords(does.length > 1 ? ALL_JOBS : does));
+    return h("div", { class: "role-chips" }, h("span", { class: "pill accent" }, "uses your tools"), jobChip);
   };
   const recent = (a) => a.lastUsedAt && Date.now() - Date.parse(a.lastUsedAt) < 5 * 60000;
   const row = (a) =>
@@ -3833,7 +4039,7 @@ async function addSheet() {
           "ul",
           { class: "list" },
           choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
-          choice(125, "↗", "An agent that works for Hewn", "Builds tools or writes the spec · runs on this machine", () => hewnAgentsSheet()),
+          choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
           choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
@@ -3856,7 +4062,10 @@ function hewnAgentsSheet() {
       const detail = h("div", {});
       const render = async () => {
         const [{ tools, ready, settings: s }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
-        const does = (t) => JOBS.filter(([k]) => s[k] === t.name && jobChosen(s, k)).map(([, title]) => title.toLowerCase());
+        const does = (t) => {
+          const keys = JOBS.filter(([k]) => s[k] === t.name && jobChosen(s, k)).map(([k]) => k);
+          return keys.length ? [jobsWords(keys.length > 1 ? ALL_JOBS : keys)] : [];
+        };
         put(
           list,
           tools.map((t) =>
@@ -3874,10 +4083,8 @@ function hewnAgentsSheet() {
         );
       };
       const pickJob = async (t) => {
-        const key = await pickerSheet({ title: `What should ${t.label} do?`, options: JOBS.map(([k, title]) => ({ value: k, label: title })), confirm: "Next", unchanged: false });
-        if (!key) return;
-        await setJob(key, t.name);
-        toast(`${t.label} ${key === "builder" ? "builds tools" : "writes the spec"}`);
+        await setJobs(ALL_JOBS, t.name);
+        toast(`${t.label} builds tools`);
         render();
       };
       render();
@@ -4003,27 +4210,25 @@ function connectDialog(agentId) {
             (error || finished) && sheetActions(error ? h("button", { onclick: showList }, "Back") : h("button", { class: "primary", onclick: () => close(true) }, "Done")),
           );
         };
-        // O6: an agent on this machine can also work for Hewn; both jobs start unticked.
+        // O6: an agent on this machine can also build tools for Hewn; it starts unticked.
         const showOffer = async () => {
           const tool = AGENT_CATALOG.find((c) => c.connect === x.agentId)?.tool;
           if (!tool) return;
           const { tools, ready, settings: s, label } = await buildJobs();
           if (!ready(tools.find((t) => t.name === tool))) return;
+          const sw = h("input", { type: "checkbox", class: "switch", "aria-label": "Build tools" });
+          sw.addEventListener("change", async () => {
+            try {
+              if (sw.checked) await setJobs(ALL_JOBS, tool);
+            } catch (e) {
+              sw.checked = false;
+              fail(e);
+            }
+          });
           put(
             offer,
             h("div", { class: "eyebrow" }, "It can also work for Hewn"),
-            JOBS.map(([key, , , verb]) => {
-              const sw = h("input", { type: "checkbox", class: "switch", "aria-label": verb });
-              sw.addEventListener("change", async () => {
-                try {
-                  if (sw.checked) await setJob(key, tool);
-                } catch (e) {
-                  sw.checked = false;
-                  fail(e);
-                }
-              });
-              return h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, verb), h("span", { class: "sub" }, `Today: ${jobChosen(s, key) ? label(s[key]) : "nobody"}`)), sw);
-            }),
+            h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, "Build tools"), h("span", { class: "sub" }, `Today: ${buildsChosen(s) ? label(s.builder) : "nobody"}`)), sw),
           );
         };
         // While it signs in, its request appears here to approve without leaving the sheet.
@@ -4159,21 +4364,26 @@ function timeZoneSheet(current) {
 }
 
 /**
- * O1 Settings › AI: the three jobs Hewn gives to AI, each with what runs it and who pays. Writing
- * the spec and building run an agent on this machine, on however it's signed in; thinking inside
- * tools is a metered API call with your key.
+ * O1 Settings › AI: what Hewn runs AI for. Building tools (talking a request through, then building
+ * it) runs an agent, on this machine and its own account or on the host's keys; Advanced splits the
+ * two halves. Thinking inside tools is a metered API call with your key.
  */
 async function aiSection() {
-  const [{ tools, settings: s, ready, label }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
-  const tile = (name) => agentTile(name === "claude" ? "claude-code" : name, label(name), 20);
-  const jobRow = (key, title, extra) => {
-    const t = tools.find((x) => x.name === s[key]);
-    const chosen = jobChosen(s, key);
+  const [{ tools, settings: s, ready }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
+  const tile = (t) => agentTileOf(t, 20);
+  const jobTool = (key) => tools.find((x) => x.name === s[key]);
+  const catalogs = new Map(await Promise.all([...new Set([s.builder, s.intake])].map(async (a) => [a, await api(`/tools/${enc(a)}/models`).catch(() => null)])));
+  const agentWords = (t) => `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? (t.remote ? "its own keys" : "signed in") : t.fix ?? "not ready"}`;
+  /** A job row: who, on which model; Change picks the agent, Model… the model and effort. */
+  const jobRow = (title, keys, extra) => {
+    const t = jobTool(keys[0]);
+    const chosen = keys.every((k) => jobChosen(s, k));
     return h(
       "div",
       { class: "setting" },
-      h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub row tight" }, chosen && t ? [tile(t.name), `${t.label} on ${machine.word} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}`, extra] : "Not chosen")),
-      h("button", { class: "sm", onclick: () => jobPicker(key).then(() => route()) }, chosen ? "Change" : "Choose…"),
+      h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub row tight" }, chosen && t ? [tile(t), `${agentWords(t)} · ${modelWords(jobModelOf(s, keys[0]), catalogs.get(t.name))}`, extra] : "Not chosen")),
+      chosen && t && h("button", { class: "sm", onclick: () => modelSheet(keys, t).then((saved) => saved && route()) }, "Model…"),
+      h("button", { class: "sm", onclick: () => jobPicker(keys.length > 1 ? null : keys[0], { thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
     );
   };
   const n = s.maxBuildAttempts;
@@ -4184,13 +4394,44 @@ async function aiSection() {
     h("output", { title: "Build attempts" }, String(n)),
     h("button", { "aria-label": "More attempts", disabled: n >= 5, onclick: () => saveSettings({ maxBuildAttempts: n + 1 }, `Build attempts: ${n + 1}`) }, "+"),
   );
+  // One row when one agent on one model does both halves; split, it says so and Advanced shows how.
+  const same = jobsSame(s);
+  const builds = same
+    ? jobRow("Builds tools", ALL_JOBS)
+    : h(
+        "div",
+        { class: "setting" },
+        h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub" }, "Split between two agents or models · see Advanced")),
+        h("button", { class: "sm", onclick: () => jobPicker(null, { thenModel: true }).then(() => route()) }, "Use one…"),
+      );
+  const builder = jobTool("builder");
+  const allowed = s.agentModels?.[s.builder] ?? catalogs.get(s.builder)?.models.filter((x) => x.kind !== "pinned").map((x) => x.id) ?? ["default"];
+  const asks =
+    builder &&
+    h(
+      "div",
+      { class: "setting" },
+      h("div", { class: "grow" }, h("span", { class: "strong" }, "Agents may ask for"), h("span", { class: "sub" }, allowed.map((id) => catalogs.get(s.builder)?.models.find((x) => x.id === id)?.label ?? id).join(", "))),
+      h("button", { class: "sm", onclick: () => agentModelsSheet(builder).then((saved) => saved && route()) }, "Change…"),
+    );
+  // A hosted Hewn (only the host's builder) has nothing to split.
+  const hosted = s.builder === "remote" && s.intake === "remote" && !tools.some((t) => !t.remote && t.found);
+  const advanced =
+    !hosted &&
+    h(
+      "details",
+      { class: "card settings-card advanced", ...(same ? {} : { open: true }) },
+      h("summary", { class: "strong" }, "Advanced"),
+      h("div", { class: "small faint" }, "Building is two jobs: talking a request through with you (quick, writes nothing) and building it (in a sandbox, takes minutes). Each can have its own agent and model."),
+      JOBS.map(([key, title]) => jobRow(title, [key])),
+    );
   const prov = m?.provider && m.providers.find((p) => p.id === m.provider);
   settingsFrame(
     "ai",
     h("div", { class: "row between" }, h("h1", { class: "flush" }, "AI"), h("button", { onclick: () => addSheet().then(() => !location.hash.startsWith("#/settings/ai/models") && route()) }, "Add…")),
     settingsCard(
-      jobRow("intake", "Writes the spec"),
-      h("div", { class: "setting-with-extra" }, jobRow("builder", "Builds tools"), h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
+      h("div", { class: "setting-with-extra" }, builds, h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
+      asks,
       h(
         "div",
         { class: "setting" },
@@ -4203,7 +4444,8 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
-    h("div", { class: "small faint" }, "Writing the spec and building run on these agents' own accounts (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
+    advanced,
+    h("div", { class: "small faint" }, builder?.remote ? "Building runs on the host's own model keys." : "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );
 }
@@ -4398,6 +4640,7 @@ async function aboutSection() {
         "div",
         { class: "card stack-sm upgrade-card" },
         h("span", { class: "strong" }, `${status.latest} is out`),
+        (status.notes ?? []).map((r) => releaseNotes(r, status.notes.length > 1)),
         h("div", { class: "small muted" }, "Upgrade from a terminal. Backups run first; your tools and data stay."),
         commandBlock(`${CLI} upgrade`),
         h("a", { class: "small", href: CHANGELOG_URL, target: "_blank", rel: "noopener" }, "What's new ›"),
@@ -4408,6 +4651,16 @@ async function aboutSection() {
       setting("Licence", "AGPL-3.0-or-later · spec and UI kit Apache-2.0"),
     ),
   );
+}
+
+/** One release's notes, as the changelog has them: "**Title.** The rest" bullets, the title in bold. */
+function releaseNotes(r, labelled) {
+  const item = (text) => {
+    const m = /^\*\*(.+?)\*\*\s*(.*)$/.exec(text);
+    const plain = (t) => t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+    return h("li", {}, m ? [h("span", { class: "strong" }, plain(m[1])), " ", plain(m[2])] : plain(text));
+  };
+  return h("div", { class: "stack-xs release-notes" }, labelled && h("span", { class: "eyebrow" }, r.version), h("ul", { class: "small" }, r.items.map(item)));
 }
 
 /** "0.3.4" vs "0.3.3": >0 when a is newer. Pre-releases sort before their release. */

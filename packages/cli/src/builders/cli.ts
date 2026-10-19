@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { claudeActivity, codexActivity } from "./activity.ts";
+import { MODEL_REJECTED } from "./models.ts";
 import { wrapBuilder } from "./sandbox.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 
@@ -44,6 +45,12 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
     ({ command, args } = wrapBuilder(command, args, { workspace: job.workspace, platformRoot: job.platformRoot, ...confine }));
   }
   let unavailable: string | undefined;
+  // Errors only (stderr, error and failed-result events), never the builder's own words about models.
+  let modelRejected: string | undefined;
+  // Only before the builder has done anything: a model that won't run fails at once, and a re-run
+  // on the default must not start over a half-written workspace.
+  let worked = false;
+  const checkModel = (text: string) => job.model && !worked && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
   return new Promise((resolve, reject) => {
     const raw = createWriteStream(job.logPath.replace(/\.log$/, ".jsonl"), { flags: "a" });
     const child = spawn(command, args, { cwd: job.workspace, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -51,11 +58,16 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
       raw.write(line + "\n");
       let activity: string | null;
       try {
-        activity = format(JSON.parse(line), job.workspace);
+        const event = JSON.parse(line);
+        // Claude Code names the model it runs on first (a family resolves to a full name).
+        if (event?.type === "system" && event.subtype === "init" && typeof event.model === "string") job.onModel?.(event.model);
+        if (event?.type === "error" || event?.type === "turn.failed" || (event?.type === "result" && event.is_error)) checkModel(JSON.stringify(event));
+        activity = format(event, job.workspace);
       } catch {
         activity = line.trim() || null;
       }
       if (!activity) return;
+      if (/^→ /.test(activity)) worked = true;
       if (!unavailable && UNAVAILABLE.test(activity)) unavailable = activity.replace(/^\S+\s/, "");
       for (const l of activity.split("\n")) write(l);
       job.onActivity?.(activity.split("\n").at(-1)!);
@@ -63,6 +75,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
     createInterface({ input: child.stderr }).on("line", (line) => {
       if (!line.trim()) return;
       if (!unavailable && UNAVAILABLE.test(line)) unavailable = line.trim();
+      checkModel(line);
       write(`! ${line}`);
     });
     const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
@@ -75,6 +88,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
       if (job.signal?.aborted) return reject(Object.assign(new Error("cancelled"), { cancelled: true }));
       raw.end();
       if (code === 0) resolve();
+      else if (modelRejected) reject(Object.assign(new Error(modelRejected), { modelRejected: true }));
       else if (unavailable) reject(Object.assign(new Error(`${unavailable} (log in to ${job.builderName ?? "the builder CLI"}, or switch "builder" in platform.json)`), { unavailable: true }));
       else reject(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`));
     });
@@ -82,6 +96,28 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
 }
 
 const TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * Run with the asked-for model; if the CLI won't run it (retired, or not on this account), say so
+ * and run again on the CLI's default, so the build still happens. The owner is told (the Inbox).
+ */
+export async function withModelFallback(job: BuildJob, run: (job: BuildJob) => Promise<void>): Promise<void> {
+  try {
+    await run(job);
+  } catch (e) {
+    if (!(e as { modelRejected?: boolean }).modelRejected || !job.model) throw e;
+    const text = `${job.model} isn't available (${(e as Error).message.slice(0, 160)}); building with the default model instead`;
+    appendFileSync(job.logPath, `${stamp()} ${text}\n`);
+    job.onNote?.({ kind: "fallback", model: job.model, text });
+    const { model: _model, ...rest } = job;
+    await run(rest);
+  }
+}
+
+/** `--model` / `--effort` for Claude Code. */
+export const claudeModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["--model", m.model] : []), ...(m.effort ? ["--effort", m.effort] : [])];
+/** `-m` / reasoning effort for Codex. */
+export const codexModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["-m", m.model] : []), ...(m.effort && /^[a-z]{2,12}$/.test(m.effort) ? ["-c", `model_reasoning_effort="${m.effort}"`] : [])];
 
 /** Builder output meaning "retrying won't help": not logged in, revoked token, no quota. */
 export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|401|usage limit|quota exceeded/i;
@@ -176,70 +212,76 @@ export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undef
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
   name: "codex",
-  build: async (job) => {
-    const isolated = codexHome(join(dirname(dirname(job.logPath)), "builder-home", "codex"));
-    try {
-      await runCli(
-        "codex",
-        [
-          "exec",
-          "--ignore-user-config",
-          "--ephemeral",
-          "--skip-git-repo-check",
-          "--json",
-          // Codex's own sandbox cannot nest inside ours. When the platform confines the
-          // builder, ours is the boundary and Codex's commands inherit it.
-          "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
-          // The workspace is the project root: never walk up looking for other AGENTS.md files.
-          "-c", 'project_root_markers=["BUILDER.md"]',
-          "-C", job.workspace,
-          builderPrompt(job),
-        ],
-        job,
-        codexActivity,
-        TIMEOUT_MS,
-        // Codex has a shell: no Keychain. Its auth lives in its own home.
-        { ownState: [isolated.dir], denyKeychain: true },
-        isolated.env,
-      );
-    } finally {
-      isolated.syncBack();
-    }
-  },
+  build: (job) => withModelFallback(job, codexRun),
 };
+
+async function codexRun(job: BuildJob) {
+  const isolated = codexHome(join(dirname(dirname(job.logPath)), "builder-home", "codex"));
+  try {
+    await runCli(
+      "codex",
+      [
+        "exec",
+        "--ignore-user-config",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--json",
+        ...codexModelArgs(job),
+        // Codex's own sandbox cannot nest inside ours. When the platform confines the
+        // builder, ours is the boundary and Codex's commands inherit it.
+        "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
+        // The workspace is the project root: never walk up looking for other AGENTS.md files.
+        "-c", 'project_root_markers=["BUILDER.md"]',
+        "-C", job.workspace,
+        builderPrompt(job),
+      ],
+      job,
+      codexActivity,
+      TIMEOUT_MS,
+      // Codex has a shell: no Keychain. Its auth lives in its own home.
+      { ownState: [isolated.dir], denyKeychain: true },
+      isolated.env,
+    );
+  } finally {
+    isolated.syncBack();
+  }
+}
 
 /** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
 export const claudeBuilder: CapabilityBuilder = {
   name: "claude",
-  build: async (job) => {
-    // Its own dir per build: builds run side by side.
-    const isolated = claudeHome(join(dirname(dirname(job.logPath)), "builder-home", "claude", job.buildId));
-    try {
-      await runCli(
-        "claude",
-        [
-          "-p", builderPrompt(job),
-          "--output-format", "stream-json", "--verbose",
-          "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-          // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
-          // No project settings either: the workspace is the builder's to write, and settings there
-          // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
-          "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
-          "--permission-mode", "acceptEdits",
-          "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep",
-          "--disallowedTools", "Bash",
-        ],
-        job,
-        claudeActivity,
-        TIMEOUT_MS,
-        // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
-        { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
-        isolated.env,
-      );
-    } finally {
-      isolated.done();
-    }
-  },
+  build: (job) => withModelFallback(job, claudeRun),
 };
+
+async function claudeRun(job: BuildJob) {
+  // Its own dir per build: builds run side by side.
+  const isolated = claudeHome(join(dirname(dirname(job.logPath)), "builder-home", "claude", job.buildId));
+  try {
+    await runCli(
+      "claude",
+      [
+        "-p", builderPrompt(job),
+        "--output-format", "stream-json", "--verbose",
+        ...claudeModelArgs(job),
+        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+        // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
+        // No project settings either: the workspace is the builder's to write, and settings there
+        // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
+        "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
+        "--permission-mode", "acceptEdits",
+        "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep",
+        "--disallowedTools", "Bash",
+      ],
+      job,
+      claudeActivity,
+      TIMEOUT_MS,
+      // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
+      { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
+      isolated.env,
+    );
+  } finally {
+    isolated.done();
+  }
+}
 
 export const BUILDERS: Record<string, CapabilityBuilder> = { codex: codexBuilder, claude: claudeBuilder };

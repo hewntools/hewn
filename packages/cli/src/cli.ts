@@ -17,6 +17,7 @@ import { openHome } from "./home.ts";
 import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
 import { cliIntake } from "./intake.ts";
+import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
 import * as service from "./service.ts";
 import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
@@ -124,17 +125,29 @@ async function main() {
         log(`data format ${format.upgradeFrom} → ${format.current}: backed up first (${b.file})`);
       }
       const upgrade = await import("./upgrade.ts");
+      // A host that runs Hewn's builder and intake on its own keys (HEWN_BUILD_URL) adds "remote".
+      const remote = remoteJobsFromEnv();
+      if (remote) log(`builder and intake: also ${remote.label} (${new URL(remote.url).host})`);
       const sv = await startSupervisor({
         home,
         port,
         publicPort: process.env.HEWN_PUBLIC_PORT ? Number(process.env.HEWN_PUBLIC_PORT) : undefined,
         publicListen: readConfig(home).publicListen,
-        builders: BUILDERS,
-        intake: (which) => cliIntake(which as "claude" | "codex", home.root),
+        builders: remote ? { ...BUILDERS, remote: remoteBuilder(remote) } : BUILDERS,
+        intake: (which) => {
+          if (which === "remote") {
+            if (!remote) throw new Error("the host's intake isn't configured here (HEWN_BUILD_URL); pick another in Settings › AI");
+            return remoteIntake(remote);
+          }
+          return cliIntake(which as "claude" | "codex", home.root);
+        },
+        ...(remote ? { remote } : {}),
         setup: await realSetupHooks(),
         sandbox: !flag("no-sandbox"),
         sandboxBuilders: () => readConfig(home).sandbox,
         latest: upgrade.latestRelease,
+        // Only once a newer release is out: then its notes are fetched (at most twice a day).
+        latestNotes: () => (upgrade.latestRelease() && upgrade.latestRelease() !== upgrade.appVersion() ? upgrade.latestNotes() : []),
         log,
       });
       writeFormat(home);

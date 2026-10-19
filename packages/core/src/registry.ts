@@ -68,6 +68,17 @@ export interface BuildReview {
   };
 }
 
+/** What a build ran on (Settings › AI, or what was asked for), for the build page and Activity. */
+export interface BuildModel {
+  /** As asked or set: an alias ("fable"), a full name, or unset for the builder's default. */
+  model?: string;
+  effort?: string;
+  /** What the builder reported running on (a full name). */
+  ran?: string;
+  /** `fallback`: the model wasn't available, so it ran on the builder's default. */
+  note?: { kind: "fallback"; model: string; text: string };
+}
+
 export interface BuildRow {
   id: string;
   capabilityId: string;
@@ -238,6 +249,15 @@ CREATE TABLE IF NOT EXISTS builds (
   builder        TEXT,
   depends_on     TEXT,
   review         TEXT
+);
+-- What a build runs on: the model and effort asked for (or the owner's setting), the model it
+-- actually ran on, and a note for the owner (a pinned model that wasn't available).
+CREATE TABLE IF NOT EXISTS build_models (
+  build_id       TEXT PRIMARY KEY,
+  model          TEXT,
+  effort         TEXT,
+  ran_model      TEXT,
+  note           TEXT
 );
 `;
 
@@ -541,6 +561,29 @@ export class Registry {
     this.db
       .prepare("INSERT INTO builds (id, capability_id, kind, request, requested_by, builder, status, base_version, depends_on, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(b.id, b.capabilityId, b.kind, JSON.stringify(b.request), b.requestedBy, b.builder, status, b.baseVersion, b.dependsOn ?? null, t, t);
+  }
+
+  /** The model and effort a build runs with (kept apart from the request: retries copy the request, not the outcome). */
+  setBuildModel(buildId: string, m: { model?: string; effort?: string }) {
+    this.db.prepare("INSERT OR REPLACE INTO build_models (build_id, model, effort) VALUES (?, ?, ?)").run(buildId, m.model ?? null, m.effort ?? null);
+  }
+
+  /** The model the builder reported running on, and a note for the owner. */
+  updateBuildModel(buildId: string, patch: { ranModel?: string; note?: BuildModel["note"] }) {
+    this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
+    if (patch.ranModel !== undefined) this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(patch.ranModel, buildId);
+    if (patch.note !== undefined) this.db.prepare("UPDATE build_models SET note = ? WHERE build_id = ?").run(JSON.stringify(patch.note), buildId);
+  }
+
+  buildModel(buildId: string): BuildModel | undefined {
+    const r = this.db.prepare("SELECT * FROM build_models WHERE build_id = ?").get(buildId);
+    if (!r) return undefined;
+    return {
+      ...(r.model ? { model: r.model as string } : {}),
+      ...(r.effort ? { effort: r.effort as string } : {}),
+      ...(r.ran_model ? { ran: r.ran_model as string } : {}),
+      ...(r.note ? { note: JSON.parse(r.note as string) } : {}),
+    };
   }
 
   /** Builds waiting for `buildId` (or, without it, every waiting build). */

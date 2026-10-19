@@ -14,6 +14,7 @@ import { nodeSql } from "./sql.ts";
 import { localWorkbench } from "@hewntools/cli/workbench.ts";
 import { APP_DIR } from "@hewntools/cli/app-dir.ts";
 import { readConfig } from "@hewntools/cli/config.ts";
+import { agentModels, jobModel } from "@hewntools/host-workerd/surface/host.ts";
 
 export const BRIEF = readFileSync(join(APP_DIR, "spec", "builder-brief.md"), "utf8");
 
@@ -30,6 +31,8 @@ export interface NodePlatformOptions {
   visualCheck?: VisualCheck;
   /** HTTP for model providers and the model catalog (Hewn passes fetch; tests pass a fake). */
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Builds that may run at once (default 5). */
+  maxRunningBuilds?: number;
 }
 
 export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platform {
@@ -52,5 +55,9 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
     logRetentionDays: opts.logRetentionDays,
     timezone: () => readConfig(home).timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     modelFetch: opts.modelFetch,
+    // The owner's model choices, from platform.json (Settings › AI writes them there on this host).
+    buildModel: (builder) => jobModel(readConfig(home), "builder", builder),
+    agentBuildModels: (builder) => agentModels(readConfig(home), builder),
+    maxRunningBuilds: opts.maxRunningBuilds,
   });
 }

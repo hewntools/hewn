@@ -26,6 +26,9 @@ import { readConfig } from "../config.ts";
 import { type KeySource, masterKey } from "./master-key.ts";
 import { Tunnel, validTunnelConfig } from "./tunnel.ts";
 import { toolStatus } from "../setup/tools.ts";
+import { modelCatalogs } from "../builders/models.ts";
+import type { RemoteJobs } from "../builders/remote.ts";
+import type { ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { workerdBinary } from "../app-dir.ts";
 
@@ -59,6 +62,15 @@ export interface SupervisorOptions {
   browser?: string;
   /** The newest release in this version's line, for Settings › About (default: none). `hewn serve` checks the release feed. */
   latest?: () => string | null;
+  /** The notes of releases newer than this one, for About's upgrade card (default: none). */
+  latestNotes?: () => { version: string; date?: string; items: string[] }[];
+  /**
+   * The host runs Hewn's builder and intake (HEWN_BUILD_URL): "remote" is a choice, and the
+   * default. Its builder must also be in `builders` and its intake behind `intake("remote")`.
+   */
+  remote?: RemoteJobs;
+  /** Each agent's model list (default: read from its CLI, or the remote service). Tests stub it. */
+  models?: (agent: string) => Promise<ModelCatalog>;
 }
 
 export interface Supervisor {
@@ -131,6 +143,7 @@ const hewn :Workerd.Worker = (
     (name = "SECRETS_KEY", fromEnvironment = "HEWN_SECRETS_KEY"),
     (name = "TIMEZONE", fromEnvironment = "HEWN_TIMEZONE"),
     (name = "PROXY_SECRET", fromEnvironment = "HEWN_PROXY_SECRET"),
+    (name = "REMOTE_JOBS", fromEnvironment = "HEWN_REMOTE_JOBS"),
     (name = "PORT", text = "${o.port}"),
   ],
   durableObjectNamespaces = [
@@ -192,6 +205,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const controlToken = randomBytes(24).toString("hex");
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
+  const models = o.models ?? modelCatalogs({ ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
   const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined) });
   const blobRoot = join(data, "blobs");
 
@@ -218,10 +232,10 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       const abort = new AbortController();
       res.on("close", () => abort.abort());
       try {
-        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }) });
+        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onNote: (note) => send({ note }) });
         send({ done: true });
       } catch (e) {
-        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable });
+        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused });
       }
       res.end();
       return STREAMED;
@@ -273,8 +287,9 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       return harnessStatuses(s.harnesses(), s.userHome);
     },
     "/tunnel/status": async () => tunnel.current(),
-    "/setup/tools": async () => (o.tools ?? toolStatus)(),
-    "/status/info": async () => ({ machine: hostname().replace(/\.local$/, ""), version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(backupDir())[0]?.at ?? null, backupDir: backupDir(), latest: o.latest?.() ?? null }),
+    "/setup/tools": async () => [...(o.tools ?? toolStatus)(), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
+    "/models/catalog": async (b) => models(String(b.agent)),
+    "/status/info": async () => ({ machine: hostname().replace(/\.local$/, ""), version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(backupDir())[0]?.at ?? null, backupDir: backupDir(), latest: o.latest?.() ?? null, notes: o.latestNotes?.() ?? [] }),
     "/setup/connect": async (b, req, res) => {
       const send = ndjson(res);
       const s = o.setup!;
@@ -363,7 +378,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     child = spawn(command[0], command.slice(1), {
       // Run in its own data dir: workerd opens its working directory, and the sandbox only allows that.
       cwd: data,
-      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret },
+      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_REMOTE_JOBS: o.remote ? "1" : "" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (child.pid) writeFileSync(pidFile, String(child.pid));

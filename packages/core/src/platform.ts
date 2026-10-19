@@ -61,7 +61,7 @@ import {
 } from "./models.ts";
 import { migrationProblems, migrationsOf, rollbackProblems } from "./migrations.ts";
 import type { Blobs, CallHandler, CapabilityRuntime, CodeRef, ExecutionTarget, Files, SecretStore, Sql, StateRef, Workbench } from "./ports.ts";
-import { type BuildKind, type BuildReview, type BuildRow, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
+import { type BuildKind, type BuildModel, type BuildReview, type BuildRow, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
 import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
@@ -144,6 +144,8 @@ export interface BuildView {
   dependsOn?: string;
   /** Status "review": what the change would add; it goes live once the owner approves it. */
   review?: BuildReview;
+  /** What it runs on: the model and effort (as asked for or set), the model it ran on, and a note for the owner. */
+  model?: BuildModel;
   instructions?: string;
 }
 
@@ -174,7 +176,7 @@ type CreateRequest = {
   /** The build it waited for. */
   after?: string;
   retryOf?: string;
-};
+} & ModelAsk;
 
 
 export interface PlatformOptions {
@@ -195,6 +197,12 @@ export interface PlatformOptions {
   logger?: (message: string) => void;
   /** Builder for new builds, resolved per build (e.g. "claude", "codex"). */
   builder?: () => string | undefined;
+  /** The owner's model and effort for builds by this builder (Settings › AI). Unset: the builder's default. */
+  buildModel?: (builder: string) => { model?: string; effort?: string };
+  /** Model names an agent may ask a build by this builder to use (the owner ticks them; "default" is the builder's default). */
+  agentBuildModels?: (builder: string) => string[];
+  /** Builds that may run at once (the rest wait their turn). Default 5. */
+  maxRunningBuilds?: number;
   maxBuildAttempts?: () => number;
   /** The owner's timezone (IANA name) for schedules. Default UTC. */
   timezone?: () => string;
@@ -250,6 +258,21 @@ interface LoadedVersion {
   code: CodeRef;
 }
 
+/** Builds that run at once (per Hewn, so per owner); more wait their turn. */
+export const MAX_RUNNING_BUILDS = 5;
+
+/** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
+export type ModelAsk = {
+  /** An alias ("fable"), a full name, or "default" for the builder's own default. */
+  model?: string;
+  effort?: string;
+};
+
+const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { model: o.model } : {}), ...(o.effort !== undefined ? { effort: o.effort } : {}) });
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$/;
+const EFFORT = /^[a-z]{2,12}$/;
+
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
 
@@ -261,6 +284,11 @@ export class Platform {
   agentStore: AgentStore;
   logger: (message: string) => void;
   builderFor: () => string | undefined;
+  private buildModelFor: (builder: string) => { model?: string; effort?: string };
+  private agentBuildModels?: (builder: string) => string[];
+  /** Builds that may run at once; the rest wait their turn. */
+  maxRunningBuilds: number;
+  private slots = { busy: 0, queue: [] as (() => void)[] };
   maxBuildAttempts: () => number;
   secrets: SecretStore;
   schedules: ScheduleStore;
@@ -311,6 +339,9 @@ export class Platform {
     const log = opts.logger ?? (() => {});
     this.logger = (m) => (log(m), this.events.emit("changed"));
     this.builderFor = opts.builder ?? (() => undefined);
+    this.buildModelFor = opts.buildModel ?? (() => ({}));
+    this.agentBuildModels = opts.agentBuildModels;
+    this.maxRunningBuilds = opts.maxRunningBuilds ?? MAX_RUNNING_BUILDS;
     this.maxBuildAttempts = opts.maxBuildAttempts ?? (() => 3);
     this.secrets = opts.secrets ?? new MemorySecretStore();
     this.schedules = new ScheduleStore(opts.sql);
@@ -2285,14 +2316,14 @@ export class Platform {
    * for, e.g. the connection this capability will call; it starts once that one promotes.
    * `schedules`: the owner's approved schedules, set up once the build promotes (owner only).
    */
-  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[] }): Promise<BuildView & { widgetsBuildId?: string }> {
+  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
     const { widgets, ...rest } = req;
     this.checkApprovedSchedules(agent, req.schedules);
     if (widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
     const b = await this.createBuild(agent, rest);
     if (!widgets) return b;
     // Widgets are their own build, chained after this one: a broken widget never blocks the capability.
-    const w = await this.addWidgets(agent, { capabilityId: b.capabilityId, after: b.buildId });
+    const w = await this.addWidgets(agent, { capabilityId: b.capabilityId, after: b.buildId, ...pickAsk(req) });
     return { ...b, widgetsBuildId: w.buildId };
   }
 
@@ -2328,7 +2359,7 @@ export class Platform {
     }
   }
 
-  private async createBuild(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; schedules?: ApprovedSchedule[] }): Promise<BuildView> {
+  private async createBuild(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "create");
     const id = slugify(req.name);
     if (!id) throw new PlatformError("invalid_request", "name must contain letters or digits");
@@ -2397,6 +2428,35 @@ export class Platform {
     void this.releaseDependents(buildId);
   }
 
+  /** Requests whose model was already accepted once (automatic retries): not checked against the agent's list again. */
+  private trustedAsks = new WeakSet<object>();
+
+  /**
+   * The model and effort a new build runs with. Nothing asked: the owner's setting for this builder.
+   * The owner may ask for any model; an agent only for one the owner ticked (Settings › AI), and
+   * a name it may not use is an error listing the ones it may, never a quiet default.
+   */
+  private modelFor(agent: Agent, builder: string, ask: ModelAsk): { model?: string; effort?: string } {
+    if (builder === "keep" || builder.startsWith("copy:")) return {};
+    const { model, effort } = ask;
+    if (model === undefined && effort === undefined) return this.buildModelFor(builder);
+    if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) throw new PlatformError("invalid_request", "model must be a model name, like fable or claude-fable-5-1, or default");
+    if (effort !== undefined && (typeof effort !== "string" || !EFFORT.test(effort))) throw new PlatformError("invalid_request", "effort must be a level such as low, medium or high");
+    if (agent.kind !== "user" && model !== undefined && !this.trustedAsks.has(ask)) {
+      const allowed = this.agentModelChoices(builder);
+      if (!allowed.includes(model)) throw new PlatformError("invalid_request", `the owner doesn't let agents ask for '${model}' on this Hewn; you may ask for: ${allowed.join(", ")}`);
+    }
+    const chosen = model ?? this.buildModelFor(builder).model;
+    return { ...(chosen && chosen !== "default" ? { model: chosen } : {}), ...(effort ? { effort } : {}) };
+  }
+
+  /** Model names agents may pass for builds by `builder` (default: the current builder). Always includes "default". */
+  agentModelChoices(builder = this.builderFor()): string[] {
+    if (!builder) return ["default"];
+    const allowed = this.agentBuildModels?.(builder) ?? [];
+    return ["default", ...allowed.filter((m) => m !== "default")];
+  }
+
   private requireBuilder(): string {
     const builder = this.builderFor();
     if (!builder) throw new PlatformError("conflict", "no builder is configured (Settings → builder)");
@@ -2406,10 +2466,12 @@ export class Platform {
   /** A create build for `id` (newly reserved, or retrying a create that never promoted). */
   private async openCreateBuild(agent: Agent, id: string, req: CreateRequest, reserve: boolean, builderOverride?: string, seed?: Files, dependsOn?: string): Promise<BuildView> {
     const builder = builderOverride ?? this.requireBuilder();
+    const model = this.modelFor(agent, builder, req);
     const buildId = newBuildId();
     this.registry.transaction(() => {
       if (reserve) this.registry.insertCapability({ id, name: req.name, purpose: req.purpose, createdBy: agent.id });
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
+      this.registry.setBuildModel(buildId, model);
     });
     if (dependsOn) this.waitFor(buildId, id, dependsOn, `build ${buildId} [create ${id} by ${agent.id}]`);
     else await this.startCreate(buildId, seed);
@@ -2458,16 +2520,20 @@ export class Platform {
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). */
-  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[] }): Promise<BuildView> {
+  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "modify");
     this.checkApprovedSchedules(agent, req.schedules);
     const cap = this.visibleActive(agent, req.capabilityId);
     const builder = this.requireBuilder();
+    const model = this.modelFor(agent, builder, req);
     const dependsOn = this.dependency(agent, req.after);
     const { after: _after, ...rest } = req;
     const request = { ...rest, ...(dependsOn ? { after: dependsOn } : {}) };
     const buildId = newBuildId();
-    this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
+    this.registry.transaction(() => {
+      this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
+      this.registry.setBuildModel(buildId, model);
+    });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
     return this.buildView(this.registry.getBuild(buildId)!);
@@ -2479,17 +2545,21 @@ export class Platform {
    * says what to show; without one the builder proposes 1–3 widgets from the capability's data.
    * `after`: the build to wait for (e.g. the create build of the capability itself).
    */
-  async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string }): Promise<BuildView> {
+  async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "modify");
     const dependsOn = this.dependency(agent, req.after);
     const cap = dependsOn ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
     if (cap.activeVersion && isConnection(this.activeManifest(cap.id))) throw new PlatformError("invalid_request", `${cap.id} is a connection; connections have no widgets`);
     const builder = this.requireBuilder();
+    const model = this.modelFor(agent, builder, req);
     const { after: _after, ...rest } = req;
     const request = { ...rest, capabilityId: cap.id, request: rest.request?.trim() ?? "", ...(dependsOn ? { after: dependsOn } : {}) };
     const buildId = newBuildId();
-    this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
+    this.registry.transaction(() => {
+      this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
+      this.registry.setBuildModel(buildId, model);
+    });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
     return this.buildView(this.registry.getBuild(buildId)!);
@@ -2530,6 +2600,9 @@ export class Platform {
     if (opts.fix && old.status !== "failed") throw new PlatformError("conflict", "only failed builds can be fixed; retry it instead");
     const req: Record<string, any> = { ...old.request, retryOf: old.id };
     delete req.autoRetryOf;
+    // An automatic retry (after a restart) runs on what was asked; an agent's own retry is checked
+    // again, so a model the owner has unticked since isn't used.
+    if (opts.auto) this.trustedAsks.add(req);
     if (opts.auto) req.autoRetryOf = old.id;
     if (opts.fix) {
       // "Ask builder to fix": the same request plus why the last build failed.
@@ -2627,7 +2700,9 @@ export class Platform {
   private startBuilder(buildId: string, builder: string) {
     const abort = new AbortController();
     this.aborts.set(buildId, abort);
-    const run = this.runBuilder(buildId, builder, abort.signal)
+    let release = () => {};
+    const run = this.takeSlot(buildId, abort.signal)
+      .then((r) => ((release = r), abort.signal.aborted ? undefined : this.runBuilder(buildId, builder, abort.signal)))
       .catch((e) => {
         if (abort.signal.aborted) return;
         this.logger(`build ${buildId} crashed: ${(e as Error).message}`);
@@ -2635,6 +2710,7 @@ export class Platform {
         this.registry.updateBuild(buildId, { status: "failed", log });
       })
       .finally(() => {
+        release();
         this.running.delete(buildId);
         this.aborts.delete(buildId);
         this.progress.delete(buildId);
@@ -2645,6 +2721,42 @@ export class Platform {
       });
     this.running.set(buildId, run);
     this.events.emit(`${buildId}:state`);
+  }
+
+  /**
+   * Wait for one of the `maxRunningBuilds` places (in the order builds asked). Resolves with the
+   * function that gives it back; a build cancelled while it waits leaves the queue.
+   */
+  private takeSlot(buildId: string, signal: AbortSignal): Promise<() => void> {
+    const once = () => {
+      let given = false;
+      return () => {
+        if (given) return;
+        given = true;
+        const next = this.slots.queue.shift();
+        if (next) next();
+        else this.slots.busy--;
+      };
+    };
+    if (this.slots.busy < this.maxRunningBuilds) {
+      this.slots.busy++;
+      return Promise.resolve(once());
+    }
+    const b = this.mustBuild(buildId);
+    this.buildEvent(buildId, `queued: ${this.slots.busy} builds are running; it starts when one finishes`, `build ${buildId} [${b.kind} ${b.capabilityId}]`);
+    return new Promise((resolve) => {
+      const go = () => {
+        signal.removeEventListener("abort", leave);
+        resolve(once());
+      };
+      const leave = () => {
+        const i = this.slots.queue.indexOf(go);
+        if (i >= 0) this.slots.queue.splice(i, 1);
+        resolve(() => {});
+      };
+      this.slots.queue.push(go);
+      signal.addEventListener("abort", leave, { once: true });
+    });
   }
 
   /** Builder writes, platform validates; retry with feedback. */
@@ -2673,14 +2785,20 @@ export class Platform {
       }, this.heartbeatMs);
       (heartbeat as { unref?: () => void }).unref?.();
       try {
+        const asked = this.registry.buildModel(buildId);
         await this.workbench.build(
-          { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, feedback },
+          { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}) },
           {
             signal,
             onActivity: (line) => {
               live.lastActivity = line;
               live.lastActivityAt = Date.now();
               this.events.emit(buildId, line);
+            },
+            onModel: (ran) => this.registry.updateBuildModel(buildId, { ranModel: ran }),
+            onNote: (note) => {
+              this.registry.updateBuildModel(buildId, { note });
+              this.buildEvent(buildId, note.text, tag);
             },
           },
         );
@@ -2693,6 +2811,14 @@ export class Platform {
           this.buildEvent(buildId, `attempt ${attempt}: lost the connection to the builder (${(e as Error).message}); waiting before going on`, tag);
           await new Promise((ok) => setTimeout(ok, this.interruptWaitMs));
           if (cancelled()) return;
+        }
+        if ((e as { refused?: boolean }).refused) {
+          // The builder's host declined it (e.g. over the month's builds): say why, don't retry.
+          const line = `FAILED: refused: ${(e as Error).message}`;
+          history.push(line);
+          this.buildEvent(buildId, line, tag);
+          this.registry.updateBuild(buildId, { status: "failed", log: history });
+          return;
         }
         const msg = `attempt ${attempt}: builder ${builder} failed: ${(e as Error).message}`;
         history.push(msg);
@@ -3152,6 +3278,8 @@ export class Platform {
     const tests = testCounts(b.log);
     if (tests) view.tests = tests;
     if (b.status === "failed") view.failure = explainFailure(b.log);
+    const model = this.registry.buildModel(b.id);
+    if (model && Object.keys(model).length) view.model = model;
     if (b.status === "waiting") {
       view.instructions = `This build waits for build ${b.dependsOn} and starts on its own once that one promotes (if it fails, this one fails too). Call builds_wait to follow it.`;
     }

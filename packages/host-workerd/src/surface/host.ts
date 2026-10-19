@@ -18,6 +18,57 @@ export interface Settings {
   timeZone?: string;
   /** Hewn's jobs the owner has picked an agent for ("builder", "intake"); first run asks until both are. */
   jobsChosen?: string[];
+  /**
+   * The model and effort for each job, remembered per agent, so switching back restores them:
+   * `jobModels.builder.claude = { model: "fable", effort: "high" }`. Unset: the agent's default.
+   */
+  jobModels?: { builder?: Record<string, JobModel>; intake?: Record<string, JobModel> };
+  /** Model names agents may ask a build to use, per builder agent. Unset: Default and the families. */
+  agentModels?: Record<string, string[]>;
+}
+
+/** What one job runs on with one agent: a model name the agent's CLI takes, and an effort. */
+export interface JobModel {
+  model?: string;
+  effort?: string;
+}
+
+/** Hewn's two jobs; the owner sees one ("Builds tools"), with the split under Advanced. */
+export const JOBS = ["builder", "intake"] as const;
+export type Job = (typeof JOBS)[number];
+
+/** The agents that can do Hewn's jobs: the CLIs on this machine, and the host's builder when it offers one. */
+export const jobAgents = (remote: boolean) => ["claude", "codex", ...(remote ? ["remote"] : [])];
+
+/** Models agents may ask for until the owner changes it: the default and Claude Code's families (they follow the newest). */
+export const DEFAULT_AGENT_MODELS: Record<string, string[]> = { claude: ["default", "fable", "opus", "sonnet", "haiku"], codex: ["default"], remote: ["default"] };
+
+/** The owner's model and effort for `job` on `agent`. */
+export const jobModel = (s: Pick<Settings, "jobModels">, job: Job, agent: string): JobModel => s.jobModels?.[job]?.[agent] ?? {};
+
+/** Model names agents may pass for builds by `agent`. */
+export const agentModels = (s: Pick<Settings, "agentModels">, agent: string): string[] => s.agentModels?.[agent] ?? DEFAULT_AGENT_MODELS[agent] ?? ["default"];
+
+/** One option in an agent's model list (Settings › AI, the intake's +). */
+export interface ModelChoice {
+  /** What Hewn passes to the CLI: "default" (nothing), an alias ("fable"), or a full name. */
+  id: string;
+  label: string;
+  /** default: the CLI decides; family: the newest of it; pinned: exactly this one. */
+  kind: "default" | "family" | "pinned";
+  description?: string;
+  /** Effort levels it takes; empty when it has none. */
+  efforts: string[];
+  defaultEffort?: string;
+  /** A pinned model's successor, when its CLI names one (Codex's catalog). */
+  upgrade?: string;
+}
+
+/** An agent's model list, read from its CLI (or the host's builder). `other`: full names beyond the list are accepted. */
+export interface ModelCatalog {
+  agent: string;
+  models: ModelChoice[];
+  other?: boolean;
 }
 
 export interface HarnessStatus {
@@ -61,9 +112,11 @@ export interface SurfaceHost {
     connect(agentId: string, mcpUrl: string, event: (name: string, data: unknown) => void): Promise<void>;
   };
   /** Builder / intake CLIs on this machine: installed, signed in (first run, Settings). */
-  tools?: () => Promise<{ name: string; label: string; found: boolean; loggedIn?: boolean; fix?: string }[]>;
+  tools?: () => Promise<{ name: string; label: string; found: boolean; loggedIn?: boolean; fix?: string; remote?: boolean }[]>;
+  /** The models an agent offers (its CLI's list, or the host's builder's). Absent: only Default. */
+  modelCatalog?: (agent: string) => Promise<ModelCatalog>;
   /** Backup and version status (Settings). */
-  status?: () => Promise<{ machine?: string; version: string; dataFormat: number; lastBackup: string | null; backupDir: string; latest?: string | null }>;
+  status?: () => Promise<{ machine?: string; version: string; dataFormat: number; lastBackup: string | null; backupDir: string; latest?: string | null; notes?: { version: string; date?: string; items: string[] }[] }>;
   /** The public address agents in the cloud use (hewn tunnel). Absent: no tunnel support here. */
   tunnel?: () => Promise<TunnelStatus>;
   backups?: {
@@ -73,6 +126,52 @@ export interface SurfaceHost {
     /** Whether the backup folder is on the same disk as the data (null: can't tell). */
     sameDisk?(): Promise<boolean | null>;
   };
+}
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$/;
+const EFFORT = /^[a-z]{2,12}$/;
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Every setting's problems, for both settings stores (the workerd host's and platform.json).
+ * `remote`: the host offers its own builder ("remote").
+ */
+export function settingsProblems(next: Record<string, unknown>, opts: { remote?: boolean; changed?: string[] } = {}): string[] {
+  const agents = jobAgents(!!opts.remote);
+  const bad: string[] = [];
+  // Only what changes: a saved "remote" stays valid if the host stops offering it (it fails at build time instead).
+  const checks = (k: string) => !opts.changed || opts.changed.includes(k);
+  if (checks("builder") && !agents.includes(next.builder as string)) bad.push(`builder must be ${agents.join(", ")}`);
+  if (checks("intake") && !agents.includes(next.intake as string)) bad.push(`intake must be ${agents.join(", ")}`);
+  const n = next.maxBuildAttempts as number;
+  if (!Number.isInteger(n) || n < 1 || n > 5) bad.push("maxBuildAttempts must be 1–5");
+  if (typeof next.sandbox !== "boolean") bad.push("sandbox must be true or false");
+  if (next.firstRunDone !== undefined && typeof next.firstRunDone !== "boolean") bad.push("firstRunDone must be true or false");
+  const days = next.logRetentionDays as number;
+  if (!Number.isInteger(days) || days < 0 || days > 3650) bad.push("logRetentionDays must be 0 (forever) to 3650");
+  bad.push(...ownerPrefProblems(next), ...modelPrefProblems(next));
+  return bad;
+}
+
+/** Problems with the owner's model choices (jobModels, agentModels). */
+export function modelPrefProblems(s: { jobModels?: unknown; agentModels?: unknown }): string[] {
+  const bad: string[] = [];
+  if (s.jobModels !== undefined) {
+    const ok =
+      isObj(s.jobModels) &&
+      Object.entries(s.jobModels).every(
+        ([job, perAgent]) =>
+          (JOBS as readonly string[]).includes(job) &&
+          isObj(perAgent) &&
+          Object.values(perAgent).every((m) => isObj(m) && Object.keys(m).every((k) => k === "model" || k === "effort") && (m.model === undefined || (typeof m.model === "string" && MODEL_NAME.test(m.model))) && (m.effort === undefined || (typeof m.effort === "string" && EFFORT.test(m.effort)))),
+      );
+    if (!ok) bad.push('jobModels must look like { "builder": { "claude": { "model": "fable", "effort": "high" } } }');
+  }
+  if (s.agentModels !== undefined) {
+    const ok = isObj(s.agentModels) && Object.values(s.agentModels).every((list) => Array.isArray(list) && list.length <= 50 && list.every((m) => typeof m === "string" && MODEL_NAME.test(m)));
+    if (!ok) bad.push('agentModels must look like { "claude": ["default", "fable"] }');
+  }
+  return bad;
 }
 
 /** Problems with the owner's time zone and chosen jobs, for both settings stores. */

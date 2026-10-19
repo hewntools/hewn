@@ -21,17 +21,16 @@ Tools are **versioned**. Each change is a new version, tested before it becomes 
 
 See [Connecting agents](agents.md).
 
-## Hewn's three jobs
+## Hewn's two jobs
 
-Hewn uses AI itself, for three jobs (Settings › AI):
+Hewn uses AI itself, for two jobs (Settings › AI):
 
-- **Writes the spec:** the **intake** talks a request through with you and proposes a **spec** of what to build.
-- **Builds tools:** the **builder** writes the tool from the spec, in a sandbox.
-
-Both run Claude Code or Codex on your machine, on however it's signed in: a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI. Hewn adds no fees of its own.
+- **Builds tools:** an agent talks your request through with you, proposes a **spec** of what to build, and once you say Build, writes the tool in a sandbox. It runs Claude Code or Codex on your machine, on however it's signed in: a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI. Hewn adds no fees of its own. You choose its model and effort; [Choosing the model](models.md#building-tools) says how.
 - **Thinks inside tools:** tools that need a model call one through Hewn, with your API key and a monthly budget. See [Models](models.md).
 
-One agent can do the first two jobs and also use your tools as an MCP client.
+Building is two parts underneath: the **intake** talks it through (quick, writes nothing) and the **builder** builds (in a sandbox, takes minutes). Settings › AI › Advanced gives each its own agent and model, say a light model to talk it through and a strong one to build.
+
+One agent can build your tools and also use them as an MCP client.
 
 ## Builds
 

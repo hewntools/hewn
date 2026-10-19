@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { claudeHome, codexHome } from "./builders/cli.ts";
+import { claudeHome, claudeModelArgs, codexHome, codexModelArgs } from "./builders/cli.ts";
+import { MODEL_REJECTED } from "./builders/models.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
 
@@ -140,7 +141,7 @@ const IDEAS = {
 };
 
 /** One reply shape for both modes ("widgets" and "schedules" only when modifying, "ideas" only when creating). */
-const SCHEMA = {
+export const SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["kind", "message", "questions", "name", "purpose", "requirements", "request", "operations", "widgets", "model", "uses", "hosts", "secrets", "connection", "proposals", "ideas", "schedules"],
@@ -339,9 +340,33 @@ function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEn
   });
 }
 
-/** Intake backed by a headless coding-agent CLI, confined by the builder sandbox profile. */
+/**
+ * Intake backed by a headless coding-agent CLI, confined by the builder sandbox profile. It runs on
+ * the model the owner picked (`req.run`); one the CLI won't run is dropped for its default, and the
+ * owner sees that in the chat.
+ */
 export function cliIntake(which: "claude" | "codex", platformRoot: string): Intake {
+  const once = cliIntakeOnce(which, platformRoot);
   return async (req, onProgress, signal) => {
+    try {
+      return await once(req, onProgress, signal);
+    } catch (e) {
+      const model = req.run?.model;
+      if (!model || signal?.aborted || !MODEL_REJECTED.test((e as Error).message)) throw e;
+      onProgress?.({ activity: `${model} isn't available; answering with the default model` });
+      return once({ ...req, run: req.run?.effort ? { effort: req.run.effort } : {} }, onProgress, signal);
+    }
+  };
+}
+
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$/;
+const EFFORT = /^[a-z]{2,12}$/;
+
+function cliIntakeOnce(which: "claude" | "codex", platformRoot: string): Intake {
+  return async (req, onProgress, signal) => {
+    // They become CLI arguments (and Codex config): names and levels only.
+    if (req.run?.model !== undefined && !MODEL_NAME.test(String(req.run.model))) throw new Error("intake: model must be a model name");
+    if (req.run?.effort !== undefined && !EFFORT.test(String(req.run.effort))) throw new Error("intake: effort must be a level such as low or high");
     const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
     try {
       // Claude gets web lookup (WebFetch/WebSearch) to check services the owner mentions;
@@ -352,6 +377,7 @@ export function cliIntake(which: "claude" | "codex", platformRoot: string): Inta
         writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
         const args = [
           "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
+          ...codexModelArgs(req.run ?? {}),
           "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
           "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), prompt,
         ];
@@ -367,6 +393,7 @@ export function cliIntake(which: "claude" | "codex", platformRoot: string): Inta
       }
       const args = [
         "-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
+        ...claudeModelArgs(req.run ?? {}),
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
         "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",

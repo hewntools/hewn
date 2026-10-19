@@ -1,14 +1,25 @@
 # Models
 
-Some tools think: they suggest tags, explain a word, summarise your week. Those tools call a language model themselves, through Hewn, with **your own API key**. That's separate from your coding agent, which does [Hewn's other two jobs](concepts.md#hewns-three-jobs):
+Some tools think: they suggest tags, explain a word, summarise your week. Those tools call a language model themselves, through Hewn, with **your own API key**. That's separate from your coding agent, which builds your tools ([Hewn's two jobs](concepts.md#hewns-two-jobs)):
 
 | Hewn's job | Who does it | Paid by |
 | --- | --- | --- |
-| Writes the spec (the intake) | Claude Code or Codex on your machine | however it's signed in |
-| Builds tools (the builder) | Claude Code or Codex on your machine | however it's signed in |
+| Builds tools (talks it through, then builds) | Claude Code or Codex on your machine | however it's signed in |
 | Thinks inside tools | a model provider's API | your API key, metered |
 
-Tools call models directly, not through an agent, so your Claude Code or Codex login doesn't cover them, nor does a Claude or ChatGPT subscription. Settings › AI shows all three jobs and who does each.
+Tools call models directly, not through an agent, so your Claude Code or Codex login doesn't cover them, nor does a Claude or ChatGPT subscription. Settings › AI shows both jobs and who does each.
+
+## Building tools
+
+Building uses the model you pick for it in Settings › AI (**Builds tools › Model…**), with an effort (low, medium, high, and more on some models). The list comes from the agent itself:
+
+- **Default:** Hewn passes no model; the agent uses its own default, and follows it when that changes.
+- **A family** (Claude Code's Fable, Opus, Sonnet, Haiku): the newest of it. Picked on Fable 5.1, the next build after Fable 5.5 ships uses Fable 5.5.
+- **A pinned model** (a full name such as `claude-fable-5-1`, or any Codex model, whose names carry a version): stays on that one. When it's gone, or the agent won't run it, the build runs on the default instead and the Inbox tells you, so you can pick another.
+
+Switching agent means choosing its model; Hewn remembers your last choice for each agent. The **+** in the chat where you describe a tool picks a model and effort for that one request. Settings › AI › Advanced gives talking it through and building their own.
+
+Agents that ask for a build (`capabilities_create`, `capabilities_modify`, `capabilities_add_widgets`) can name a model too, but only one you allow: **Agents may ask for** in Settings › AI (Default and the families to start with). Asking for another is an error that names the allowed ones; nothing is built. Each build says what it ran on, on its page and in Activity.
 
 ## Setting it up
 

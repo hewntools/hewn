@@ -117,6 +117,29 @@ export interface BuildJob {
   attempt: number;
   /** Validation log from the previous attempt, if it failed. */
   feedback?: string;
+  /** The model to build with: a name the builder's CLI takes (an alias or a full name). Unset: the CLI's default. */
+  model?: string;
+  /** Reasoning effort, as the builder's CLI names it (low, medium, high …). Unset: the model's default. */
+  effort?: string;
+}
+
+/**
+ * How a build went, beyond its files: `onModel` names the model it actually ran on (a family such as
+ * "fable" resolves to a full name); `onNote` says something the owner should know (a pinned model
+ * that isn't available any more, so the build ran on the default).
+ */
+export interface BuildHooks {
+  onActivity: (line: string) => void;
+  signal: AbortSignal;
+  onModel?: (model: string) => void;
+  onNote?: (note: BuildNote) => void;
+}
+
+/** `fallback`: the asked-for model wasn't available, so the build ran on the CLI's default. */
+export interface BuildNote {
+  kind: "fallback";
+  model: string;
+  text: string;
 }
 
 export interface Workbench {
@@ -127,8 +150,11 @@ export interface Workbench {
   /** One workspace file, if present (e.g. the icon a builder writes first). */
   file(buildId: string, path: string): Promise<Uint8Array | undefined>;
   remove(buildId: string): Promise<void>;
-  /** Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't help. */
-  build(job: BuildJob, hooks: { onActivity: (line: string) => void; signal: AbortSignal }): Promise<void>;
+  /**
+   * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
+   * help, and `refused: true` that the builder's host declined it (e.g. over quota; the message says why).
+   */
+  build(job: BuildJob, hooks: BuildHooks): Promise<void>;
   /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */
   bundle(buildId: string): Promise<{ js: string; log: string[] }>;
   /** Append a line to the build's human-readable transcript. */

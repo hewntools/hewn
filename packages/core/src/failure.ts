@@ -53,6 +53,8 @@ export function explainFailure(log: string[]): BuildFailure {
   const msg = cause ?? "";
   const say = (title: string, detail: string): BuildFailure => ({ title, detail: clip(detail), ...meta });
   if (/interrupted by platform restart/.test(msg)) return say("Interrupted by a restart", "The platform restarted while this was building.");
+  const refused = /^refused: ([\s\S]*)$/.exec(msg);
+  if (refused) return say("Not built", refused[1].trim() || "The builder declined it.");
   if (/is unavailable/.test(msg)) {
     const name = /builder (\S+) is unavailable/.exec(msg)?.[1] ?? "The builder";
     return say("The builder isn't available", `${name} couldn't start. Check that it's installed and signed in.`);

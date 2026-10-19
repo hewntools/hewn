@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import type { BuildNote } from "@hewntools/core/ports.ts";
 import type { BuildKind } from "@hewntools/core/registry.ts";
 
 export interface BuildJob {
@@ -20,7 +21,17 @@ export interface BuildJob {
   platformRoot?: string;
   /** Aborted when the owner (or requester) cancels the build: stop and return/throw promptly. */
   signal?: AbortSignal;
+  /** The model to build with, as the CLI takes it (an alias or a full name). Unset: the CLI's default. */
+  model?: string;
+  /** Reasoning effort, as the CLI names it. Unset: the model's default. */
+  effort?: string;
+  /** The model the run actually used (a family resolves to a full name), when the CLI says. */
+  onModel?: (model: string) => void;
+  /** Something the owner should know about the run (it fell back to the default model). */
+  onNote?: (note: BuildNote) => void;
 }
+
+export type { BuildNote } from "@hewntools/core/ports.ts";
 
 /**
  * Turns a build request into a candidate implementation in the workspace.

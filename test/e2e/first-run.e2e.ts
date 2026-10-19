@@ -99,8 +99,8 @@ try {
     await page.goto(`${web}/auth?ticket=${ticket}`);
     await page.getByText("Make your own tools.").waitFor();
     await page.getByText(/Agents on this/).waitFor();
-    await page.getByText("Who works for Hewn").waitFor();
-    if ((await page.getByText("Not chosen").count()) !== 2) throw new Error("jobs chosen before the owner chose them");
+    await page.getByText("Who builds your tools").waitFor();
+    if ((await page.getByText("Not chosen").count()) !== 1) throw new Error("chosen before the owner chose");
     if (!(await page.getByPlaceholder("Describe it…").isDisabled())) throw new Error("Make something is open before a builder is chosen");
     await page.screenshot({ path: "/tmp/e2e-fr-welcome.png" });
   });
@@ -142,11 +142,28 @@ try {
     await page.screenshot({ path: "/tmp/e2e-fr-agents.png" });
   });
 
-  await step("build a starter: the build runs and the tool lands on Home", async () => {
+  await step("Settings › AI: one Builds tools row; pick its model; Advanced shows both halves on it", async () => {
+    await page.goto(`${web}/#/settings/ai`);
+    const row = page.locator(".setting", { hasText: "Builds tools" }).first();
+    await row.getByRole("button", { name: "Model…" }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "Model for building tools" });
+    await sheet.locator("label.job-option", { hasText: "Fable" }).locator("input").check();
+    await sheet.getByLabel("Effort").selectOption("high");
+    await sheet.getByRole("button", { name: "Save" }).click();
+    await row.getByText(/Fable · high effort/).waitFor();
+    await page.locator(".setting", { hasText: "Agents may ask for" }).getByText(/Default, Fable, Opus/).waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-ai.png" });
+    await page.locator("details.advanced > summary").click();
+    await page.locator("details.advanced .setting", { hasText: "Talks it through" }).getByText(/Fable · high effort/).waitFor();
+    await page.goto(`${web}/#/`);
+  });
+
+  await step("build a starter: the build runs on the chosen model and the tool lands on Home", async () => {
     await page.getByRole("button", { name: "Reading list" }).click();
     await page.waitForURL(/#\/b\//);
     await page.screenshot({ path: "/tmp/e2e-fr-building.png" });
     await page.getByText(/is ready|v1/).first().waitFor({ timeout: real ? 15 * 60_000 : 60_000 });
+    await page.getByText(/Built with Claude Code · /).waitFor();
     await page.goto(`${web}/#/`);
     await page.locator(".tile-label", { hasText: "Reading List" }).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-home.png" });

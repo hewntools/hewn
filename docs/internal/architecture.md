@@ -87,7 +87,7 @@ Both directions are token-authenticated (`HEWN_ADMIN_TOKEN` into workerd, `HEWN_
 
 ## Builds
 
-Every change to a capability is a build, run by a platform builder: Claude Code or Codex, chosen by the owner. An agent asks (`capabilities_create`, `capabilities_modify`, `capabilities_add_widgets`) or the owner does from the web client; nobody hands in code directly. `hewn install <dir>` is a build with a copy builder.
+Every change to a capability is a build, run by a platform builder: Claude Code or Codex, chosen by the owner, or the host's own builder (`remote`, below). An agent asks (`capabilities_create`, `capabilities_modify`, `capabilities_add_widgets`) or the owner does from the web client; nobody hands in code directly. `hewn install <dir>` is a build with a copy builder.
 
 ```text
 request → build row ("waiting" while its `after` build hasn't promoted)
@@ -123,7 +123,15 @@ A refreshed login is copied back. Versions never keep builder configuration (dot
 
 ## Intake
 
-The intake (`packages/cli/src/intake.ts`) is the job the web client calls "Writes the spec". It turns the owner's rough request into a draft: questions back, a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP, returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
+The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (Settings › AI › Advanced calls it "Talks it through"). It turns the owner's rough request into a draft: questions back, a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP, returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
+
+## Models for building, and the cap
+
+A build runs on a model and effort: what the requester asked for, else the owner's setting for that builder (`jobModels` in the settings, per job and per agent). The owner may ask for anything; an agent only for names the owner ticked (`agentModels`), checked in the core (`Platform.modelFor`). The builder passes them to its CLI (`--model`/`--effort`, `-m`/`model_reasoning_effort`), reports the model it ran on (Claude Code's `init` event), and when the CLI won't run a pinned model, runs again on the default and says so (`BuildNote`, then an Inbox row). The lists in Settings › AI come from the CLIs (`packages/cli/src/builders/models.ts`: `codex debug models`, Claude Code's families). At most 5 builds run at once (`MAX_RUNNING_BUILDS`); the rest wait in order.
+
+## The host's builder (`remote`)
+
+With `HEWN_BUILD_URL` (and `HEWN_BUILD_TOKEN`, `HEWN_BUILD_NAME`), the supervisor adds a builder and an intake that run on the host's service and model keys, and makes them the default: Hewn Cloud runs builds on separate short-lived machines, so a cell holds no model key. They sit behind the same `CapabilityBuilder` and `Intake` contracts: validation, tests and promotion stay in Hewn. A refusal (over quota) fails the build at once with the service's reason. The protocol: [remote-builder.md](remote-builder.md).
 
 ## Web client and tool UIs
 
