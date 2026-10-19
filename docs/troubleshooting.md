@@ -55,6 +55,16 @@ The passkey must have been added on the current public URL (`hewn url`): passkey
 **Port 7717 is in use**
 Another Hewn is probably running. Choose another port: `HEWN_PORT=7727 hewn service install`. The tunnel listener uses the next port (7728).
 
+**Hewn keeps restarting: "can't store the secrets key with secret-tool: … Could not connect"** (WSL, a server)
+`secret-tool` (from `libsecret-tools`) is installed, but there's no keyring for it to talk to. Hewn 0.4.0 tried to use it anyway; later versions don't. Remove it, or tell Hewn to use its key file, then restart:
+
+```sh
+sudo apt remove libsecret-tools    # or: set HEWN_KEY_SOURCE=file for the service
+hewn service restart
+```
+
+Your key stays in `~/.hewn/master.key` and your secrets keep working.
+
 ## Sandbox (Linux)
 
 **"bubblewrap isn't installed"**: `sudo apt install bubblewrap`.

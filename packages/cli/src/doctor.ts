@@ -123,10 +123,10 @@ export async function runDoctor(d: DoctorDeps): Promise<Check[]> {
     );
 
   // Secrets key
-  const key = status?.keySource ?? (d.keySource ?? defaultKeySource)();
+  const key = status?.keySource ?? (d.keySource ?? (() => defaultKeySource(d.home.root)))();
   add(
     key === "file"
-      ? { name: "Secrets key", state: "warn", detail: "kept in a file (master.key) in the Hewn home: anyone who can read the home as you can decrypt secrets", fix: "on a desktop session, install libsecret-tools (secret-tool) and restart Hewn" }
+      ? { name: "Secrets key", state: "warn", detail: "kept in a file (master.key) in the Hewn home: anyone who can read the home as you can decrypt secrets", fix: "keep the Hewn home private to you (chmod 700). On a Linux desktop with a keyring (GNOME Keyring, KWallet), a new Hewn home keeps its key there if libsecret-tools is installed before its first start; not on WSL or a server" }
       : { name: "Secrets key", state: "ok", detail: key === "keychain" ? "in the macOS Keychain" : "in the desktop keyring (libsecret)" },
   );
   const lost = up ? await d.unreadableSecrets?.().catch(() => []) : [];

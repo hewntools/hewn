@@ -2,8 +2,10 @@
 // The secrets master key: generated once per Hewn home, kept outside it. The supervisor hands it
 // to workerd at start; Hewn's own data dir only ever holds ciphertext.
 //   macOS: the login Keychain (service "hewn-master", account = the home's real path)
-//   Linux: libsecret via `secret-tool` when a desktop session is available, else a 0600 file
-//          next to the data (<home>/master.key) — see the self-host threat model.
+//   Linux: libsecret via `secret-tool` when a keyring actually answers (a desktop session), else a
+//          0600 file next to the data (<home>/master.key) — see the self-host threat model.
+// A home keeps the place its key is in: one with a master.key file goes on using it, even if a
+// keyring turns up later (a new key there couldn't decrypt the secrets the old one encrypted).
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -30,7 +32,11 @@ function libsecret(account: string): string {
   if (found.status === 0 && found.stdout.trim()) return found.stdout.trim();
   const key = fresh();
   const r = spawnSync("secret-tool", ["store", "--label=Hewn secrets key", "service", SERVICE, "home", account], { input: key, encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`can't store the secrets key with secret-tool: ${r.stderr.trim()}`);
+  if (r.status !== 0) {
+    throw new Error(
+      `can't store the secrets key with secret-tool: ${r.stderr.trim()}. If this machine has no keyring (WSL, a server), remove libsecret-tools or set HEWN_KEY_SOURCE=file, then restart Hewn.`,
+    );
+  }
   return key;
 }
 
@@ -43,16 +49,27 @@ function file(root: string): string {
   return key;
 }
 
-export function defaultKeySource(): KeySource {
+/**
+ * Whether a keyring answers `secret-tool`. Installed isn't enough: on WSL and servers there's a
+ * session bus but no Secret Service, and every call fails with "Could not connect".
+ */
+export function keyringAnswers(run = (args: string[]) => spawnSync("secret-tool", args, { encoding: "utf8", timeout: 5000 })): boolean {
+  if (!process.env.DBUS_SESSION_BUS_ADDRESS) return false;
+  // A lookup for something that isn't there: exit 1 and no message when the keyring answers.
+  const r = run(["lookup", "service", SERVICE, "probe", "hewn"]);
+  return !r.error && (r.status === 0 || r.status === 1) && !(r.stderr ?? "").trim();
+}
+
+export function defaultKeySource(root?: string): KeySource {
   const forced = process.env.HEWN_KEY_SOURCE;
   if (forced === "keychain" || forced === "libsecret" || forced === "file") return forced;
   if (platform() === "darwin") return "keychain";
-  const hasSecretTool = spawnSync("sh", ["-c", "command -v secret-tool"], { encoding: "utf8" }).status === 0;
-  return hasSecretTool && process.env.DBUS_SESSION_BUS_ADDRESS ? "libsecret" : "file";
+  if (root && existsSync(join(root, "master.key"))) return "file";
+  return keyringAnswers() ? "libsecret" : "file";
 }
 
 /** The base64 AES-256 key for this Hewn home. */
-export function masterKey(root: string, source: KeySource = defaultKeySource()): { key: string; source: KeySource } {
+export function masterKey(root: string, source: KeySource = defaultKeySource(root)): { key: string; source: KeySource } {
   const account = realpathSync(root);
   if (source === "keychain") return { key: keychain(account), source };
   if (source === "libsecret") return { key: libsecret(account), source };

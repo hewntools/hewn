@@ -221,7 +221,7 @@ async function main() {
         exec: realExec,
         service: { installed: st.installed || st.loaded, uninstall: () => service.uninstall() },
         binDirs: [...npmBin, join(defaultHome(), ".local", "bin")],
-        keySource: defaultKeySource(),
+        keySource: defaultKeySource(home.root),
         linux: process.platform === "linux",
       });
       let yes = flag("yes");
