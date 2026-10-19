@@ -146,6 +146,8 @@ export interface BuildView {
   review?: BuildReview;
   /** What it runs on: the model and effort (as asked for or set), the model it ran on, and a note for the owner. */
   model?: BuildModel;
+  /** What the builder's host charged for it, all attempts ("12 Credits"). Absent: no charge (a builder on the owner's own account). */
+  charge?: { amount: number; unit: string };
   instructions?: string;
 }
 
@@ -2800,6 +2802,10 @@ export class Platform {
               this.registry.updateBuildModel(buildId, { note });
               this.buildEvent(buildId, note.text, tag);
             },
+            onCharge: (c) => {
+              if (!Number.isFinite(c.amount) || c.amount < 0 || c.amount > 1e6 || !/^[A-Za-z][A-Za-z ]{0,19}$/.test(c.unit)) return;
+              this.registry.addBuildCharge(buildId, c);
+            },
           },
         );
       } catch (e) {
@@ -3280,6 +3286,8 @@ export class Platform {
     if (b.status === "failed") view.failure = explainFailure(b.log);
     const model = this.registry.buildModel(b.id);
     if (model && Object.keys(model).length) view.model = model;
+    const charge = this.registry.buildCharge(b.id);
+    if (charge) view.charge = charge;
     if (b.status === "waiting") {
       view.instructions = `This build waits for build ${b.dependsOn} and starts on its own once that one promotes (if it fails, this one fails too). Call builds_wait to follow it.`;
     }

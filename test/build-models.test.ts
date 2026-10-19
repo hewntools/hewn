@@ -131,6 +131,20 @@ describe("models for builds", () => {
     assert.equal(done.model!.note!.model, "fable-old");
   });
 
+  test("a host's charge: summed over attempts, shown as given; nonsense is dropped", async () => {
+    let n = 0;
+    use(recorder("fake", (job) => {
+      job.onCharge?.({ amount: 4, unit: "Credits" });
+      job.onCharge?.({ amount: -1, unit: "Credits" });
+      job.onCharge?.({ amount: 1, unit: "<script>" });
+      if (n++ === 0) return; // the first attempt writes nothing: validation fails, attempt 2 runs
+      cpSync(SEED, job.workspace, { recursive: true });
+    }), { attempts: 2 });
+    const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.deepEqual(done.charge, { amount: 8, unit: "Credits" });
+  });
+
   test("a refusal (over quota) fails at once with the host's reason, no further attempts", async () => {
     use(recorder("fake", () => {
       throw Object.assign(new Error("You've used this month's 40 builds; more on 1 November."), { refused: true });

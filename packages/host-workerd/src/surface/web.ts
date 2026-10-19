@@ -810,6 +810,7 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildKind: b.kind,
       builder: b.builder,
       ...(b.model ? { buildModel: b.model } : {}),
+      ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,
       ...(b.failure ? { failure: b.failure, reason: failureReason(b.failure) } : {}),
     });

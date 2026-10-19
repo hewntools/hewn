@@ -259,6 +259,12 @@ CREATE TABLE IF NOT EXISTS build_models (
   ran_model      TEXT,
   note           TEXT
 );
+-- What the builder's host charged (all attempts), in its own unit.
+CREATE TABLE IF NOT EXISTS build_charges (
+  build_id       TEXT PRIMARY KEY,
+  amount         REAL NOT NULL,
+  unit           TEXT NOT NULL
+);
 `;
 
 type Row = Record<string, any>;
@@ -573,6 +579,18 @@ export class Registry {
     this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
     if (patch.ranModel !== undefined) this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(patch.ranModel, buildId);
     if (patch.note !== undefined) this.db.prepare("UPDATE build_models SET note = ? WHERE build_id = ?").run(JSON.stringify(patch.note), buildId);
+  }
+
+  /** Add an attempt's charge to the build's (a different unit replaces it). */
+  addBuildCharge(buildId: string, c: { amount: number; unit: string }) {
+    const cur = this.buildCharge(buildId);
+    const amount = cur && cur.unit === c.unit ? cur.amount + c.amount : c.amount;
+    this.db.prepare("INSERT OR REPLACE INTO build_charges (build_id, amount, unit) VALUES (?, ?, ?)").run(buildId, amount, c.unit);
+  }
+
+  buildCharge(buildId: string): { amount: number; unit: string } | undefined {
+    const r = this.db.prepare("SELECT amount, unit FROM build_charges WHERE build_id = ?").get(buildId);
+    return r ? { amount: Number(r.amount), unit: String(r.unit) } : undefined;
   }
 
   buildModel(buildId: string): BuildModel | undefined {

@@ -232,7 +232,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       const abort = new AbortController();
       res.on("close", () => abort.abort());
       try {
-        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onNote: (note) => send({ note }) });
+        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onNote: (note) => send({ note }), onCharge: (charge) => send({ charge }) });
         send({ done: true });
       } catch (e) {
         send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused });

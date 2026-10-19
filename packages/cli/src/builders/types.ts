@@ -29,6 +29,8 @@ export interface BuildJob {
   onModel?: (model: string) => void;
   /** Something the owner should know about the run (it fell back to the default model). */
   onNote?: (note: BuildNote) => void;
+  /** What the builder's host charged for this attempt (the remote builder). */
+  onCharge?: (charge: { amount: number; unit: string }) => void;
 }
 
 export type { BuildNote } from "@hewntools/core/ports.ts";

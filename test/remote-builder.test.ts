@@ -62,11 +62,14 @@ describe("remote builder and intake", () => {
       ndjson(res, [
         { activity: "→ Write src/index.ts" },
         { model: "claude-fable-5-5" },
+        { heartbeat: true },
+        { charge: { amount: 12, unit: "Credits" } },
         { files: { "BUILDER.md": b64("brief"), "src/index.ts": b64("export const operations = {};"), "capability.json": b64("{}") } },
         { done: true },
       ]);
     const dir = workspace();
-    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed" });
+    const charges: unknown[] = [];
+    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed", onCharge: (c) => charges.push(c) });
     await remoteBuilder(remote).build(j);
     const sent = seen.at(-1)!;
     assert.equal(sent.path, "/v1/builds");
@@ -78,6 +81,7 @@ describe("remote builder and intake", () => {
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);
     assert.deepEqual(j.models, ["claude-fable-5-5"]);
+    assert.deepEqual(charges, [{ amount: 12, unit: "Credits" }]);
     assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "export const operations = {};");
     assert.ok(existsSync(join(dir, "capability.json")));
     assert.ok(!existsSync(join(dir, "old.txt")), "files it didn't return are gone");

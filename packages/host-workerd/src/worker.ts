@@ -236,6 +236,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
           if (e.activity) hooks.onActivity(e.activity);
           if (e.model) hooks.onModel?.(e.model);
           if (e.note) hooks.onNote?.(e.note);
+          if (e.charge) hooks.onCharge?.(e.charge);
           if (e.error) failure = e;
         }, hooks.signal);
       } catch (e) {

@@ -3022,6 +3022,8 @@ async function buildPage(id) {
 const buildModelWords = (b) => (b.model && (b.model.ran || b.model.model || b.model.effort) ? modelWords({ model: b.model.ran ?? b.model.model, effort: b.model.effort }) : "");
 /** Whose account a build spends: the builder agent's own, or the host's keys. */
 const accountWords = (builder) => (builder === "remote" ? "on the host's keys" : "on your account");
+/** What the builder's host charged, as it says it: "12 Credits" (1 decimal at most). */
+const chargeWords = (c) => (c ? `${Math.round(c.amount * 10) / 10} ${c.unit}` : "");
 
 /** "Codex asked · " when an agent asked for the build (it runs on the owner's builder account all the same). */
 const askedBy = (b) => {
@@ -3034,7 +3036,7 @@ const builtWith = (b) =>
   b.builder &&
   !["keep", "agent"].includes(b.builder) &&
   !b.builder.startsWith("copy:") &&
-  h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}`, b.model?.note && h("span", {}, ` · ${b.model.note.text}`));
+  h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}${b.charge ? ` · ${chargeWords(b.charge)}` : ""}`, b.model?.note && h("span", {}, ` · ${b.model.note.text}`));
 
 function buildPanel(id, { compact = false, onPromoted } = {}) {
   const card = h("div", { class: compact ? "build-panel stack-md" : "card build-card" }, skeleton("50%", "80%"));
@@ -3441,9 +3443,9 @@ function activityRow(g, all, showCap) {
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
-    const ran = buildModelWords({ model: g.buildModel });
+    const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
     if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
-    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref]));
+    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
   } else if (g.kind === "lifecycle") {

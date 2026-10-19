@@ -11,7 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Each build says what it ran on**, on its page and in Activity ("Built with Claude Code · claude-fable-5-5 · high effort").
 - **At most 5 builds run at once**; the rest wait their turn (and can be cancelled while they wait).
 - **About shows what's new** in a newer release, from the changelog, above the upgrade command.
-- **For hosts:** with `HEWN_BUILD_URL`, Hewn's builder and intake run on the host's own service and model keys (a refusal, such as over a quota, says why and isn't retried). This is what Hewn Cloud uses; the protocol is in [`docs/internal/remote-builder.md`](docs/internal/remote-builder.md).
+- **For hosts:** with `HEWN_BUILD_URL`, Hewn's builder and intake run on the host's own service and model keys (a refusal, such as over a quota, says why and isn't retried; what the host charges for a build, such as Credits, shows on its page and in Activity). This is what Hewn Cloud uses; the protocol is in [`docs/internal/remote-builder.md`](docs/internal/remote-builder.md).
 
 ## 0.4.1 (2026-10-19)
 

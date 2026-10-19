@@ -133,6 +133,14 @@ export interface BuildHooks {
   signal: AbortSignal;
   onModel?: (model: string) => void;
   onNote?: (note: BuildNote) => void;
+  /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. Credits). */
+  onCharge?: (charge: BuildCharge) => void;
+}
+
+/** A host's charge for a build, as the owner sees it ("12 Credits"); Hewn shows it as given. */
+export interface BuildCharge {
+  amount: number;
+  unit: string;
 }
 
 /** `fallback`: the asked-for model wasn't available, so the build ran on the CLI's default. */
