@@ -249,7 +249,10 @@ async function openNeed(n) {
       if (c) await confirmationSheet(c);
     } else if (n.kind === "schedule") {
       const x = (await api("/schedules")).find((s) => s.id === n.id);
-      if (x) await proposalSheet(x);
+      if (x?.status === "paused") {
+        const cap = await api(`/capabilities/${enc(x.capabilityId)}`);
+        await schedulesSheet({ ...((await caps()).get(x.capabilityId) ?? {}), ...cap }, runnableOps(cap));
+      } else if (x) await proposalSheet(x);
     } else if (n.kind === "model") {
       const c = (await caps(true)).get(n.capabilityId);
       if (n.action === "Replace…" && c) await toolModelSheet(c, { replace: true });
@@ -281,14 +284,15 @@ async function renderInbox() {
   const { needs, building, recent } = inboxData;
   const tab = (key, label) => h("button", { "aria-pressed": String(inboxTab === key), onclick: (e) => (e.stopPropagation(), (inboxTab = key), renderInbox(), key === "activity" && pollInbox(true)) }, label);
   const head = h("div", { class: "inbox-head" }, h("div", { class: "segmented" }, tab("needs", `Needs you · ${needs.length}`), tab("activity", "Activity")), h("a", { class: "link sm", href: "#/activity" }, "All activity ›"));
+  // The whole row opens it; what it opens to stays in the row's label.
   const needRow = (n) =>
     h(
       "div",
-      { class: "inbox-row" },
+      { class: "inbox-row link", role: "button", tabindex: 0, "aria-label": `${n.title}: ${n.detail}. ${n.action}`, onclick: () => openNeed(n), onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openNeed(n)) },
       h("span", { class: `dot ${n.severity}` }),
       needIcon(n, all),
       h("div", { class: "grow" }, h("span", { class: "title" }, n.title), h("span", { class: "small muted clip-1" }, n.detail)),
-      h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), openNeed(n)) }, n.action),
+      h("span", { class: "faint", "aria-hidden": "true" }, "›"),
     );
   const buildRow = (b) => {
     const c = all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.name };
@@ -3426,6 +3430,17 @@ function reviewTitle(b, all) {
   return h("span", { class: "title-ref" }, ops.length ? [`${who} wants to add ${andList(ops)} to `, ref] : [`${who} wants to change `, ref]);
 }
 
+/** A description's first sentence (cut at 200 characters), and the rest. */
+const summaryOf = (d = "") => {
+  const first = /^[\s\S]+?[.!?](?=\s|$)/.exec(d.trim())?.[0] ?? d.trim();
+  return first.length > 200 ? `${first.slice(0, 199).replace(/\s+\S*$/, "")}…` : first;
+};
+const restOf = (d = "") => {
+  const t = d.trim();
+  const first = /^[\s\S]+?[.!?](?=\s|$)/.exec(t)?.[0] ?? t;
+  return first.length > 200 ? t : t.slice(first.length).trim();
+};
+
 /** One new operation: what agents can do with it, what it takes and (full view) what it returned in its tests. */
 function reviewOp(o, { full }) {
   const [pill, verb, tone] = EFFECT[o.sideEffect] ?? EFFECT.write;
@@ -3433,7 +3448,9 @@ function reviewOp(o, { full }) {
   return h(
     "div",
     { class: "stack-sm" },
-    h("div", { class: "row tight wrap" }, h("span", { class: `pill ${tone}` }, pill), h("span", { class: "strong" }, `Agents can then ${verb}: `, h("span", { class: "muted" }, o.description))),
+    h("div", { class: "row tight wrap" }, h("span", { class: `pill ${tone}` }, pill), h("span", { class: "strong" }, `Agents can then ${verb}: `, h("span", { class: "muted" }, summaryOf(o.description)))),
+    // Descriptions are written for agents, often a long paragraph: the first sentence above, the rest folded.
+    restOf(o.description) && h("details", { class: "small review-more" }, h("summary", {}, "Full description"), h("p", { class: "muted pre-line" }, restOf(o.description))),
     h("div", { class: "small faint mono" }, [o.key, takes].filter(Boolean).join(" · ")),
     full && (o.example ? [h("div", { class: "eyebrow" }, "What it returned in its tests"), h("pre", { class: "small review-example" }, o.example)] : o.inputs && h("div", { class: "small muted" }, "No test shows what it returns.")),
   );

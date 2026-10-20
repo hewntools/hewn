@@ -416,8 +416,10 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .release-notes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 
 /* An Inbox row that is a link as a whole (a build): looks like the other rows. */
-a.inbox-row { color: inherit; text-decoration: none; border-radius: 10px; }
-a.inbox-row:hover { background: var(--surface-2); }
+a.inbox-row, .inbox-row.link { color: inherit; text-decoration: none; border-radius: 10px; cursor: pointer; }
+a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { background: var(--surface-2); }
+.pre-line { white-space: pre-line; margin: 6px 0 0; }
+.review-more > summary { cursor: pointer; color: var(--text-2); }
 
 /* The build page: who builds it on what, a labelled strip across the card. */
 .build-meta { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1px; border-radius: 12px; overflow: hidden; background: var(--border); border: 1px solid var(--border); }

@@ -330,6 +330,19 @@ describe("web: models for building", () => {
     t.cleanup();
   });
 
+  test("a schedule that paused itself after failing is in the Inbox; one the owner paused isn't", async () => {
+    const b = (await api("/capabilities", { method: "POST", body: { name: "Run Log", purpose: "p", requirements: "r" } })).json;
+    assert.equal((await platform.settle(b.buildId)).status, "promoted");
+    const sch = platform.createSchedule(USER, { capabilityId: b.capabilityId, operation: "list_runs", cadence: "daily 12:30" } as any);
+    platform.schedules.update(sch.id, { status: "paused", failures: 3, pausedReason: "paused after 3 failures in a row" });
+    const need = (await api("/inbox")).json.needs.find((n: { id: string }) => n.id === sch.id);
+    assert.ok(need, "the Inbox names it");
+    assert.equal(need.severity, "danger");
+    assert.match(need.detail, /stopped running daily 12:30: it failed 3 times in a row/);
+    platform.schedules.update(sch.id, { failures: 0, pausedReason: null });
+    assert.ok(!(await api("/inbox")).json.needs.some((n: { id: string }) => n.id === sch.id), "paused by the owner: not news");
+  });
+
   test("each agent's model list; the owner's model per job and agent, checked", async () => {
     assert.deepEqual((await api("/tools/claude/models")).json.models.map((m: { id: string }) => m.id), ["default", "fable", "opus", "sonnet", "haiku"]);
     assert.equal((await api("/settings", { method: "PUT", body: { jobModels: { builder: { claude: { model: "--x" } } } } })).status, 400);

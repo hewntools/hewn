@@ -703,6 +703,9 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger", action: "Show", at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
     needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, agentId: x.createdBy, title: nameOf(x.capabilityId), detail: `${who(x.createdBy)} wants to run ${x.operation.split("@")[0]} ${x.cadence}`, severity: "warn", action: "Review", at: x.createdAt });
+  // A schedule that stopped itself after failing in a row: whatever it keeps fresh goes stale quietly otherwise.
+  for (const x of platform.listSchedules(owner).filter((s) => s.status === "paused" && s.pausedReason))
+    needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, title: nameOf(x.capabilityId), detail: `${x.operation.split("@")[0]} stopped running ${x.cadence}: it failed ${x.failures} times in a row`, severity: "danger", action: "Resume…", at: x.lastRunAt ?? x.createdAt });
 
   // Tools (and connections) that can't run until the owner does something.
   let modelUsers = false;
