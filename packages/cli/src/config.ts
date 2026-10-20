@@ -53,7 +53,8 @@ function stored(home: Home): Partial<Record<(typeof KEYS)[number], unknown>> {
   const raw: Record<string, unknown> = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
   const out = Object.fromEntries(KEYS.filter((k) => raw[k] !== undefined).map((k) => [k, raw[k]]));
   const chosen = Array.isArray(raw.jobsChosen) ? raw.jobsChosen : [];
-  if (process.env.HEWN_BUILD_URL) for (const k of ["builder", "intake"] as const) if (out[k] !== "remote" && !chosen.includes(k)) delete out[k];
+  // Hosted (HEWN_HOSTED): the host builds, whatever was chosen before.
+  if (process.env.HEWN_BUILD_URL) for (const k of ["builder", "intake"] as const) if (out[k] !== "remote" && (!chosen.includes(k) || process.env.HEWN_HOSTED === "1")) delete out[k];
   return out;
 }
 

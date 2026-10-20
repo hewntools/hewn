@@ -28,7 +28,7 @@ import { Tunnel, validTunnelConfig } from "./tunnel.ts";
 import { toolStatus } from "../setup/tools.ts";
 import { modelCatalogs } from "../builders/models.ts";
 import type { RemoteJobs } from "../builders/remote.ts";
-import type { JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
+import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { workerdBinary } from "../app-dir.ts";
 
@@ -76,18 +76,15 @@ export interface SupervisorOptions {
   models?: (agent: string) => Promise<ModelCatalog>;
 }
 
-export interface Hosted {
-  /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL): signed-out pages link there. */
-  signInUrl?: string;
-}
+export type { Hosted };
 
 /**
  * Hosted mode (HEWN_HOSTED=1): a host runs this Hewn for its owner, who has no terminal and no
  * agents on the machine, so the host must also build (HEWN_BUILD_URL). Unset: self-hosted.
  */
 export function hostedFromEnv(env: NodeJS.ProcessEnv = process.env): Hosted | undefined {
-  if (!env.HEWN_HOSTED) return undefined;
-  if (env.HEWN_HOSTED !== "1") throw new Error("HEWN_HOSTED must be 1 (or unset)");
+  if (!env.HEWN_HOSTED || env.HEWN_HOSTED === "0") return undefined;
+  if (env.HEWN_HOSTED !== "1") throw new Error("HEWN_HOSTED must be 1 (or 0, or unset)");
   if (!env.HEWN_BUILD_URL) throw new Error("HEWN_HOSTED needs HEWN_BUILD_URL: a hosted owner has no agent on the machine to build with");
   const url = env.HEWN_HOST_SIGNIN_URL;
   if (url && !(URL.canParse(url) && new URL(url).protocol === "https:")) throw new Error("HEWN_HOST_SIGNIN_URL must be an https URL");

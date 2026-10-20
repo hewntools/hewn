@@ -4682,7 +4682,7 @@ async function remoteSection() {
     "remote",
     h("h1", { class: "flush" }, "Remote access"),
     // Hosted: the address is the host's; nothing to set up.
-    settingsCard(setting("Public address", remote?.url ? `${remote.url}` : "Not set: Hewn is only on this machine", !settings?.hosted && h("button", { class: "sm", onclick: setUp }, "Set up…"))),
+    settingsCard(setting("Public address", remote?.url ? remote.url : settings?.hosted ? "Not set up yet" : "Not set: Hewn is only on this machine", !settings?.hosted && h("button", { class: "sm", onclick: setUp }, "Set up…"))),
     remote &&
       h(
         "div",

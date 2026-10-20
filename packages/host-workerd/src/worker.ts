@@ -379,11 +379,14 @@ export class HewnDO extends DurableObject<Env> {
     // A host that runs the builder and intake makes them the default.
     const out: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...(this.env.REMOTE_JOBS === "1" ? { builder: "remote", intake: "remote" } : {}) };
     for (const r of this.sql.prepare("SELECT key, value FROM settings").all()) out[r.key] = JSON.parse(r.value);
+    // Hosted: the host builds, whatever was stored before (a home moved from a machine with agents).
+    if (this.env.HOSTED === "1") Object.assign(out, { builder: "remote", intake: "remote" });
     return out as unknown as Settings;
   }
 
   /** Validate the whole result, store only what changed: settings left alone keep following their defaults. */
   private writeSettings(change: Record<string, unknown>): Settings {
+    if (this.env.HOSTED === "1" && [change.builder, change.intake].some((a) => a !== undefined && a !== "remote")) throw new PlatformError("invalid_request", "the host builds tools here");
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
@@ -438,7 +441,8 @@ export class HewnDO extends DurableObject<Env> {
       },
       intakeLog: async (entry) => void (await sv.json("/intake/log", entry)),
       modelCatalog: (agent) => sv.json<ModelCatalog>("/models/catalog", { agent }),
-      ...(hosted ? { hosted: env.HOST_SIGNIN_URL ? { signInUrl: env.HOST_SIGNIN_URL } : {} } : {}),
+      // The supervisor checked the link is https; checked again, as it goes into an href.
+      ...(hosted ? { hosted: env.HOST_SIGNIN_URL && URL.canParse(env.HOST_SIGNIN_URL) && new URL(env.HOST_SIGNIN_URL).protocol === "https:" ? { signInUrl: env.HOST_SIGNIN_URL } : {} } : {}),
       // Hosted: no local agents to connect, and the public address is the host's (no tunnel).
       ...(hosted
         ? {}

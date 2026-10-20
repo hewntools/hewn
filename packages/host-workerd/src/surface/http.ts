@@ -64,4 +64,7 @@ export const typeOf = (path: string) => TYPES[path.split(".").at(-1)!.toLowerCas
 export const cookieValue = (req: Request, name: string) => new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(req.headers.get("cookie") ?? "")?.[1];
 
 /** Bytes as a Response body (TS's DOM typings don't accept every Uint8Array buffer kind). */
+/** HTML-escape text for the server-rendered pages. */
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 export const body = (b: Uint8Array | string): BodyInit => b as unknown as BodyInit;

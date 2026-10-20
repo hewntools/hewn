@@ -17,9 +17,10 @@ const SIGN_IN = "https://host.example/open";
 describe("hosted mode: the environment", () => {
   test("off unless HEWN_HOSTED=1; it needs the host's builder; the sign-in link is https", () => {
     assert.equal(hostedFromEnv({}), undefined);
+    assert.equal(hostedFromEnv({ HEWN_HOSTED: "0", HEWN_BUILD_URL: "https://builds.example/" }), undefined);
     assert.deepEqual(hostedFromEnv({ HEWN_HOSTED: "1", HEWN_BUILD_URL: "https://builds.example/" }), {});
     assert.deepEqual(hostedFromEnv({ HEWN_HOSTED: "1", HEWN_BUILD_URL: "https://builds.example/", HEWN_HOST_SIGNIN_URL: SIGN_IN }), { signInUrl: SIGN_IN });
-    assert.throws(() => hostedFromEnv({ HEWN_HOSTED: "yes" }), /must be 1/);
+    assert.throws(() => hostedFromEnv({ HEWN_HOSTED: "yes" }), /must be 1 \(or 0, or unset\)/);
     assert.throws(() => hostedFromEnv({ HEWN_HOSTED: "1" }), /needs HEWN_BUILD_URL/);
     assert.throws(() => hostedFromEnv({ HEWN_HOSTED: "1", HEWN_BUILD_URL: "https://builds.example/", HEWN_HOST_SIGNIN_URL: "http://host.example/open" }), /https/);
   });

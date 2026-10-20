@@ -98,6 +98,11 @@ export interface TunnelStatus {
   error?: string;
 }
 
+/** Hosted mode (HEWN_HOSTED): `signInUrl` is where the host signs the owner in (HEWN_HOST_SIGNIN_URL). */
+export interface Hosted {
+  signInUrl?: string;
+}
+
 export interface SurfaceHost {
   /** Port the browser uses (the web client is http://hewn.localhost:<port>). */
   port: number;
@@ -129,7 +134,7 @@ export interface SurfaceHost {
    * and signed-out pages send the owner to the host instead of to a command; `signInUrl` is where
    * the host signs the owner in (HEWN_HOST_SIGNIN_URL). Absent: self-hosted.
    */
-  hosted?: { signInUrl?: string };
+  hosted?: Hosted;
   /** The public address agents in the cloud use (hewn tunnel). Absent: no tunnel support here. */
   tunnel?: () => Promise<TunnelStatus>;
   backups?: {

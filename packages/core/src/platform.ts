@@ -940,7 +940,7 @@ export class Platform {
   async passkeySignIn(site: { origin: string; rpId: string }, body: { challenge: string; response: AssertionResponse }, userAgent?: string): Promise<string> {
     this.takeChallenge(String(body.challenge ?? ""), "get");
     const stored = this.registry.passkey(String(body.response?.id ?? ""));
-    if (!stored || stored.rpId !== site.rpId) throw new PlatformError("unauthenticated", "this passkey isn't one of Hewn's (it may have been removed); sign in with a link: hewn open --print");
+    if (!stored || stored.rpId !== site.rpId) throw new PlatformError("unauthenticated", "this passkey isn't one of Hewn's (it may have been removed): sign in another way, then add a new one");
     try {
       const { signCount } = await verifyAssertion(body.response, { challenge: body.challenge, origin: site.origin, rpId: site.rpId }, { key: JSON.parse(stored.publicKey) as StoredKey, signCount: stored.signCount });
       this.registry.usePasskey(stored.credentialId, signCount);

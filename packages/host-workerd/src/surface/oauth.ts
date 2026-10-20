@@ -8,7 +8,7 @@ import { OAuthError } from "@hewntools/core/agents.ts";
 import { SCOPES } from "@hewntools/core/auth.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { randomToken } from "@hewntools/core/sha256.ts";
-import { json } from "./http.ts";
+import { esc, json } from "./http.ts";
 
 export const OAUTH_PATHS = new Set([
   "/.well-known/oauth-protected-resource",
@@ -147,7 +147,6 @@ export async function handleOAuth(platform: Platform, req: Request, origin: Orig
   }
 }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function page(title: string, body: string, nonce?: string, script = ""): Response {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

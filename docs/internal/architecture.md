@@ -135,7 +135,7 @@ With `HEWN_BUILD_URL` (and `HEWN_BUILD_TOKEN`, `HEWN_BUILD_NAME`), the superviso
 
 ## Hosted mode (`HEWN_HOSTED`)
 
-With `HEWN_HOSTED=1` (which needs `HEWN_BUILD_URL`; `hostedFromEnv` in the supervisor), a host runs Hewn for an owner who has no terminal. The workerd host gets `HOSTED` and `HOST_SIGNIN_URL` and gives the surface `host.hosted` instead of `setup` (local agents) and `tunnel`. Signed-out pages, `/approve` and the OAuth approval page send the owner to the host's sign-in link instead of a command; `/api/settings` adds `hosted: true`, and the web client hides the builder choice, the first run's builder step, Remote access set-up, the sandbox and backup folder settings, and the upgrade command. The admin channel stays: it's how the host runs `hewn open --print`, `hewn backup now` and `hewn status` in the machine. Agents' OAuth, scopes and grants are unchanged.
+With `HEWN_HOSTED=1` (which needs `HEWN_BUILD_URL`; `hostedFromEnv` in the supervisor), a host runs Hewn for an owner who has no terminal. The workerd host gets `HOSTED` and `HOST_SIGNIN_URL` and gives the surface `host.hosted` instead of `setup` (local agents) and `tunnel`. Signed-out pages, `/approve` and the OAuth approval page send the owner to the host's sign-in link instead of a command; `/api/settings` adds `hosted: true` and always reports the host's builder and intake (another can't be stored), and the web client hides the builder choice, the first run's builder step, Remote access set-up, the sandbox and backup folder settings, and the upgrade command. The admin channel stays: it's how the host runs `hewn open --print`, `hewn backup now` and `hewn status` in the machine. Agents' OAuth, scopes and grants are unchanged.
 
 ## Web client and tool UIs
 

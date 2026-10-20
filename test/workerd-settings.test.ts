@@ -65,5 +65,8 @@ describe("hosted mode on the workerd host", () => {
     assert.equal(s.builder, "remote");
     assert.equal((await api("/setup/agents")).status, 404);
     assert.deepEqual(JSON.parse((await api("/tools")).body).map((t: { name: string }) => t.name), ["remote"]);
+    // The host builds: another builder can't be chosen, and one stored before doesn't count.
+    await assert.rejects(h.sv.admin("settings", { builder: "claude", intake: "claude" }), /the host builds tools here/);
+    assert.deepEqual([s.builder, s.intake], ["remote", "remote"]);
   });
 });

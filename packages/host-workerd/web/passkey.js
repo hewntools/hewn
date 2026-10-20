@@ -30,12 +30,19 @@ export function passkeyError(e) {
 const KNOWN = "hewn-passkeys";
 export const knownPasskeys = () => {
   try {
-    return JSON.parse(localStorage.getItem(KNOWN) ?? "[]");
+    const ids = JSON.parse(localStorage.getItem(KNOWN) ?? "[]");
+    return Array.isArray(ids) ? ids : [];
   } catch {
     return [];
   }
 };
-const remember = (id) => localStorage.setItem(KNOWN, JSON.stringify([...new Set([...knownPasskeys(), id])]));
+const remember = (id) => {
+  try {
+    localStorage.setItem(KNOWN, JSON.stringify([...new Set([...knownPasskeys(), id])]));
+  } catch {
+    // No storage (a private window): Remote access just keeps offering to add one.
+  }
+};
 
 /** Make a passkey on this device and add it to Hewn (signed in). */
 export async function addPasskey(name) {
