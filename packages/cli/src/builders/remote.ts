@@ -38,6 +38,9 @@ const endpoint = (r: RemoteJobs, path: string) => new URL(path, r.url.endsWith("
 /** A service failure: refused (it declined, e.g. over quota) or unavailable (bad token, gone) never retry. */
 const failure = (message: string, kind?: "refused" | "unavailable") => Object.assign(new Error(message), kind ? { [kind]: true } : {});
 
+/** A path the service may write: relative, inside the workspace, and not an artefact (node_modules …). */
+const writable = (p: string) => !!p && !p.startsWith("/") && !p.includes("\\") && !p.split("/").some((s) => s === "" || s === "." || s === "..") && !isArtefact(p);
+
 /**
  * POST a JSON body and read the NDJSON events back as they come. A refusal may also arrive as the
  * status (402, 403 or 429 with `{ "refused": "…" }`).
@@ -120,6 +123,15 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
           if (typeof e.model === "string") job.onModel?.(e.model);
           // What the host charged for this attempt, in its own unit (Hewn Cloud: Credits); shown as given.
           if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
+          // One file mid-build (the icon, written first), so Home and the build page show it while it builds.
+          // The final `files` event still replaces the whole tree.
+          if (e.file && typeof e.file.path === "string" && typeof e.file.content === "string" && writable(e.file.path)) {
+            try {
+              writeTree(job.workspace, { [e.file.path]: fromBase64(e.file.content) });
+            } catch {
+              // Can't be written as sent (a file where a directory is): it's only a preview, skip it.
+            }
+          }
           if (e.files && typeof e.files === "object") result = e.files;
           if (e.done === true) done = true;
           if (typeof e.refused === "string") error = { refused: e.refused };
@@ -135,7 +147,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
       // Every path checked before anything is written: relative, inside the workspace, no artefacts.
       const returned = new Map<string, Uint8Array>();
       for (const [p, b] of Object.entries(result)) {
-        if (typeof b !== "string" || !p || p.startsWith("/") || p.includes("\\") || p.split("/").some((s) => s === "" || s === "." || s === "..") || isArtefact(p)) throw new Error(`${r.label} returned a path Hewn won't write: ${p.slice(0, 120)}`);
+        if (typeof b !== "string" || !writable(p)) throw new Error(`${r.label} returned a path Hewn won't write: ${p.slice(0, 120)}`);
         returned.set(p, fromBase64(b));
       }
       // The returned tree is the whole candidate: files it doesn't list are gone.

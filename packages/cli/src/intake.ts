@@ -422,6 +422,8 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         else if (e?.type === "content_block_delta" && e.delta?.type === "text_delta") {
           text += e.delta.text;
           onProgress(partialReply(text));
+        } else if (e?.type === "content_block_start" && e.content_block?.type === "thinking") {
+          onProgress({ activity: "Thinking" });
         } else if (e?.type === "content_block_start" && e.content_block?.type === "tool_use") {
           onProgress({ activity: e.content_block.name === "WebSearch" ? "Searching the web" : "Reading a web page" });
         }

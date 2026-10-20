@@ -2029,6 +2029,9 @@ export class Platform {
     const visible = new Set(this.list(owner).map((c) => c.id));
     const keys = new Set<string>();
     const clean: HomeEntry[] = [];
+    // Widgets already placed, by key: one whose options a later version no longer takes still saves
+    // (it shows its error until the owner sets new options), so it can't block moving everything else.
+    const placed = new Map((this.registry.getKv<HomeEntry[]>(HOME_LAYOUT) ?? []).flatMap((e) => (e.type === "widget" ? [[e.key, e] as const] : [])));
     for (const raw of entries as Record<string, unknown>[]) {
       const id = String(raw?.id ?? "");
       if (!visible.has(id)) continue; // gone since the page loaded
@@ -2051,7 +2054,10 @@ export class Platform {
         if (!(w.sizes as string[]).includes(size)) throw new PlatformError("invalid_request", `widget ${id}/${widget} comes in ${w.sizes.join(", ")}, not ${size}`);
         const op = m.operations.find((o) => opKey(o.name, o.version) === w.operation)!;
         const check = compileSchema(op.inputSchema);
-        if (!check(input ?? {})) throw new PlatformError("invalid_request", `widget ${id}/${widget}: input doesn't match ${w.operation}`, schemaErrors(check));
+        const prev = placed.get(key);
+        // Compared as JSON: what the client sends back is what it was given, in the same key order.
+        const unchanged = prev?.id === id && prev.widget === widget && JSON.stringify(prev.input ?? {}) === JSON.stringify(input ?? {});
+        if (!unchanged && !check(input ?? {})) throw new PlatformError("invalid_request", `widget ${id}/${widget}: input doesn't match ${w.operation}`, schemaErrors(check));
       } else if (!(WIDGET_SIZES as readonly string[]).includes(size)) throw new PlatformError("invalid_request", `unknown size ${size}`);
       // A widget that no longer exists may stay where it is (shown as missing) but can't be placed anew.
       else if (!this.homeLayout(owner).some((e) => e.type === "widget" && e.key === key)) throw new PlatformError("not_found", `${id} has no widget ${widget}`);

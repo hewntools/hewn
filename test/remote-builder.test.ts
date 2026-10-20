@@ -116,6 +116,28 @@ describe("remote builder and intake", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("a file sent mid-build (the icon) is in the workspace at once; the final tree still decides", async () => {
+    const icon = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    handle = (_b, _r, res) =>
+      ndjson(res, [
+        { file: { path: "ui/icon.svg", content: b64(icon) } },
+        { file: { path: "../escape.svg", content: b64("x") } },
+        { file: { path: "ui", content: b64("x") } },
+        { activity: "→ Write src/index.ts" },
+        { files: { "BUILDER.md": b64("brief"), "ui/icon.svg": b64(icon), "src/index.ts": b64("export const operations = {};") } },
+        { done: true },
+      ]);
+    const dir = workspace();
+    let iconWhileBuilding: string | undefined;
+    await remoteBuilder(remote).build(job(dir, { onActivity: () => (iconWhileBuilding = readFileSync(join(dir, "ui", "icon.svg"), "utf8")) }));
+    assert.equal(iconWhileBuilding, icon, "written before the build ended");
+    assert.ok(!existsSync(join(dir, "..", "escape.svg")), "a path outside the workspace is ignored");
+    // "ui" is a directory by then: that file can't be written, and the build goes on.
+    assert.equal(readFileSync(join(dir, "ui", "icon.svg"), "utf8"), icon);
+    assert.ok(!existsSync(join(dir, "old.txt")));
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("cancelling the build closes the request", async () => {
     closed = false;
     handle = (_b, _r, res) => {
@@ -159,7 +181,7 @@ describe("remote builder and intake", () => {
     const c = await remoteCatalog(remote.url, remote.token);
     assert.deepEqual(c.models.map((m) => m.id), ["default", "fast"]);
     assert.equal(remoteJobsFromEnv({}), undefined);
-    assert.deepEqual(remoteJobsFromEnv({ HEWN_BUILD_URL: "https://builds.example/", HEWN_BUILD_TOKEN: "t", HEWN_BUILD_NAME: "Hewn Cloud" }), { url: "https://builds.example/", token: "t", label: "Hewn Cloud" });
+    assert.deepEqual(remoteJobsFromEnv({ HEWN_BUILD_URL: "https://builds.example/", HEWN_BUILD_TOKEN: "t", HEWN_BUILD_NAME: "Test Cloud" }), { url: "https://builds.example/", token: "t", label: "Test Cloud" });
     assert.throws(() => remoteJobsFromEnv({ HEWN_BUILD_URL: "file:///etc" }), /https/);
     assert.throws(() => remoteJobsFromEnv({ HEWN_BUILD_URL: "http://builds.example/" }), /https/, "the token never goes in clear text");
     assert.ok(remoteJobsFromEnv({ HEWN_BUILD_URL: "http://127.0.0.1:9/" }));

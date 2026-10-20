@@ -123,6 +123,8 @@ const loadSettings = async () => {
   settings = await api("/settings").catch(() => null);
   // Taken from the browser the first time, editable under Settings › General.
   if (settings && !settings.timeZone && browserZone()) settings = await api("/settings", { method: "PUT", body: { timeZone: browserZone() } }).catch(() => settings);
+  // The host's builder goes by the name the host gives it, which only /tools knows: once per load.
+  if (settings?.builder === "remote" || settings?.intake === "remote") for (const t of await api("/tools").catch(() => [])) if (t.remote) rememberAgents([{ id: t.name, name: t.label }]);
   return settings;
 };
 const sandboxNotice = () =>
@@ -751,7 +753,10 @@ async function home({ editing = false } = {}) {
     if (!c) continue;
     if (e.type === "icon" && !tiles.has(c.id)) addTile(c);
     if (e.type === "widget") {
-      const w = widgetTile(e, c, { remove: () => (w.el.remove(), widgets.splice(widgets.indexOf(w), 1), saveLayout(grid, widgets, hiddenIds).then(() => home(), fail)) });
+      // Its options (the operation's input), when it takes any: set when placed, changeable here.
+      const gw = homeData.gallery.find((g) => g.capabilityId === e.id)?.widgets.find((x) => x.name === e.widget);
+      const options = Object.keys(gw?.inputSchema?.properties ?? {}).length ? () => widgetOptionsSheet(w.entry, c, gw).then((saved) => saved && home(), fail) : undefined;
+      const w = widgetTile(e, c, { remove: () => (w.el.remove(), widgets.splice(widgets.indexOf(w), 1), saveLayout(grid, widgets, hiddenIds).then(() => home(), fail)), options });
       widgets.push(w);
       items.push(w.el);
     }
@@ -851,10 +856,10 @@ const layoutOf = (grid, widgets, hiddenIds) =>
   [...grid.querySelectorAll(".tile[data-id], .tile-widget[data-key]")].flatMap((el) => {
     if (el.dataset.id) return [{ type: "icon", id: el.dataset.id, ...(hiddenIds.has(el.dataset.id) ? { hidden: true } : {}) }];
     const w = widgets.find((x) => x.el === el);
-    if (!w) return [];
-    const { key, id, widget, size, input } = w.entry;
-    return [{ type: "widget", key, id, widget, size, ...(input ? { input } : {}) }];
+    return w ? [storedEntry(w.entry)] : [];
   });
+/** A Home entry as the layout stores it (without the view and other fields the server adds). */
+const storedEntry = (e) => (e.type === "icon" ? { type: "icon", id: e.id, ...(e.hidden ? { hidden: true } : {}) } : { type: "widget", key: e.key, id: e.id, widget: e.widget, size: e.size, ...(e.input ? { input: e.input } : {}) });
 const saveLayout = (grid, widgets, hiddenIds = new Set()) => api("/home/layout", { method: "PUT", body: { entries: layoutOf(grid, widgets, hiddenIds) } });
 
 /** Drag icons and widgets to reorder Home (desktop). The layout is saved as an owner preference. */
@@ -930,7 +935,7 @@ const renderer = async () => (widgetRenderer ??= (await import("/_platform/widge
  * A placed widget (F6): the platform draws its view model (no tool code on Home). It shows the
  * cached view first; a failed refresh keeps that view and says how old it is. Tap opens the tool.
  */
-function widgetTile(e, c, { remove }) {
+function widgetTile(e, c, { remove, options }) {
   const slot = h("div", { class: "widget-slot" });
   const staleNote = h("span", { class: "jw-stale-note", hidden: true });
   const el = h("div", { class: `tile-widget w-${e.size}`, role: "button", tabindex: 0, "data-key": e.key }, slot, staleNote);
@@ -985,6 +990,7 @@ function widgetTile(e, c, { remove }) {
   withContextMenu(el, () => [
     ["Open", open],
     !e.missing && ["Refresh", refresh],
+    !e.missing && options && !el.closest(".editing") && ["Options…", options],
     !e.missing && ["Change…", () => openChange(c, { widget: e.widget })],
     "-",
     ["Remove widget", remove, { danger: true }],
@@ -1122,6 +1128,50 @@ async function addWidgetSheet({ capabilityId, widget, onAdded } = {}) {
     { width: 520 },
   );
   if (added) onAdded ? onAdded() : (location.hash === "" || location.hash === "#/") && route();
+}
+
+/** A placed widget's options: the form it was added with, filled in, live preview; saves the layout with the new input. */
+async function widgetOptionsSheet(e, c, w) {
+  let saved = false;
+  await modal(
+    (close) => {
+      const required = new Set(w.inputSchema?.required ?? []);
+      const fields = Object.entries(w.inputSchema?.properties ?? {}).map(([n, s]) => [n, field(n, s, required.has(n))]);
+      for (const [n, f] of fields) f.write(e.input?.[n]);
+      const readInput = () => Object.fromEntries(fields.map(([n, f]) => [n, f.read()]).filter(([, v]) => v !== undefined));
+      const preview = widgetPreview(c, e.id, w, { size: e.size, input: e.input ?? {} });
+      for (const [, f] of fields) f.el.addEventListener("change", () => preview.load(readInput()));
+      const saveBtn = h("button", { class: "primary", type: "submit" }, "Save");
+      const form = h(
+        "form",
+        {
+          class: "stack-md",
+          onsubmit: async (ev) => {
+            ev.preventDefault();
+            try {
+              saveBtn.disabled = true;
+              const input = readInput();
+              // The layout as stored, with this widget's input replaced.
+              const { layout } = await api("/home");
+              const entries = layout.map((x) => storedEntry(x.key === e.key ? { ...x, input: Object.keys(input).length ? input : undefined } : x));
+              await api("/home/layout", { method: "PUT", body: { entries } });
+              saved = true;
+              close();
+            } catch (err) {
+              saveBtn.disabled = false;
+              fail(err);
+            }
+          },
+        },
+        preview.el,
+        h("div", { class: "fields" }, fields.map(([, f]) => f.el)),
+        sheetActions(h("button", { type: "button", onclick: () => close() }, "Cancel"), saveBtn),
+      );
+      return [sheetHead(appIcon(c, { size: 44 }), e.title ?? w.title, c.name), form];
+    },
+    { width: 520 },
+  );
+  return saved;
 }
 
 /** New widgets come from the intake, for one tool (it suggests a few; only the ticked ones are built). */
@@ -3046,7 +3096,7 @@ function proposalCard(kind, list, ctx) {
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
-    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it, on the host's keys.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
+    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
     h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
@@ -3100,7 +3150,7 @@ function milestones(b) {
 
 async function buildPage(id) {
   const panel = buildPanel(id, {});
-  view(...moment({ left: "-60px", bottom: "-20px" }, backBar("Activity", "#/activity?view=builds"), h("div", { class: "build-center" }, panel.el)));
+  view(...moment({ left: "-60px", bottom: "-20px" }, topBar(""), sandboxNotice(), h("div", { class: "build-center" }, panel.el)));
 }
 
 /**
@@ -3110,8 +3160,6 @@ async function buildPage(id) {
  */
 /** What a build runs on, in words ("Fable · high effort"; the model it ran on, once the builder says). */
 const buildModelWords = (b) => (b.model && (b.model.ran || b.model.model || b.model.effort) ? modelWords({ model: b.model.ran ?? b.model.model, effort: b.model.effort }) : "");
-/** Whose account a build spends: the builder agent's own, or the host's keys. */
-const accountWords = (builder) => (builder === "remote" ? "on the host's keys" : "on your account");
 /** What the builder's host charged, as it says it: "12 Credits" (1 decimal at most). */
 const chargeWords = (c) => (c ? `${Math.round(c.amount * 10) / 10} ${c.unit}` : "");
 
@@ -3132,7 +3180,7 @@ function buildMeta(b) {
     "div",
     { class: "build-meta" },
     asked && cell("Asked by", [agentTile(catalogOf({ id: b.requestedBy })?.id ?? b.requestedBy, who, 18), who]),
-    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder === "remote" ? "on the host's keys" : "on your account"),
+    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder !== "remote" && "on your account"),
     cell("Model", model ? pretty(model) : "Default", null, model),
     cell("Effort", [h("span", { class: "meter", "aria-hidden": "true" }, efforts.map((_, i) => h("i", { class: i < level ? "on" : "" }))), b.model?.effort ? b.model.effort[0].toUpperCase() + b.model.effort.slice(1) : "Default"]),
   );
@@ -3791,6 +3839,7 @@ const logoTile = (hue, logo, letters, size) =>
   h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
 /** An agent's tile, by id (claude-code-2 → claude-code) or by its name. */
 const agentTile = (id, label = id, size = 44) => {
+  if (id === "remote") return brandTile(size);
   const entry = AGENT_CATALOG.find((c) => id === c.id || String(id).startsWith(`${c.id}-`) || c.label === label || c.label === id);
   const [hue, logo] = TILES[entry?.id ?? id] ?? [260, null];
   return logoTile(hue, logo, String(label).replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "AG", size);
@@ -3834,7 +3883,7 @@ async function jobPicker({ thenModel = false } = {}) {
       label: t.label,
       tile: agentTileOf(t, 28),
       disabled: !ready(t),
-      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "Runs on the host's own keys" : `On ${machine.word} · signed in`,
+      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "" : `On ${machine.word} · signed in`,
     })),
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
@@ -4483,7 +4532,7 @@ function timeZoneSheet(current) {
 
 /**
  * O1 Settings › AI: what Hewn runs AI for. Building tools (talking a request through, then building
- * it) runs one agent, on this machine and its own account or on the host's keys. Thinking inside
+ * it) runs one agent, on this machine and its own account, or the host's builder. Thinking inside
  * tools is a metered API call with your key.
  */
 async function aiSection() {
@@ -4491,7 +4540,7 @@ async function aiSection() {
   const tile = (t) => agentTileOf(t, 20);
   const builder = tools.find((x) => x.name === s.builder);
   const catalogs = new Map([[s.builder, await api(`/tools/${enc(s.builder)}/models`).catch(() => null)]]);
-  const agentWords = (t) => `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? (t.remote ? "its own keys" : "signed in") : t.fix ?? "not ready"}`;
+  const agentWords = (t) => (t.remote && ready(t) ? t.label : `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}`);
   /** Who builds tools, on which model; Change picks the agent, Model… the model and effort. */
   const buildsRow = () => {
     const chosen = buildsChosen(s);
@@ -4541,7 +4590,7 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
-    h("div", { class: "small faint" }, builder?.remote ? "Building runs on the host's own model keys." : "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
+    !builder?.remote && h("div", { class: "small faint" }, "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );
 }
