@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Hewn's builder and intake run by the host (HEWN_BUILD_URL), on its own model keys: Hewn Cloud runs
-// them elsewhere, so a cell holds no model key, only its token for the service. The protocol is in
+// Hewn's builder and intake run by the host (HEWN_BUILD_URL), on its own model keys: the host can run
+// them elsewhere, so this Hewn holds no model key, only its token for the service. The protocol is in
 // docs/internal/remote-builder.md. Validation, tests and promotion stay in Hewn, as for any builder.
 import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -17,7 +17,7 @@ export interface RemoteJobs {
   url: string;
   /** This Hewn's token for it (HEWN_BUILD_TOKEN): the only credential the cell holds. */
   token: string;
-  /** What the owner sees it called (HEWN_BUILD_NAME), e.g. "Hewn Cloud". */
+  /** What the owner sees it called (HEWN_BUILD_NAME). */
   label: string;
   fetch?: typeof fetch;
 }
@@ -121,7 +121,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
             job.onActivity?.(e.activity);
           }
           if (typeof e.model === "string") job.onModel?.(e.model);
-          // What the host charged for this attempt, in its own unit (Hewn Cloud: Credits); shown as given.
+          // What the host charged for this attempt, in its own unit; shown as given.
           if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
           // One file mid-build (the icon, written first), so Home and the build page show it while it builds.
           // The final `files` event still replaces the whole tree.

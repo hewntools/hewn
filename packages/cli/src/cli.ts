@@ -152,7 +152,7 @@ async function main() {
       });
       writeFormat(home);
       writeFileSync(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", { mode: 0o600 });
-      // Off unless set: a host that scrapes Hewn (Hewn Cloud) turns it on.
+      // Off unless set: a host that scrapes Hewn turns it on.
       const metricsPort = Number(process.env.HEWN_METRICS_PORT ?? 0);
       if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log });
       log(`Hewn on ${webOrigin(port)} · MCP ${sv.url}/mcp · tunnels point at ${sv.publicUrl}${sv.publicNetwork ? ` · public listener also on ${sv.publicNetwork}` : ""} · home ${home.root}${flag("no-sandbox") ? " · workerd sandbox OFF" : ""}`);

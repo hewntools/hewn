@@ -41,7 +41,7 @@ export interface SupervisorOptions {
   publicListen?: string;
   /**
    * Only requests carrying this in x-hewn-proxy-secret pass the public listener (a host behind its
-   * own proxy, e.g. Hewn Cloud). Default: HEWN_PROXY_SECRET; unset or "" = off.
+   * own proxy). Default: HEWN_PROXY_SECRET; unset or "" = off.
    */
   proxySecret?: string;
   builders: Record<string, CapabilityBuilder>;

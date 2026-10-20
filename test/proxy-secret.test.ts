@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // HEWN_PROXY_SECRET: a host whose public listener is reachable directly as well as through its own
-// proxy (Hewn Cloud's cells) takes public requests only from that proxy.
+// proxy takes public requests only from that proxy.
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { after, before, describe, test } from "node:test";

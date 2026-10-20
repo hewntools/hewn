@@ -1,6 +1,6 @@
 # The host's builder: protocol
 
-A host can run Hewn's builder and intake itself, on its own model keys, instead of Claude Code or Codex on the owner's machine. Hewn Cloud does: each user's Hewn (a cell) holds no model key, only a token for the build service, and builds run on separate short-lived machines with no state or secrets.
+A host can run Hewn's builder and intake itself, on its own model keys, instead of Claude Code or Codex on the owner's machine. Then each user's Hewn can hold no model key, only a token for the build service, and builds can run on separate short-lived machines with no state or secrets.
 
 Hewn's side is `packages/cli/src/builders/remote.ts`. Validation, tests, the visual check and promotion stay in Hewn, exactly as for a local builder: the service only turns a workspace into a candidate, and a request into a reply.
 
@@ -10,7 +10,7 @@ Hewn's side is `packages/cli/src/builders/remote.ts`. Validation, tests, the vis
 | --- | --- |
 | `HEWN_BUILD_URL` | The service's base URL: `https://…` (plain `http` only to localhost, since the token goes with every request). Set: the `remote` builder and intake exist, and are the default. |
 | `HEWN_BUILD_TOKEN` | This Hewn's token, sent as `Authorization: Bearer <token>`. |
-| `HEWN_BUILD_NAME` | What the owner sees it called (default "Remote builder"), e.g. "Hewn Cloud". |
+| `HEWN_BUILD_NAME` | What the owner sees it called (default "Remote builder"). |
 
 `hewn doctor` reports it as "the host's builder (HEWN_BUILD_URL)".
 

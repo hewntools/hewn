@@ -372,7 +372,7 @@ export class HewnDO extends DurableObject<Env> {
   }
 
   private settings(): Settings {
-    // A host that runs the builder and intake (Hewn Cloud) makes them the default.
+    // A host that runs the builder and intake makes them the default.
     const out: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...(this.env.REMOTE_JOBS === "1" ? { builder: "remote", intake: "remote" } : {}) };
     for (const r of this.sql.prepare("SELECT key, value FROM settings").all()) out[r.key] = JSON.parse(r.value);
     return out as unknown as Settings;

@@ -25,7 +25,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Reviewing an agent's change:** each new operation leads with its first sentence; the agent-facing rest is under "Full description".
 - **Fixed:** authorizing a tool that uses a model failed ("keyBlock?.saveBudget is not a function") when a model key was already set.
 - **About shows what's new** in a newer release, from the changelog, above the upgrade command.
-- **For hosts:** with `HEWN_BUILD_URL`, Hewn's builder and intake run on the host's own service and model keys (a refusal, such as over a quota, says why and isn't retried; what the host charges for a build, such as Credits, shows on its page and in Activity). This is what Hewn Cloud uses; the protocol is in [`docs/internal/remote-builder.md`](docs/internal/remote-builder.md).
+- **For hosts:** with `HEWN_BUILD_URL`, Hewn's builder and intake run on the host's own service and model keys (a refusal, such as over a quota, says why and isn't retried; what the host charges for a build shows on its page and in Activity). The protocol is in [`docs/internal/remote-builder.md`](docs/internal/remote-builder.md).
 
 ## 0.4.1 (2026-10-19)
 
