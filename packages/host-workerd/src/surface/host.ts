@@ -2,6 +2,7 @@
 // What the HTTP surface (web client, capability UIs, MCP) needs from its host, beyond the core.
 // Node implements these in-process; the workerd host forwards the machine-bound ones
 // (intake, connecting local agents, backups) to the supervisor.
+import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
 
 export interface Settings {
@@ -23,7 +24,7 @@ export interface Settings {
    * `jobModels.builder.claude = { model: "fable", effort: "high" }`. Unset: the agent's default.
    */
   jobModels?: { builder?: Record<string, JobModel>; intake?: Record<string, JobModel> };
-  /** Model names agents may ask a build to use, per builder agent. Unset: Default and the families. */
+  /** Model names agents may ask a build to use, per builder agent. Unset: DEFAULT_AGENT_MODELS (the web client shows what the server resolves). */
   agentModels?: Record<string, string[]>;
 }
 
@@ -33,7 +34,7 @@ export interface JobModel {
   effort?: string;
 }
 
-/** Hewn's two jobs; the owner sees one ("Builds tools"), with the split under Advanced. */
+/** Hewn's two jobs; the owner sees one ("Builds tools"): one agent, the builder, does both. */
 export const JOBS = ["builder", "intake"] as const;
 export type Job = (typeof JOBS)[number];
 
@@ -45,6 +46,12 @@ export const DEFAULT_AGENT_MODELS: Record<string, string[]> = { claude: ["defaul
 
 /** The owner's model and effort for `job` on `agent`. */
 export const jobModel = (s: Pick<Settings, "jobModels">, job: Job, agent: string): JobModel => s.jobModels?.[job]?.[agent] ?? {};
+
+/**
+ * Who runs the intake, and on what: the builder's agent (one agent builds tools, so an older split
+ * setting can't send the intake elsewhere), on its intake model, else its model for building.
+ */
+export const intakeJob = (s: Pick<Settings, "builder" | "jobModels">): { agent: string; run: JobModel } => ({ agent: s.builder, run: s.jobModels?.intake?.[s.builder] ?? jobModel(s, "builder", s.builder) });
 
 /** Model names agents may pass for builds by `agent`. */
 export const agentModels = (s: Pick<Settings, "agentModels">, agent: string): string[] => s.agentModels?.[agent] ?? DEFAULT_AGENT_MODELS[agent] ?? ["default"];
@@ -128,8 +135,6 @@ export interface SurfaceHost {
   };
 }
 
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$/;
-const EFFORT = /^[a-z]{2,12}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 /**

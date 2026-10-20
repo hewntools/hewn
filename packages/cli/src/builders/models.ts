@@ -7,6 +7,15 @@ import type { ModelCatalog, ModelChoice } from "@hewntools/host-workerd/surface/
 /** Claude Code's `--effort` levels. */
 export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
+/** The "Default" entry every list starts with: the CLI (or the service) decides. */
+const defaultChoice = (efforts: string[], description?: string): ModelChoice => ({ id: "default", label: "Default", kind: "default", ...(description ? { description } : {}), efforts });
+
+/** A list with Default only, and any name may be typed: an agent whose list can't be read. */
+export const defaultOnly = (agent: string): ModelCatalog => ({ agent, models: [defaultChoice(agent === "claude" ? CLAUDE_EFFORTS : [])], other: true });
+
+/** Model lists without asking a CLI: Claude Code's families, Default only for the rest. */
+export const offlineCatalog = async (agent: string): Promise<ModelCatalog> => (agent === "claude" ? claudeCatalog() : defaultOnly(agent));
+
 /**
  * Claude Code: Default, and the families `--model` takes as an alias for the newest of each. A full
  * name ("claude-fable-5-1") is accepted too (`other`) and pins that model.
@@ -16,7 +25,7 @@ export function claudeCatalog(): ModelCatalog {
   return {
     agent: "claude",
     models: [
-      { id: "default", label: "Default", kind: "default", description: "Claude Code's own choice", efforts: CLAUDE_EFFORTS },
+      defaultChoice(CLAUDE_EFFORTS, "Claude Code's own choice"),
       family("fable", "Fable", "The newest Fable"),
       family("opus", "Opus", "The newest Opus"),
       family("sonnet", "Sonnet", "The newest Sonnet"),
@@ -52,7 +61,7 @@ export function codexCatalogFrom(raw: string): ModelCatalog {
         ...(upgrade ? { upgrade } : {}),
       };
     });
-  return { agent: "codex", models: [{ id: "default", label: "Default", kind: "default", description: "Codex's own choice", efforts: CODEX_EFFORTS }, ...models], other: !models.length };
+  return { agent: "codex", models: [defaultChoice(CODEX_EFFORTS, "Codex's own choice"), ...models], other: !models.length };
 }
 
 const run = (cmd: string, args: string[]) => new Promise<string>((resolve, reject) => execFile(cmd, args, { timeout: 15_000, encoding: "utf8", maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
@@ -63,7 +72,7 @@ export async function remoteCatalog(url: string, token: string, fetchImpl: typeo
   if (!res.ok) throw new Error(`models: HTTP ${res.status}`);
   const body = (await res.json()) as { models?: ModelChoice[] };
   const models = (body.models ?? []).filter((m) => m && typeof m.id === "string" && typeof m.label === "string").map((m) => ({ ...m, efforts: Array.isArray(m.efforts) ? m.efforts : [] }));
-  return { agent: "remote", models: models.some((m) => m.id === "default") ? models : [{ id: "default", label: "Default", kind: "default", efforts: [] }, ...models] };
+  return { agent: "remote", models: models.some((m) => m.id === "default") ? models : [defaultChoice([]), ...models] };
 }
 
 /**
@@ -86,13 +95,13 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; code
       cache.set(agent, { at: Date.now(), catalog });
       return catalog;
     } catch {
-      return { agent, models: [{ id: "default", label: "Default", kind: "default", efforts: agent === "claude" ? CLAUDE_EFFORTS : [] }], other: true };
+      return defaultOnly(agent);
     }
   };
 }
 
 /**
  * Output meaning the CLI won't run the model it was given (retired, misspelled, or not on this
- * account): the build goes on with the default instead.
+ * account): the build stops, saying so (never a quiet switch to the default).
  */
 export const MODEL_REJECTED = /issue with the selected model|selected model .{0,80}(not exist|access)|model[^\n]{0,60}\b(not found|does not exist|doesn't exist|is not available|isn't available|not supported|is not supported)|unknown model|invalid model|not_found_error[^\n]*model/i;

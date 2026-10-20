@@ -6,7 +6,9 @@ import { basename, join } from "node:path";
 import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText } from "./builders/cli.ts";
 import { MODEL_REJECTED } from "./builders/models.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
+import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
+import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
 
 /**
  * Intake: a replaceable platform role (like the builder) that turns a non-agent client's rough
@@ -342,30 +344,26 @@ function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEn
 
 /**
  * Intake backed by a headless coding-agent CLI, confined by the builder sandbox profile. It runs on
- * the model the owner picked (`req.run`); one the CLI won't run stops it with a reason the owner
- * can act on (pick another), never a quiet switch to the default.
+ * the owner's model for building (`run`, Settings › AI); one the CLI won't run stops it with a
+ * reason the owner can act on (pick another), never a quiet switch to the default.
  */
-export function cliIntake(which: "claude" | "codex", platformRoot: string): Intake {
-  const once = cliIntakeOnce(which, platformRoot);
+export function cliIntake(which: "claude" | "codex", platformRoot: string, run: JobModel = {}): Intake {
+  const once = cliIntakeOnce(which, platformRoot, run);
   return async (req, onProgress, signal) => {
     try {
       return await once(req, onProgress, signal);
     } catch (e) {
-      const model = req.run?.model;
-      if (model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) throw new Error(modelUnavailableText(model));
+      if (run.model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) throw new Error(modelUnavailableText(run.model));
       throw e;
     }
   };
 }
 
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$/;
-const EFFORT = /^[a-z]{2,12}$/;
-
-function cliIntakeOnce(which: "claude" | "codex", platformRoot: string): Intake {
+function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: JobModel): Intake {
   return async (req, onProgress, signal) => {
     // They become CLI arguments (and Codex config): names and levels only.
-    if (req.run?.model !== undefined && !MODEL_NAME.test(String(req.run.model))) throw new Error("intake: model must be a model name");
-    if (req.run?.effort !== undefined && !EFFORT.test(String(req.run.effort))) throw new Error("intake: effort must be a level such as low or high");
+    if (model.model !== undefined && !MODEL_NAME.test(String(model.model))) throw new Error("intake: model must be a model name");
+    if (model.effort !== undefined && !EFFORT.test(String(model.effort))) throw new Error("intake: effort must be a level such as low or high");
     const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
     try {
       // Claude gets web lookup (WebFetch/WebSearch) to check services the owner mentions;
@@ -376,7 +374,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string): Intake 
         writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
         const args = [
           "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
-          ...codexModelArgs(req.run ?? {}),
+          ...codexModelArgs(model),
           "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
           "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), prompt,
         ];
@@ -392,7 +390,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string): Intake 
       }
       const args = [
         "-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
-        ...claudeModelArgs(req.run ?? {}),
+        ...claudeModelArgs(model),
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
         "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",

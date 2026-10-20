@@ -134,12 +134,12 @@ async function main() {
         publicPort: process.env.HEWN_PUBLIC_PORT ? Number(process.env.HEWN_PUBLIC_PORT) : undefined,
         publicListen: readConfig(home).publicListen,
         builders: remote ? { ...BUILDERS, remote: remoteBuilder(remote) } : BUILDERS,
-        intake: (which) => {
+        intake: (which, run) => {
           if (which === "remote") {
             if (!remote) throw new Error("the host's intake isn't configured here (HEWN_BUILD_URL); pick another in Settings › AI");
-            return remoteIntake(remote);
+            return remoteIntake(remote, run);
           }
-          return cliIntake(which as "claude" | "codex", home.root);
+          return cliIntake(which as "claude" | "codex", home.root, run);
         },
         ...(remote ? { remote } : {}),
         setup: await realSetupHooks(),

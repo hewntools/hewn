@@ -10,6 +10,7 @@ import type { BuildJob, CapabilityBuilder } from "./types.ts";
 import { readTree, writeTree } from "../workbench.ts";
 import { intakePrompt, parseIntake, partialReply, SCHEMA } from "../intake.ts";
 import type { Intake } from "../intake.ts";
+import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
 
 export interface RemoteJobs {
   /** The service's base URL, e.g. https://builds.example.com/ (HEWN_BUILD_URL). */
@@ -106,6 +107,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
       const files = Object.fromEntries(Object.entries(readTree(job.workspace)).map(([p, b]) => [p, toBase64(b)]));
       let result: Record<string, string> | undefined;
       let error: Record<string, any> | undefined;
+      let done = false;
       await stream(
         r,
         "v1/builds",
@@ -119,6 +121,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
           // What the host charged for this attempt, in its own unit (Hewn Cloud: Credits); shown as given.
           if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
           if (e.files && typeof e.files === "object") result = e.files;
+          if (e.done === true) done = true;
           if (typeof e.refused === "string") error = { refused: e.refused };
           else if (typeof e.error === "string") error = e;
         },
@@ -126,6 +129,8 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
       );
       if (error?.refused) throw failure(error.refused, "refused");
       if (error) throw failure(error.error, error.unavailable ? "unavailable" : undefined);
+      // The stream closing early (the service crashed, a proxy cut it) isn't a finished build.
+      if (!done) throw new Error(`${r.label} ended without finishing`);
       if (!result) throw new Error(`${r.label} finished without returning the workspace`);
       // Every path checked before anything is written: relative, inside the workspace, no artefacts.
       const returned = new Map<string, Uint8Array>();
@@ -145,7 +150,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
  * back as it is written. Hewn writes the prompt and reads the reply, as with a local CLI; the service
  * runs the model on its keys, with web lookup.
  */
-export function remoteIntake(r: RemoteJobs): Intake {
+export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
   return async (req, onProgress, signal) => {
     let text = "";
     let result: string | undefined;
@@ -153,7 +158,7 @@ export function remoteIntake(r: RemoteJobs): Intake {
     await stream(
       r,
       "v1/intake",
-      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true }), schema: SCHEMA, ...(req.run?.model ? { model: req.run.model } : {}), ...(req.run?.effort ? { effort: req.run.effort } : {}) },
+      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}) },
       (e) => {
         if (typeof e.text === "string") {
           text += e.text;
@@ -167,7 +172,7 @@ export function remoteIntake(r: RemoteJobs): Intake {
       signal,
     );
     if (error?.refused) throw failure(error.refused, "refused");
-    if (error) throw new Error(`intake failed: ${error.error}`);
+    if (error) throw failure(`intake failed: ${error.error}`, error.unavailable ? "unavailable" : undefined);
     if (!result) throw new Error(`intake failed: ${r.label} returned no reply`);
     return parseIntake(result, req.mode, req.current);
   };

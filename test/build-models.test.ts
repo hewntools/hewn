@@ -14,7 +14,7 @@ import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.
 import { writeConfig } from "@hewntools/cli/config.ts";
 import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED } from "@hewntools/cli/builders/models.ts";
 import { claudeModelArgs, codexModelArgs, withModelCheck } from "@hewntools/cli/builders/cli.ts";
-import { settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
+import { intakeJob, type ModelCatalog, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import { toolsFor } from "@hewntools/host-workerd/mcp.ts";
 import { notesSince } from "@hewntools/cli/upgrade.ts";
 import { platformWith, SEED, serve, setup } from "./helpers.ts";
@@ -39,9 +39,9 @@ describe("models for builds", () => {
   let t: ReturnType<typeof setup>;
   let platform: Platform;
   let b: ReturnType<typeof recorder>;
-  const use = (builder: ReturnType<typeof recorder>, opts: { attempts?: number; maxRunningBuilds?: number } = {}) => {
+  const use = (builder: ReturnType<typeof recorder>, opts: { attempts?: number; maxRunningBuilds?: number; models?: (agent: string) => Promise<ModelCatalog> } = {}) => {
     b = builder;
-    platform = platformWith(t.home, () => b, { attempts: opts.attempts ?? 1, ...(opts.maxRunningBuilds ? { maxRunningBuilds: opts.maxRunningBuilds } : {}) });
+    platform = platformWith(t.home, () => b, { attempts: opts.attempts ?? 1, ...(opts.maxRunningBuilds ? { maxRunningBuilds: opts.maxRunningBuilds } : {}), ...(opts.models ? { models: opts.models } : {}) });
   };
 
   beforeEach(() => (t = setup()));
@@ -92,6 +92,27 @@ describe("models for builds", () => {
     await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x", effort: "high" })).buildId);
     assert.equal(b.jobs[1].model, "sonnet");
     assert.equal(b.jobs[1].effort, "high");
+  });
+
+  test("an agent's effort must be one its model takes (when the list can be read); the owner's isn't limited", async () => {
+    writeConfig(t.home, { agentModels: { fake: ["default", "opus"] } });
+    let readable = true;
+    const models = async (agent: string): Promise<ModelCatalog> => {
+      if (!readable) throw new Error("no list");
+      return { agent, models: [{ id: "default", label: "Default", kind: "default", efforts: ["low", "high"] }, { id: "opus", label: "Opus", kind: "family", efforts: ["low", "max"] }] };
+    };
+    use(recorder(), { models });
+    await assert.rejects(platform.create(t.claude, { ...ask, model: "opus", effort: "high" }), (e: Error) => /opus doesn't take effort 'high'; it takes: low, max$/.test(e.message));
+    await assert.rejects(platform.create(t.claude, { ...ask, effort: "max" }), /default doesn't take effort 'max'; it takes: low, high$/);
+    assert.equal(b.jobs.length, 0, "nothing was built");
+    const done = await platform.settle((await platform.create(t.claude, { ...ask, model: "opus", effort: "max" })).buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    await assert.rejects(platform.addWidgets(t.claude, { capabilityId: "running-log", effort: "max" }), /it takes: low, high/);
+    await platform.settle((await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", effort: "xhigh" })).buildId);
+    assert.equal(b.jobs.at(-1)!.effort, "xhigh", "the owner may ask for any level");
+    readable = false;
+    await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "y", effort: "max" })).buildId);
+    assert.equal(b.jobs.at(-1)!.effort, "max", "no list: not checked");
   });
 
   test("names and efforts are checked", async () => {
@@ -256,6 +277,12 @@ describe("settings for models", () => {
     assert.equal(settingsProblems({ ...base, jobModels: { builder: { claude: { model: "--x" } } } }).length, 1);
     assert.equal(settingsProblems({ ...base, agentModels: { claude: "fable" } }).length, 1);
   });
+  test("the intake runs on the builder's agent, on its intake model, else its model for building", () => {
+    const jobModels = { builder: { claude: { model: "fable", effort: "high" } }, intake: { codex: { model: "gpt-5.5" } } };
+    assert.deepEqual(intakeJob({ builder: "claude", jobModels }), { agent: "claude", run: { model: "fable", effort: "high" } }, "an older split setting (intake on codex) doesn't count");
+    assert.deepEqual(intakeJob({ builder: "claude", jobModels: { ...jobModels, intake: { claude: {} } } }), { agent: "claude", run: {} });
+    assert.deepEqual(intakeJob({ builder: "codex" }), { agent: "codex", run: {} });
+  });
 });
 
 describe("release notes for About", () => {
@@ -344,15 +371,22 @@ describe("web: models for building", () => {
   });
 
   test("each agent's model list; the owner's model per job and agent, checked", async () => {
-    assert.deepEqual((await api("/tools/claude/models")).json.models.map((m: { id: string }) => m.id), ["default", "fable", "opus", "sonnet", "haiku"]);
+    const claude = (await api("/tools/claude/models")).json;
+    assert.deepEqual(claude.models.map((m: { id: string }) => m.id), ["default", "fable", "opus", "sonnet", "haiku"]);
+    // What agents may ask for, as the platform checks it: the same default the server uses.
+    assert.deepEqual(claude.agentModels, ["default", "fable", "opus", "sonnet", "haiku"]);
+    assert.deepEqual((await api("/tools/codex/models")).json.agentModels, ["default"]);
+    assert.deepEqual((await api("/tools/remote/models")).json.agentModels, ["default"]);
     assert.equal((await api("/settings", { method: "PUT", body: { jobModels: { builder: { claude: { model: "--x" } } } } })).status, 400);
     assert.equal((await api("/settings", { method: "PUT", body: { builder: "remote" } })).status, 400, "no host builder here");
     const s = (await api("/settings", { method: "PUT", body: { jobModels: { builder: { claude: { model: "fable", effort: "high" } } }, agentModels: { claude: ["default", "fable"] } } })).json;
     assert.deepEqual(s.jobModels.builder.claude, { model: "fable", effort: "high" });
     assert.deepEqual(s.agentModels.claude, ["default", "fable"]);
+    assert.deepEqual((await api("/tools/claude/models")).json.agentModels, ["default", "fable"]);
+    assert.deepEqual(platform.agentModelChoices("claude"), ["default", "fable"]);
   });
 
-  test("the intake's + picks a model for one build; the build page and Activity say what it ran on", async () => {
+  test("a client may pass a model for one build; the build page and Activity say what it ran on", async () => {
     const b = (await api("/capabilities", { method: "POST", body: { name: "Model Pick", purpose: "p", requirements: "r", model: "opus", effort: "low" } })).json;
     assert.deepEqual(b.model, { model: "opus", effort: "low" });
     await platform.settle(b.buildId);

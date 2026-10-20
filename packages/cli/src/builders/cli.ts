@@ -4,6 +4,7 @@ import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync,
 import { createInterface } from "node:readline";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { EFFORT } from "@hewntools/core/build-models.ts";
 import { claudeActivity, codexActivity } from "./activity.ts";
 import { MODEL_REJECTED } from "./models.ts";
 import { wrapBuilder } from "./sandbox.ts";
@@ -118,7 +119,7 @@ export const modelUnavailableText = (model: string) => `${model} isn't available
 /** `--model` / `--effort` for Claude Code. */
 export const claudeModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["--model", m.model] : []), ...(m.effort ? ["--effort", m.effort] : [])];
 /** `-m` / reasoning effort for Codex. */
-export const codexModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["-m", m.model] : []), ...(m.effort && /^[a-z]{2,12}$/.test(m.effort) ? ["-c", `model_reasoning_effort="${m.effort}"`] : [])];
+export const codexModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["-m", m.model] : []), ...(m.effort && EFFORT.test(m.effort) ? ["-c", `model_reasoning_effort="${m.effort}"`] : [])];
 
 /** Builder output meaning "retrying won't help": not logged in, revoked token, no quota. */
 export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|401|usage limit|quota exceeded/i;

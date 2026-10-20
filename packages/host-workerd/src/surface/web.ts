@@ -11,7 +11,7 @@ import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
-import { jobModel, modelPrefProblems, type SurfaceHost } from "./host.ts";
+import { agentModels, jobModel, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
@@ -414,8 +414,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "tools") {
     platform.agents(owner); // owner only
-    // /api/tools/<agent>/models: what that agent's CLI (or the host's builder) offers.
-    if (id && sub === "models") return host.modelCatalog ? host.modelCatalog(id) : { agent: id, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }] };
+    // /api/tools/<agent>/models: what that agent's CLI (or the host's builder) offers, and the
+    // names agents may ask a build by it to use, as the platform checks them.
+    if (id && sub === "models") {
+      const catalog = host.modelCatalog ? await host.modelCatalog(id) : { agent: id, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }] };
+      return { ...catalog, agentModels: agentModels(await host.settings.read(), id) };
+    }
     return host.tools ? host.tools() : [];
   }
 
@@ -513,7 +517,6 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const body = (await readJson(req)) as IntakeRequest;
     const catalog = platform.list(owner).map((c) => ({ id: c.id, name: c.name, purpose: c.purpose, operations: c.operations, ...(c.kind ? { kind: c.kind } : {}) }));
     if (body.mode === "modify" && !body.capabilityId) throw new PlatformError("invalid_request", "a change needs a capabilityId");
-    if (body.run !== undefined && modelPrefProblems({ jobModels: { intake: { x: body.run } } }).length) throw new PlatformError("invalid_request", "run must be { model?, effort? } with a model name and a level");
     if (body.session !== undefined && (typeof body.session !== "string" || !/^[\w-]{1,80}$/.test(body.session))) throw new PlatformError("invalid_request", "session must be a short id");
     const currentManifest = body.mode !== "create" && body.capabilityId ? platform.get(owner, body.capabilityId) : undefined;
     const started = Date.now();

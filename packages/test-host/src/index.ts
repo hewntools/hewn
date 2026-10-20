@@ -14,7 +14,8 @@ import { nodeSql } from "./sql.ts";
 import { localWorkbench } from "@hewntools/cli/workbench.ts";
 import { APP_DIR } from "@hewntools/cli/app-dir.ts";
 import { readConfig } from "@hewntools/cli/config.ts";
-import { agentModels, jobModel } from "@hewntools/host-workerd/surface/host.ts";
+import { agentModels, jobModel, type ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
+import { offlineCatalog } from "@hewntools/cli/builders/models.ts";
 
 export const BRIEF = readFileSync(join(APP_DIR, "spec", "builder-brief.md"), "utf8");
 
@@ -33,6 +34,8 @@ export interface NodePlatformOptions {
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Builds that may run at once (default 5). */
   maxRunningBuilds?: number;
+  /** Each builder's model list, for the efforts agents may ask for (default: without asking a CLI). */
+  models?: (agent: string) => Promise<ModelCatalog>;
 }
 
 export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platform {
@@ -58,6 +61,7 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
     // The owner's model choices, from platform.json (Settings › AI writes them there on this host).
     buildModel: (builder) => jobModel(readConfig(home), "builder", builder),
     agentBuildModels: (builder) => agentModels(readConfig(home), builder),
+    modelEfforts: async (builder, model) => (await (opts.models ?? offlineCatalog)(builder)).models.find((m) => m.id === model)?.efforts,
     maxRunningBuilds: opts.maxRunningBuilds,
   });
 }

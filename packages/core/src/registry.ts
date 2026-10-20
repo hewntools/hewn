@@ -249,13 +249,12 @@ CREATE TABLE IF NOT EXISTS builds (
   review         TEXT
 );
 -- What a build runs on: the model and effort asked for (or the owner's setting), and the model it
--- actually ran on. (note: unused since 0.4.2's fallback was dropped; kept so existing tables match.)
+-- actually ran on.
 CREATE TABLE IF NOT EXISTS build_models (
   build_id       TEXT PRIMARY KEY,
   model          TEXT,
   effort         TEXT,
-  ran_model      TEXT,
-  note           TEXT
+  ran_model      TEXT
 );
 -- What the builder's host charged (all attempts), in its own unit.
 CREATE TABLE IF NOT EXISTS build_charges (
@@ -573,9 +572,9 @@ export class Registry {
   }
 
   /** The model the builder reported running on. */
-  updateBuildModel(buildId: string, patch: { ranModel?: string }) {
+  setRanModel(buildId: string, model: string) {
     this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
-    if (patch.ranModel !== undefined) this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(patch.ranModel, buildId);
+    this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(model, buildId);
   }
 
   /** Add an attempt's charge to the build's (a different unit replaces it). */

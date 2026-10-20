@@ -14,10 +14,7 @@ import { harnessStatuses } from "@hewntools/cli/setup/harnesses.ts";
 import { sourceAsset } from "@hewntools/cli/assets.ts";
 import type { SetupHooks } from "@hewntools/cli/setup/hooks.ts";
 import type { ModelCatalog, SurfaceHost } from "@hewntools/host-workerd/surface/host.ts";
-import { claudeCatalog } from "@hewntools/cli/builders/models.ts";
-
-/** Model lists without asking a CLI: Claude Code's families, Default for the rest (tests pass their own). */
-const offlineCatalog = async (agent: string): Promise<ModelCatalog> => (agent === "claude" ? claudeCatalog() : { agent, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }], other: true });
+import { offlineCatalog } from "@hewntools/cli/builders/models.ts";
 
 export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: string) => void; intake?: Intake; setup?: SetupHooks; models?: (agent: string) => Promise<ModelCatalog> }): SurfaceHost {
   const log = opts.log ?? ((l: string) => console.error(`[${new Date().toISOString()}] ${l}`));

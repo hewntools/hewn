@@ -30,7 +30,6 @@ export interface BuildJob {
   onCharge?: (charge: { amount: number; unit: string }) => void;
 }
 
-
 /**
  * Turns a build request into a candidate implementation in the workspace.
  * A builder never validates, promotes, or talks to the platform. It writes files and returns.

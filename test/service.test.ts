@@ -114,15 +114,15 @@ describe("service and doctor", () => {
       assert.equal(by.Sandbox.state, "fail");
       assert.match(by.Sandbox.fix!, /bubblewrap|sandbox-exec/);
       assert.equal(by["Secrets key"].state, "warn");
-      // Split between two agents: one line each.
-      assert.match(by.Builds.detail, /isn't logged in/);
-      assert.equal(by["Talks it through"].state, "fail", "codex isn't on PATH here");
+      // An older split setting: one line, from the builder (it talks it through too).
+      assert.match(by["Builds tools"].detail, /claude isn't logged in/);
+      assert.ok(!by.Builds && !by["Talks it through"], "no line for the old intake setting");
       assert.equal(by["Visual check"].state, "warn");
       assert.equal(by.Codex.state, "warn");
       assert.equal(by.Backups.fix, "hewn backup now");
       assert.match(by.Install.detail, /doesn't build: ERROR: Could not resolve "zod\/v3"/);
       assert.match(by.Install.fix!, /&& npm ci$/);
-      assert.match(formatChecks(broken), /5 problems, 5 warnings\.$/);
+      assert.match(formatChecks(broken), /4 problems, 5 warnings\.$/);
 
       const healthy = await runDoctor({
         home: t.home,

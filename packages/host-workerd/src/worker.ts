@@ -19,7 +19,7 @@ import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, S
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
-import { agentModels, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
+import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
@@ -341,6 +341,8 @@ export class HewnDO extends DurableObject<Env> {
         builder: () => this.settings().builder,
         buildModel: (builder) => jobModel(this.settings(), "builder", builder),
         agentBuildModels: (builder) => agentModels(this.settings(), builder),
+        // From the builder's model list (the supervisor reads it and keeps it a while).
+        modelEfforts: async (builder, model) => (await supervisor(env).json<ModelCatalog>("/models/catalog", { agent: builder })).models.find((m) => m.id === model)?.efforts,
         maxBuildAttempts: () => this.settings().maxBuildAttempts,
         logRetentionDays: () => this.settings().logRetentionDays,
         timezone: () => this.settings().timeZone || env.TIMEZONE || "UTC",
@@ -401,10 +403,8 @@ export class HewnDO extends DurableObject<Env> {
       intake: async (req, onProgress, signal) => {
         let reply: any;
         let error: string | undefined;
-        const s = this.settings();
-        // The intake's model: what the request asks for (a client may pass one), else the setting.
-        const run = req.run ?? jobModel(s, "intake", s.intake);
-        await sv.stream("/intake", { intake: s.intake, req: { ...req, run } }, (e) => {
+        const { agent, run } = intakeJob(this.settings());
+        await sv.stream("/intake", { intake: agent, run, req }, (e) => {
           if (e.progress) onProgress?.(e.progress);
           if (e.reply) reply = e.reply;
           if (e.error) error = e.error;

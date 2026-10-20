@@ -705,6 +705,16 @@ const jobChosen = (s, key) => !!s && (s.jobsChosen?.includes(key) || s.firstRunD
 const buildsChosen = (s) => jobChosen(s, "builder") && jobChosen(s, "intake");
 /** The model and effort the owner picked for a job on an agent ({} = the agent's default). */
 const jobModelOf = (s, key, agent = s?.[key]) => s?.jobModels?.[key]?.[agent] ?? {};
+/**
+ * Save the model and effort for building tools on `agent` (the builder): both halves, and the intake
+ * on the same agent (an older split heals on the next save). "default" and unset keys are dropped.
+ */
+const saveBuildModel = async (s, agent, m) => {
+  const clean = Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined && v !== "default"));
+  const next = structuredClone(s.jobModels ?? {});
+  for (const k of ["builder", "intake"]) next[k] = { ...(next[k] ?? {}), [agent]: clean };
+  return (settings = await api("/settings", { method: "PUT", body: { jobModels: next, intake: agent } }));
+};
 /** A model choice in words: "Default model", "Fable" (a family), or the full name. */
 const modelWords = (m = {}, catalog) => {
   const name = !m.model ? "Default model" : catalog?.models.find((x) => x.id === m.model)?.label ?? (/^[a-z]+$/.test(m.model) ? m.model[0].toUpperCase() + m.model.slice(1) : m.model);
@@ -2666,8 +2676,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   };
 }
 
-/** Start a widgets build (only widgets change). `ask`: the model and effort picked with + (or none). */
-const buildWidgets = (cap, request, ask = {}) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...ask } });
+/** Start a widgets build (only widgets change). */
+const buildWidgets = (cap, request) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: request ? { request } : {} });
 
 /**
  * In the intake's chat box: the model building runs on, and its menu, like a chat app's. It is the
@@ -2694,19 +2704,12 @@ function modelChip() {
   };
   load().then(paint).catch(() => (chip.hidden = true));
 
-  /** Save a half's model and effort for its agent (one agent doing both: both halves). In order: a
-   *  slider moved right after a model pick must not write over it. */
+  /** Save the builder's model and effort. In order: a slider moved right after a model pick must not write over it. */
   let saving = Promise.resolve();
-  const save = (keys, change) => (saving = saving.then(() => saveNow(keys, change)));
-  const saveNow = async (keys, change) => {
-    const agent = ctx.s[keys[0]];
-    const next = structuredClone(ctx.s.jobModels ?? {});
-    const cur = jobModelOf(ctx.s, keys[0], agent);
-    const merged = { ...cur, ...change };
-    const clean = Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined && v !== "default"));
-    for (const k of keys) next[k] = { ...(next[k] ?? {}), [agent]: clean };
+  const save = (change) => (saving = saving.then(() => saveNow(change)));
+  const saveNow = async (change) => {
     try {
-      ctx.s = settings = await api("/settings", { method: "PUT", body: { jobModels: next } });
+      ctx.s = await saveBuildModel(ctx.s, ctx.s.builder, { ...jobModelOf(ctx.s, "builder"), ...change });
       paint();
     } catch (e) {
       fail(e);
@@ -2719,9 +2722,9 @@ function modelChip() {
       h("span", { class: "grow col" }, h("span", {}, main), sub && h("span", { class: "sub" }, sub)),
       checked && h("span", { class: "model-tick", "aria-hidden": "true" }, "✓"),
     );
-  /** One half: its current model, the effort slider, then the other models. */
-  const section = (keys, cat, title) => {
-    const cur = jobModelOf(ctx.s, keys[0]);
+  /** The current model, the effort slider, then the other models. */
+  const section = (cat) => {
+    const cur = jobModelOf(ctx.s, "builder");
     const curId = cur.model ?? "default";
     const curModel = cat.models.find((m) => m.id === curId) ?? { id: curId, label: curId, description: "A model by its full name" };
     const efforts = curModel.efforts ?? cat.models[0]?.efforts ?? [];
@@ -2733,12 +2736,11 @@ function modelChip() {
     const show = () => (value.textContent = stops[slider.value] ? cap(stops[slider.value]) : curModel.defaultEffort ? `Default (${curModel.defaultEffort})` : "Default");
     show();
     slider.addEventListener("input", show);
-    slider.addEventListener("change", () => save(keys, { effort: stops[slider.value] }));
-    const pick = (id) => save(keys, { model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
-    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s[keys[0]] === "claude" ? "Another: claude-fable-5-1" : "Another model, by name", "aria-label": "Another model, by name" });
+    slider.addEventListener("change", () => save({ effort: stops[slider.value] }));
+    const pick = (id) => save({ model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
+    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s.builder === "claude" ? "Another: claude-fable-5-1" : "Another model, by name", "aria-label": "Another model, by name" });
     other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
     return [
-      title && h("div", { class: "eyebrow mm-title" }, title),
       row(curModel.label, curModel.description, { checked: true }),
       efforts.length > 0 && h("label", { class: "mm-effort" }, h("span", { class: "row between" }, h("span", {}, "Effort"), value), slider),
       others.length > 0 && h("hr"),
@@ -2748,7 +2750,7 @@ function modelChip() {
   };
   const render = () => {
     if (!menu) return;
-    put(menu, section(ALL_JOBS, ctx.bCat, null));
+    put(menu, section(ctx.bCat));
     place();
   };
   /** Fixed to the viewport, next to the chip, never off screen (the drawer is narrow and near the edge). */
@@ -2826,7 +2828,7 @@ function scheduleTicks(list = []) {
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
  * set up once the draft's build promotes.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], ask = {} } = {}) {
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [] } = {}) {
   const conn = d.connection;
   let first = null;
   if (conn) {
@@ -2835,12 +2837,12 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
     const wait = after ?? prev?.buildId;
     first =
       conn.mode === "create"
-        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}), ...ask } }))
-        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}), ...ask } });
+        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}) } }))
+        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}) } });
     connections.set(key, first);
   }
   const wait = first?.buildId ?? after;
-  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...ask };
+  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}) };
   return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w } });
 }
 
@@ -2875,7 +2877,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  * are several, icon, name, purpose, summary pills), ▸ opens its details (G2). Returns [card, summary].
  */
 function proposalCard(kind, list, ctx) {
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, done, ask: askOf = () => ({}) } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, done } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -2965,8 +2967,6 @@ function proposalCard(kind, list, ctx) {
   };
 
   build.addEventListener("click", async () => {
-    // The model and effort picked in the menu under the composer (read now: it may have changed since this card).
-    const ask = askOf();
     build.disabled = true;
     rows.forEach((r) => (r.box.disabled = true));
     const reenable = () => (rows.forEach((r) => (r.box.disabled = false)), count());
@@ -2974,7 +2974,7 @@ function proposalCard(kind, list, ctx) {
       if (kind === "widgets") {
         const picked = chosen().map((r) => r.d);
         // A replacement keeps its widget's name, so it stays where it is on Home.
-        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`, ask);
+        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`);
         return onBuilt(b);
       }
       if (kind === "schedules") {
@@ -2995,12 +2995,12 @@ function proposalCard(kind, list, ctx) {
         // Only the connection: the intake may have drafted a tool around it.
         const d = list[0];
         const c = d.connection?.mode === "create" ? d.connection : d;
-        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection", ...ask } });
+        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection" } });
         invalidateCaps();
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), ask });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen() });
         invalidateCaps();
         return onBuilt(b);
       }
@@ -3018,7 +3018,7 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), ask });
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen() });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {
@@ -3827,7 +3827,6 @@ const agentTileOf = (t, size) => agentTile(t.name === "claude" ? "claude-code" :
  * (switching agent means choosing its model; it remembers the last one).
  */
 async function jobPicker({ thenModel = false } = {}) {
-  const keys = ALL_JOBS;
   const [{ tools, settings: s, ready }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
   const options = [
     ...tools.map((t) => ({
@@ -3842,25 +3841,25 @@ async function jobPicker({ thenModel = false } = {}) {
   const chosen = buildsChosen(s) ? s.builder : null;
   const pick = await pickerSheet({ title: "Who builds tools?", options, value: chosen, note: "It talks each request through with you, then builds it.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
   if (!pick) return null;
-  await setJobs(keys, pick);
+  await setJobs(ALL_JOBS, pick);
   const t = tools.find((x) => x.name === pick);
   toast(`${t?.label ?? pick} builds tools`);
-  if (thenModel && pick !== chosen) await modelSheet(keys, t ?? { name: pick, label: pick });
+  if (thenModel && pick !== chosen) await modelSheet(t ?? { name: pick, label: pick });
   return pick;
 }
 
 /**
- * O3 The model and effort for a job (or both) on one agent, from the agent's own list: Default
- * lets the CLI decide, a family (Fable) follows the newest, a pinned model stays put (and falls
- * back to the default, with a notice, once it's gone). Other… takes a full name.
+ * O3 The model and effort for building tools on one agent, from the agent's own list: Default
+ * lets the CLI decide, a family (Fable) follows the newest, a pinned model stays put (once it's
+ * gone, builds fail saying so until another is picked). Other… takes a full name.
  */
-async function modelSheet(keys, t) {
+async function modelSheet(t) {
   const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
-  const cur = jobModelOf(s, keys[0], t.name);
+  const cur = jobModelOf(s, "builder", t.name);
   const kindWords = { default: "lets it decide", family: "follows the newest", pinned: "stays on this one" };
   return formSheet({
     icon: agentTileOf(t, 44),
-    title: keys.length > 1 ? "Model for building tools" : keys[0] === "intake" ? "Model for talking it through" : "Model for building",
+    title: "Model for building tools",
     sub: t.label,
     width: 520,
     build: (close) => {
@@ -3894,10 +3893,8 @@ async function modelSheet(keys, t) {
       const save = h("button", { class: "primary" }, "Save");
       save.addEventListener("click", async () => {
         const model = chosen && chosen !== "default" ? chosen : undefined;
-        const next = structuredClone(s.jobModels ?? {});
-        for (const k of keys) next[k] = { ...(next[k] ?? {}), [t.name]: { ...(model ? { model } : {}), ...(effort.value ? { effort: effort.value } : {}) } };
         try {
-          settings = await api("/settings", { method: "PUT", body: { jobModels: next } });
+          await saveBuildModel(s, t.name, { model, effort: effort.value || undefined });
           toast(`Builds tools: ${modelWords({ model, effort: effort.value || undefined }, catalog)}`);
           close(true);
         } catch (e) {
@@ -3917,7 +3914,7 @@ async function modelSheet(keys, t) {
 /** O4 The models agents may ask a build to use, for the agent that builds (Default always). */
 async function agentModelsSheet(t) {
   const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
-  const allowed = new Set(s.agentModels?.[t.name] ?? catalog.models.filter((m) => m.kind !== "pinned").map((m) => m.id));
+  const allowed = new Set(catalog.agentModels ?? ["default"]);
   const extra = [...allowed].filter((id) => !catalog.models.some((m) => m.id === id)).map((id) => ({ id, label: id, kind: "pinned" }));
   return formSheet({
     icon: agentTileOf(t, 44),
@@ -4492,18 +4489,17 @@ function timeZoneSheet(current) {
 async function aiSection() {
   const [{ tools, settings: s, ready }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
   const tile = (t) => agentTileOf(t, 20);
-  const jobTool = (key) => tools.find((x) => x.name === s[key]);
+  const builder = tools.find((x) => x.name === s.builder);
   const catalogs = new Map([[s.builder, await api(`/tools/${enc(s.builder)}/models`).catch(() => null)]]);
   const agentWords = (t) => `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? (t.remote ? "its own keys" : "signed in") : t.fix ?? "not ready"}`;
-  /** A job row: who, on which model; Change picks the agent, Model… the model and effort. */
-  const jobRow = (title, keys, extra) => {
-    const t = jobTool(keys[0]);
-    const chosen = keys.every((k) => jobChosen(s, k));
+  /** Who builds tools, on which model; Change picks the agent, Model… the model and effort. */
+  const buildsRow = () => {
+    const chosen = buildsChosen(s);
     return h(
       "div",
       { class: "setting" },
-      h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub row tight" }, chosen && t ? [tile(t), `${agentWords(t)} · ${modelWords(jobModelOf(s, keys[0]), catalogs.get(t.name))}`, extra] : "Not chosen")),
-      chosen && t && h("button", { class: "sm", onclick: () => modelSheet(keys, t).then((saved) => saved && route()) }, "Model…"),
+      h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub row tight" }, chosen && builder ? [tile(builder), `${agentWords(builder)} · ${modelWords(jobModelOf(s, "builder"), catalogs.get(builder.name))}`] : "Not chosen")),
+      chosen && builder && h("button", { class: "sm", onclick: () => modelSheet(builder).then((saved) => saved && route()) }, "Model…"),
       h("button", { class: "sm", onclick: () => jobPicker({ thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
     );
   };
@@ -4515,9 +4511,9 @@ async function aiSection() {
     h("output", { title: "Build attempts" }, String(n)),
     h("button", { "aria-label": "More attempts", disabled: n >= 5, onclick: () => saveSettings({ maxBuildAttempts: n + 1 }, `Build attempts: ${n + 1}`) }, "+"),
   );
-  const builds = jobRow("Builds tools", ALL_JOBS);
-  const builder = jobTool("builder");
-  const allowed = s.agentModels?.[s.builder] ?? catalogs.get(s.builder)?.models.filter((x) => x.kind !== "pinned").map((x) => x.id) ?? ["default"];
+  const builds = buildsRow();
+  // As the server has it (the owner's ticks, else its default for this agent).
+  const allowed = catalogs.get(s.builder)?.agentModels ?? ["default"];
   const asks =
     builder &&
     h(

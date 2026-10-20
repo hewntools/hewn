@@ -59,6 +59,7 @@ import {
   resolveModel,
   structured,
 } from "./models.ts";
+import { EFFORT, MODEL_NAME } from "./build-models.ts";
 import { migrationProblems, migrationsOf, rollbackProblems } from "./migrations.ts";
 import type { Blobs, CallHandler, CapabilityRuntime, CodeRef, ExecutionTarget, Files, SecretStore, Sql, StateRef, Workbench } from "./ports.ts";
 import { type BuildKind, type BuildModel, type BuildReview, type BuildRow, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
@@ -203,6 +204,8 @@ export interface PlatformOptions {
   buildModel?: (builder: string) => { model?: string; effort?: string };
   /** Model names an agent may ask a build by this builder to use (the owner ticks them; "default" is the builder's default). */
   agentBuildModels?: (builder: string) => string[];
+  /** The effort levels a model takes on this builder (its model list). Undefined or empty: not known, so not checked. */
+  modelEfforts?: (builder: string, model: string) => Promise<string[] | undefined>;
   /** Builds that may run at once (the rest wait their turn). Default 5. */
   maxRunningBuilds?: number;
   maxBuildAttempts?: () => number;
@@ -272,9 +275,6 @@ export type ModelAsk = {
 
 const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { model: o.model } : {}), ...(o.effort !== undefined ? { effort: o.effort } : {}) });
 
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,99}$/;
-const EFFORT = /^[a-z]{2,12}$/;
-
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
 
@@ -288,6 +288,7 @@ export class Platform {
   builderFor: () => string | undefined;
   private buildModelFor: (builder: string) => { model?: string; effort?: string };
   private agentBuildModels?: (builder: string) => string[];
+  private modelEfforts?: (builder: string, model: string) => Promise<string[] | undefined>;
   /** Builds that may run at once; the rest wait their turn. */
   maxRunningBuilds: number;
   private slots = { busy: 0, queue: [] as (() => void)[] };
@@ -343,6 +344,7 @@ export class Platform {
     this.builderFor = opts.builder ?? (() => undefined);
     this.buildModelFor = opts.buildModel ?? (() => ({}));
     this.agentBuildModels = opts.agentBuildModels;
+    this.modelEfforts = opts.modelEfforts;
     this.maxRunningBuilds = opts.maxRunningBuilds ?? MAX_RUNNING_BUILDS;
     this.maxBuildAttempts = opts.maxBuildAttempts ?? (() => 3);
     this.secrets = opts.secrets ?? new MemorySecretStore();
@@ -2319,6 +2321,7 @@ export class Platform {
    * `schedules`: the owner's approved schedules, set up once the build promotes (owner only).
    */
   async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
+    await this.checkEffort(agent, req);
     const { widgets, ...rest } = req;
     this.checkApprovedSchedules(agent, req.schedules);
     if (widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
@@ -2452,6 +2455,19 @@ export class Platform {
     return { ...(chosen && chosen !== "default" ? { model: chosen } : {}), ...(effort ? { effort } : {}) };
   }
 
+  /**
+   * An agent's effort, against the levels its model takes (the builder's model list, when the host
+   * can read it): one it doesn't take is an error naming them. Before anything is reserved, so the
+   * wait for the list can't let a second request in between. The owner's own asks aren't limited.
+   */
+  private async checkEffort(agent: Agent, ask: ModelAsk) {
+    const builder = this.builderFor();
+    if (agent.kind === "user" || !this.modelEfforts || !builder || typeof ask.effort !== "string" || !EFFORT.test(ask.effort)) return;
+    const model = typeof ask.model === "string" ? ask.model : this.buildModelFor(builder).model ?? "default";
+    const levels = await this.modelEfforts(builder, model).catch(() => undefined);
+    if (levels?.length && !levels.includes(ask.effort)) throw new PlatformError("invalid_request", `${model} doesn't take effort '${ask.effort}'; it takes: ${levels.join(", ")}`);
+  }
+
   /** Model names agents may pass for builds by `builder` (default: the current builder). Always includes "default". */
   agentModelChoices(builder = this.builderFor()): string[] {
     if (!builder) return ["default"];
@@ -2524,6 +2540,7 @@ export class Platform {
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). */
   async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "modify");
+    await this.checkEffort(agent, req);
     this.checkApprovedSchedules(agent, req.schedules);
     const cap = this.visibleActive(agent, req.capabilityId);
     const builder = this.requireBuilder();
@@ -2549,6 +2566,7 @@ export class Platform {
    */
   async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "modify");
+    await this.checkEffort(agent, req);
     const dependsOn = this.dependency(agent, req.after);
     const cap = dependsOn ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
@@ -2797,8 +2815,9 @@ export class Platform {
               live.lastActivityAt = Date.now();
               this.events.emit(buildId, line);
             },
-            onModel: (ran) => this.registry.updateBuildModel(buildId, { ranModel: ran }),
+            onModel: (ran) => this.registry.setRanModel(buildId, ran),
             onCharge: (c) => {
+              // The only check on a value from the builder's host: a sane amount and a short unit, else ignored.
               if (!Number.isFinite(c.amount) || c.amount < 0 || c.amount > 1e6 || !/^[A-Za-z][A-Za-z ]{0,19}$/.test(c.unit)) return;
               this.registry.addBuildCharge(buildId, c);
             },

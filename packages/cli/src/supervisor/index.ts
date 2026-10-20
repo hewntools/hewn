@@ -28,7 +28,7 @@ import { Tunnel, validTunnelConfig } from "./tunnel.ts";
 import { toolStatus } from "../setup/tools.ts";
 import { modelCatalogs } from "../builders/models.ts";
 import type { RemoteJobs } from "../builders/remote.ts";
-import type { ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
+import type { JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { workerdBinary } from "../app-dir.ts";
 
@@ -45,7 +45,8 @@ export interface SupervisorOptions {
    */
   proxySecret?: string;
   builders: Record<string, CapabilityBuilder>;
-  intake?: (which: string) => Intake;
+  /** The intake on agent `which`, running on `run` (the owner's model and effort for building). */
+  intake?: (which: string, run: JobModel) => Intake;
   setup?: SetupHooks;
   /** Run workerd inside the OS sandbox (Seatbelt / bubblewrap). */
   sandbox?: boolean;
@@ -268,7 +269,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       res.on("close", () => !res.writableFinished && abort.abort());
       try {
         if (!o.intake) throw new Error("intake is not configured");
-        const reply = await o.intake(b.intake)(b.req, (progress) => send({ progress }), abort.signal);
+        const reply = await o.intake(b.intake, b.run ?? {})(b.req, (progress) => send({ progress }), abort.signal);
         send({ reply });
       } catch (e) {
         send({ error: (e as Error).message });

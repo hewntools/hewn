@@ -101,6 +101,10 @@ describe("remote builder and intake", () => {
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { unavailable?: boolean; refused?: boolean }) => !e.unavailable && !e.refused && /crashed/.test(e.message));
     handle = (_b, _r, res) => ndjson(res, [{ done: true }]);
     await assert.rejects(remoteBuilder(remote).build(job(dir)), /without returning the workspace/);
+    // The stream closing without "done" (the service crashed mid-way) is no finished build, files or not.
+    handle = (_b, _r, res) => ndjson(res, [{ files: { "src/index.ts": b64("half") } }]);
+    await assert.rejects(remoteBuilder(remote).build(job(dir)), /Test Cloud ended without finishing/);
+    assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// old", "nothing was written");
     // Paths outside the workspace (or artefacts) are refused before anything is written.
     for (const bad of ["../escape.txt", "/etc/x", "a/../../b", "node_modules/x.js"]) {
       handle = (_b, _r, res) => ndjson(res, [{ files: { "src/index.ts": b64("new"), [bad]: b64("x") } }, { done: true }]);
@@ -130,18 +134,23 @@ describe("remote builder and intake", () => {
     const text = JSON.stringify(reply);
     handle = (_b, _r, res) => ndjson(res, [{ activity: "Searching the web" }, { text: text.slice(0, 20) }, { text: text.slice(20) }, { result: text }]);
     const progress: unknown[] = [];
-    const got = await remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "track my coffee" }], session: "s-1", run: { model: "fast", effort: "low" } }, (p) => progress.push(p));
+    const got = await remoteIntake(remote, { model: "fast", effort: "low" })({ mode: "create", messages: [{ role: "user", content: "track my coffee" }], session: "s-1" }, (p) => progress.push(p));
     assert.deepEqual(got, reply);
     const sent = seen.at(-1)!;
     assert.equal(sent.path, "/v1/intake");
     assert.equal(sent.body.session, "s-1");
     assert.equal(sent.body.model, "fast");
+    assert.equal(sent.body.effort, "low");
     assert.ok(sent.body.schema?.properties, "the reply's JSON schema goes with it");
     assert.match(sent.body.prompt, /track my coffee/);
     assert.deepEqual(progress[0], { activity: "Searching the web" });
     assert.ok(progress.some((p) => (p as { message?: string }).message === "A few things first."), "the message shows while it's written");
     handle = (_b, _r, res) => ndjson(res, [{ refused: "The intake is paused for this account." }]);
     await assert.rejects(remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "x" }] }), (e: Error & { refused?: boolean }) => e.refused === true);
+    handle = (_b, _r, res) => ndjson(res, [{ error: "no model key for this account", unavailable: true }]);
+    await assert.rejects(remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "x" }] }), (e: Error & { unavailable?: boolean }) => e.unavailable === true && /no model key/.test(e.message));
+    handle = (_b, _r, res) => ndjson(res, [{ error: "the model timed out" }]);
+    await assert.rejects(remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "x" }] }), (e: Error & { unavailable?: boolean }) => !e.unavailable && /timed out/.test(e.message));
   });
 
   test("its model list, and the environment that turns it on", async () => {
