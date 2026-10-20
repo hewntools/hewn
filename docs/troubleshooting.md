@@ -101,6 +101,16 @@ The agent asked for a model you haven't allowed. Tick it under **Agents may ask 
 **"Visual check: no Chromium-based browser"**
 Built UIs aren't rendered before promotion. Install one: `npx playwright install chromium-headless-shell` (on Linux and WSL, `npx playwright install --with-deps chromium-headless-shell`).
 
+**"Visual check: the browser didn't start … Hewn runs as root"**
+Chromium won't start as root with its sandbox on, which is usual in a container. Hewn doesn't turn the sandbox off by itself. If the container is the boundary you rely on, point `HEWN_BROWSER` at a small wrapper that adds the flag, and restart Hewn:
+
+```sh
+#!/bin/sh
+exec /path/to/chrome-headless-shell --no-sandbox "$@"
+```
+
+Better still, run Hewn as a user other than root.
+
 ## Agents
 
 **An agent can't connect, or keeps asking to sign in**

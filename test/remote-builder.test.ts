@@ -116,6 +116,26 @@ describe("remote builder and intake", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("a file sent mid-build (the icon) is in the workspace at once; the final tree still decides", async () => {
+    const icon = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    handle = (_b, _r, res) =>
+      ndjson(res, [
+        { file: { path: "ui/icon.svg", content: b64(icon) } },
+        { file: { path: "../escape.svg", content: b64("x") } },
+        { activity: "→ Write src/index.ts" },
+        { files: { "BUILDER.md": b64("brief"), "ui/icon.svg": b64(icon), "src/index.ts": b64("export const operations = {};") } },
+        { done: true },
+      ]);
+    const dir = workspace();
+    let iconWhileBuilding: string | undefined;
+    await remoteBuilder(remote).build(job(dir, { onActivity: () => (iconWhileBuilding = readFileSync(join(dir, "ui", "icon.svg"), "utf8")) }));
+    assert.equal(iconWhileBuilding, icon, "written before the build ended");
+    assert.ok(!existsSync(join(dir, "..", "escape.svg")), "a path outside the workspace is ignored");
+    assert.equal(readFileSync(join(dir, "ui", "icon.svg"), "utf8"), icon);
+    assert.ok(!existsSync(join(dir, "old.txt")));
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("cancelling the build closes the request", async () => {
     closed = false;
     handle = (_b, _r, res) => {

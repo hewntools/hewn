@@ -5,6 +5,11 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.3 (unreleased)
 
 - **Fixed:** with `HEWN_BUILD_URL` set, the host's builder and intake are the default again, also after you save another setting (saving a setting no longer stores the defaults of the others, and a builder stored that way that you didn't choose is dropped when Hewn starts).
+- **The host's builder shows Hewn's icon** wherever a builder is shown, and the "on the host's keys" notes are gone.
+- **The icon shows while the host's builder works:** the build service can send a file mid-build (`{ "file": … }`, see the remote builder protocol), so the tool's icon appears on Home and the build page as soon as it's written, not when the build ends.
+- **The build page has the standard top bar** (Hewn, the tabs, Search and the Inbox), like other pages.
+- **The intake says "Thinking…"** while the model thinks before it answers (Claude Code, and the host's intake when the service sends it).
+- **Visual check as root:** when Chromium won't start because Hewn runs as root (a container), the skipped check says so and points to `HEWN_BROWSER` ([troubleshooting](docs/troubleshooting.md)).
 
 ## 0.4.2 (2026-10-20)
 

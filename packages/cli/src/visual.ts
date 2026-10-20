@@ -248,7 +248,9 @@ export function chromiumCheck(browser: string | undefined = findBrowser()): Visu
       } catch {
         // The machine's problem, not the candidate's: skip the check (and say why) rather than fail the build.
         const why = stderr.split("\n").map((l) => l.replace(/^\[[^\]]*\]\s*/, "").trim()).find((l) => /error|fail|denied|cannot|missing/i.test(l));
-        return { skipped: `the browser (${browser.split("/").pop()}) didn't start${why ? `: ${why.slice(0, 200)}` : ""}`, errors: [] };
+        // Chromium won't run as root with its sandbox (containers): say how, rather than turn the sandbox off here.
+        const root = process.getuid?.() === 0 ? " (Hewn runs as root: set HEWN_BROWSER to a browser that can, see docs/troubleshooting.md)" : "";
+        return { skipped: `the browser (${browser.split("/").pop()}) didn't start${why ? `: ${why.slice(0, 200)}` : ""}${root}`, errors: [] };
       }
       const client = cdp(url);
       await client.open;

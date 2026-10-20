@@ -3046,7 +3046,7 @@ function proposalCard(kind, list, ctx) {
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
-    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it, on the host's keys.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
+    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
     h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
@@ -3100,7 +3100,7 @@ function milestones(b) {
 
 async function buildPage(id) {
   const panel = buildPanel(id, {});
-  view(...moment({ left: "-60px", bottom: "-20px" }, backBar("Activity", "#/activity?view=builds"), h("div", { class: "build-center" }, panel.el)));
+  view(...moment({ left: "-60px", bottom: "-20px" }, topBar(""), sandboxNotice(), h("div", { class: "build-center" }, panel.el)));
 }
 
 /**
@@ -3110,8 +3110,6 @@ async function buildPage(id) {
  */
 /** What a build runs on, in words ("Fable · high effort"; the model it ran on, once the builder says). */
 const buildModelWords = (b) => (b.model && (b.model.ran || b.model.model || b.model.effort) ? modelWords({ model: b.model.ran ?? b.model.model, effort: b.model.effort }) : "");
-/** Whose account a build spends: the builder agent's own, or the host's keys. */
-const accountWords = (builder) => (builder === "remote" ? "on the host's keys" : "on your account");
 /** What the builder's host charged, as it says it: "12 Credits" (1 decimal at most). */
 const chargeWords = (c) => (c ? `${Math.round(c.amount * 10) / 10} ${c.unit}` : "");
 
@@ -3132,7 +3130,7 @@ function buildMeta(b) {
     "div",
     { class: "build-meta" },
     asked && cell("Asked by", [agentTile(catalogOf({ id: b.requestedBy })?.id ?? b.requestedBy, who, 18), who]),
-    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder === "remote" ? "on the host's keys" : "on your account"),
+    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder !== "remote" && "on your account"),
     cell("Model", model ? pretty(model) : "Default", null, model),
     cell("Effort", [h("span", { class: "meter", "aria-hidden": "true" }, efforts.map((_, i) => h("i", { class: i < level ? "on" : "" }))), b.model?.effort ? b.model.effort[0].toUpperCase() + b.model.effort.slice(1) : "Default"]),
   );
@@ -3791,6 +3789,8 @@ const logoTile = (hue, logo, letters, size) =>
   h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
 /** An agent's tile, by id (claude-code-2 → claude-code) or by its name. */
 const agentTile = (id, label = id, size = 44) => {
+  // The host's builder and intake (Hewn Cloud) are Hewn's own.
+  if (id === "remote") return brandTile(size);
   const entry = AGENT_CATALOG.find((c) => id === c.id || String(id).startsWith(`${c.id}-`) || c.label === label || c.label === id);
   const [hue, logo] = TILES[entry?.id ?? id] ?? [260, null];
   return logoTile(hue, logo, String(label).replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "AG", size);
@@ -3834,7 +3834,7 @@ async function jobPicker({ thenModel = false } = {}) {
       label: t.label,
       tile: agentTileOf(t, 28),
       disabled: !ready(t),
-      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "Runs on the host's own keys" : `On ${machine.word} · signed in`,
+      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "" : `On ${machine.word} · signed in`,
     })),
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
@@ -4483,7 +4483,7 @@ function timeZoneSheet(current) {
 
 /**
  * O1 Settings › AI: what Hewn runs AI for. Building tools (talking a request through, then building
- * it) runs one agent, on this machine and its own account or on the host's keys. Thinking inside
+ * it) runs one agent, on this machine and its own account, or the host's builder. Thinking inside
  * tools is a metered API call with your key.
  */
 async function aiSection() {
@@ -4491,7 +4491,7 @@ async function aiSection() {
   const tile = (t) => agentTileOf(t, 20);
   const builder = tools.find((x) => x.name === s.builder);
   const catalogs = new Map([[s.builder, await api(`/tools/${enc(s.builder)}/models`).catch(() => null)]]);
-  const agentWords = (t) => `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? (t.remote ? "its own keys" : "signed in") : t.fix ?? "not ready"}`;
+  const agentWords = (t) => (t.remote && ready(t) ? t.label : `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}`);
   /** Who builds tools, on which model; Change picks the agent, Model… the model and effort. */
   const buildsRow = () => {
     const chosen = buildsChosen(s);
@@ -4541,7 +4541,7 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
-    h("div", { class: "small faint" }, builder?.remote ? "Building runs on the host's own model keys." : "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
+    !builder?.remote && h("div", { class: "small faint" }, "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );
 }
