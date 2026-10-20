@@ -70,8 +70,28 @@ export interface SupervisorOptions {
    * default. Its builder must also be in `builders` and its intake behind `intake("remote")`.
    */
   remote?: RemoteJobs;
+  /** A host runs this Hewn for its owner (HEWN_HOSTED): see `hostedFromEnv`. */
+  hosted?: Hosted;
   /** Each agent's model list (default: read from its CLI, or the remote service). Tests stub it. */
   models?: (agent: string) => Promise<ModelCatalog>;
+}
+
+export interface Hosted {
+  /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL): signed-out pages link there. */
+  signInUrl?: string;
+}
+
+/**
+ * Hosted mode (HEWN_HOSTED=1): a host runs this Hewn for its owner, who has no terminal and no
+ * agents on the machine, so the host must also build (HEWN_BUILD_URL). Unset: self-hosted.
+ */
+export function hostedFromEnv(env: NodeJS.ProcessEnv = process.env): Hosted | undefined {
+  if (!env.HEWN_HOSTED) return undefined;
+  if (env.HEWN_HOSTED !== "1") throw new Error("HEWN_HOSTED must be 1 (or unset)");
+  if (!env.HEWN_BUILD_URL) throw new Error("HEWN_HOSTED needs HEWN_BUILD_URL: a hosted owner has no agent on the machine to build with");
+  const url = env.HEWN_HOST_SIGNIN_URL;
+  if (url && !(URL.canParse(url) && new URL(url).protocol === "https:")) throw new Error("HEWN_HOST_SIGNIN_URL must be an https URL");
+  return url ? { signInUrl: url } : {};
 }
 
 export interface Supervisor {
@@ -145,6 +165,8 @@ const hewn :Workerd.Worker = (
     (name = "TIMEZONE", fromEnvironment = "HEWN_TIMEZONE"),
     (name = "PROXY_SECRET", fromEnvironment = "HEWN_PROXY_SECRET"),
     (name = "REMOTE_JOBS", fromEnvironment = "HEWN_REMOTE_JOBS"),
+    (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
+    (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
     (name = "PORT", text = "${o.port}"),
   ],
   durableObjectNamespaces = [
@@ -288,7 +310,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       return harnessStatuses(s.harnesses(), s.userHome);
     },
     "/tunnel/status": async () => tunnel.current(),
-    "/setup/tools": async () => [...(o.tools ?? toolStatus)(), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
+    // Hosted: no agents on the machine, only the host's builder.
+    "/setup/tools": async () => [...(o.hosted ? [] : (o.tools ?? toolStatus)()), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
     "/models/catalog": async (b) => models(String(b.agent)),
     "/status/info": async () => ({ machine: hostname().replace(/\.local$/, ""), version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(backupDir())[0]?.at ?? null, backupDir: backupDir(), latest: o.latest?.() ?? null, notes: o.latestNotes?.() ?? [] }),
     "/setup/connect": async (b, req, res) => {
@@ -379,7 +402,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     child = spawn(command[0], command.slice(1), {
       // Run in its own data dir: workerd opens its working directory, and the sandbox only allows that.
       cwd: data,
-      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_REMOTE_JOBS: o.remote ? "1" : "" },
+      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (child.pid) writeFileSync(pidFile, String(child.pid));

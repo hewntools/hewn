@@ -81,7 +81,7 @@ export function metadata(origin: Origin) {
   };
 }
 
-export async function handleOAuth(platform: Platform, req: Request, origin: Origin, opts: { webUrl?: string; log: (line: string) => void }): Promise<Response> {
+export async function handleOAuth(platform: Platform, req: Request, origin: Origin, opts: { webUrl?: string; hosted?: boolean; log: (line: string) => void }): Promise<Response> {
   const url = new URL(req.url);
   const store = platform.agentStore;
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
@@ -104,7 +104,7 @@ export async function handleOAuth(platform: Platform, req: Request, origin: Orig
         try {
           const r = store.startAuthorization(p, { via: origin.via, issuer: origin.url });
           opts.log(`oauth: "${r.clientName}" asks to connect (${origin.via}, code ${r.userCode})`);
-          return authorizePage(r, origin, opts.webUrl);
+          return authorizePage(r, origin, opts.webUrl, opts.hosted);
         } catch (e) {
           if (e instanceof OAuthError && (e as OAuthError & { redirectTo?: string }).redirectTo) {
             return new Response(null, { status: 302, headers: { location: (e as OAuthError & { redirectTo: string }).redirectTo } });
@@ -174,10 +174,11 @@ function errorPage(message: string): Response {
  * "Approve in your Hewn": shows the agent and a code to match against the approval card, and
  * waits. When the owner decides, the page sends the browser back to the agent.
  */
-function authorizePage(r: { id: string; secret: string; userCode: string; clientName: string; redirectHost: string }, origin: Origin, webUrl?: string): Response {
+function authorizePage(r: { id: string; secret: string; userCode: string; clientName: string; redirectHost: string }, origin: Origin, webUrl?: string, hosted = false): Response {
   const nonce = randomToken(12);
+  // Hosted: the owner has no terminal, and Hewn's web address is where they are anyway.
   const where =
-    origin.via === "local" && webUrl
+    (origin.via === "local" || hosted) && webUrl
       ? `<a class="button" href="${esc(webUrl)}/approve?code=${encodeURIComponent(r.userCode)}" target="_blank" rel="noopener">Open Hewn to approve</a>`
       : `<p>Open Hewn on your computer (<b>Agents</b>), or run <code>hewn agents approve ${esc(r.userCode)}</code>.</p>`;
   const body = `<h1>Approve ${esc(r.clientName)} in your Hewn</h1>

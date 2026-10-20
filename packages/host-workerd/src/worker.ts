@@ -48,6 +48,10 @@ interface Env {
   PROXY_SECRET?: string;
   /** "1" when the host runs Hewn's builder and intake (HEWN_BUILD_URL): "remote" is a choice, and the default. */
   REMOTE_JOBS?: string;
+  /** "1" when a host runs this Hewn for its owner (HEWN_HOSTED): no terminal, no local agents. */
+  HOSTED?: string;
+  /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
+  HOST_SIGNIN_URL?: string;
 }
 
 const COMPAT_DATE = "2026-09-01";
@@ -408,6 +412,7 @@ export class HewnDO extends DurableObject<Env> {
   private surfaceHost(): SurfaceHost {
     const env = this.env;
     const sv = supervisor(env);
+    const hosted = env.HOSTED === "1";
     return {
       port: Number(env.PORT),
       log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
@@ -433,18 +438,24 @@ export class HewnDO extends DurableObject<Env> {
       },
       intakeLog: async (entry) => void (await sv.json("/intake/log", entry)),
       modelCatalog: (agent) => sv.json<ModelCatalog>("/models/catalog", { agent }),
-      setup: {
-        list: () => sv.json("/setup/list", {}),
-        // The supervisor runs the harness steps and its OAuth login; the owner approves in the web client.
-        connect: (agentId, mcpUrl, event) => sv.stream("/setup/connect", { agentId, mcpUrl }, (e) => event(e.name, e.data)),
-      },
+      ...(hosted ? { hosted: env.HOST_SIGNIN_URL ? { signInUrl: env.HOST_SIGNIN_URL } : {} } : {}),
+      // Hosted: no local agents to connect, and the public address is the host's (no tunnel).
+      ...(hosted
+        ? {}
+        : {
+            setup: {
+              list: () => sv.json("/setup/list", {}),
+              // The supervisor runs the harness steps and its OAuth login; the owner approves in the web client.
+              connect: (agentId, mcpUrl, event) => sv.stream("/setup/connect", { agentId, mcpUrl }, (e) => event(e.name, e.data)),
+            },
+            tunnel: () => sv.json("/tunnel/status", {}),
+          }),
       backups: {
         location: async () => (await sv.json<{ dir: string }>("/backups/list", {})).dir,
         list: async () => (await sv.json<{ backups: unknown[] }>("/backups/list", {})).backups,
         now: () => sv.json("/backups/now", {}),
         sameDisk: async () => (await sv.json<{ sameDisk?: boolean | null }>("/backups/list", {})).sameDisk ?? null,
       },
-      tunnel: () => sv.json("/tunnel/status", {}),
       tools: () => sv.json("/setup/tools", {}),
       status: () => sv.json("/status/info", {}),
     };

@@ -68,7 +68,7 @@ function browser(platform: Platform, host: SurfaceHost, site: Site, req: Request
 
 async function route(platform: Platform, sessions: McpSessions, host: SurfaceHost, req: Request, url: URL, isPublic: boolean, site?: Site): Promise<Response> {
   const origin = originOf(req, isPublic);
-  if (OAUTH_PATHS.has(url.pathname)) return handleOAuth(platform, req, origin, { webUrl: (site ?? localSite(host.port)).web, log: host.log });
+  if (OAUTH_PATHS.has(url.pathname)) return handleOAuth(platform, req, origin, { webUrl: (site ?? localSite(host.port)).web, hosted: !!host.hosted, log: host.log });
   if (url.pathname !== "/mcp") return json(404, { error: "not_found" });
   const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
   const agent = platform.agentStore.authenticate(token);

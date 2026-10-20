@@ -124,6 +124,12 @@ export interface SurfaceHost {
   modelCatalog?: (agent: string) => Promise<ModelCatalog>;
   /** Backup and version status (Settings). */
   status?: () => Promise<{ machine?: string; version: string; dataFormat: number; lastBackup: string | null; backupDir: string; latest?: string | null; notes?: { version: string; date?: string; items: string[] }[] }>;
+  /**
+   * Hosted (HEWN_HOSTED): a host runs this Hewn for its owner, who has no terminal. The web client
+   * and signed-out pages send the owner to the host instead of to a command; `signInUrl` is where
+   * the host signs the owner in (HEWN_HOST_SIGNIN_URL). Absent: self-hosted.
+   */
+  hosted?: { signInUrl?: string };
   /** The public address agents in the cloud use (hewn tunnel). Absent: no tunnel support here. */
   tunnel?: () => Promise<TunnelStatus>;
   backups?: {
