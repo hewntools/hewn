@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The models each agent's CLI offers, for Settings › AI and the intake's model menu. Read from the CLI where it
+// The models each agent's CLI offers, for Settings › AI and the model menu in the intake's chat box. Read from the CLI where it
 // can say (Codex's catalog); Claude Code has no list, so its families stand in (they follow the newest).
 import { execFile } from "node:child_process";
 import type { ModelCatalog, ModelChoice } from "@hewntools/host-workerd/surface/host.ts";

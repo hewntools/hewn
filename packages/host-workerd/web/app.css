@@ -108,7 +108,9 @@ code.token { overflow-wrap: anywhere; }
 .moment-col { flex: 1; width: min(640px, 100% - var(--s6)); margin: 0 auto; display: flex; flex-direction: column; justify-content: flex-start; gap: var(--s5); padding: clamp(var(--s5), 12vh, 120px) 0 var(--s7); }
 .chat-card, .spec-card { border-radius: var(--radius-xl); padding: 20px; display: flex; flex-direction: column; gap: var(--s4); }
 .spec-card { padding: var(--s5); gap: 18px; }
-.chat-card .thread:empty { display: none; }
+.chat-card .thread:empty, .chat-col .thread:empty { display: none; }
+/* The new-tool chat: the conversation, then the one box (no card around it). */
+.chat-col { display: flex; flex-direction: column; gap: var(--s4); }
 textarea.composer-input { flex: 1; min-height: 44px; max-height: 40vh; resize: none; overflow-x: hidden; overflow-y: auto; border-radius: var(--radius); line-height: 1.45; }
 .composer { flex-wrap: nowrap; align-items: flex-end; }
 .intake-activity:empty { display: none; }
@@ -386,24 +388,30 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .title-ref { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; } .title-ref .cap-ref { font-weight: inherit; }
 .ref-end { display: inline-flex; align-items: center; }
 
-/* Under the intake's composer: the model for this request, and its menu (a chat app's model menu). */
-.composer-bar { position: relative; padding: 0 var(--s2); }
-.model-chip { gap: 6px; color: var(--text-2); font-weight: 450; }
-.model-chip.set { color: var(--text); background: var(--surface-2); }
-.model-menu { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; width: min(380px, 92vw); padding: 6px; overflow-y: auto; }
-.model-menu.above { top: auto; bottom: calc(100% + 6px); }
+/* The intake's chat box: the message on top, then the model chip and Send inside the same box (a chat app's). */
+.composer.boxed { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 8px 8px 6px; background: var(--field); border: 1px solid var(--field-border); border-radius: 22px; box-shadow: var(--field-inset); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.composer.boxed:focus-within { border-color: var(--accent-ink); background-color: var(--surface-solid); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer.boxed textarea.composer-input, .composer.boxed textarea.composer-input:focus { border: 0; background: transparent; box-shadow: none; padding: 8px 10px; min-height: 44px; }
+.composer-tools { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); }
+.composer-tools > button[type=submit], .composer-tools > .stop-btn { border-radius: var(--radius-pill); }
+.model-chip { gap: 6px; color: var(--text-2); font-weight: 450; border-radius: var(--radius-pill); }
+.model-chip .faint { font-weight: 400; }
+.model-chip .caret { width: 7px; height: 7px; margin: -3px 2px 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: .7; }
+.model-chip[aria-expanded="true"] .caret { transform: rotate(225deg); margin-top: 3px; }
+/* Its menu: fixed to the viewport next to the chip (placed in JS), scrolling when space is short. */
+.model-menu { position: fixed; z-index: 60; padding: 6px; overflow-y: auto; }
 .model-menu > * { flex-shrink: 0; }
-.drawer .model-menu { left: 0; right: auto; }
 .model-menu .mm-row { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 8px; background: none; text-align: left; font: 450 var(--fs)/1.35 var(--font); white-space: normal; }
-.model-menu .mm-row:hover, .mm-row:focus-visible { background: var(--surface-2); }
+.model-menu .mm-row:hover, .model-menu .mm-row:focus-visible { background: var(--surface-2); }
 .model-menu .mm-row .col { gap: 3px; }
 .model-menu .mm-row .sub { font-size: var(--fs-sm); color: var(--text-2); }
-.model-menu .mm-row .faint { font-size: var(--fs-sm); white-space: nowrap; }
-.model-menu .mm-row.back { min-height: 34px; font-size: var(--fs-sm); color: var(--text-2); }
 .model-tick { color: var(--accent-ink); font-weight: 600; }
 .model-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
-.model-note { padding: 6px 10px 4px; }
-.model-other { padding: 6px 10px; }
+.mm-title { padding: 8px 12px 2px; }
+.mm-effort { display: flex; flex-direction: column; gap: 6px; padding: 6px 12px 10px; font-size: var(--fs-sm); }
+.effort-slider { width: 100%; accent-color: var(--accent); }
+.mm-other { padding: 6px 12px; }
+.mm-note { padding: 6px 12px 4px; }
 
 /* Settings › AI › Advanced: the two halves of building, each with its own agent and model. */
 .advanced > summary { cursor: pointer; padding: 12px 0; list-style-position: inside; }

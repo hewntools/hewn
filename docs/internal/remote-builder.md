@@ -75,4 +75,4 @@ Events: `{ "text": "<delta>" }` as the reply is written (Hewn shows its message 
 { "models": [{ "id": "default", "label": "Default", "kind": "default", "efforts": ["low", "medium", "high"] }, { "id": "fable", "label": "Fable", "kind": "family", "description": "The newest Fable", "efforts": ["low", "medium", "high", "max"] }] }
 ```
 
-`kind`: `default` (the service decides), `family` (follows the newest), or `pinned` (exactly that model; `upgrade` may name its successor). Settings › AI and the intake's model menu list these; the owner ticks which ones agents may ask for.
+`kind`: `default` (the service decides), `family` (follows the newest), or `pinned` (exactly that model; `upgrade` may name its successor). Settings › AI and the model menu in the intake's chat box list these; the owner ticks which ones agents may ask for.

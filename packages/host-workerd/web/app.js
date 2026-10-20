@@ -2524,16 +2524,14 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));
   const send = h("button", { type: "submit", class: embedded ? "" : "lg" }, "Send");
-  // The model and effort for this request (what it builds, and the intake when one agent does
-  // both), picked under the composer. Unset: Settings › AI. One session id for the conversation.
-  const models = { build: {}, intake: {} };
+  // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
+  // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const picker = requestModelMenu(models);
-  const composer = embedded ? h("form", { class: "stack-sm composer" }, input, h("div", { class: "row between" }, picker, send)) : h("form", { class: "row tight composer" }, input, send);
+  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "stack-sm" }, h("div", { class: "card chat-card" }, thread, composer), h("div", { class: "row end composer-bar" }, picker)));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
   const say = (who, text) => thread.append(h("div", { class: `bubble ${who}` }, text));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim());
   input.addEventListener("input", syncSend);
@@ -2586,15 +2584,14 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     try {
       let reply = null;
       let failure = null;
-      const run = models.intake.model || models.intake.effort ? { run: models.intake } : {};
-      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session, ...run }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       typing.remove();
       live.remove();
       activity.remove();
       if (reply.message) say("them", reply.message);
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
-      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, ask: () => models.build, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
+      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n") });
         reply.questions.forEach((x) => say("them", x));
@@ -2629,7 +2626,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       }
       thread.append(errorBox(err));
       // Widgets don't need the intake: the builder can still make what was asked (or pick itself).
-      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, models.build).then(onBuilt, fail) }, "Build without suggestions")));
+      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text).then(onBuilt, fail) }, "Build without suggestions")));
     } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
@@ -2652,123 +2649,137 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
 const buildWidgets = (cap, request, ask = {}) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...ask } });
 
 /**
- * Under the intake's composer: the model and effort for this request, like a chat app's model
- * menu. The chip shows what it will use (yours from Settings › AI until you pick another); the menu
- * lists Default and the families, "More models" the pinned ones (and a full name), "Effort" the
- * levels. With the two halves split, "Talks it through" picks the intake's model too. `models` is
- * filled in place: { build, intake }, each { model?, effort? } (empty: Settings › AI).
+ * In the intake's chat box: the model building runs on, and its menu, like a chat app's. It is the
+ * Settings › AI choice, changed right here: the current model, an effort slider, then the other
+ * models (and a full name). With building split between two agents, "Talks it through" has its own.
  */
-function requestModelMenu(models) {
-  const chip = h("button", { type: "button", class: "ghost sm model-chip", "aria-haspopup": "menu", title: "Model and effort for this request" }, h("span", {}, "Model"), h("span", { class: "faint" }));
+function modelChip() {
+  const name = h("span", {}, "Model");
+  const effortEl = h("span", { class: "faint" });
+  const chip = h("button", { type: "button", class: "ghost sm model-chip", "aria-haspopup": "menu", title: "Model for building (Settings › AI)" }, name, effortEl, h("span", { class: "caret", "aria-hidden": "true" }));
   let ctx = null;
+  let menu = null;
+  const cap = (x) => (x ? x[0].toUpperCase() + x.slice(1) : "");
   const load = async () => {
     const { tools, settings: s } = await buildJobs();
     const split = s.intake !== s.builder;
     const [bCat, iCat] = await Promise.all([api(`/tools/${enc(s.builder)}/models`), split ? api(`/tools/${enc(s.intake)}/models`).catch(() => null) : null]);
-    ctx = { s, split, bCat, iCat, intakeTool: tools.find((t) => t.name === s.intake) };
+    ctx = { s, split, bCat, iCat, tool: (k) => tools.find((t) => t.name === s[k]) };
     return ctx;
   };
-  /** What a half will use: this request's pick, else the setting. */
-  const effective = (half) => {
-    const set = jobModelOf(ctx.s, half === "build" ? "builder" : "intake");
-    const pick = models[half];
-    return { model: pick.model ?? set.model, effort: pick.effort ?? (pick.model ? undefined : set.effort) };
-  };
-  const label = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
+  const labelOf = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
   const paint = () => {
-    const e = effective("build");
-    chip.firstChild.textContent = label(ctx.bCat, e.model);
-    chip.lastChild.textContent = e.effort ? e.effort[0].toUpperCase() + e.effort.slice(1) : "";
-    chip.classList.toggle("set", !!(models.build.model || models.build.effort));
+    const m = jobModelOf(ctx.s, "builder");
+    name.textContent = labelOf(ctx.bCat, m.model);
+    effortEl.textContent = cap(m.effort);
   };
   load().then(paint).catch(() => (chip.hidden = true));
 
-  let menu = null;
+  /** Save a half's model and effort for its agent (one agent doing both: both halves). In order: a
+   *  slider moved right after a model pick must not write over it. */
+  let saving = Promise.resolve();
+  const save = (keys, change) => (saving = saving.then(() => saveNow(keys, change)));
+  const saveNow = async (keys, change) => {
+    const agent = ctx.s[keys[0]];
+    const next = structuredClone(ctx.s.jobModels ?? {});
+    const cur = jobModelOf(ctx.s, keys[0], agent);
+    const merged = { ...cur, ...change };
+    const clean = Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined && v !== "default"));
+    for (const k of keys) next[k] = { ...(next[k] ?? {}), [agent]: clean };
+    try {
+      ctx.s = settings = await api("/settings", { method: "PUT", body: { jobModels: next } });
+      paint();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const row = (main, sub, { checked = false, onClick } = {}) =>
+    h(
+      "button",
+      { type: "button", role: "menuitemradio", "aria-checked": String(checked), class: "mm-row", onclick: (e) => (e.stopPropagation(), onClick?.()) },
+      h("span", { class: "grow col" }, h("span", {}, main), sub && h("span", { class: "sub" }, sub)),
+      checked && h("span", { class: "model-tick", "aria-hidden": "true" }, "✓"),
+    );
+  /** One half: its current model, the effort slider, then the other models. */
+  const section = (keys, cat, title) => {
+    const cur = jobModelOf(ctx.s, keys[0]);
+    const curId = cur.model ?? "default";
+    const curModel = cat.models.find((m) => m.id === curId) ?? { id: curId, label: curId, description: "A model by its full name" };
+    const efforts = curModel.efforts ?? cat.models[0]?.efforts ?? [];
+    const others = cat.models.filter((m) => m.id !== curId);
+    // The slider: Default (the model's own), then its levels in order.
+    const stops = [undefined, ...efforts];
+    const value = h("span", { class: "faint" });
+    const slider = h("input", { type: "range", min: 0, max: stops.length - 1, step: 1, value: Math.max(0, stops.indexOf(cur.effort)), "aria-label": "Effort", class: "effort-slider" });
+    const show = () => (value.textContent = stops[slider.value] ? cap(stops[slider.value]) : curModel.defaultEffort ? `Default (${curModel.defaultEffort})` : "Default");
+    show();
+    slider.addEventListener("input", show);
+    slider.addEventListener("change", () => save(keys, { effort: stops[slider.value] }));
+    const pick = (id) => save(keys, { model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
+    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s[keys[0]] === "claude" ? "Another: claude-fable-5-1" : "Another model, by name", "aria-label": "Another model, by name" });
+    other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
+    return [
+      title && h("div", { class: "eyebrow mm-title" }, title),
+      row(curModel.label, curModel.description, { checked: true }),
+      efforts.length > 0 && h("label", { class: "mm-effort" }, h("span", { class: "row between" }, h("span", {}, "Effort"), value), slider),
+      others.length > 0 && h("hr"),
+      others.map((m) => row(m.label, m.description, { onClick: () => pick(m.id) })),
+      other && h("div", { class: "mm-other" }, other),
+    ];
+  };
+  const render = () => {
+    if (!menu) return;
+    const { split, bCat, iCat, tool } = ctx;
+    put(
+      menu,
+      split
+        ? [section(["builder"], bCat, `Builds · ${tool("builder")?.label ?? ctx.s.builder}`), h("hr"), iCat ? section(["intake"], iCat, `Talks it through · ${tool("intake")?.label ?? ctx.s.intake}`) : null]
+        : section(["builder", "intake"], bCat, null),
+      h("div", { class: "small faint mm-note" }, "Your setting for everything you build (as in Settings › AI)."),
+    );
+    place();
+  };
+  /** Fixed to the viewport, next to the chip, never off screen (the drawer is narrow and near the edge). */
+  const place = () => {
+    const r = chip.getBoundingClientRect();
+    const w = Math.min(380, innerWidth - 16);
+    menu.style.width = `${w}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`;
+    const below = innerHeight - r.bottom - 14;
+    const above = r.top - 14;
+    menu.style.maxHeight = "";
+    const hgt = menu.getBoundingClientRect().height;
+    const up = hgt > below && above > below;
+    const room = Math.max(160, up ? above : below);
+    menu.style.maxHeight = `${room}px`;
+    menu.style.top = up ? `${Math.max(8, r.top - 6 - Math.min(hgt, room))}px` : `${r.bottom + 6}px`;
+  };
   const close = () => {
     menu?.remove();
     menu = null;
+    chip.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", outside, true);
     document.removeEventListener("keydown", onKey, true);
+    removeEventListener("resize", close);
   };
   const outside = (e) => menu && !menu.contains(e.target) && !chip.contains(e.target) && close();
   const onKey = (e) => e.key === "Escape" && (e.stopPropagation(), close(), chip.focus());
-  /** Pick a model for a half: the setting's own model clears the pick; an effort it doesn't take is dropped. */
-  const pickModel = (half, cat, id) => {
-    const set = jobModelOf(ctx.s, half === "build" ? "builder" : "intake");
-    const same = (id === "default" ? undefined : id) === set.model;
-    const efforts = cat.models.find((m) => m.id === id)?.efforts ?? [];
-    const effort = models[half].effort && efforts.includes(models[half].effort) ? models[half].effort : undefined;
-    models[half] = { ...(same ? {} : { model: id }), ...(effort ? { effort } : {}) };
-    if (half === "build" && !ctx.split) models.intake = models.build;
-  };
-  const row = (main, sub, { checked = false, aside, onClick, chevron = false } = {}) =>
-    h(
-      "button",
-      { type: "button", role: "menuitem", class: "mm-row", onclick: (e) => (e.stopPropagation(), onClick?.()) },
-      h("span", { class: "grow col" }, h("span", {}, main), sub && h("span", { class: "sub" }, sub)),
-      aside && h("span", { class: "faint" }, aside),
-      checked && h("span", { class: "model-tick", "aria-label": "chosen" }, "✓"),
-      chevron && h("span", { class: "faint" }, "›"),
-    );
-  const back = (title) => h("button", { type: "button", class: "mm-row back", onclick: (e) => (e.stopPropagation(), show("main")) }, h("span", { class: "faint" }, "‹"), h("span", { class: "grow" }, title));
-  const modelRows = (half, cat, list) => {
-    const cur = effective(half).model ?? "default";
-    const set = jobModelOf(ctx.s, half === "build" ? "builder" : "intake").model ?? "default";
-    return list.map((m) => row(m.label, m.description, { checked: m.id === cur, aside: m.id === set ? "your setting" : null, onClick: () => (pickModel(half, cat, m.id), paint(), half === "build" ? close() : show("main")) }));
-  };
-  const show = (view) => {
-    const { bCat, iCat, split, intakeTool } = ctx;
-    const e = effective("build");
-    const efforts = bCat.models.find((m) => m.id === (e.model ?? "default"))?.efforts ?? bCat.models[0]?.efforts ?? [];
-    const pinned = bCat.models.filter((m) => m.kind === "pinned");
-    let body;
-    if (view === "effort") {
-      const def = bCat.models.find((m) => m.id === (e.model ?? "default"))?.defaultEffort;
-      body = [
-        back("Effort"),
-        row(def ? `Default (${def})` : "Default", null, { checked: !e.effort, onClick: () => ((models.build = { ...models.build, effort: undefined }), delete models.build.effort, !ctx.split && (models.intake = models.build), paint(), show("main")) }),
-        efforts.map((x) => row(x[0].toUpperCase() + x.slice(1), null, { checked: e.effort === x, onClick: () => ((models.build = { ...models.build, effort: x }), !ctx.split && (models.intake = models.build), paint(), show("main")) })),
-      ];
-    } else if (view === "more") {
-      const other = h("input", { type: "text", class: "mono", placeholder: ctx.s.builder === "claude" ? "claude-fable-5-1" : "model name", "aria-label": "Model name" });
-      other.addEventListener("keydown", (ev) => ev.key === "Enter" && (ev.preventDefault(), other.value.trim() && (pickModel("build", bCat, other.value.trim()), paint(), close())));
-      body = [back("More models"), modelRows("build", bCat, pinned), bCat.other && h("div", { class: "model-other stack-xs" }, h("span", { class: "small faint" }, "A full model name (stays on that one), then Enter"), other)];
-    } else if (view === "talk") {
-      body = [back(`Talks it through · ${intakeTool?.label ?? ctx.s.intake}`), iCat ? modelRows("intake", iCat, iCat.models) : h("div", { class: "small faint pad" }, "Its models can't be listed right now.")];
-    } else {
-      body = [
-        modelRows("build", bCat, bCat.models.filter((m) => m.kind !== "pinned")),
-        h("hr"),
-        efforts.length > 0 && row("Effort", null, { aside: e.effort ? e.effort[0].toUpperCase() + e.effort.slice(1) : "Default", chevron: true, onClick: () => show("effort") }),
-        (pinned.length > 0 || bCat.other) && row("More models", null, { chevron: true, onClick: () => show("more") }),
-        split && row("Talks it through", intakeTool?.label, { aside: label(iCat, effective("intake").model), chevron: true, onClick: () => show("talk") }),
-        h("div", { class: "small faint model-note" }, "For this conversation and what it builds. Settings › AI sets the usual one."),
-      ];
-    }
-    put(menu, body);
-    menu.querySelector("button, input")?.focus();
-  };
   chip.addEventListener("click", async (e) => {
     e.stopPropagation();
     if (menu) return close();
     try {
-      await (ctx ?? load());
+      await load();
     } catch (err) {
       return fail(err);
     }
     menu = h("div", { class: "menu model-menu", role: "menu" });
-    // Under the chip, right-aligned to it (above it when there's no room below).
-    chip.parentElement.style.position ||= "relative";
-    chip.after(menu);
-    show("main");
-    // Below the chip, or above it when there's more room there; it scrolls when even that's short.
-    const r = chip.getBoundingClientRect();
-    const below = innerHeight - r.bottom - 16;
-    const above = r.top - 16;
-    if (menu.getBoundingClientRect().height > below && above > below) menu.classList.add("above");
-    menu.style.maxHeight = `${Math.max(160, menu.classList.contains("above") ? above : below)}px`;
+    document.body.append(menu);
+    chip.setAttribute("aria-expanded", "true");
+    render();
+    menu.querySelector("input[type=range], button")?.focus();
     document.addEventListener("click", outside, true);
     document.addEventListener("keydown", onKey, true);
+    addEventListener("resize", close);
   });
   onLeave(close);
   return chip;
