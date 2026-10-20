@@ -25,6 +25,18 @@ export function passkeyError(e) {
   return e?.message ?? String(e);
 }
 
+// The passkeys this browser has made or signed in with (credential ids), so Remote access doesn't
+// offer to add another one here. Only a hint: the browser can't be asked which passkeys it holds.
+const KNOWN = "hewn-passkeys";
+export const knownPasskeys = () => {
+  try {
+    return JSON.parse(localStorage.getItem(KNOWN) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const remember = (id) => localStorage.setItem(KNOWN, JSON.stringify([...new Set([...knownPasskeys(), id])]));
+
 /** Make a passkey on this device and add it to Hewn (signed in). */
 export async function addPasskey(name) {
   const o = await post("/api/passkeys/options");
@@ -36,11 +48,13 @@ export async function addPasskey(name) {
       excludeCredentials: o.excludeCredentials.map((c) => ({ ...c, id: fromB64(c.id) })),
     },
   });
-  return post("/api/passkeys", {
+  const added = await post("/api/passkeys", {
     challenge: o.challenge,
     name,
     response: { id: cred.id, clientDataJSON: toB64(cred.response.clientDataJSON), attestationObject: toB64(cred.response.attestationObject) },
   });
+  remember(cred.id);
+  return added;
 }
 
 /** Sign in with this device's passkey (signed out). */
@@ -49,6 +63,7 @@ export async function signIn() {
   const cred = await navigator.credentials.get({ publicKey: { challenge: fromB64(o.challenge), rpId: o.rpId, userVerification: o.userVerification, timeout: o.timeout, allowCredentials: [] } });
   const r = cred.response;
   await post("/passkey/signin", { challenge: o.challenge, response: { id: cred.id, clientDataJSON: toB64(r.clientDataJSON), authenticatorData: toB64(r.authenticatorData), signature: toB64(r.signature) } });
+  remember(cred.id);
 }
 
 // The signed-out page: the ASCII H behind it (a moment screen), and the passkey button.

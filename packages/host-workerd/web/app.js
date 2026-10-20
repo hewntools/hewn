@@ -48,7 +48,7 @@ import {
   toast,
   withContextMenu,
 } from "./kit.js";
-import { addPasskey, passkeyError, passkeysSupported } from "./passkey.js";
+import { addPasskey, knownPasskeys, passkeyError, passkeysSupported } from "./passkey.js";
 
 const app = document.getElementById("app");
 const go = (hash) => (location.hash === hash ? route() : (location.hash = hash));
@@ -1334,8 +1334,12 @@ async function firstRun() {
     renderMake();
   };
   const renderMake = () => {
-    const ask = h("input", { type: "text", placeholder: "Describe it…", "aria-label": "Describe it", disabled: !builderOk });
-    const next = h("button", { type: "submit", class: "primary", disabled: !builderOk }, "Next");
+    // The intake's box: the message, then the model it builds with and Send (the same as New tool).
+    const ask = h("textarea", { class: "composer-input", rows: 1, placeholder: "Track my coffee beans and how I rated each brew", "aria-label": "Describe it", disabled: !builderOk });
+    const next = h("button", { type: "submit", class: "lg", disabled: !builderOk }, "Send");
+    const start = () => ask.value.trim() && go(`#/new?m=${enc(ask.value.trim())}&send=1`);
+    ask.addEventListener("input", () => ((ask.style.height = "auto"), (ask.style.height = `${ask.scrollHeight + ask.offsetHeight - ask.clientHeight}px`)));
+    ask.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), start()));
     const starters = STARTERS.map((st) =>
       h(
         "button",
@@ -1362,7 +1366,7 @@ async function firstRun() {
     put(
       make,
       h("div", { class: "eyebrow" }, hosted ? "2 · Make something" : "3 · Make something"),
-      h("form", { class: "row tight", onsubmit: (e) => (e.preventDefault(), ask.value.trim() && go(`#/new?m=${enc(ask.value.trim())}&send=1`)) }, ask, next),
+      h("form", { class: "composer boxed", onsubmit: (e) => (e.preventDefault(), start()) }, ask, h("div", { class: "composer-tools" }, builderOk && modelChip(), next)),
       h("div", { class: "row tight wrap" }, starters),
     );
   };
@@ -4678,7 +4682,7 @@ async function remoteSection() {
     "remote",
     h("h1", { class: "flush" }, "Remote access"),
     // Hosted: the address is the host's; nothing to set up.
-    settingsCard(setting("Public address", remote?.url ? `${remote.url} · tool apps open from Home` : "Not set: Hewn is only on this machine", !settings?.hosted && h("button", { class: "sm", onclick: setUp }, "Set up…"))),
+    settingsCard(setting("Public address", remote?.url ? `${remote.url}` : "Not set: Hewn is only on this machine", !settings?.hosted && h("button", { class: "sm", onclick: setUp }, "Set up…"))),
     remote &&
       h(
         "div",
@@ -4686,7 +4690,8 @@ async function remoteSection() {
         h("div", { class: "eyebrow card-eyebrow" }, "Passkeys"),
         remote.passkeys.map((p) => setting(p.name, `${p.works ? "Passkey" : `For ${p.host}, not the current address`} · added ${ago(p.createdAt)} · last used ${p.lastUsedAt ? ago(p.lastUsedAt) : "never"}`, h("button", { class: "sm ghost danger", onclick: removePasskey(p) }, "Remove"))),
         !remote.passkeys.length && setting("None yet", settings?.hosted ? "Added on the device that uses them: sign in there from your account, then add one." : remote.url ? `Added on the device that uses them: sign in there with ${CLI} open --print, then add one.` : "Passkeys work on the public address."),
-        remote.here === "public" && passkeysSupported() && setting("Add a passkey", "On this device: it signs in with Face ID, a fingerprint or the screen lock", h("button", { class: "sm", onclick: addHere }, "Add passkey")),
+        // Not once this browser has one for this address (made here, or signed in with).
+        remote.here === "public" && passkeysSupported() && !remote.passkeys.some((p) => p.works && knownPasskeys().includes(p.id)) && setting("Add a passkey", "On this device: it signs in with Face ID, a fingerprint or the screen lock", h("button", { class: "sm", onclick: addHere }, "Add passkey")),
       ),
     h(
       "div",
@@ -4804,7 +4809,7 @@ async function aboutSection() {
       "div",
       { class: "card about-card" },
       brandTile(56),
-      h("div", { class: "grow col" }, h("span", { class: "about-name" }, `${BRAND} ${status.version ?? ""}`), h("span", { class: "small muted" }, [status.dataFormat && `Data format ${status.dataFormat}`, status.abi && `ABI ${status.abi}`, `on ${machine.word}`].filter(Boolean).join(" · "))),
+      h("div", { class: "grow col" }, h("span", { class: "about-name" }, `${BRAND} ${status.version ?? ""}`), h("span", { class: "small muted" }, [status.dataFormat && `Data format ${status.dataFormat}`, status.abi && `ABI ${status.abi}`, !settings?.hosted && `on ${machine.word}`].filter(Boolean).join(" · "))),
       newer ? h("span", { class: "pill warn with-dot" }, "update") : status.latest ? h("span", { class: "pill ok with-dot" }, "up to date") : h("span", { class: "pill" }, "can't check now"),
     ),
     newer &&

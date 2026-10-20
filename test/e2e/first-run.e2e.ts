@@ -101,7 +101,7 @@ try {
     await page.getByText(/Agents on this/).waitFor();
     await page.getByText("Who builds your tools").waitFor();
     if ((await page.getByText("Not chosen").count()) !== 1) throw new Error("chosen before the owner chose");
-    if (!(await page.getByPlaceholder("Describe it…").isDisabled())) throw new Error("Make something is open before a builder is chosen");
+    if (!(await page.getByLabel("Describe it").isDisabled())) throw new Error("Make something is open before a builder is chosen");
     await page.screenshot({ path: "/tmp/e2e-fr-welcome.png" });
   });
 
@@ -138,7 +138,7 @@ try {
     await picker.locator("label.job-option", { hasText: "Claude Code" }).locator("input").check();
     await picker.getByRole("button", { name: "Use Claude Code" }).click();
     await page.locator(".first-card li", { hasText: "Builds tools" }).getByText(/Claude Code/).waitFor();
-    await page.getByPlaceholder("Describe it…").and(page.locator(":enabled")).waitFor();
+    await page.getByLabel("Describe it").and(page.locator(":enabled")).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-agents.png" });
   });
 
