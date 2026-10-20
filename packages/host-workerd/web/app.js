@@ -384,7 +384,7 @@ async function paletteItems() {
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
     act("Connect an agent", () => connectDialog(), "claude codex chatgpt mcp", "agent"),
     act("Add a connection", () => addConnectionSheet(), "account service", "link"),
-    act("Who builds tools…", () => jobPicker(null, { thenModel: true }), "builder intake job model", "hammer"),
+    act("Who builds tools…", () => jobPicker({ thenModel: true }), "builder intake job model", "hammer"),
     act("Back up now", () => api("/backups", { method: "POST" }).then((b) => toast(`Backed up · ${Math.round(b.bytes / 1024)} KB`), fail), "backup", "backup"),
     act(`Switch to ${isDark() ? "light" : "dark"} appearance`, () => {
       const t = isDark() ? "light" : "dark";
@@ -693,20 +693,14 @@ async function iconDialog(c) {
 // ---------- F1 first run / F2 Home / F4 Edit Home ----------
 
 /**
- * Hewn's jobs, shown as one ("Builds tools"): the intake talks a request through and proposes it,
- * the builder builds it. Settings keep both keys (older homes may have them split): [settings key, title, picker question].
+ * "Builds tools": the intake talks a request through and proposes it, the builder builds it. One
+ * agent does both; the settings keep both keys (`intake`, `builder`) and the web client sets them together.
  */
-const JOBS = [
-  ["intake", "Talks it through", "Who talks requests through?"],
-  ["builder", "Builds", "Who builds?"],
-];
 const jobChosen = (s, key) => !!s && (s.jobsChosen?.includes(key) || s.firstRunDone === true);
 /** Both jobs have an agent (the first run asks until they do). */
 const buildsChosen = (s) => jobChosen(s, "builder") && jobChosen(s, "intake");
 /** The model and effort the owner picked for a job on an agent ({} = the agent's default). */
 const jobModelOf = (s, key, agent = s?.[key]) => s?.jobModels?.[key]?.[agent] ?? {};
-/** One agent on the same model does both jobs: the one "Builds tools" row says it all. */
-const jobsSame = (s) => s.builder === s.intake && JSON.stringify(jobModelOf(s, "builder")) === JSON.stringify(jobModelOf(s, "intake"));
 /** A model choice in words: "Default model", "Fable" (a family), or the full name. */
 const modelWords = (m = {}, catalog) => {
   const name = !m.model ? "Default model" : catalog?.models.find((x) => x.id === m.model)?.label ?? (/^[a-z]+$/.test(m.model) ? m.model[0].toUpperCase() + m.model.slice(1) : m.model);
@@ -1241,7 +1235,6 @@ async function firstRun() {
     builderOk = buildsChosen(s) && ready(tools.find((t) => t.name === s.builder));
     const t = tools.find((x) => x.name === s?.builder);
     const chosen = buildsChosen(s);
-    const split = chosen && s.builder !== s.intake;
     put(
       jobsCard,
       h("div", { class: "eyebrow card-eyebrow" }, "2 · Who builds your tools"),
@@ -1252,8 +1245,8 @@ async function firstRun() {
           "li",
           {},
           chosen && t ? agentTileOf(t, 28) : null,
-          h("div", { class: "grow" }, h("span", {}, "Builds tools"), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}${split ? " · split in Settings › AI" : ""}` : "Not chosen")),
-          h("button", { class: "sm", onclick: () => jobPicker(null).then(renderAll) }, "Choose…"),
+          h("div", { class: "grow" }, h("span", {}, "Builds tools"), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}` : "Not chosen")),
+          h("button", { class: "sm", onclick: () => jobPicker().then(renderAll) }, "Choose…"),
         ),
       ),
     );
@@ -1766,7 +1759,7 @@ async function grantsSheet(capId) {
   let tier = modelReq?.tier ?? null;
   let keyOk = !needsKey;
   let check = () => {};
-  const keyBlock = needsKey && providerKeyBlock(m, (ok) => ((keyOk = ok), check()));
+  const keyBlock = needsKey ? providerKeyBlock(m, (ok) => ((keyOk = ok), check())) : null;
   return modal(
     (close) => {
       const authorize = h("button", { class: "primary", disabled: true }, "Authorize");
@@ -2654,7 +2647,7 @@ const buildWidgets = (cap, request, ask = {}) => api(`/capabilities/${enc(cap.id
 /**
  * In the intake's chat box: the model building runs on, and its menu, like a chat app's. It is the
  * Settings › AI choice, changed right here: the current model, an effort slider, then the other
- * models (and a full name). With building split between two agents, "Talks it through" has its own.
+ * models (and a full name).
  */
 function modelChip() {
   const name = h("span", {}, "Model");
@@ -2664,10 +2657,8 @@ function modelChip() {
   let menu = null;
   const cap = (x) => (x ? x[0].toUpperCase() + x.slice(1) : "");
   const load = async () => {
-    const { tools, settings: s } = await buildJobs();
-    const split = s.intake !== s.builder;
-    const [bCat, iCat] = await Promise.all([api(`/tools/${enc(s.builder)}/models`), split ? api(`/tools/${enc(s.intake)}/models`).catch(() => null) : null]);
-    ctx = { s, split, bCat, iCat, tool: (k) => tools.find((t) => t.name === s[k]) };
+    const s = await api("/settings");
+    ctx = { s, bCat: await api(`/tools/${enc(s.builder)}/models`) };
     return ctx;
   };
   const labelOf = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
@@ -2732,13 +2723,7 @@ function modelChip() {
   };
   const render = () => {
     if (!menu) return;
-    const { split, bCat, iCat, tool } = ctx;
-    put(
-      menu,
-      split
-        ? [section(["builder"], bCat, `Builds · ${tool("builder")?.label ?? ctx.s.builder}`), h("hr"), iCat ? section(["intake"], iCat, `Talks it through · ${tool("intake")?.label ?? ctx.s.intake}`) : null]
-        : section(["builder", "intake"], bCat, null),
-    );
+    put(menu, section(ALL_JOBS, ctx.bCat, null));
     place();
   };
   /** Fixed to the viewport, next to the chip, never off screen (the drawer is narrow and near the edge). */
@@ -3105,6 +3090,29 @@ const accountWords = (builder) => (builder === "remote" ? "on the host's keys" :
 /** What the builder's host charged, as it says it: "12 Credits" (1 decimal at most). */
 const chargeWords = (c) => (c ? `${Math.round(c.amount * 10) / 10} ${c.unit}` : "");
 
+/**
+ * Who builds it on what, as a labelled strip across the card: who asked (if not you), the builder,
+ * the model, the effort (a meter) and whose account it runs on.
+ */
+function buildMeta(b) {
+  const who = actorLabel(b.requestedBy);
+  const asked = who && who !== "You" && !String(b.requestedBy).startsWith("ui:");
+  const model = b.model?.ran ?? b.model?.model;
+  const efforts = ["low", "medium", "high", "xhigh", "max"];
+  const level = b.model?.effort ? Math.max(0, efforts.indexOf(b.model.effort)) + 1 : 0;
+  const cell = (label, value, sub, title) => h("div", { class: "meta-cell", title: title ?? "" }, h("span", { class: "meta-label" }, label), h("span", { class: "meta-value" }, value), sub && h("span", { class: "meta-sub" }, sub));
+  // "claude-fable-5-5" reads as "Fable 5.5" (the full name on hover); other names as they are.
+  const pretty = (m) => /^claude-([a-z]+)-(\d+)-(\d+)/.exec(m)?.slice(1).reduce((name, n, i) => (i ? `${name}${i === 1 ? " " : "."}${n}` : n[0].toUpperCase() + n.slice(1)), "") ?? modelWords({ model: m });
+  return h(
+    "div",
+    { class: "build-meta" },
+    asked && cell("Asked by", [agentTile(catalogOf({ id: b.requestedBy })?.id ?? b.requestedBy, who, 18), who]),
+    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder === "remote" ? "on the host's keys" : "on your account"),
+    cell("Model", model ? pretty(model) : "Default", null, model),
+    cell("Effort", [h("span", { class: "meter", "aria-hidden": "true" }, efforts.map((_, i) => h("i", { class: i < level ? "on" : "" }))), b.model?.effort ? b.model.effort[0].toUpperCase() + b.model.effort.slice(1) : "Default"]),
+  );
+}
+
 /** "Codex asked · " when an agent asked for the build (it runs on the owner's builder account all the same). */
 const askedBy = (b) => {
   const who = actorLabel(b.requestedBy);
@@ -3152,6 +3160,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const clockEl = h("div", { class: "mono muted small" });
     const seen = new Map(); // step → first seen (ms), for durations
     let step = b.step;
+    // "Spec agreed" opens to the spec the builder works from (kept open across redraws).
+    const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
+    const specView = specText ? h("details", { class: "spec-step" }, h("summary", {}, "Spec agreed"), h("pre", { class: "spec-text" }, specText)) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
     const live = () => {
@@ -3181,18 +3192,13 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         head(
           appIcon(cap(), { size: compact ? 36 : 56, progress: step?.step === "tests" && step.tests?.total ? step.tests.passed / step.tests.total : 0, waiting: !(step?.step === "tests") }),
           compact && b.kind !== "create" ? `Building v${(base ?? 0) + 1}` : cap().name,
-          waitingAgent
-            ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave`
-            : // Two lines: what happens meanwhile, then who builds it on what.
-              [
-                h("div", {}, `${askedBy(b)}${compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building"}`),
-                h("div", { class: "faint" }, [builderLabel(b.builder), buildModelWords(b), accountWords(b.builder).replace(/^on /, "")].filter(Boolean).join(" · ")),
-              ],
+          waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : null,
           clockEl,
         ),
-        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        !waitingAgent && buildMeta(b),
+        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
-        h("div", { class: "row end" }, cancelBtn),
+        h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
       logPre.hidden = false;
       keepScroll();
@@ -3256,6 +3262,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
+        specView,
         logBlock(false),
       );
     };
@@ -3286,6 +3293,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         f.detail && h("div", { class: "notice danger" }, h("span", {}, f.detail)),
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
+        specView,
         h("div", { class: "row tight" }, fix, retry),
         logBlock(true),
       );
@@ -3773,36 +3781,32 @@ async function setJobs(keys, tool) {
 }
 
 const ALL_JOBS = ["intake", "builder"];
-/** What an agent does in words: "builds tools", or one half of it ("talks it through"). */
-const jobsWords = (keys) => (keys.length > 1 ? "builds tools" : JOBS.find(([k]) => k === keys[0])[1].toLowerCase());
 const agentTileOf = (t, size) => agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, size);
 
 /**
  * O2 Who builds tools: the signed-in agents on this machine (and the host's builder, if it runs
- * one). `key` picks one half; without it (the web client's only way) the agent does both. `thenModel`: open
- * the model sheet next (switching agent means choosing its model; it remembers the last one).
+ * one); the agent talks requests through and builds them. `thenModel`: open the model sheet next
+ * (switching agent means choosing its model; it remembers the last one).
  */
-async function jobPicker(key, { thenModel = false } = {}) {
-  const keys = key ? [key] : ALL_JOBS;
+async function jobPicker({ thenModel = false } = {}) {
+  const keys = ALL_JOBS;
   const [{ tools, settings: s, ready }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
-  const question = key ? JOBS.find(([k]) => k === key)[2] : "Who builds tools?";
-  const others = (t) => (key ? JOBS.filter(([k]) => k !== key && s[k] === t.name && jobChosen(s, k)).map(([, title]) => title.toLowerCase()) : []);
   const options = [
     ...tools.map((t) => ({
       value: t.name,
       label: t.label,
       tile: agentTileOf(t, 28),
       disabled: !ready(t),
-      sub: !ready(t) ? t.fix ?? "Not installed" : [t.remote ? "Runs on the host's own keys" : `On ${machine.word} · signed in`, ...others(t).map((o) => `also ${o}`)].join(" · "),
+      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "Runs on the host's own keys" : `On ${machine.word} · signed in`,
     })),
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
-  const chosen = keys.every((k) => jobChosen(s, k)) && keys.every((k) => s[k] === s[keys[0]]) ? s[keys[0]] : null;
-  const pick = await pickerSheet({ title: question, options, value: chosen, note: key ? undefined : "It talks each request through with you, then builds it.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
+  const chosen = buildsChosen(s) ? s.builder : null;
+  const pick = await pickerSheet({ title: "Who builds tools?", options, value: chosen, note: "It talks each request through with you, then builds it.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
   if (!pick) return null;
   await setJobs(keys, pick);
   const t = tools.find((x) => x.name === pick);
-  toast(`${t?.label ?? pick} ${jobsWords(keys)}`);
+  toast(`${t?.label ?? pick} builds tools`);
   if (thenModel && pick !== chosen) await modelSheet(keys, t ?? { name: pick, label: pick });
   return pick;
 }
@@ -3856,7 +3860,7 @@ async function modelSheet(keys, t) {
         for (const k of keys) next[k] = { ...(next[k] ?? {}), [t.name]: { ...(model ? { model } : {}), ...(effort.value ? { effort: effort.value } : {}) } };
         try {
           settings = await api("/settings", { method: "PUT", body: { jobModels: next } });
-          toast(`${keys.length > 1 ? "Builds tools" : JOBS.find(([k]) => k === keys[0])[1]}: ${modelWords({ model, effort: effort.value || undefined }, catalog)}`);
+          toast(`Builds tools: ${modelWords({ model, effort: effort.value || undefined }, catalog)}`);
           close(true);
         } catch (e) {
           fail(e);
@@ -3914,8 +3918,7 @@ async function agentsPage() {
   const from = (a) => (a.via === "local" ? `On ${machine.word}` : a.via === "tunnel" ? `Through ${a.address ?? "the public address"}` : "Connected");
   const roleChips = (a) => {
     const tool = toolOf(a);
-    const does = a.via === "local" && tool ? JOBS.filter(([k]) => s[k] === tool && jobChosen(s, k)).map(([k]) => k) : [];
-    const jobChip = does.length > 0 && h("a", { class: "pill", href: "#/settings/ai", onclick: (e) => e.stopPropagation() }, jobsWords(does.length > 1 ? ALL_JOBS : does));
+    const jobChip = a.via === "local" && tool && s.builder === tool && buildsChosen(s) && h("a", { class: "pill", href: "#/settings/ai", onclick: (e) => e.stopPropagation() }, "builds tools");
     return h("div", { class: "role-chips" }, h("span", { class: "pill accent" }, "uses your tools"), jobChip);
   };
   const recent = (a) => a.lastUsedAt && Date.now() - Date.parse(a.lastUsedAt) < 5 * 60000;
@@ -4145,10 +4148,7 @@ function hewnAgentsSheet() {
       const detail = h("div", {});
       const render = async () => {
         const [{ tools, ready, settings: s }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
-        const does = (t) => {
-          const keys = JOBS.filter(([k]) => s[k] === t.name && jobChosen(s, k)).map(([k]) => k);
-          return keys.length ? [jobsWords(keys.length > 1 ? ALL_JOBS : keys)] : [];
-        };
+        const does = (t) => (s.builder === t.name && buildsChosen(s) ? ["builds tools"] : []);
         put(
           list,
           tools.map((t) =>
@@ -4455,7 +4455,7 @@ async function aiSection() {
   const [{ tools, settings: s, ready }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
   const tile = (t) => agentTileOf(t, 20);
   const jobTool = (key) => tools.find((x) => x.name === s[key]);
-  const catalogs = new Map(await Promise.all([...new Set([s.builder, s.intake])].map(async (a) => [a, await api(`/tools/${enc(a)}/models`).catch(() => null)])));
+  const catalogs = new Map([[s.builder, await api(`/tools/${enc(s.builder)}/models`).catch(() => null)]]);
   const agentWords = (t) => `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? (t.remote ? "its own keys" : "signed in") : t.fix ?? "not ready"}`;
   /** A job row: who, on which model; Change picks the agent, Model… the model and effort. */
   const jobRow = (title, keys, extra) => {
@@ -4466,7 +4466,7 @@ async function aiSection() {
       { class: "setting" },
       h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub row tight" }, chosen && t ? [tile(t), `${agentWords(t)} · ${modelWords(jobModelOf(s, keys[0]), catalogs.get(t.name))}`, extra] : "Not chosen")),
       chosen && t && h("button", { class: "sm", onclick: () => modelSheet(keys, t).then((saved) => saved && route()) }, "Model…"),
-      h("button", { class: "sm", onclick: () => jobPicker(keys.length > 1 ? null : keys[0], { thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
+      h("button", { class: "sm", onclick: () => jobPicker({ thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
     );
   };
   const n = s.maxBuildAttempts;
@@ -4477,16 +4477,7 @@ async function aiSection() {
     h("output", { title: "Build attempts" }, String(n)),
     h("button", { "aria-label": "More attempts", disabled: n >= 5, onclick: () => saveSettings({ maxBuildAttempts: n + 1 }, `Build attempts: ${n + 1}`) }, "+"),
   );
-  // One row when one agent on one model does both halves; an older split says so, with Use one….
-  const same = jobsSame(s);
-  const builds = same
-    ? jobRow("Builds tools", ALL_JOBS)
-    : h(
-        "div",
-        { class: "setting" },
-        h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub" }, "Talking it through and building use different agents or models")),
-        h("button", { class: "sm", onclick: () => jobPicker(null, { thenModel: true }).then(() => route()) }, "Use one…"),
-      );
+  const builds = jobRow("Builds tools", ALL_JOBS);
   const builder = jobTool("builder");
   const allowed = s.agentModels?.[s.builder] ?? catalogs.get(s.builder)?.models.filter((x) => x.kind !== "pinned").map((x) => x.id) ?? ["default"];
   const asks =

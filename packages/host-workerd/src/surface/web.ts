@@ -761,17 +761,10 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
 /** The model the owner picked for a job, when its CLI names a successor. Gone once the owner picks another. */
 async function modelNotices(host: SurfaceHost): Promise<InboxItem[]> {
   const s = await host.settings.read();
-  const out: InboxItem[] = [];
-  // One agent doing both halves: one notice.
-  const jobs = s.builder === s.intake ? ([["builder", "Builds tools"]] as const) : ([["builder", "Builds tools"], ["intake", "Talks it through"]] as const);
-  for (const [job, title] of jobs) {
-    const agent = s[job];
-    const pinned = jobModel(s, job, agent).model;
-    if (!pinned) continue;
-    const upgrade = host.modelCatalog ? (await host.modelCatalog(agent).catch(() => undefined))?.models.find((m) => m.id === pinned)?.upgrade : undefined;
-    if (upgrade) out.push({ kind: "builder-model", id: job, title, detail: `${upgrade} replaces ${pinned}`, severity: "warn", action: "Change…" });
-  }
-  return out;
+  const pinned = jobModel(s, "builder", s.builder).model;
+  if (!pinned || !host.modelCatalog) return [];
+  const upgrade = (await host.modelCatalog(s.builder).catch(() => undefined))?.models.find((m) => m.id === pinned)?.upgrade;
+  return upgrade ? [{ kind: "builder-model", id: "builder", title: "Builds tools", detail: `${upgrade} replaces ${pinned}`, severity: "warn", action: "Change…" }] : [];
 }
 
 export interface ActivityItem {

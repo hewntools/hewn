@@ -10,6 +10,8 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Agents can ask for a model too**, on `capabilities_create`, `capabilities_modify` and `capabilities_add_widgets` (`model`, `effort`), but only one you tick under "Agents may ask for". Any other is an error naming the allowed ones; nothing is built.
 - **Each build says what it ran on**, on its page and in Activity ("Built with Claude Code · claude-fable-5-5 · high effort").
 - **At most 5 builds run at once**; the rest wait their turn (and can be cancelled while they wait).
+- **The build page** shows who asked, the builder, the model and the effort in one strip, and "Spec agreed" opens to the spec. Cancel build is in the card; a building tile or Inbox row opens its build.
+- **Fixed:** authorizing a tool that uses a model failed ("keyBlock?.saveBudget is not a function") when a model key was already set.
 - **About shows what's new** in a newer release, from the changelog, above the upgrade command.
 - **For hosts:** with `HEWN_BUILD_URL`, Hewn's builder and intake run on the host's own service and model keys (a refusal, such as over a quota, says why and isn't retried; what the host charges for a build, such as Credits, shows on its page and in Activity). This is what Hewn Cloud uses; the protocol is in [`docs/internal/remote-builder.md`](docs/internal/remote-builder.md).
 
