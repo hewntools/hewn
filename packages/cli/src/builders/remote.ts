@@ -125,7 +125,13 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
           if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
           // One file mid-build (the icon, written first), so Home and the build page show it while it builds.
           // The final `files` event still replaces the whole tree.
-          if (e.file && typeof e.file.path === "string" && typeof e.file.content === "string" && writable(e.file.path)) writeTree(job.workspace, { [e.file.path]: fromBase64(e.file.content) });
+          if (e.file && typeof e.file.path === "string" && typeof e.file.content === "string" && writable(e.file.path)) {
+            try {
+              writeTree(job.workspace, { [e.file.path]: fromBase64(e.file.content) });
+            } catch {
+              // Can't be written as sent (a file where a directory is): it's only a preview, skip it.
+            }
+          }
           if (e.files && typeof e.files === "object") result = e.files;
           if (e.done === true) done = true;
           if (typeof e.refused === "string") error = { refused: e.refused };

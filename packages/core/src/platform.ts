@@ -2055,6 +2055,7 @@ export class Platform {
         const op = m.operations.find((o) => opKey(o.name, o.version) === w.operation)!;
         const check = compileSchema(op.inputSchema);
         const prev = placed.get(key);
+        // Compared as JSON: what the client sends back is what it was given, in the same key order.
         const unchanged = prev?.id === id && prev.widget === widget && JSON.stringify(prev.input ?? {}) === JSON.stringify(input ?? {});
         if (!unchanged && !check(input ?? {})) throw new PlatformError("invalid_request", `widget ${id}/${widget}: input doesn't match ${w.operation}`, schemaErrors(check));
       } else if (!(WIDGET_SIZES as readonly string[]).includes(size)) throw new PlatformError("invalid_request", `unknown size ${size}`);

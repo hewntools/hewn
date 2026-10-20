@@ -123,6 +123,8 @@ const loadSettings = async () => {
   settings = await api("/settings").catch(() => null);
   // Taken from the browser the first time, editable under Settings › General.
   if (settings && !settings.timeZone && browserZone()) settings = await api("/settings", { method: "PUT", body: { timeZone: browserZone() } }).catch(() => settings);
+  // The host's builder goes by the name the host gives it, which only /tools knows: once per load.
+  if (settings?.builder === "remote" || settings?.intake === "remote") for (const t of await api("/tools").catch(() => [])) if (t.remote) rememberAgents([{ id: t.name, name: t.label }]);
   return settings;
 };
 const sandboxNotice = () =>
@@ -854,10 +856,10 @@ const layoutOf = (grid, widgets, hiddenIds) =>
   [...grid.querySelectorAll(".tile[data-id], .tile-widget[data-key]")].flatMap((el) => {
     if (el.dataset.id) return [{ type: "icon", id: el.dataset.id, ...(hiddenIds.has(el.dataset.id) ? { hidden: true } : {}) }];
     const w = widgets.find((x) => x.el === el);
-    if (!w) return [];
-    const { key, id, widget, size, input } = w.entry;
-    return [{ type: "widget", key, id, widget, size, ...(input ? { input } : {}) }];
+    return w ? [storedEntry(w.entry)] : [];
   });
+/** A Home entry as the layout stores it (without the view and other fields the server adds). */
+const storedEntry = (e) => (e.type === "icon" ? { type: "icon", id: e.id, ...(e.hidden ? { hidden: true } : {}) } : { type: "widget", key: e.key, id: e.id, widget: e.widget, size: e.size, ...(e.input ? { input: e.input } : {}) });
 const saveLayout = (grid, widgets, hiddenIds = new Set()) => api("/home/layout", { method: "PUT", body: { entries: layoutOf(grid, widgets, hiddenIds) } });
 
 /** Drag icons and widgets to reorder Home (desktop). The layout is saved as an owner preference. */
@@ -988,7 +990,7 @@ function widgetTile(e, c, { remove, options }) {
   withContextMenu(el, () => [
     ["Open", open],
     !e.missing && ["Refresh", refresh],
-    !e.missing && options && ["Options…", options],
+    !e.missing && options && !el.closest(".editing") && ["Options…", options],
     !e.missing && ["Change…", () => openChange(c, { widget: e.widget })],
     "-",
     ["Remove widget", remove, { danger: true }],
@@ -1151,7 +1153,7 @@ async function widgetOptionsSheet(e, c, w) {
               const input = readInput();
               // The layout as stored, with this widget's input replaced.
               const { layout } = await api("/home");
-              const entries = layout.map((x) => (x.type === "icon" ? { type: "icon", id: x.id, ...(x.hidden ? { hidden: true } : {}) } : { type: "widget", key: x.key, id: x.id, widget: x.widget, size: x.size, ...(x.key === e.key ? (Object.keys(input).length ? { input } : {}) : x.input ? { input: x.input } : {}) }));
+              const entries = layout.map((x) => storedEntry(x.key === e.key ? { ...x, input: Object.keys(input).length ? input : undefined } : x));
               await api("/home/layout", { method: "PUT", body: { entries } });
               saved = true;
               close();
@@ -3223,8 +3225,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
 
   (async () => {
     const [b0, all] = await Promise.all([api(`/builds/${enc(id)}`), caps(true).catch(() => new Map())]);
-    // The host's builder goes by the name the host gives it, which only /tools knows.
-    if (b0.builder === "remote" && builderLabel("remote") === "remote") for (const t of await api("/tools").catch(() => [])) if (t.remote) rememberAgents([{ id: t.name, name: t.label }]);
     let b = b0;
     const cap = () => all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.request?.name ?? b.capabilityId };
     if (!compact) setWallpaper(await hues([hueOf(cap()), 125]));
