@@ -1,6 +1,6 @@
 {
   "name": "@hewntools/test-host",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "description": "An in-process Hewn host for fast tests (no isolation; never shipped)",

@@ -1,6 +1,6 @@
 {
   "name": "@hewntools/core",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "type": "module",
   "description": "Hewn core: the platform logic, pure (no Node, no workerd)",
