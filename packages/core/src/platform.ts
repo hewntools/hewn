@@ -147,7 +147,7 @@ export interface BuildView {
   review?: BuildReview;
   /** What it runs on: the model and effort (as asked for or set), and the model it ran on. */
   model?: BuildModel;
-  /** What the builder's host charged for it, all attempts ("12 Credits"). Absent: no charge (a builder on the owner's own account). */
+  /** What the builder's host charged for it, all attempts ("12 points"). Absent: no charge (a builder on the owner's own account). */
   charge?: { amount: number; unit: string };
   instructions?: string;
 }

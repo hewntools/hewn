@@ -15,7 +15,7 @@ import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
 export interface RemoteJobs {
   /** The service's base URL, e.g. https://builds.example.com/ (HEWN_BUILD_URL). */
   url: string;
-  /** This Hewn's token for it (HEWN_BUILD_TOKEN): the only credential the cell holds. */
+  /** This Hewn's token for it (HEWN_BUILD_TOKEN): the only credential this Hewn holds. */
   token: string;
   /** What the owner sees it called (HEWN_BUILD_NAME). */
   label: string;

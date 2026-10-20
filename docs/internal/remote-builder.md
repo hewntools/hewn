@@ -50,7 +50,7 @@ Events:
 | --- | --- |
 | `{ "activity": "→ Edit src/index.ts" }` | One line of what the builder is doing (the build page and `builds_wait` show it). |
 | `{ "model": "claude-fable-5-5" }` | The model it runs on, once known. |
-| `{ "charge": { "amount": 12, "unit": "Credits" } }` | What this attempt costs the owner, in the host's own unit. Hewn adds up a build's attempts and shows it as given ("12 Credits") on the build page and in Activity; it never converts or prices anything. Leave it out when nothing is charged. |
+| `{ "charge": { "amount": 12, "unit": "points" } }` | What this attempt costs the owner, in the host's own unit. Hewn adds up a build's attempts and shows it as given ("12 points") on the build page and in Activity; it never converts or prices anything. Leave it out when nothing is charged. |
 | `{ "heartbeat": true }` (or any other key) | Ignored: keeps the connection open. |
 | `{ "file": { "path": "ui/icon.svg", "content": "<base64>" } }` | Optional: one file as the builder writes it, before the build ends. Hewn writes it into the workspace at once, so the icon (`ui/icon.svg`, and `hue` in `capability.json`) shows on Home and the build page while it builds. Same path rules as `files`; a path Hewn won't write is ignored. The `files` event still decides the candidate. |
 | `{ "files": { "<path>": "<base64>", … } }` | The workspace as the builder left it: the whole tree. Paths it doesn't list are deleted. Paths must be relative, inside the workspace, and not artefacts (`node_modules` …); one that isn't fails the attempt before anything is written. |
