@@ -663,7 +663,7 @@ export function unresolvedFailures<T extends { buildId: string; capabilityId: st
 export const failureReason = (f?: { title: string; detail: string }) => (!f ? "" : f.title === "The builder stopped" && f.detail ? f.detail : f.title);
 
 export interface InboxItem {
-  /** "builder-model": the model the owner picked for building isn't available any more, or has a successor. */
+  /** "builder-model": the model the owner picked for building has a successor. */
   kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model";
   id: string;
   capabilityId?: string;
@@ -685,7 +685,8 @@ const usdText = (n: number) => `$${n >= 10 ? Math.round(n) : n.toFixed(2).replac
 async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent: boolean) {
   const needs: InboxItem[] = [];
   const caps = platform.list(owner);
-  const nameOf = (id: string) => platform.registry.getCapability(id)?.displayName ?? caps.find((c) => c.id === id)?.name ?? id;
+  // A tool in its first build isn't listed yet: its reserved name, not its id.
+  const nameOf = (id: string) => platform.registry.getCapability(id)?.displayName ?? caps.find((c) => c.id === id)?.name ?? platform.registry.getCapability(id)?.name ?? id;
   const builds = platform.registry.recentBuilds(60).map((id) => platform.getBuild(owner, id));
   const live = new Set(builds.filter((b) => LIVE.has(b.status)).map((b) => b.capabilityId));
   const agents = new Map(platform.agents(owner).map((a) => [a.id, a.name]));
@@ -746,7 +747,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
       if (cap > 0 && spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its ${usdText(cap)} cap`, severity: "danger", action: "Raise cap…" });
     }
   }
-  needs.push(...(await modelNotices(platform, host, builds)));
+  needs.push(...(await modelNotices(host)));
 
   const order = { danger: 0, warn: 1 };
   needs.sort((a, b) => (a.kind === "confirmation" ? -1 : b.kind === "confirmation" ? 1 : 0) || order[a.severity] - order[b.severity] || (b.at ?? "").localeCompare(a.at ?? ""));
@@ -757,24 +758,16 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   return { needs, building, ...(recent ? { recent: activity(platform, owner, { limit: 6 }).items } : {}) };
 }
 
-/**
- * The model the owner picked for a job, when it needs them: a pinned model a build couldn't use (it
- * ran on the default), or one whose CLI names a successor. Gone once the owner picks another.
- */
-async function modelNotices(platform: Platform, host: SurfaceHost, builds: ReturnType<Platform["getBuild"]>[]): Promise<InboxItem[]> {
+/** The model the owner picked for a job, when its CLI names a successor. Gone once the owner picks another. */
+async function modelNotices(host: SurfaceHost): Promise<InboxItem[]> {
   const s = await host.settings.read();
   const out: InboxItem[] = [];
-  for (const [job, title] of [["builder", "Builds tools"], ["intake", "Talks it through"]] as const) {
+  // One agent doing both halves: one notice.
+  const jobs = s.builder === s.intake ? ([["builder", "Builds tools"]] as const) : ([["builder", "Builds tools"], ["intake", "Talks it through"]] as const);
+  for (const [job, title] of jobs) {
     const agent = s[job];
     const pinned = jobModel(s, job, agent).model;
     if (!pinned) continue;
-    // The newest build that ran on this agent with a model of the owner's (builds are newest first).
-    const last = job === "builder" ? builds.find((b) => b.builder === agent && b.model && b.status !== "waiting") : undefined;
-    const fell = last?.model?.note?.kind === "fallback" ? last : undefined;
-    if (fell && fell.model!.note!.model === pinned) {
-      out.push({ kind: "builder-model", id: job, title, detail: `${pinned} isn't available any more; builds use the default`, severity: "warn", action: "Change…", at: fell.updatedAt });
-      continue;
-    }
     const upgrade = host.modelCatalog ? (await host.modelCatalog(agent).catch(() => undefined))?.models.find((m) => m.id === pinned)?.upgrade : undefined;
     if (upgrade) out.push({ kind: "builder-model", id: job, title, detail: `${upgrade} replaces ${pinned}`, severity: "warn", action: "Change…" });
   }

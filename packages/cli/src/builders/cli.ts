@@ -15,6 +15,8 @@ export function builderPrompt(job: BuildJob): string {
     `Your current directory is the build workspace. Read BUILDER.md: it holds the request and the implementation contract. Implement the request in place.`,
     `Only change files inside this directory. Do not try to start, call or promote anything on the platform. When the candidate is complete, stop. The platform validates it automatically.`,
   ];
+  // The owner watches Home while it builds: the glyph first, not after reading everything.
+  if (job.kind === "create") lines.push(`Right after reading BUILDER.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BUILDER.md): the owner's Home shows the icon while you build.`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }
@@ -47,8 +49,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
   let unavailable: string | undefined;
   // Errors only (stderr, error and failed-result events), never the builder's own words about models.
   let modelRejected: string | undefined;
-  // Only before the builder has done anything: a model that won't run fails at once, and a re-run
-  // on the default must not start over a half-written workspace.
+  // Only before the builder has done anything: a model that won't run fails at once.
   let worked = false;
   const checkModel = (text: string) => job.model && !worked && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
   return new Promise((resolve, reject) => {
@@ -98,21 +99,21 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
 const TIMEOUT_MS = 15 * 60_000;
 
 /**
- * Run with the asked-for model; if the CLI won't run it (retired, or not on this account), say so
- * and run again on the CLI's default, so the build still happens. The owner is told (the Inbox).
+ * Run with the asked-for model. If the CLI won't run it (retired, misspelled, not on this account),
+ * the build stops at once and says so: the owner picks another; nothing is built on a model they
+ * didn't choose.
  */
-export async function withModelFallback(job: BuildJob, run: (job: BuildJob) => Promise<void>): Promise<void> {
+export async function withModelCheck(job: BuildJob, run: (job: BuildJob) => Promise<void>): Promise<void> {
   try {
     await run(job);
   } catch (e) {
     if (!(e as { modelRejected?: boolean }).modelRejected || !job.model) throw e;
-    const text = `${job.model} isn't available (${(e as Error).message.slice(0, 160)}); building with the default model instead`;
-    appendFileSync(job.logPath, `${stamp()} ${text}\n`);
-    job.onNote?.({ kind: "fallback", model: job.model, text });
-    const { model: _model, ...rest } = job;
-    await run(rest);
+    throw Object.assign(new Error(modelUnavailableText(job.model)), { modelUnavailable: true });
   }
 }
+
+/** What the owner reads when a model can't run. */
+export const modelUnavailableText = (model: string) => `${model} isn't available. Pick another model (in the chat box or Settings › AI).`;
 
 /** `--model` / `--effort` for Claude Code. */
 export const claudeModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["--model", m.model] : []), ...(m.effort ? ["--effort", m.effort] : [])];
@@ -212,7 +213,7 @@ export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undef
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
   name: "codex",
-  build: (job) => withModelFallback(job, codexRun),
+  build: (job) => withModelCheck(job, codexRun),
 };
 
 async function codexRun(job: BuildJob) {
@@ -250,7 +251,7 @@ async function codexRun(job: BuildJob) {
 /** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
 export const claudeBuilder: CapabilityBuilder = {
   name: "claude",
-  build: (job) => withModelFallback(job, claudeRun),
+  build: (job) => withModelCheck(job, claudeRun),
 };
 
 async function claudeRun(job: BuildJob) {

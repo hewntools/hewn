@@ -142,7 +142,7 @@ try {
     await page.screenshot({ path: "/tmp/e2e-fr-agents.png" });
   });
 
-  await step("Settings › AI: one Builds tools row; pick its model; Advanced shows both halves on it", async () => {
+  await step("Settings › AI: one Builds tools row; pick its model", async () => {
     await page.goto(`${web}/#/settings/ai`);
     const row = page.locator(".setting", { hasText: "Builds tools" }).first();
     await row.getByRole("button", { name: "Model…" }).click();
@@ -153,8 +153,6 @@ try {
     await row.getByText(/Fable · high effort/).waitFor();
     await page.locator(".setting", { hasText: "Agents may ask for" }).getByText(/Default, Fable, Opus/).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-ai.png" });
-    await page.locator("details.advanced > summary").click();
-    await page.locator("details.advanced .setting", { hasText: "Talks it through" }).getByText(/Fable · high effort/).waitFor();
     await page.goto(`${web}/#/`);
   });
 

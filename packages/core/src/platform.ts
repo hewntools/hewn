@@ -144,7 +144,7 @@ export interface BuildView {
   dependsOn?: string;
   /** Status "review": what the change would add; it goes live once the owner approves it. */
   review?: BuildReview;
-  /** What it runs on: the model and effort (as asked for or set), the model it ran on, and a note for the owner. */
+  /** What it runs on: the model and effort (as asked for or set), and the model it ran on. */
   model?: BuildModel;
   /** What the builder's host charged for it, all attempts ("12 Credits"). Absent: no charge (a builder on the owner's own account). */
   charge?: { amount: number; unit: string };
@@ -2798,10 +2798,6 @@ export class Platform {
               this.events.emit(buildId, line);
             },
             onModel: (ran) => this.registry.updateBuildModel(buildId, { ranModel: ran }),
-            onNote: (note) => {
-              this.registry.updateBuildModel(buildId, { note });
-              this.buildEvent(buildId, note.text, tag);
-            },
             onCharge: (c) => {
               if (!Number.isFinite(c.amount) || c.amount < 0 || c.amount > 1e6 || !/^[A-Za-z][A-Za-z ]{0,19}$/.test(c.unit)) return;
               this.registry.addBuildCharge(buildId, c);
@@ -2817,6 +2813,14 @@ export class Platform {
           this.buildEvent(buildId, `attempt ${attempt}: lost the connection to the builder (${(e as Error).message}); waiting before going on`, tag);
           await new Promise((ok) => setTimeout(ok, this.interruptWaitMs));
           if (cancelled()) return;
+        }
+        if ((e as { modelUnavailable?: boolean }).modelUnavailable) {
+          // The model asked for can't run (retired, misspelled, not on this account): nothing is built.
+          const line = `FAILED: model unavailable: ${(e as Error).message}`;
+          history.push(line);
+          this.buildEvent(buildId, line, tag);
+          this.registry.updateBuild(buildId, { status: "failed", log: history });
+          return;
         }
         if ((e as { refused?: boolean }).refused) {
           // The builder's host declined it (e.g. over the month's builds): say why, don't retry.

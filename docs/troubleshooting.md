@@ -92,8 +92,8 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 **A build fails**
 The build says why (the failing test, the invalid manifest, the error on its screen), with its log, and offers **Ask builder to fix**. When the builder itself is unavailable (signed out, out of usage), Hewn stops instead of retrying.
 
-**"… isn't available any more; builds use the default"** (Inbox)
-The model you pinned for building is gone (retired, or not on your account), so builds run on the agent's default model. Pick another in Settings › AI (**Builds tools › Model…**), or a family such as Fable, which follows the newest.
+**"Model not available: … isn't available. Pick another model"**
+The model you pinned for building is gone (retired, misspelled, or not on your account), so nothing was built. Pick another in the chat box's model menu or Settings › AI (**Builds tools › Model…**), or a family such as Fable, which follows the newest. Then retry the build.
 
 **An agent's build fails with "the owner doesn't let agents ask for …"**
 The agent asked for a model you haven't allowed. Tick it under **Agents may ask for** in Settings › AI, or let the agent leave the model out (your choice is used then).

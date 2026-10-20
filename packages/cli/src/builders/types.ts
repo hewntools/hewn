@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import type { BuildNote } from "@hewntools/core/ports.ts";
 import type { BuildKind } from "@hewntools/core/registry.ts";
 
 export interface BuildJob {
@@ -27,13 +26,10 @@ export interface BuildJob {
   effort?: string;
   /** The model the run actually used (a family resolves to a full name), when the CLI says. */
   onModel?: (model: string) => void;
-  /** Something the owner should know about the run (it fell back to the default model). */
-  onNote?: (note: BuildNote) => void;
   /** What the builder's host charged for this attempt (the remote builder). */
   onCharge?: (charge: { amount: number; unit: string }) => void;
 }
 
-export type { BuildNote } from "@hewntools/core/ports.ts";
 
 /**
  * Turns a build request into a candidate implementation in the workspace.

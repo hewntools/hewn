@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { claudeHome, claudeModelArgs, codexHome, codexModelArgs } from "./builders/cli.ts";
+import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText } from "./builders/cli.ts";
 import { MODEL_REJECTED } from "./builders/models.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
@@ -342,8 +342,8 @@ function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEn
 
 /**
  * Intake backed by a headless coding-agent CLI, confined by the builder sandbox profile. It runs on
- * the model the owner picked (`req.run`); one the CLI won't run is dropped for its default, and the
- * owner sees that in the chat.
+ * the model the owner picked (`req.run`); one the CLI won't run stops it with a reason the owner
+ * can act on (pick another), never a quiet switch to the default.
  */
 export function cliIntake(which: "claude" | "codex", platformRoot: string): Intake {
   const once = cliIntakeOnce(which, platformRoot);
@@ -352,9 +352,8 @@ export function cliIntake(which: "claude" | "codex", platformRoot: string): Inta
       return await once(req, onProgress, signal);
     } catch (e) {
       const model = req.run?.model;
-      if (!model || signal?.aborted || !MODEL_REJECTED.test((e as Error).message)) throw e;
-      onProgress?.({ activity: `${model} isn't available; answering with the default model` });
-      return once({ ...req, run: req.run?.effort ? { effort: req.run.effort } : {} }, onProgress, signal);
+      if (model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) throw new Error(modelUnavailableText(model));
+      throw e;
     }
   };
 }

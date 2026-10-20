@@ -232,10 +232,10 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       const abort = new AbortController();
       res.on("close", () => abort.abort());
       try {
-        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onNote: (note) => send({ note }), onCharge: (charge) => send({ charge }) });
+        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }) });
         send({ done: true });
       } catch (e) {
-        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused });
+        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
       }
       res.end();
       return STREAMED;

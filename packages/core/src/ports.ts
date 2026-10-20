@@ -125,14 +125,12 @@ export interface BuildJob {
 
 /**
  * How a build went, beyond its files: `onModel` names the model it actually ran on (a family such as
- * "fable" resolves to a full name); `onNote` says something the owner should know (a pinned model
- * that isn't available any more, so the build ran on the default).
+ * "fable" resolves to a full name).
  */
 export interface BuildHooks {
   onActivity: (line: string) => void;
   signal: AbortSignal;
   onModel?: (model: string) => void;
-  onNote?: (note: BuildNote) => void;
   /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. Credits). */
   onCharge?: (charge: BuildCharge) => void;
 }
@@ -141,13 +139,6 @@ export interface BuildHooks {
 export interface BuildCharge {
   amount: number;
   unit: string;
-}
-
-/** `fallback`: the asked-for model wasn't available, so the build ran on the CLI's default. */
-export interface BuildNote {
-  kind: "fallback";
-  model: string;
-  text: string;
 }
 
 export interface Workbench {
@@ -160,7 +151,8 @@ export interface Workbench {
   remove(buildId: string): Promise<void>;
   /**
    * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
-   * help, and `refused: true` that the builder's host declined it (e.g. over quota; the message says why).
+   * help, `refused: true` that the builder's host declined it (e.g. over quota; the message says why),
+   * and `modelUnavailable: true` that the model asked for can't run (the owner picks another).
    */
   build(job: BuildJob, hooks: BuildHooks): Promise<void>;
   /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */

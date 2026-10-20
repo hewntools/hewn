@@ -116,10 +116,6 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
             job.onActivity?.(e.activity);
           }
           if (typeof e.model === "string") job.onModel?.(e.model);
-          if (e.note && e.note.kind === "fallback" && typeof e.note.model === "string" && typeof e.note.text === "string") {
-            write(e.note.text);
-            job.onNote?.({ kind: "fallback", model: e.note.model, text: e.note.text });
-          }
           // What the host charged for this attempt, in its own unit (Hewn Cloud: Credits); shown as given.
           if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
           if (e.files && typeof e.files === "object") result = e.files;

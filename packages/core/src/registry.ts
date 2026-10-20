@@ -75,8 +75,6 @@ export interface BuildModel {
   effort?: string;
   /** What the builder reported running on (a full name). */
   ran?: string;
-  /** `fallback`: the model wasn't available, so it ran on the builder's default. */
-  note?: { kind: "fallback"; model: string; text: string };
 }
 
 export interface BuildRow {
@@ -250,8 +248,8 @@ CREATE TABLE IF NOT EXISTS builds (
   depends_on     TEXT,
   review         TEXT
 );
--- What a build runs on: the model and effort asked for (or the owner's setting), the model it
--- actually ran on, and a note for the owner (a pinned model that wasn't available).
+-- What a build runs on: the model and effort asked for (or the owner's setting), and the model it
+-- actually ran on. (note: unused since 0.4.2's fallback was dropped; kept so existing tables match.)
 CREATE TABLE IF NOT EXISTS build_models (
   build_id       TEXT PRIMARY KEY,
   model          TEXT,
@@ -574,11 +572,10 @@ export class Registry {
     this.db.prepare("INSERT OR REPLACE INTO build_models (build_id, model, effort) VALUES (?, ?, ?)").run(buildId, m.model ?? null, m.effort ?? null);
   }
 
-  /** The model the builder reported running on, and a note for the owner. */
-  updateBuildModel(buildId: string, patch: { ranModel?: string; note?: BuildModel["note"] }) {
+  /** The model the builder reported running on. */
+  updateBuildModel(buildId: string, patch: { ranModel?: string }) {
     this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
     if (patch.ranModel !== undefined) this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(patch.ranModel, buildId);
-    if (patch.note !== undefined) this.db.prepare("UPDATE build_models SET note = ? WHERE build_id = ?").run(JSON.stringify(patch.note), buildId);
   }
 
   /** Add an attempt's charge to the build's (a different unit replaces it). */
@@ -600,7 +597,6 @@ export class Registry {
       ...(r.model ? { model: r.model as string } : {}),
       ...(r.effort ? { effort: r.effort as string } : {}),
       ...(r.ran_model ? { ran: r.ran_model as string } : {}),
-      ...(r.note ? { note: JSON.parse(r.note as string) } : {}),
     };
   }
 

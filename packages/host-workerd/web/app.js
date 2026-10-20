@@ -293,13 +293,14 @@ async function renderInbox() {
   const buildRow = (b) => {
     const c = all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.name };
     const lit = b.step?.step === "tests" && b.tests?.total ? b.tests.passed / b.tests.total : 0;
+    // The whole row opens the build.
     return h(
-      "div",
-      { class: "inbox-row" },
+      "a",
+      { class: "inbox-row link", href: `#/b/${enc(b.buildId)}` },
       h("span", { class: "dot live" }),
       appIcon(c, { size: 36, progress: lit, waiting: !lit }),
       h("div", { class: "grow" }, h("span", { class: "title" }, b.name), h("span", { class: "small muted" }, b.status === "waiting" ? "Waiting" : buildingLabel({ ...(b.step ?? {}), tests: b.tests }))),
-      h("a", { class: "btn ghost sm", href: `#/b/${enc(b.buildId)}` }, "Show"),
+      h("span", { class: "faint", "aria-hidden": "true" }, "›"),
     );
   };
   const recentList = (n) => (recent ? h("ul", { class: "list inbox-recent" }, recent.slice(0, n).map((i) => recentRow(i, all))) : skeleton("70%", "50%"));
@@ -693,7 +694,7 @@ async function iconDialog(c) {
 
 /**
  * Hewn's jobs, shown as one ("Builds tools"): the intake talks a request through and proposes it,
- * the builder builds it. Settings › AI › Advanced splits them: [settings key, title, picker question].
+ * the builder builds it. Settings keep both keys (older homes may have them split): [settings key, title, picker question].
  */
 const JOBS = [
   ["intake", "Talks it through", "Who talks requests through?"],
@@ -896,8 +897,10 @@ function tile(c, { hidden = false, editHome, show } = {}) {
     el.title = c.purpose ?? "";
   };
   const items = () => (c.building && !c.version ? [["Show build", () => go(`#/b/${c.building.buildId}`)]] : capabilityMenu(c, { rename: () => inlineRename(c, label), editHome, hidden, show }));
-  el.addEventListener("click", () => openCapability(c).catch(fail));
-  el.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && e.target === el && (e.preventDefault(), openCapability(c).catch(fail)));
+  // While it builds, the tile opens the build.
+  const open = () => (c.building ? go(`#/b/${enc(c.building.buildId)}`) : openCapability(c).catch(fail));
+  el.addEventListener("click", open);
+  el.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && e.target === el && (e.preventDefault(), open()));
   withContextMenu(el, items);
   render(c);
   return { el, update: render };
@@ -3087,7 +3090,7 @@ function milestones(b) {
 
 async function buildPage(id) {
   const panel = buildPanel(id, {});
-  view(...moment({ left: "-60px", bottom: "-20px" }, backBar("Activity", "#/activity?view=builds", panel.barRight), h("div", { class: "build-center" }, panel.el)));
+  view(...moment({ left: "-60px", bottom: "-20px" }, backBar("Activity", "#/activity?view=builds"), h("div", { class: "build-center" }, panel.el)));
 }
 
 /**
@@ -3113,12 +3116,11 @@ const builtWith = (b) =>
   b.builder &&
   !["keep", "agent"].includes(b.builder) &&
   !b.builder.startsWith("copy:") &&
-  h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}${b.charge ? ` · ${chargeWords(b.charge)}` : ""}`, b.model?.note && h("span", {}, ` · ${b.model.note.text}`));
+  h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}${b.charge ? ` · ${chargeWords(b.charge)}` : ""}`);
 
 function buildPanel(id, { compact = false, onPromoted } = {}) {
   const card = h("div", { class: compact ? "build-panel stack-md" : "card build-card" }, skeleton("50%", "80%"));
-  const cancelBtn = h("button", {}, "Cancel build");
-  const barRight = h("div", { class: "glass-bar", hidden: true }, cancelBtn);
+  const cancelBtn = h("button", { class: "sm" }, "Cancel build");
   const logPre = h("pre", { class: `log ${compact ? "short" : "tail"}` });
   let follow = true;
   let logScroll = 0;
@@ -3181,11 +3183,16 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           compact && b.kind !== "create" ? `Building v${(base ?? 0) + 1}` : cap().name,
           waitingAgent
             ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave`
-            : `${askedBy(b)}${compact && base ? `With ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}, ${accountWords(b.builder)} · v${base} keeps working` : `Building with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}, ${accountWords(b.builder)} · you can leave`}`,
+            : // Two lines: what happens meanwhile, then who builds it on what.
+              [
+                h("div", {}, `${askedBy(b)}${compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building"}`),
+                h("div", { class: "faint" }, [builderLabel(b.builder), buildModelWords(b), accountWords(b.builder).replace(/^on /, "")].filter(Boolean).join(" · ")),
+              ],
           clockEl,
         ),
         h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
+        h("div", { class: "row end" }, cancelBtn),
       );
       logPre.hidden = false;
       keepScroll();
@@ -3286,7 +3293,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     };
 
     const cancelled = () => {
-      barRight.hidden = true;
       const retry = h("button", { class: "primary" }, "Start again");
       retry.addEventListener("click", async () => {
         retry.disabled = true;
@@ -3335,7 +3341,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
 
     const settle = (v) => {
       b = v;
-      if (!LIVE_BUILD.has(b.status)) barRight.hidden = true;
       if (b.status === "review") return inReview();
       if (b.status === "promoted") return ready();
       if (b.status === "failed") return failed();
@@ -3356,7 +3361,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         fail(e);
       }
     });
-    barRight.hidden = !LIVE_BUILD.has(b.status);
     // The transcript replays (live or finished, kept for 30 days), then "done".
     const finished = !LIVE_BUILD.has(b.status) && b.status !== "open";
     if (!finished) live();
@@ -3393,7 +3397,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     }, 4000);
     onLeave(() => clearInterval(tick));
   })().catch((e) => put(card, errorBox(e)));
-  return { el: card, barRight };
+  return { el: card };
 }
 
 // ---------- review of agents' changes ----------
@@ -3775,7 +3779,7 @@ const agentTileOf = (t, size) => agentTile(t.name === "claude" ? "claude-code" :
 
 /**
  * O2 Who builds tools: the signed-in agents on this machine (and the host's builder, if it runs
- * one). `key` picks one half under Advanced; without it the agent does both. `thenModel`: open
+ * one). `key` picks one half; without it (the web client's only way) the agent does both. `thenModel`: open
  * the model sheet next (switching agent means choosing its model; it remembers the last one).
  */
 async function jobPicker(key, { thenModel = false } = {}) {
@@ -3794,7 +3798,7 @@ async function jobPicker(key, { thenModel = false } = {}) {
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
   const chosen = keys.every((k) => jobChosen(s, k)) && keys.every((k) => s[k] === s[keys[0]]) ? s[keys[0]] : null;
-  const pick = await pickerSheet({ title: question, options, value: chosen, note: key ? undefined : "It talks each request through with you, then builds it. Settings › AI › Advanced splits the two.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
+  const pick = await pickerSheet({ title: question, options, value: chosen, note: key ? undefined : "It talks each request through with you, then builds it.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
   if (!pick) return null;
   await setJobs(keys, pick);
   const t = tools.find((x) => x.name === pick);
@@ -4444,8 +4448,8 @@ function timeZoneSheet(current) {
 
 /**
  * O1 Settings › AI: what Hewn runs AI for. Building tools (talking a request through, then building
- * it) runs an agent, on this machine and its own account or on the host's keys; Advanced splits the
- * two halves. Thinking inside tools is a metered API call with your key.
+ * it) runs one agent, on this machine and its own account or on the host's keys. Thinking inside
+ * tools is a metered API call with your key.
  */
 async function aiSection() {
   const [{ tools, settings: s, ready }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
@@ -4473,14 +4477,14 @@ async function aiSection() {
     h("output", { title: "Build attempts" }, String(n)),
     h("button", { "aria-label": "More attempts", disabled: n >= 5, onclick: () => saveSettings({ maxBuildAttempts: n + 1 }, `Build attempts: ${n + 1}`) }, "+"),
   );
-  // One row when one agent on one model does both halves; split, it says so and Advanced shows how.
+  // One row when one agent on one model does both halves; an older split says so, with Use one….
   const same = jobsSame(s);
   const builds = same
     ? jobRow("Builds tools", ALL_JOBS)
     : h(
         "div",
         { class: "setting" },
-        h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub" }, "Split between two agents or models · see Advanced")),
+        h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub" }, "Talking it through and building use different agents or models")),
         h("button", { class: "sm", onclick: () => jobPicker(null, { thenModel: true }).then(() => route()) }, "Use one…"),
       );
   const builder = jobTool("builder");
@@ -4492,17 +4496,6 @@ async function aiSection() {
       { class: "setting" },
       h("div", { class: "grow" }, h("span", { class: "strong" }, "Agents may ask for"), h("span", { class: "sub" }, allowed.map((id) => catalogs.get(s.builder)?.models.find((x) => x.id === id)?.label ?? id).join(", "))),
       h("button", { class: "sm", onclick: () => agentModelsSheet(builder).then((saved) => saved && route()) }, "Change…"),
-    );
-  // A hosted Hewn (only the host's builder) has nothing to split.
-  const hosted = s.builder === "remote" && s.intake === "remote" && !tools.some((t) => !t.remote && t.found);
-  const advanced =
-    !hosted &&
-    h(
-      "details",
-      { class: "card settings-card advanced", ...(same ? {} : { open: true }) },
-      h("summary", { class: "strong" }, "Advanced"),
-      h("div", { class: "small faint" }, "Building is two jobs: talking a request through with you (quick, writes nothing) and building it (in a sandbox, takes minutes). Each can have its own agent and model."),
-      JOBS.map(([key, title]) => jobRow(title, [key])),
     );
   const prov = m?.provider && m.providers.find((p) => p.id === m.provider);
   settingsFrame(
@@ -4523,7 +4516,6 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
-    advanced,
     h("div", { class: "small faint" }, builder?.remote ? "Building runs on the host's own model keys." : "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );

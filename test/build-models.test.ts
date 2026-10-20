@@ -13,7 +13,7 @@ import type { Platform } from "@hewntools/core/platform.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { writeConfig } from "@hewntools/cli/config.ts";
 import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED } from "@hewntools/cli/builders/models.ts";
-import { claudeModelArgs, codexModelArgs, withModelFallback } from "@hewntools/cli/builders/cli.ts";
+import { claudeModelArgs, codexModelArgs, withModelCheck } from "@hewntools/cli/builders/cli.ts";
 import { settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import { toolsFor } from "@hewntools/host-workerd/mcp.ts";
 import { notesSince } from "@hewntools/cli/upgrade.ts";
@@ -118,17 +118,21 @@ describe("models for builds", () => {
     assert.equal(b.jobs.at(-1)!.model, "opus");
   });
 
-  test("the model it ran on, and a fallback note, are kept on the build", async () => {
-    writeConfig(t.home, { jobModels: { builder: { fake: { model: "fable-old" } } } });
+  test("the model it ran on is kept on the build; a model that can't run fails it at once, saying so", async () => {
+    writeConfig(t.home, { jobModels: { builder: { fake: { model: "fable" } } } });
     use(recorder("fake", (job) => {
-      job.onNote?.({ kind: "fallback", model: "fable-old", text: "fable-old isn't available; building with the default model instead" });
+      if (job.model === "gone-1") throw Object.assign(new Error("gone-1 isn't available. Pick another model (in the chat box or Settings › AI)."), { modelUnavailable: true });
       job.onModel?.("claude-fable-5-5");
       cpSync(SEED, job.workspace, { recursive: true });
-    }));
+    }), { attempts: 3 });
     const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
     assert.equal(done.status, "promoted");
     assert.equal(done.model!.ran, "claude-fable-5-5");
-    assert.equal(done.model!.note!.model, "fable-old");
+    const gone = await platform.settle((await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", model: "gone-1" })).buildId);
+    assert.equal(gone.status, "failed");
+    assert.equal(b.jobs.length, 2, "not retried");
+    assert.equal(gone.failure!.title, "Model not available");
+    assert.match(gone.failure!.detail, /gone-1 isn't available\. Pick another/);
   });
 
   test("a host's charge: summed over attempts, shown as given; nonsense is dropped", async () => {
@@ -225,22 +229,18 @@ describe("model lists and flags", () => {
     assert.deepEqual(codexModelArgs({ model: "gpt-a", effort: "low" }), ["-m", "gpt-a", "-c", 'model_reasoning_effort="low"']);
   });
 
-  test("a model the CLI won't run: noted, then built on the default", async () => {
+  test("a model the CLI won't run stops the build, saying so; other failures pass through", async () => {
     assert.match("There's an issue with the selected model (claude-fable-5-1). It may not exist or you may not have access to it.", MODEL_REJECTED);
     assert.match('{"type":"error","message":"The model `gpt-x` does not exist"}', MODEL_REJECTED);
     assert.doesNotMatch("→ Edit src/models.ts", MODEL_REJECTED);
-    const runs: (string | undefined)[] = [];
-    const notes: string[] = [];
-    const job = { buildId: "b1", capabilityId: "x", kind: "create", workspace: "/tmp", attempt: 1, logPath: "/dev/null", model: "fable-5-1", onNote: (n: { text: string }) => notes.push(n.text) } as BuildJob;
-    await withModelFallback(job, async (j) => {
-      runs.push(j.model);
-      if (j.model) throw Object.assign(new Error("issue with the selected model"), { modelRejected: true });
-    });
-    assert.deepEqual(runs, ["fable-5-1", undefined]);
-    assert.match(notes[0], /fable-5-1 isn't available/);
-    // Other failures aren't retried on the default.
-    await assert.rejects(withModelFallback(job, async () => Promise.reject(new Error("boom"))), /boom/);
+    const job = { buildId: "b1", capabilityId: "x", kind: "create", workspace: "/tmp", attempt: 1, logPath: "/dev/null", model: "fable-5-1" } as BuildJob;
+    await assert.rejects(
+      withModelCheck(job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))),
+      (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /fable-5-1 isn't available\. Pick another/.test(e.message),
+    );
+    await assert.rejects(withModelCheck(job, async () => Promise.reject(new Error("boom"))), /boom/);
   });
+
 });
 
 describe("settings for models", () => {
@@ -311,7 +311,6 @@ describe("web: models for building", () => {
     t = setup();
     // Named like Claude Code, so Settings' builder ("claude") is this one.
     const builder = recorder("claude", (job) => {
-      if (job.model === "gone-1") job.onNote?.({ kind: "fallback", model: "gone-1", text: "gone-1 isn't available; building with the default model instead" });
       cpSync(SEED, job.workspace, { recursive: true });
       const path = join(job.workspace, "capability.json");
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), id: job.capabilityId }));
@@ -348,14 +347,5 @@ describe("web: models for building", () => {
     assert.deepEqual(items.find((i: { buildId: string }) => i.buildId === b.buildId).buildModel, { model: "opus", effort: "low" });
   });
 
-  test("a pinned model that's gone: the build runs on the default and the Inbox says so, until the owner picks another", async () => {
-    await api("/settings", { method: "PUT", body: { jobModels: { builder: { claude: { model: "gone-1" } } } } });
-    const b = (await api("/capabilities", { method: "POST", body: { name: "Fell Back", purpose: "p", requirements: "r" } })).json;
-    assert.equal((await platform.settle(b.buildId)).status, "promoted");
-    const notice = (await api("/inbox")).json.needs.find((n: { kind: string }) => n.kind === "builder-model");
-    assert.ok(notice, "the Inbox names it");
-    assert.match(notice.detail, /gone-1 isn't available any more/);
-    await api("/settings", { method: "PUT", body: { jobModels: { builder: { claude: { model: "fable" } } } } });
-    assert.ok(!(await api("/inbox")).json.needs.some((n: { kind: string }) => n.kind === "builder-model"), "gone once the owner picks another");
-  });
+
 });

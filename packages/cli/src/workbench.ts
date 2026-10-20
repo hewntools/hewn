@@ -141,7 +141,6 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         ...(job.model ? { model: job.model } : {}),
         ...(job.effort ? { effort: job.effort } : {}),
         onModel: hooks.onModel,
-        onNote: hooks.onNote,
         onCharge: hooks.onCharge,
       });
     },

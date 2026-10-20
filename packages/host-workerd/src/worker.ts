@@ -230,12 +230,11 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
     build: async (job: BuildJob, hooks) => {
-      let failure: { error: string; unavailable?: boolean; refused?: boolean } | undefined;
+      let failure: { error: string; unavailable?: boolean; refused?: boolean; modelUnavailable?: boolean } | undefined;
       try {
         await sv.stream("/workbench/build", job, (e) => {
           if (e.activity) hooks.onActivity(e.activity);
           if (e.model) hooks.onModel?.(e.model);
-          if (e.note) hooks.onNote?.(e.note);
           if (e.charge) hooks.onCharge?.(e.charge);
           if (e.error) failure = e;
         }, hooks.signal);
@@ -244,7 +243,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
         if (!hooks.signal.aborted && !(e as { unavailable?: boolean }).unavailable && !/supervisor .*HTTP/.test((e as Error).message)) throw Object.assign(e as Error, { interrupted: true });
         throw e;
       }
-      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused });
+      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, modelUnavailable: failure.modelUnavailable });
     },
     bundle: (buildId) => sv.json("/workbench/bundle", { buildId }),
     note: async (buildId, line) => void (await sv.json("/workbench/note", { buildId, line })),
