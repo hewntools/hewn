@@ -108,14 +108,16 @@ code.token { overflow-wrap: anywhere; }
 .moment-col { flex: 1; width: min(640px, 100% - var(--s6)); margin: 0 auto; display: flex; flex-direction: column; justify-content: flex-start; gap: var(--s5); padding: clamp(var(--s5), 12vh, 120px) 0 var(--s7); }
 .chat-card, .spec-card { border-radius: var(--radius-xl); padding: 20px; display: flex; flex-direction: column; gap: var(--s4); }
 .spec-card { padding: var(--s5); gap: 18px; }
-.chat-card .thread:empty { display: none; }
+.chat-card .thread:empty, .chat-col .thread:empty { display: none; }
+/* The new-tool chat: the conversation, then the one box (no card around it). */
+.chat-col { display: flex; flex-direction: column; gap: var(--s4); }
 textarea.composer-input { flex: 1; min-height: 44px; max-height: 40vh; resize: none; overflow-x: hidden; overflow-y: auto; border-radius: var(--radius); line-height: 1.45; }
 .composer { flex-wrap: nowrap; align-items: flex-end; }
 .intake-activity:empty { display: none; }
 .spec-name { font-size: 22px; font-weight: 650; letter-spacing: var(--track-tight); }
 a.spec-name { color: var(--text); text-decoration: none; }
 a.spec-name:hover { text-decoration: underline; }
-.spec-text { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; font: var(--fs-sm)/1.6 var(--font); color: var(--text-2); }
+.spec-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-sm)/1.6 var(--font); color: var(--text-2); }
 
 /* B3 / B4 build */
 .build-center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 var(--s4) 60px; }
@@ -238,7 +240,7 @@ fieldset.job legend .sub { color: var(--text-2); }
 .row.baseline { align-items: baseline; }
 .stack-xs { display: flex; flex-direction: column; gap: 4px; }
 .clip-1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.danger-text { color: var(--danger); }
+.danger-text, .list > li .sub.danger-text { color: var(--danger); }
 .wide { width: 100%; }
 .center { text-align: center; }
 .inset-block { padding: 14px; border-radius: 14px; background: var(--surface-2); }
@@ -312,6 +314,7 @@ fieldset.job legend .sub { color: var(--text-2); }
 .setting-with-extra .attempts { justify-content: flex-end; padding: 0 0 10px; }
 .setting-with-extra .setting { border-top: 0; }
 .setting-with-extra { border-top: 1px solid var(--border); }
+.setting-with-extra:first-child { border-top: 0; }
 
 /* Sheets */
 .tier-select, .provider-select { width: 150px; flex: none; }
@@ -384,3 +387,64 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .stop-btn { min-width: 44px; justify-content: center; } .stop-square { display: block; width: 12px; height: 12px; border-radius: 2px; background: currentColor; }
 .title-ref { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; } .title-ref .cap-ref { font-weight: inherit; }
 .ref-end { display: inline-flex; align-items: center; }
+
+/* The intake's chat box: the message on top, then the model chip and Send inside the same box (a chat app's). */
+.composer.boxed { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 8px 8px 6px; background: var(--field); border: 1px solid var(--field-border); border-radius: 22px; box-shadow: var(--field-inset); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.composer.boxed:focus-within { border-color: var(--accent-ink); background-color: var(--surface-solid); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer.boxed textarea.composer-input, .composer.boxed textarea.composer-input:focus { border: 0; background: transparent; box-shadow: none; padding: 8px 10px; min-height: 44px; }
+.composer-tools { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); }
+.composer-tools > button[type=submit], .composer-tools > .stop-btn { border-radius: var(--radius-pill); }
+.model-chip { gap: 6px; color: var(--text-2); font-weight: 450; border-radius: var(--radius-pill); }
+.model-chip .faint { font-weight: 400; }
+.model-chip .caret { width: 7px; height: 7px; margin: -3px 2px 0 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: .7; }
+.model-chip[aria-expanded="true"] .caret { transform: rotate(225deg); margin-top: 3px; }
+/* Its menu: fixed to the viewport next to the chip (placed in JS), scrolling when space is short. */
+.model-menu { position: fixed; z-index: 60; padding: 6px; overflow-y: auto; }
+.model-menu > * { flex-shrink: 0; }
+.model-menu .mm-row { display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 8px; background: none; text-align: left; font: 450 var(--fs)/1.35 var(--font); white-space: normal; }
+.model-menu .mm-row:hover, .model-menu .mm-row:focus-visible { background: var(--surface-2); }
+.model-menu .mm-row .col { gap: 3px; }
+.model-menu .mm-row .sub { font-size: var(--fs-sm); color: var(--text-2); }
+.model-tick { color: var(--accent-ink); font-weight: 600; }
+.model-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
+.mm-title { padding: 8px 12px 2px; }
+.mm-effort { display: flex; flex-direction: column; gap: 6px; padding: 6px 12px 10px; font-size: var(--fs-sm); }
+.effort-slider { width: 100%; accent-color: var(--accent); }
+.mm-other { padding: 6px 12px; }
+
+/* About's upgrade card: the new version's notes from the changelog. */
+.release-notes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+
+/* An Inbox row that is a link as a whole (a build): looks like the other rows. */
+a.inbox-row, .inbox-row.link { color: inherit; text-decoration: none; border-radius: 10px; cursor: pointer; }
+a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { background: var(--surface-2); }
+.pre-line { white-space: pre-line; margin: 6px 0 0; }
+.review-more > summary { cursor: pointer; color: var(--text-2); }
+
+/* The build page: who builds it on what, a labelled strip across the card. */
+.build-meta { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 1px; border-radius: 12px; overflow: hidden; background: var(--border); border: 1px solid var(--border); }
+.meta-cell { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--surface-solid); min-width: 0; }
+.meta-label { font: 500 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.meta-value { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta-sub { font-size: var(--fs-xs, 11px); color: var(--text-3); }
+.meta-value .meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.meta-value .meter i { width: 3px; border-radius: 1px; background: var(--border-strong); }
+.meta-value .meter i:nth-child(1) { height: 4px; } .meta-value .meter i:nth-child(2) { height: 6px; } .meta-value .meter i:nth-child(3) { height: 8px; } .meta-value .meter i:nth-child(4) { height: 10px; } .meta-value .meter i:nth-child(5) { height: 12px; }
+.meta-value .meter i.on { background: var(--accent-ink); }
+/* "Spec agreed" opens to the spec. */
+.spec-step > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.spec-step > summary::-webkit-details-marker { display: none; }
+.spec-step > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .6; }
+.spec-step[open] > summary::after { transform: rotate(45deg); margin-top: -3px; }
+.step:has(.spec-step[open]) { align-items: start; }
+.step:has(.spec-step[open])::before { align-self: start; margin-top: 7px; }
+.spec-step > .spec-text { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
+
+/* Two lines at most (the full text on hover). */
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.expandable { display: flex; align-items: flex-start; gap: 6px; }
+.expandable > span { min-width: 0; overflow-wrap: anywhere; }
+.caret-btn { flex: none; width: 20px; min-height: 20px; height: 20px; padding: 0; border: 0; background: none; color: inherit; }
+.caret-btn::before { content: ""; display: block; width: 6px; height: 6px; margin: 4px auto 0; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.caret-btn[aria-expanded="true"]::before { transform: rotate(225deg); margin-top: 8px; }
+.caret-btn:hover, .caret-btn:focus, .caret-btn:active { background: none; transform: none; }

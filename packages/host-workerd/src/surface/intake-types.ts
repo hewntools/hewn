@@ -18,6 +18,8 @@ export interface IntakeRequest {
   /** Filled in by the platform: the owner's capabilities, and the current manifest when modifying. */
   catalog?: { id: string; name: string; purpose: string; operations: string[]; kind?: "connection" }[];
   current?: CapabilityManifest;
+  /** One id per conversation, so a host that runs the intake can keep one session for all its turns. */
+  session?: string;
 }
 
 /**

@@ -82,12 +82,12 @@ Call logs are kept for two weeks by default (Settings › Data).
 ## Settings
 
 - **General:** appearance (system, light or dark), your time zone, and whether the sandbox is on.
-- **AI:** who does [Hewn's three jobs](concepts.md#hewns-three-jobs) (writes the spec, builds tools, thinks inside tools), and the Models page ([Models](models.md)).
+- **AI:** who does [Hewn's two jobs](concepts.md#hewns-two-jobs) (builds tools, on which model, and thinks inside tools), which models agents may ask for, and the Models page ([Models](models.md)).
 - **Remote access:** the public URL, your passkeys and signed-in browsers ([Using Hewn from anywhere](remote-access.md)).
 - **Data:** backups and their folder, how long call logs are kept, and deleted tools ([Your data](data.md)).
 - **About:** the version, whether a newer one is out (with the command to upgrade), and shortcuts.
 
-![Settings › AI: Writes the spec and Builds tools both set to Claude Code, and Thinks inside tools with no provider yet](images/settings-ai.png)
+![Settings › AI: Builds tools set to Claude Code on the default model, the models agents may ask for, and Thinks inside tools with no provider yet](images/settings-ai.png)
 
 ## On a phone
 

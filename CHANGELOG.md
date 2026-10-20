@@ -2,6 +2,22 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.2 (unreleased)
+
+- **One choice for building.** Talking a request through and building it are one job now, "Builds tools", with one agent to pick (in the first run, Settings › AI and the command palette). The docs call them Hewn's two jobs: building tools, and thinking inside them.
+- **Choose the model and effort for building.** Settings › AI lists what the agent offers: Default, a family that follows the newest (Claude Code's Fable, Opus, Sonnet, Haiku), or a pinned model (any Codex model, or a full Claude name), with an effort. Switching agent means choosing its model; Hewn remembers the last one for each. A model that's gone or misspelled stops the build (or the chat) at once with "… isn't available. Pick another model"; nothing is built on a model you didn't choose.
+- **Change the model where you type:** the box where you describe a tool shows the model it builds with; its menu has the current model, an effort slider and the other models, and changes your setting.
+- **Agents can ask for a model too**, on `capabilities_create`, `capabilities_modify` and `capabilities_add_widgets` (`model`, `effort`), but only one you tick under "Agents may ask for". Any other is an error naming the allowed ones, as is an effort the model doesn't take (naming its levels); nothing is built.
+- **Each build says what it ran on**, on its page and in Activity ("Built with Claude Code · claude-fable-5-5 · high effort").
+- **At most 5 builds run at once**; the rest wait their turn (and can be cancelled while they wait).
+- **The build page** shows who asked, the builder, the model and the effort in one strip, and "Spec agreed" opens to the spec. Cancel build is in the card; a building tile or Inbox row opens its build.
+- **The Inbox:** every row opens what it's about with one tap, and a schedule that stopped itself after failing (say a fetch whose service was down) shows there, so a widget doesn't go stale quietly.
+- **Schedules say why a run failed,** with when, in the tool's own words ("Last run 3 h ago failed: NOAA is unreachable").
+- **Reviewing an agent's change:** each new operation leads with its first sentence; the agent-facing rest is under "Full description".
+- **Fixed:** authorizing a tool that uses a model failed ("keyBlock?.saveBudget is not a function") when a model key was already set.
+- **About shows what's new** in a newer release, from the changelog, above the upgrade command.
+- **For hosts:** with `HEWN_BUILD_URL`, Hewn's builder and intake run on the host's own service and model keys (a refusal, such as over a quota, says why and isn't retried; what the host charges for a build, such as Credits, shows on its page and in Activity). This is what Hewn Cloud uses; the protocol is in [`docs/internal/remote-builder.md`](docs/internal/remote-builder.md).
+
 ## 0.4.1 (2026-10-19)
 
 - **Linux and WSL: the secrets key stays where it is.** Hewn keeps its key in a keyring only when one actually answers `secret-tool`; WSL and servers have a session bus but no keyring, and installing `libsecret-tools` there made Hewn restart over and over ("Could not connect"). A home that already has `master.key` keeps using it, even if a keyring appears later. `hewn doctor` no longer suggests `libsecret-tools` on machines without a keyring.

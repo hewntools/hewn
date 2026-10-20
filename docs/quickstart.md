@@ -2,7 +2,7 @@
 
 Hewn runs on your own machine: macOS, Linux, or Windows through WSL.
 
-Install it where your [builder](concepts.md#hewns-three-jobs) (Claude Code or Codex) is signed in, usually the computer you work on. Want Hewn on your phone too? Put it on a machine that's always on and follow [Using Hewn from anywhere](remote-access.md) after this.
+Install it where the agent that [builds your tools](concepts.md#hewns-two-jobs) (Claude Code or Codex) is signed in, usually the computer you work on. Want Hewn on your phone too? Put it on a machine that's always on and follow [Using Hewn from anywhere](remote-access.md) after this.
 
 ## Before you start
 
@@ -41,8 +41,7 @@ On a healthy install, `hewn doctor` says:
 ✔ workerd       installed
 ✔ Sandbox       Seatbelt: workerd and builders are confined
 ✔ Secrets key   in the macOS Keychain
-✔ Builder       claude found, logged in
-✔ Intake        claude found
+✔ Builds tools  claude found, logged in
 ✔ Visual check  chrome-headless-shell
 ✔ Claude Code   Hewn registered (if it asks to sign in: hewn setup --agents claude-code)
 ✔ Codex         Hewn registered (if it asks to sign in: hewn setup --agents codex)
@@ -53,10 +52,10 @@ No problems.
 
 The first run has three steps:
 1. Connect the agents on this machine that will use your tools (Claude Code, Codex).
-2. Choose who works for Hewn: which agent on this machine [writes the spec](concepts.md#hewns-three-jobs) for a new tool, and which builds it. One agent can do both.
+2. Choose who [builds your tools](concepts.md#hewns-two-jobs): the agent on this machine that talks each request through with you and builds it.
 3. Describe your first tool.
 
-![The first run: Make your own tools. Step 1 lists the agents found on this Mac (Claude Code, Codex) with Connect, step 2 who builds tools and who writes the spec, and step 3 a box to describe the first tool](images/first-run.png)
+![The first run: Make your own tools. Step 1 lists the agents found on this Mac (Claude Code, Codex) with Connect, step 2 who builds tools, and step 3 a box to describe the first tool](images/first-run.png)
 
 ## Upgrade
 
@@ -77,7 +76,7 @@ Your data, backups, Hewn itself (`npm uninstall -g @hewntools/cli`) and the secr
 
 ## Next
 
-- [Concepts](concepts.md): tools, agents, Hewn's three jobs, grants.
+- [Concepts](concepts.md): tools, agents, Hewn's two jobs, grants.
 - [The web client](using-hewn.md) and [Building tools](building-tools.md).
 - [Connecting agents](agents.md): Claude Code, Codex, claude.ai, ChatGPT.
 - [Using Hewn from anywhere](remote-access.md): your phone and other computers, on an always-on machine.

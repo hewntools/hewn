@@ -34,6 +34,11 @@ export interface AgentTool {
 
 const obj = (properties: Record<string, JSONSchema>, required: string[] = []): JSONSchema => ({ type: "object", properties, required, additionalProperties: false });
 const str = (description?: string): JSONSchema => ({ type: "string", ...(description ? { description } : {}) });
+/** What a build runs on. The host appends the names this agent may ask for to the tool's description. */
+const buildModel = {
+  model: str("The model to build it with, by name (e.g. 'fable', or 'default' for the builder's own). Leave it out to use the owner's choice; only names the owner allows are accepted."),
+  effort: str("How hard the model thinks: low, medium, high (and more on some models). Leave it out for the model's default."),
+};
 
 export const AGENT_TOOLS: AgentTool[] = [
   {
@@ -98,6 +103,7 @@ export const AGENT_TOOLS: AgentTool[] = [
         kind: { type: "string", enum: ["capability", "connection"], description: "'connection' wraps one external service and holds its credentials. Default 'capability'." },
         after: str("A buildId to wait for (e.g. the connection this capability calls)"),
         widgets: { type: "boolean", description: "Also build widgets for Home and chats, as a follow-up build once this one promotes (returned as widgetsBuildId)" },
+        ...buildModel,
       },
       ["name", "purpose", "requirements"],
     ),
@@ -107,14 +113,14 @@ export const AGENT_TOOLS: AgentTool[] = [
     scopes: ["modify"],
     description:
       "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
-    inputSchema: obj({ capabilityId: str(), request: str("Desired change"), after: str("A buildId to wait for") }, ["capabilityId", "request"]),
+    inputSchema: obj({ capabilityId: str(), request: str("Desired change"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId", "request"]),
   },
   {
     name: "capabilities_add_widgets",
     scopes: ["modify"],
     description:
       "Add widgets to an existing capability: glanceable cards (a number, a short list, a chart…) the owner can place on Hewn's Home and agents can show with widgets_show. A focused follow-up build that changes nothing but widgets, so it can't break the capability. Its new operations wait for the owner's review (status review), unless it follows the capability's own creation. Say what to show in request, or leave it out to let the builder propose 1–3. Follow it with builds_wait.",
-    inputSchema: obj({ capabilityId: str(), request: str("What the widgets should show (optional)"), after: str("A buildId to wait for") }, ["capabilityId"]),
+    inputSchema: obj({ capabilityId: str(), request: str("What the widgets should show (optional)"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId"]),
   },
   {
     name: "capabilities_request_access",

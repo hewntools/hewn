@@ -249,12 +249,16 @@ async function openNeed(n) {
       if (c) await confirmationSheet(c);
     } else if (n.kind === "schedule") {
       const x = (await api("/schedules")).find((s) => s.id === n.id);
-      if (x) await proposalSheet(x);
+      if (x?.status === "paused") {
+        const cap = await api(`/capabilities/${enc(x.capabilityId)}`);
+        await schedulesSheet({ ...((await caps()).get(x.capabilityId) ?? {}), ...cap }, runnableOps(cap));
+      } else if (x) await proposalSheet(x);
     } else if (n.kind === "model") {
       const c = (await caps(true)).get(n.capabilityId);
       if (n.action === "Replace…" && c) await toolModelSheet(c, { replace: true });
       else await grantsSheet(n.capabilityId);
-    } else if (n.kind === "spend") {
+    } else if (n.kind === "builder-model") go("#/settings/ai");
+    else if (n.kind === "spend") {
       const c = n.capabilityId && (await caps()).get(n.capabilityId);
       if (c) await toolModelSheet(c);
       else go("#/settings/ai/models");
@@ -280,25 +284,27 @@ async function renderInbox() {
   const { needs, building, recent } = inboxData;
   const tab = (key, label) => h("button", { "aria-pressed": String(inboxTab === key), onclick: (e) => (e.stopPropagation(), (inboxTab = key), renderInbox(), key === "activity" && pollInbox(true)) }, label);
   const head = h("div", { class: "inbox-head" }, h("div", { class: "segmented" }, tab("needs", `Needs you · ${needs.length}`), tab("activity", "Activity")), h("a", { class: "link sm", href: "#/activity" }, "All activity ›"));
+  // The whole row opens it; what it opens to stays in the row's label.
   const needRow = (n) =>
     h(
       "div",
-      { class: "inbox-row" },
+      { class: "inbox-row link", role: "button", tabindex: 0, "aria-label": `${n.title}: ${n.detail}. ${n.action}`, onclick: () => openNeed(n), onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openNeed(n)) },
       h("span", { class: `dot ${n.severity}` }),
       needIcon(n, all),
       h("div", { class: "grow" }, h("span", { class: "title" }, n.title), h("span", { class: "small muted clip-1" }, n.detail)),
-      h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), openNeed(n)) }, n.action),
+      h("span", { class: "faint", "aria-hidden": "true" }, "›"),
     );
   const buildRow = (b) => {
     const c = all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.name };
     const lit = b.step?.step === "tests" && b.tests?.total ? b.tests.passed / b.tests.total : 0;
+    // The whole row opens the build.
     return h(
-      "div",
-      { class: "inbox-row" },
+      "a",
+      { class: "inbox-row link", href: `#/b/${enc(b.buildId)}` },
       h("span", { class: "dot live" }),
       appIcon(c, { size: 36, progress: lit, waiting: !lit }),
       h("div", { class: "grow" }, h("span", { class: "title" }, b.name), h("span", { class: "small muted" }, b.status === "waiting" ? "Waiting" : buildingLabel({ ...(b.step ?? {}), tests: b.tests }))),
-      h("a", { class: "btn ghost sm", href: `#/b/${enc(b.buildId)}` }, "Show"),
+      h("span", { class: "faint", "aria-hidden": "true" }, "›"),
     );
   };
   const recentList = (n) => (recent ? h("ul", { class: "list inbox-recent" }, recent.slice(0, n).map((i) => recentRow(i, all))) : skeleton("70%", "50%"));
@@ -382,8 +388,7 @@ async function paletteItems() {
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
     act("Connect an agent", () => connectDialog(), "claude codex chatgpt mcp", "agent"),
     act("Add a connection", () => addConnectionSheet(), "account service", "link"),
-    act("Who builds tools…", () => jobPicker("builder"), "builder job", "hammer"),
-    act("Who writes the spec…", () => jobPicker("intake"), "intake job", "ask"),
+    act("Who builds tools…", () => jobPicker({ thenModel: true }), "builder intake job model", "hammer"),
     act("Back up now", () => api("/backups", { method: "POST" }).then((b) => toast(`Backed up · ${Math.round(b.bytes / 1024)} KB`), fail), "backup", "backup"),
     act(`Switch to ${isDark() ? "light" : "dark"} appearance`, () => {
       const t = isDark() ? "light" : "dark";
@@ -691,12 +696,30 @@ async function iconDialog(c) {
 
 // ---------- F1 first run / F2 Home / F4 Edit Home ----------
 
-/** Who does each of Hewn's jobs (Settings › AI): owner-facing words, and the settings key. */
-const JOBS = [
-  ["builder", "Builds tools", "Who builds tools?", "Build tools"],
-  ["intake", "Writes the spec", "Who writes the spec?", "Write the spec"],
-];
+/**
+ * "Builds tools": the intake talks a request through and proposes it, the builder builds it. One
+ * agent does both; the settings keep both keys (`intake`, `builder`) and the web client sets them together.
+ */
 const jobChosen = (s, key) => !!s && (s.jobsChosen?.includes(key) || s.firstRunDone === true);
+/** Both jobs have an agent (the first run asks until they do). */
+const buildsChosen = (s) => jobChosen(s, "builder") && jobChosen(s, "intake");
+/** The model and effort the owner picked for a job on an agent ({} = the agent's default). */
+const jobModelOf = (s, key, agent = s?.[key]) => s?.jobModels?.[key]?.[agent] ?? {};
+/**
+ * Save the model and effort for building tools on `agent` (the builder): both halves, and the intake
+ * on the same agent (an older split heals on the next save). "default" and unset keys are dropped.
+ */
+const saveBuildModel = async (s, agent, m) => {
+  const clean = Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined && v !== "default"));
+  const next = structuredClone(s.jobModels ?? {});
+  for (const k of ["builder", "intake"]) next[k] = { ...(next[k] ?? {}), [agent]: clean };
+  return (settings = await api("/settings", { method: "PUT", body: { jobModels: next, intake: agent } }));
+};
+/** A model choice in words: "Default model", "Fable" (a family), or the full name. */
+const modelWords = (m = {}, catalog) => {
+  const name = !m.model ? "Default model" : catalog?.models.find((x) => x.id === m.model)?.label ?? (/^[a-z]+$/.test(m.model) ? m.model[0].toUpperCase() + m.model.slice(1) : m.model);
+  return m.effort ? `${name} · ${m.effort} effort` : name;
+};
 
 async function home({ editing = false } = {}) {
   // Redrawn in place (a layout save, a build starting or ending): stop the last drawing's timers first.
@@ -882,8 +905,10 @@ function tile(c, { hidden = false, editHome, show } = {}) {
     el.title = c.purpose ?? "";
   };
   const items = () => (c.building && !c.version ? [["Show build", () => go(`#/b/${c.building.buildId}`)]] : capabilityMenu(c, { rename: () => inlineRename(c, label), editHome, hidden, show }));
-  el.addEventListener("click", () => openCapability(c).catch(fail));
-  el.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && e.target === el && (e.preventDefault(), openCapability(c).catch(fail)));
+  // While it builds, the tile opens the build.
+  const open = () => (c.building ? go(`#/b/${enc(c.building.buildId)}`) : openCapability(c).catch(fail));
+  el.addEventListener("click", open);
+  el.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && e.target === el && (e.preventDefault(), open()));
   withContextMenu(el, items);
   render(c);
   return { el, update: render };
@@ -1221,24 +1246,22 @@ async function firstRun() {
   };
   const renderJobs = async () => {
     const [{ tools, ready }, s] = await Promise.all([buildJobs(), loadSettings()]);
-    builderOk = jobChosen(s, "builder") && ready(tools.find((t) => t.name === s.builder));
+    builderOk = buildsChosen(s) && ready(tools.find((t) => t.name === s.builder));
+    const t = tools.find((x) => x.name === s?.builder);
+    const chosen = buildsChosen(s);
     put(
       jobsCard,
-      h("div", { class: "eyebrow card-eyebrow" }, "2 · Who works for Hewn"),
+      h("div", { class: "eyebrow card-eyebrow" }, "2 · Who builds your tools"),
       h(
         "ul",
         { class: "list" },
-        JOBS.map(([key, title]) => {
-          const t = tools.find((x) => x.name === s?.[key]);
-          const chosen = jobChosen(s, key);
-          return h(
-            "li",
-            {},
-            chosen && t ? agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, 28) : null,
-            h("div", { class: "grow" }, h("span", {}, title), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}` : "Not chosen")),
-            h("button", { class: "sm", onclick: () => jobPicker(key).then(renderAll) }, "Choose…"),
-          );
-        }),
+        h(
+          "li",
+          {},
+          chosen && t ? agentTileOf(t, 28) : null,
+          h("div", { class: "grow" }, h("span", {}, "Builds tools"), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}` : "Not chosen")),
+          h("button", { class: "sm", onclick: () => jobPicker().then(renderAll) }, "Choose…"),
+        ),
       ),
     );
     renderMake();
@@ -1750,7 +1773,7 @@ async function grantsSheet(capId) {
   let tier = modelReq?.tier ?? null;
   let keyOk = !needsKey;
   let check = () => {};
-  const keyBlock = needsKey && providerKeyBlock(m, (ok) => ((keyOk = ok), check()));
+  const keyBlock = needsKey ? providerKeyBlock(m, (ok) => ((keyOk = ok), check())) : null;
   return modal(
     (close) => {
       const authorize = h("button", { class: "primary", disabled: true }, "Authorize");
@@ -1975,6 +1998,24 @@ const inFuture = (iso) => {
   return d === 1 ? "tomorrow" : `in ${d} days`;
 };
 
+/** Text kept to two lines, with a caret that shows all of it (long text only). */
+function expandable(text, cls = "") {
+  const body = h("span", { class: "clamp-2" }, text);
+  if (text.length <= 90) return h("span", { class: cls }, text);
+  const caret = h("button", { type: "button", class: "caret-btn", "aria-expanded": "false", "aria-label": "Show the whole message" });
+  caret.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = caret.getAttribute("aria-expanded") !== "true";
+    caret.setAttribute("aria-expanded", String(open));
+    caret.setAttribute("aria-label", open ? "Show less" : "Show the whole message");
+    body.classList.toggle("clamp-2", !open);
+  });
+  return h("span", { class: `${cls} expandable` }, body, caret);
+}
+
+/** "operation_failed: fetch_tonight@1 failed: NOAA is unreachable" → "NOAA is unreachable". */
+const runFailure = (outcome, operation) => String(outcome).replace(/^\w+: /, "").replace(new RegExp(`^${operation.split("@")[0]}(@\\d+)? failed: `), "");
+
 /**
  * K1 + K2 Schedules for one tool: each schedule a row with a switch and its next run (paused ones
  * say why and offer Resume), then a New schedule block with preset cadences in the owner's time zone.
@@ -2002,16 +2043,19 @@ async function schedulesSheet(c, ops) {
             ? all.map((x) => {
                 const sw = h("input", { type: "checkbox", class: "switch", checked: x.status === "active", "aria-label": "On" });
                 sw.addEventListener("change", () => act(x.id, { status: sw.checked ? "active" : "paused" }, sw.checked ? "Schedule on" : "Schedule paused")());
+                const failed = x.lastRunAt && x.lastOutcome && x.lastOutcome !== "ok";
                 const sub =
                   x.status === "proposed"
                     ? h("span", { class: "sub" }, `${cadenceText(x.cadence)} · proposed by ${actorLabel(x.createdBy)}`)
                     : x.status === "paused"
-                      ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `Paused ${x.pausedReason}` : `${cadenceText(x.cadence)} · paused`)
-                      : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}${x.lastRunAt && x.lastOutcome !== "ok" ? ` · last run failed` : ""}`);
+                      ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `${cadenceText(x.cadence)} · paused after ${x.failures} failures in a row` : `${cadenceText(x.cadence)} · paused`)
+                      : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
+                // Why the last run failed, and when: the tool's own words, without the call's prefixes.
+                const why = failed && expandable(`Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`, "sub danger-text");
                 return h(
                   "li",
                   {},
-                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub),
+                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why),
                   x.status === "proposed" ? h("button", { class: "sm primary", onclick: act(x.id, { status: "active" }, "Schedule enabled") }, "Enable") : x.status === "paused" && x.pausedReason ? h("button", { class: "sm", onclick: act(x.id, { status: "active" }, "Resumed") }, "Resume") : sw,
                   h("button", { class: "ghost sm icon-only", "aria-label": "Delete schedule", onclick: act(x.id, null, "Schedule deleted") }, "×"),
                 );
@@ -2511,11 +2555,14 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));
   const send = h("button", { type: "submit", class: embedded ? "" : "lg" }, "Send");
-  const composer = embedded ? h("form", { class: "stack-sm composer" }, input, h("div", { class: "row end" }, send)) : h("form", { class: "row tight composer" }, input, send);
+  // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
+  // One session id for the conversation.
+  const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "card chat-card" }, thread, composer));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
   const say = (who, text) => thread.append(h("div", { class: `bubble ${who}` }, text));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim());
   input.addEventListener("input", syncSend);
@@ -2568,7 +2615,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     try {
       let reply = null;
       let failure = null;
-      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       typing.remove();
       live.remove();
@@ -2631,6 +2678,129 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
 
 /** Start a widgets build (only widgets change). */
 const buildWidgets = (cap, request) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: request ? { request } : {} });
+
+/**
+ * In the intake's chat box: the model building runs on, and its menu, like a chat app's. It is the
+ * Settings › AI choice, changed right here: the current model, an effort slider, then the other
+ * models (and a full name).
+ */
+function modelChip() {
+  const name = h("span", {}, "Model");
+  const effortEl = h("span", { class: "faint" });
+  const chip = h("button", { type: "button", class: "ghost sm model-chip", "aria-haspopup": "menu", title: "Model for building (Settings › AI)" }, name, effortEl, h("span", { class: "caret", "aria-hidden": "true" }));
+  let ctx = null;
+  let menu = null;
+  const cap = (x) => (x ? x[0].toUpperCase() + x.slice(1) : "");
+  const load = async () => {
+    const s = await api("/settings");
+    ctx = { s, bCat: await api(`/tools/${enc(s.builder)}/models`) };
+    return ctx;
+  };
+  const labelOf = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
+  const paint = () => {
+    const m = jobModelOf(ctx.s, "builder");
+    name.textContent = labelOf(ctx.bCat, m.model);
+    effortEl.textContent = cap(m.effort);
+  };
+  load().then(paint).catch(() => (chip.hidden = true));
+
+  /** Save the builder's model and effort. In order: a slider moved right after a model pick must not write over it. */
+  let saving = Promise.resolve();
+  const save = (change) => (saving = saving.then(() => saveNow(change)));
+  const saveNow = async (change) => {
+    try {
+      ctx.s = await saveBuildModel(ctx.s, ctx.s.builder, { ...jobModelOf(ctx.s, "builder"), ...change });
+      paint();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const row = (main, sub, { checked = false, onClick } = {}) =>
+    h(
+      "button",
+      { type: "button", role: "menuitemradio", "aria-checked": String(checked), class: "mm-row", onclick: (e) => (e.stopPropagation(), onClick?.()) },
+      h("span", { class: "grow col" }, h("span", {}, main), sub && h("span", { class: "sub" }, sub)),
+      checked && h("span", { class: "model-tick", "aria-hidden": "true" }, "✓"),
+    );
+  /** The current model, the effort slider, then the other models. */
+  const section = (cat) => {
+    const cur = jobModelOf(ctx.s, "builder");
+    const curId = cur.model ?? "default";
+    const curModel = cat.models.find((m) => m.id === curId) ?? { id: curId, label: curId, description: "A model by its full name" };
+    const efforts = curModel.efforts ?? cat.models[0]?.efforts ?? [];
+    const others = cat.models.filter((m) => m.id !== curId);
+    // The slider: Default (the model's own), then its levels in order.
+    const stops = [undefined, ...efforts];
+    const value = h("span", { class: "faint" });
+    const slider = h("input", { type: "range", min: 0, max: stops.length - 1, step: 1, value: Math.max(0, stops.indexOf(cur.effort)), "aria-label": "Effort", class: "effort-slider" });
+    const show = () => (value.textContent = stops[slider.value] ? cap(stops[slider.value]) : curModel.defaultEffort ? `Default (${curModel.defaultEffort})` : "Default");
+    show();
+    slider.addEventListener("input", show);
+    slider.addEventListener("change", () => save({ effort: stops[slider.value] }));
+    const pick = (id) => save({ model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
+    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s.builder === "claude" ? "Another: claude-fable-5-1" : "Another model, by name", "aria-label": "Another model, by name" });
+    other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
+    return [
+      row(curModel.label, curModel.description, { checked: true }),
+      efforts.length > 0 && h("label", { class: "mm-effort" }, h("span", { class: "row between" }, h("span", {}, "Effort"), value), slider),
+      others.length > 0 && h("hr"),
+      others.map((m) => row(m.label, m.description, { onClick: () => pick(m.id) })),
+      other && h("div", { class: "mm-other" }, other),
+    ];
+  };
+  const render = () => {
+    if (!menu) return;
+    put(menu, section(ctx.bCat));
+    place();
+  };
+  /** Fixed to the viewport, next to the chip, never off screen (the drawer is narrow and near the edge). */
+  const place = () => {
+    const r = chip.getBoundingClientRect();
+    const w = Math.min(380, innerWidth - 16);
+    menu.style.width = `${w}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`;
+    const below = innerHeight - r.bottom - 14;
+    const above = r.top - 14;
+    menu.style.maxHeight = "";
+    const hgt = menu.getBoundingClientRect().height;
+    const up = hgt > below && above > below;
+    const room = Math.max(160, up ? above : below);
+    menu.style.maxHeight = `${room}px`;
+    menu.style.top = up ? `${Math.max(8, r.top - 6 - Math.min(hgt, room))}px` : `${r.bottom + 6}px`;
+  };
+  const close = () => {
+    menu?.remove();
+    menu = null;
+    chip.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", outside, true);
+    document.removeEventListener("keydown", onKey, true);
+    removeEventListener("resize", close);
+    removeEventListener("blur", close);
+  };
+  const outside = (e) => menu && !menu.contains(e.target) && !chip.contains(e.target) && close();
+  const onKey = (e) => e.key === "Escape" && (e.stopPropagation(), close(), chip.focus());
+  chip.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (menu) return close();
+    try {
+      await load();
+    } catch (err) {
+      return fail(err);
+    }
+    menu = h("div", { class: "menu model-menu", role: "menu" });
+    document.body.append(menu);
+    chip.setAttribute("aria-expanded", "true");
+    render();
+    menu.querySelector("input[type=range], button")?.focus();
+    document.addEventListener("click", outside, true);
+    document.addEventListener("keydown", onKey, true);
+    addEventListener("resize", close);
+    // A click in a tool (its own frame) never reaches this page; the page losing focus to it does.
+    addEventListener("blur", close);
+  });
+  onLeave(close);
+  return chip;
+}
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
@@ -2876,7 +3046,7 @@ function proposalCard(kind, list, ctx) {
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
-    kind !== "schedules" && h("div", { class: "small faint" }, `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
+    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it, on the host's keys.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
     h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
@@ -2930,7 +3100,7 @@ function milestones(b) {
 
 async function buildPage(id) {
   const panel = buildPanel(id, {});
-  view(...moment({ left: "-60px", bottom: "-20px" }, backBar("Activity", "#/activity?view=builds", panel.barRight), h("div", { class: "build-center" }, panel.el)));
+  view(...moment({ left: "-60px", bottom: "-20px" }, backBar("Activity", "#/activity?view=builds"), h("div", { class: "build-center" }, panel.el)));
 }
 
 /**
@@ -2938,16 +3108,52 @@ async function buildPage(id) {
  * while it works, collapsed under "Show log" once it succeeds, open by default when it fails (H6).
  * `compact`: in the change drawer (P3); `onPromoted(b)`: what to show there when it's live (P4).
  */
+/** What a build runs on, in words ("Fable · high effort"; the model it ran on, once the builder says). */
+const buildModelWords = (b) => (b.model && (b.model.ran || b.model.model || b.model.effort) ? modelWords({ model: b.model.ran ?? b.model.model, effort: b.model.effort }) : "");
+/** Whose account a build spends: the builder agent's own, or the host's keys. */
+const accountWords = (builder) => (builder === "remote" ? "on the host's keys" : "on your account");
+/** What the builder's host charged, as it says it: "12 Credits" (1 decimal at most). */
+const chargeWords = (c) => (c ? `${Math.round(c.amount * 10) / 10} ${c.unit}` : "");
+
+/**
+ * Who builds it on what, as a labelled strip across the card: who asked (if not you), the builder,
+ * the model, the effort (a meter) and whose account it runs on.
+ */
+function buildMeta(b) {
+  const who = actorLabel(b.requestedBy);
+  const asked = who && who !== "You" && !String(b.requestedBy).startsWith("ui:");
+  const model = b.model?.ran ?? b.model?.model;
+  const efforts = ["low", "medium", "high", "xhigh", "max"];
+  const level = b.model?.effort ? Math.max(0, efforts.indexOf(b.model.effort)) + 1 : 0;
+  const cell = (label, value, sub, title) => h("div", { class: "meta-cell", title: title ?? "" }, h("span", { class: "meta-label" }, label), h("span", { class: "meta-value" }, value), sub && h("span", { class: "meta-sub" }, sub));
+  // "claude-fable-5-5" reads as "Fable 5.5" (the full name on hover); other names as they are.
+  const pretty = (m) => /^claude-([a-z]+)-(\d+)-(\d+)/.exec(m)?.slice(1).reduce((name, n, i) => (i ? `${name}${i === 1 ? " " : "."}${n}` : n[0].toUpperCase() + n.slice(1)), "") ?? modelWords({ model: m });
+  return h(
+    "div",
+    { class: "build-meta" },
+    asked && cell("Asked by", [agentTile(catalogOf({ id: b.requestedBy })?.id ?? b.requestedBy, who, 18), who]),
+    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder === "remote" ? "on the host's keys" : "on your account"),
+    cell("Model", model ? pretty(model) : "Default", null, model),
+    cell("Effort", [h("span", { class: "meter", "aria-hidden": "true" }, efforts.map((_, i) => h("i", { class: i < level ? "on" : "" }))), b.model?.effort ? b.model.effort[0].toUpperCase() + b.model.effort.slice(1) : "Default"]),
+  );
+}
+
 /** "Codex asked · " when an agent asked for the build (it runs on the owner's builder account all the same). */
 const askedBy = (b) => {
   const who = actorLabel(b.requestedBy);
   return who && who !== "You" ? `${who} asked · ` : "";
 };
 
+/** "Built with Claude Code · claude-fable-5-5 · high effort", and why it wasn't the model asked for. */
+const builtWith = (b) =>
+  b.builder &&
+  !["keep", "agent"].includes(b.builder) &&
+  !b.builder.startsWith("copy:") &&
+  h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}${b.charge ? ` · ${chargeWords(b.charge)}` : ""}`);
+
 function buildPanel(id, { compact = false, onPromoted } = {}) {
   const card = h("div", { class: compact ? "build-panel stack-md" : "card build-card" }, skeleton("50%", "80%"));
-  const cancelBtn = h("button", {}, "Cancel build");
-  const barRight = h("div", { class: "glass-bar", hidden: true }, cancelBtn);
+  const cancelBtn = h("button", { class: "sm" }, "Cancel build");
   const logPre = h("pre", { class: `log ${compact ? "short" : "tail"}` });
   let follow = true;
   let logScroll = 0;
@@ -2979,6 +3185,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const clockEl = h("div", { class: "mono muted small" });
     const seen = new Map(); // step → first seen (ms), for durations
     let step = b.step;
+    // "Spec agreed" opens to the spec the builder works from (kept open across redraws).
+    const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
+    const specView = specText ? h("details", { class: "spec-step" }, h("summary", {}, "Spec agreed"), h("pre", { class: "spec-text" }, specText)) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
     const live = () => {
@@ -3008,13 +3217,13 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         head(
           appIcon(cap(), { size: compact ? 36 : 56, progress: step?.step === "tests" && step.tests?.total ? step.tests.passed / step.tests.total : 0, waiting: !(step?.step === "tests") }),
           compact && b.kind !== "create" ? `Building v${(base ?? 0) + 1}` : cap().name,
-          waitingAgent
-            ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave`
-            : `${askedBy(b)}${compact && base ? `With ${builderLabel(b.builder)}, on your account · v${base} keeps working` : `Building with ${builderLabel(b.builder)}, on your account · you can leave`}`,
+          waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : null,
           clockEl,
         ),
-        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        !waitingAgent && buildMeta(b),
+        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
+        h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
       logPre.hidden = false;
       keepScroll();
@@ -3076,7 +3285,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       put(
         card,
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
+        builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
+        specView,
         logBlock(false),
       );
     };
@@ -3084,8 +3295,10 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const failed = () => {
       const f = b.failure ?? { title: "The build didn't pass", detail: b.log.at(-1) ?? "" };
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
-      const fix = h("button", { class: "primary" }, "Ask builder to fix");
-      const retry = h("button", {}, "Retry");
+      // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
+      const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
+      const fix = !refused && h("button", { class: "primary" }, "Ask builder to fix");
+      const retry = h("button", { class: refused ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {
         btn.disabled = true;
         try {
@@ -3096,14 +3309,16 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           fail(e);
         }
       };
-      fix.addEventListener("click", again("fix", fix));
+      if (fix) fix.addEventListener("click", again("fix", fix));
       retry.addEventListener("click", again("retry", retry));
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "danger" }), f.title, `${cap().name} · ${kindWord(b)}${attempt}`),
         f.detail && h("div", { class: "notice danger" }, h("span", {}, f.detail)),
+        builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
+        specView,
         h("div", { class: "row tight" }, fix, retry),
         logBlock(true),
       );
@@ -3111,7 +3326,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     };
 
     const cancelled = () => {
-      barRight.hidden = true;
       const retry = h("button", { class: "primary" }, "Start again");
       retry.addEventListener("click", async () => {
         retry.disabled = true;
@@ -3160,7 +3374,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
 
     const settle = (v) => {
       b = v;
-      if (!LIVE_BUILD.has(b.status)) barRight.hidden = true;
       if (b.status === "review") return inReview();
       if (b.status === "promoted") return ready();
       if (b.status === "failed") return failed();
@@ -3181,7 +3394,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         fail(e);
       }
     });
-    barRight.hidden = !LIVE_BUILD.has(b.status);
     // The transcript replays (live or finished, kept for 30 days), then "done".
     const finished = !LIVE_BUILD.has(b.status) && b.status !== "open";
     if (!finished) live();
@@ -3218,7 +3430,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     }, 4000);
     onLeave(() => clearInterval(tick));
   })().catch((e) => put(card, errorBox(e)));
-  return { el: card, barRight };
+  return { el: card };
 }
 
 // ---------- review of agents' changes ----------
@@ -3239,6 +3451,17 @@ function reviewTitle(b, all) {
   return h("span", { class: "title-ref" }, ops.length ? [`${who} wants to add ${andList(ops)} to `, ref] : [`${who} wants to change `, ref]);
 }
 
+/** A description's first sentence (cut at 200 characters), and the rest. */
+const summaryOf = (d = "") => {
+  const first = /^[\s\S]+?[.!?](?=\s|$)/.exec(d.trim())?.[0] ?? d.trim();
+  return first.length > 200 ? `${first.slice(0, 199).replace(/\s+\S*$/, "")}…` : first;
+};
+const restOf = (d = "") => {
+  const t = d.trim();
+  const first = /^[\s\S]+?[.!?](?=\s|$)/.exec(t)?.[0] ?? t;
+  return first.length > 200 ? t : t.slice(first.length).trim();
+};
+
 /** One new operation: what agents can do with it, what it takes and (full view) what it returned in its tests. */
 function reviewOp(o, { full }) {
   const [pill, verb, tone] = EFFECT[o.sideEffect] ?? EFFECT.write;
@@ -3246,7 +3469,9 @@ function reviewOp(o, { full }) {
   return h(
     "div",
     { class: "stack-sm" },
-    h("div", { class: "row tight wrap" }, h("span", { class: `pill ${tone}` }, pill), h("span", { class: "strong" }, `Agents can then ${verb}: `, h("span", { class: "muted" }, o.description))),
+    h("div", { class: "row tight wrap" }, h("span", { class: `pill ${tone}` }, pill), h("span", { class: "strong" }, `Agents can then ${verb}: `, h("span", { class: "muted" }, summaryOf(o.description)))),
+    // Descriptions are written for agents, often a long paragraph: the first sentence above, the rest folded.
+    restOf(o.description) && h("details", { class: "small review-more" }, h("summary", {}, "Full description"), h("p", { class: "muted pre-line" }, restOf(o.description))),
     h("div", { class: "small faint mono" }, [o.key, takes].filter(Boolean).join(" · ")),
     full && (o.example ? [h("div", { class: "eyebrow" }, "What it returned in its tests"), h("pre", { class: "small review-example" }, o.example)] : o.inputs && h("div", { class: "small muted" }, "No test shows what it returns.")),
   );
@@ -3344,8 +3569,10 @@ function activityRow(g, all, showCap) {
     }
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
-    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref]);
-    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref]));
+    // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
+    const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
+    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
   } else if (g.kind === "lifecycle") {
@@ -3578,42 +3805,142 @@ const toolOf = (a) => catalogOf(a)?.tool;
 /** Hewn's jobs: who does them, and the CLIs that can (installed, signed in). */
 async function buildJobs() {
   const [tools, s] = await Promise.all([api("/tools").catch(() => []), api("/settings")]);
+  for (const t of tools) if (t.remote) rememberAgents([{ id: t.name, name: t.label }]);
   const ready = (t) => !!t?.found && t.loggedIn !== false;
   const label = (name) => tools.find((t) => t.name === name)?.label ?? name;
   return { tools, settings: s, ready, label };
 }
 
-/** Save who does a job (and that the owner chose it). */
-async function setJob(key, tool) {
+/** Save who does these jobs (and that the owner chose them). */
+async function setJobs(keys, tool) {
   const s = await api("/settings");
-  settings = await api("/settings", { method: "PUT", body: { [key]: tool, jobsChosen: [...new Set([...(s.jobsChosen ?? []), key])] } });
+  settings = await api("/settings", { method: "PUT", body: { ...Object.fromEntries(keys.map((k) => [k, tool])), jobsChosen: [...new Set([...(s.jobsChosen ?? []), ...keys])] } });
   return settings;
 }
 
+const ALL_JOBS = ["intake", "builder"];
+const agentTileOf = (t, size) => agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, size);
+
 /**
- * O2 Picker for one of Hewn's jobs: the signed-in agents on this machine; the subtitle says what
- * else each already does. One agent can do every job.
+ * O2 Who builds tools: the signed-in agents on this machine (and the host's builder, if it runs
+ * one); the agent talks requests through and builds them. `thenModel`: open the model sheet next
+ * (switching agent means choosing its model; it remembers the last one).
  */
-async function jobPicker(key) {
+async function jobPicker({ thenModel = false } = {}) {
   const [{ tools, settings: s, ready }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
-  const [, , question] = JOBS.find(([k]) => k === key);
-  const others = (t) => JOBS.filter(([k]) => k !== key && s[k] === t.name && jobChosen(s, k)).map(([, title]) => title.toLowerCase());
   const options = [
     ...tools.map((t) => ({
       value: t.name,
       label: t.label,
-      tile: agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, 28),
+      tile: agentTileOf(t, 28),
       disabled: !ready(t),
-      sub: !ready(t) ? t.fix ?? "Not installed" : [`On ${machine.word} · signed in`, ...others(t).map((o) => `also ${o}`)].join(" · "),
+      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "Runs on the host's own keys" : `On ${machine.word} · signed in`,
     })),
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
-  const chosen = jobChosen(s, key) ? s[key] : null;
-  const pick = await pickerSheet({ title: question, options, value: chosen, note: "One agent can do every job.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
+  const chosen = buildsChosen(s) ? s.builder : null;
+  const pick = await pickerSheet({ title: "Who builds tools?", options, value: chosen, note: "It talks each request through with you, then builds it.", confirm: (v) => `Use ${tools.find((t) => t.name === v)?.label ?? "it"}`, unchanged: false });
   if (!pick) return null;
-  await setJob(key, pick);
-  toast(`${tools.find((t) => t.name === pick)?.label ?? pick} ${key === "builder" ? "builds tools" : "writes the spec"}`);
+  await setJobs(ALL_JOBS, pick);
+  const t = tools.find((x) => x.name === pick);
+  toast(`${t?.label ?? pick} builds tools`);
+  if (thenModel && pick !== chosen) await modelSheet(t ?? { name: pick, label: pick });
   return pick;
+}
+
+/**
+ * O3 The model and effort for building tools on one agent, from the agent's own list: Default
+ * lets the CLI decide, a family (Fable) follows the newest, a pinned model stays put (once it's
+ * gone, builds fail saying so until another is picked). Other… takes a full name.
+ */
+async function modelSheet(t) {
+  const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
+  const cur = jobModelOf(s, "builder", t.name);
+  const kindWords = { default: "lets it decide", family: "follows the newest", pinned: "stays on this one" };
+  return formSheet({
+    icon: agentTileOf(t, 44),
+    title: "Model for building tools",
+    sub: t.label,
+    width: 520,
+    build: (close) => {
+      let chosen = cur.model ?? "default";
+      const listed = catalog.models.some((m) => m.id === chosen);
+      const name = `model-${Math.random().toString(36).slice(2)}`;
+      const other = h("input", { type: "text", placeholder: t.name === "claude" ? "claude-fable-5-1" : "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
+      const effort = h("select", { "aria-label": "Effort" });
+      const efforts = () => (chosen === "" ? catalog.models[0]?.efforts ?? [] : catalog.models.find((m) => m.id === chosen)?.efforts ?? catalog.models[0]?.efforts ?? []);
+      const fillEffort = (keep) => {
+        const list = efforts();
+        const def = catalog.models.find((m) => m.id === chosen)?.defaultEffort;
+        put(effort, h("option", { value: "" }, def ? `Default (${def})` : "Default"), list.map((e) => h("option", { value: e, selected: e === keep }, e[0].toUpperCase() + e.slice(1))));
+        effort.disabled = !list.length;
+      };
+      const rows = catalog.models.map((m) => {
+        const radio = h("input", { type: "radio", name, checked: m.id === chosen });
+        radio.addEventListener("change", () => ((chosen = m.id), fillEffort(effort.value)));
+        // A family's or the default's own description says it; a pinned model also says it stays put.
+        const sub = [m.description ?? kindWords[m.kind], m.kind === "pinned" && m.description && kindWords.pinned, m.upgrade && `${m.upgrade} replaces it`].filter(Boolean).join(" · ");
+        return h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, m.label), sub && h("span", { class: "sub" }, sub)));
+      });
+      if (catalog.other) {
+        const radio = h("input", { type: "radio", name, checked: !listed });
+        const pickOther = () => ((radio.checked = true), (chosen = other.value.trim()), fillEffort(effort.value));
+        radio.addEventListener("change", pickOther);
+        other.addEventListener("input", pickOther);
+        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, "A full model name: stays on that one"), other)));
+      }
+      fillEffort(cur.effort);
+      const save = h("button", { class: "primary" }, "Save");
+      save.addEventListener("click", async () => {
+        const model = chosen && chosen !== "default" ? chosen : undefined;
+        try {
+          await saveBuildModel(s, t.name, { model, effort: effort.value || undefined });
+          toast(`Builds tools: ${modelWords({ model, effort: effort.value || undefined }, catalog)}`);
+          close(true);
+        } catch (e) {
+          fail(e);
+        }
+      });
+      return [
+        h("fieldset", { class: "job" }, rows),
+        h("label", { class: "field" }, h("span", { class: "label" }, "Effort"), effort),
+        h("div", { class: "small faint" }, "Agents that ask for a build can pick a model too, from the ones you allow (Settings › AI)."),
+        sheetActions(h("button", { onclick: () => close() }, "Cancel"), save),
+      ];
+    },
+  });
+}
+
+/** O4 The models agents may ask a build to use, for the agent that builds (Default always). */
+async function agentModelsSheet(t) {
+  const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
+  const allowed = new Set(catalog.agentModels ?? ["default"]);
+  const extra = [...allowed].filter((id) => !catalog.models.some((m) => m.id === id)).map((id) => ({ id, label: id, kind: "pinned" }));
+  return formSheet({
+    icon: agentTileOf(t, 44),
+    title: "Models agents may ask for",
+    sub: `When an agent asks ${t.label} for a build`,
+    width: 520,
+    build: (close) => {
+      const boxes = [...catalog.models, ...extra].map((m) => ({ m, box: h("input", { type: "checkbox", checked: m.id === "default" || allowed.has(m.id), disabled: m.id === "default" }) }));
+      const save = h("button", { class: "primary" }, "Save");
+      save.addEventListener("click", async () => {
+        const list = boxes.filter((b) => b.box.checked).map((b) => b.m.id);
+        try {
+          settings = await api("/settings", { method: "PUT", body: { agentModels: { ...(s.agentModels ?? {}), [t.name]: list } } });
+          toast(`Agents may ask for ${list.length === 1 ? "the default only" : `${list.length} models`}`);
+          close(true);
+        } catch (e) {
+          fail(e);
+        }
+      });
+      return [
+        h("div", { class: "stack-xs" }, boxes.map(({ m, box }) => h("label", { class: "check" }, box, h("span", {}, m.label, m.description && h("span", { class: "faint" }, ` · ${m.description}`))))),
+        h("div", { class: "small faint" }, "An agent asking for one you haven't ticked gets told which it may use; nothing is built. Your own choices aren't limited."),
+        sheetActions(h("button", { onclick: () => close() }, "Cancel"), save),
+      ];
+    },
+  });
 }
 
 /** L1 Agents: one row per agent identity, with the parts it plays (role chips). */
@@ -3626,8 +3953,8 @@ async function agentsPage() {
   const from = (a) => (a.via === "local" ? `On ${machine.word}` : a.via === "tunnel" ? `Through ${a.address ?? "the public address"}` : "Connected");
   const roleChips = (a) => {
     const tool = toolOf(a);
-    const jobChips = a.via === "local" && tool ? JOBS.filter(([k]) => s[k] === tool && jobChosen(s, k)).map(([, title]) => h("a", { class: "pill", href: "#/settings/ai", onclick: (e) => e.stopPropagation() }, title.toLowerCase())) : [];
-    return h("div", { class: "role-chips" }, h("span", { class: "pill accent" }, "uses your tools"), jobChips);
+    const jobChip = a.via === "local" && tool && s.builder === tool && buildsChosen(s) && h("a", { class: "pill", href: "#/settings/ai", onclick: (e) => e.stopPropagation() }, "builds tools");
+    return h("div", { class: "role-chips" }, h("span", { class: "pill accent" }, "uses your tools"), jobChip);
   };
   const recent = (a) => a.lastUsedAt && Date.now() - Date.parse(a.lastUsedAt) < 5 * 60000;
   const row = (a) =>
@@ -3833,7 +4160,7 @@ async function addSheet() {
           "ul",
           { class: "list" },
           choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
-          choice(125, "↗", "An agent that works for Hewn", "Builds tools or writes the spec · runs on this machine", () => hewnAgentsSheet()),
+          choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
           choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
@@ -3856,7 +4183,7 @@ function hewnAgentsSheet() {
       const detail = h("div", {});
       const render = async () => {
         const [{ tools, ready, settings: s }, machine] = await Promise.all([buildJobs(), hewnMachine()]);
-        const does = (t) => JOBS.filter(([k]) => s[k] === t.name && jobChosen(s, k)).map(([, title]) => title.toLowerCase());
+        const does = (t) => (s.builder === t.name && buildsChosen(s) ? ["builds tools"] : []);
         put(
           list,
           tools.map((t) =>
@@ -3874,10 +4201,8 @@ function hewnAgentsSheet() {
         );
       };
       const pickJob = async (t) => {
-        const key = await pickerSheet({ title: `What should ${t.label} do?`, options: JOBS.map(([k, title]) => ({ value: k, label: title })), confirm: "Next", unchanged: false });
-        if (!key) return;
-        await setJob(key, t.name);
-        toast(`${t.label} ${key === "builder" ? "builds tools" : "writes the spec"}`);
+        await setJobs(ALL_JOBS, t.name);
+        toast(`${t.label} builds tools`);
         render();
       };
       render();
@@ -4003,27 +4328,25 @@ function connectDialog(agentId) {
             (error || finished) && sheetActions(error ? h("button", { onclick: showList }, "Back") : h("button", { class: "primary", onclick: () => close(true) }, "Done")),
           );
         };
-        // O6: an agent on this machine can also work for Hewn; both jobs start unticked.
+        // O6: an agent on this machine can also build tools for Hewn; it starts unticked.
         const showOffer = async () => {
           const tool = AGENT_CATALOG.find((c) => c.connect === x.agentId)?.tool;
           if (!tool) return;
           const { tools, ready, settings: s, label } = await buildJobs();
           if (!ready(tools.find((t) => t.name === tool))) return;
+          const sw = h("input", { type: "checkbox", class: "switch", "aria-label": "Build tools" });
+          sw.addEventListener("change", async () => {
+            try {
+              if (sw.checked) await setJobs(ALL_JOBS, tool);
+            } catch (e) {
+              sw.checked = false;
+              fail(e);
+            }
+          });
           put(
             offer,
             h("div", { class: "eyebrow" }, "It can also work for Hewn"),
-            JOBS.map(([key, , , verb]) => {
-              const sw = h("input", { type: "checkbox", class: "switch", "aria-label": verb });
-              sw.addEventListener("change", async () => {
-                try {
-                  if (sw.checked) await setJob(key, tool);
-                } catch (e) {
-                  sw.checked = false;
-                  fail(e);
-                }
-              });
-              return h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, verb), h("span", { class: "sub" }, `Today: ${jobChosen(s, key) ? label(s[key]) : "nobody"}`)), sw);
-            }),
+            h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, "Build tools"), h("span", { class: "sub" }, `Today: ${buildsChosen(s) ? label(s.builder) : "nobody"}`)), sw),
           );
         };
         // While it signs in, its request appears here to approve without leaving the sheet.
@@ -4159,21 +4482,25 @@ function timeZoneSheet(current) {
 }
 
 /**
- * O1 Settings › AI: the three jobs Hewn gives to AI, each with what runs it and who pays. Writing
- * the spec and building run an agent on this machine, on however it's signed in; thinking inside
+ * O1 Settings › AI: what Hewn runs AI for. Building tools (talking a request through, then building
+ * it) runs one agent, on this machine and its own account or on the host's keys. Thinking inside
  * tools is a metered API call with your key.
  */
 async function aiSection() {
-  const [{ tools, settings: s, ready, label }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
-  const tile = (name) => agentTile(name === "claude" ? "claude-code" : name, label(name), 20);
-  const jobRow = (key, title, extra) => {
-    const t = tools.find((x) => x.name === s[key]);
-    const chosen = jobChosen(s, key);
+  const [{ tools, settings: s, ready }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
+  const tile = (t) => agentTileOf(t, 20);
+  const builder = tools.find((x) => x.name === s.builder);
+  const catalogs = new Map([[s.builder, await api(`/tools/${enc(s.builder)}/models`).catch(() => null)]]);
+  const agentWords = (t) => `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? (t.remote ? "its own keys" : "signed in") : t.fix ?? "not ready"}`;
+  /** Who builds tools, on which model; Change picks the agent, Model… the model and effort. */
+  const buildsRow = () => {
+    const chosen = buildsChosen(s);
     return h(
       "div",
       { class: "setting" },
-      h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub row tight" }, chosen && t ? [tile(t.name), `${t.label} on ${machine.word} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}`, extra] : "Not chosen")),
-      h("button", { class: "sm", onclick: () => jobPicker(key).then(() => route()) }, chosen ? "Change" : "Choose…"),
+      h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub row tight" }, chosen && builder ? [tile(builder), `${agentWords(builder)} · ${modelWords(jobModelOf(s, "builder"), catalogs.get(builder.name))}`] : "Not chosen")),
+      chosen && builder && h("button", { class: "sm", onclick: () => modelSheet(builder).then((saved) => saved && route()) }, "Model…"),
+      h("button", { class: "sm", onclick: () => jobPicker({ thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
     );
   };
   const n = s.maxBuildAttempts;
@@ -4184,13 +4511,24 @@ async function aiSection() {
     h("output", { title: "Build attempts" }, String(n)),
     h("button", { "aria-label": "More attempts", disabled: n >= 5, onclick: () => saveSettings({ maxBuildAttempts: n + 1 }, `Build attempts: ${n + 1}`) }, "+"),
   );
+  const builds = buildsRow();
+  // As the server has it (the owner's ticks, else its default for this agent).
+  const allowed = catalogs.get(s.builder)?.agentModels ?? ["default"];
+  const asks =
+    builder &&
+    h(
+      "div",
+      { class: "setting" },
+      h("div", { class: "grow" }, h("span", { class: "strong" }, "Agents may ask for"), h("span", { class: "sub" }, allowed.map((id) => catalogs.get(s.builder)?.models.find((x) => x.id === id)?.label ?? id).join(", "))),
+      h("button", { class: "sm", onclick: () => agentModelsSheet(builder).then((saved) => saved && route()) }, "Change…"),
+    );
   const prov = m?.provider && m.providers.find((p) => p.id === m.provider);
   settingsFrame(
     "ai",
     h("div", { class: "row between" }, h("h1", { class: "flush" }, "AI"), h("button", { onclick: () => addSheet().then(() => !location.hash.startsWith("#/settings/ai/models") && route()) }, "Add…")),
     settingsCard(
-      jobRow("intake", "Writes the spec"),
-      h("div", { class: "setting-with-extra" }, jobRow("builder", "Builds tools"), h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
+      h("div", { class: "setting-with-extra" }, builds, h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
+      asks,
       h(
         "div",
         { class: "setting" },
@@ -4203,7 +4541,7 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
-    h("div", { class: "small faint" }, "Writing the spec and building run on these agents' own accounts (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
+    h("div", { class: "small faint" }, builder?.remote ? "Building runs on the host's own model keys." : "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );
 }
@@ -4398,6 +4736,7 @@ async function aboutSection() {
         "div",
         { class: "card stack-sm upgrade-card" },
         h("span", { class: "strong" }, `${status.latest} is out`),
+        (status.notes ?? []).map((r) => releaseNotes(r, status.notes.length > 1)),
         h("div", { class: "small muted" }, "Upgrade from a terminal. Backups run first; your tools and data stay."),
         commandBlock(`${CLI} upgrade`),
         h("a", { class: "small", href: CHANGELOG_URL, target: "_blank", rel: "noopener" }, "What's new ›"),
@@ -4408,6 +4747,16 @@ async function aboutSection() {
       setting("Licence", "AGPL-3.0-or-later · spec and UI kit Apache-2.0"),
     ),
   );
+}
+
+/** One release's notes, as the changelog has them: "**Title.** The rest" bullets, the title in bold. */
+function releaseNotes(r, labelled) {
+  const item = (text) => {
+    const m = /^\*\*(.+?)\*\*\s*(.*)$/.exec(text);
+    const plain = (t) => t.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+    return h("li", {}, m ? [h("span", { class: "strong" }, plain(m[1])), " ", plain(m[2])] : plain(text));
+  };
+  return h("div", { class: "stack-xs release-notes" }, labelled && h("span", { class: "eyebrow" }, r.version), h("ul", { class: "small" }, r.items.map(item)));
 }
 
 /** "0.3.4" vs "0.3.3": >0 when a is newer. Pre-releases sort before their release. */

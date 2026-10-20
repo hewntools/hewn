@@ -68,6 +68,15 @@ export interface BuildReview {
   };
 }
 
+/** What a build ran on (Settings › AI, or what was asked for), for the build page and Activity. */
+export interface BuildModel {
+  /** As asked or set: an alias ("fable"), a full name, or unset for the builder's default. */
+  model?: string;
+  effort?: string;
+  /** What the builder reported running on (a full name). */
+  ran?: string;
+}
+
 export interface BuildRow {
   id: string;
   capabilityId: string;
@@ -238,6 +247,20 @@ CREATE TABLE IF NOT EXISTS builds (
   builder        TEXT,
   depends_on     TEXT,
   review         TEXT
+);
+-- What a build runs on: the model and effort asked for (or the owner's setting), and the model it
+-- actually ran on.
+CREATE TABLE IF NOT EXISTS build_models (
+  build_id       TEXT PRIMARY KEY,
+  model          TEXT,
+  effort         TEXT,
+  ran_model      TEXT
+);
+-- What the builder's host charged (all attempts), in its own unit.
+CREATE TABLE IF NOT EXISTS build_charges (
+  build_id       TEXT PRIMARY KEY,
+  amount         REAL NOT NULL,
+  unit           TEXT NOT NULL
 );
 `;
 
@@ -541,6 +564,39 @@ export class Registry {
     this.db
       .prepare("INSERT INTO builds (id, capability_id, kind, request, requested_by, builder, status, base_version, depends_on, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(b.id, b.capabilityId, b.kind, JSON.stringify(b.request), b.requestedBy, b.builder, status, b.baseVersion, b.dependsOn ?? null, t, t);
+  }
+
+  /** The model and effort a build runs with (kept apart from the request: retries copy the request, not the outcome). */
+  setBuildModel(buildId: string, m: { model?: string; effort?: string }) {
+    this.db.prepare("INSERT OR REPLACE INTO build_models (build_id, model, effort) VALUES (?, ?, ?)").run(buildId, m.model ?? null, m.effort ?? null);
+  }
+
+  /** The model the builder reported running on. */
+  setRanModel(buildId: string, model: string) {
+    this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
+    this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(model, buildId);
+  }
+
+  /** Add an attempt's charge to the build's (a different unit replaces it). */
+  addBuildCharge(buildId: string, c: { amount: number; unit: string }) {
+    const cur = this.buildCharge(buildId);
+    const amount = cur && cur.unit === c.unit ? cur.amount + c.amount : c.amount;
+    this.db.prepare("INSERT OR REPLACE INTO build_charges (build_id, amount, unit) VALUES (?, ?, ?)").run(buildId, amount, c.unit);
+  }
+
+  buildCharge(buildId: string): { amount: number; unit: string } | undefined {
+    const r = this.db.prepare("SELECT amount, unit FROM build_charges WHERE build_id = ?").get(buildId);
+    return r ? { amount: Number(r.amount), unit: String(r.unit) } : undefined;
+  }
+
+  buildModel(buildId: string): BuildModel | undefined {
+    const r = this.db.prepare("SELECT * FROM build_models WHERE build_id = ?").get(buildId);
+    if (!r) return undefined;
+    return {
+      ...(r.model ? { model: r.model as string } : {}),
+      ...(r.effort ? { effort: r.effort as string } : {}),
+      ...(r.ran_model ? { ran: r.ran_model as string } : {}),
+    };
   }
 
   /** Builds waiting for `buildId` (or, without it, every waiting build). */

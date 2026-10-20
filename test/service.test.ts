@@ -114,14 +114,15 @@ describe("service and doctor", () => {
       assert.equal(by.Sandbox.state, "fail");
       assert.match(by.Sandbox.fix!, /bubblewrap|sandbox-exec/);
       assert.equal(by["Secrets key"].state, "warn");
-      assert.match(by.Builder.detail, /isn't logged in/);
-      assert.equal(by.Intake.state, "fail", "codex isn't on PATH here");
+      // An older split setting: one line, from the builder (it talks it through too).
+      assert.match(by["Builds tools"].detail, /claude isn't logged in/);
+      assert.ok(!by.Builds && !by["Talks it through"], "no line for the old intake setting");
       assert.equal(by["Visual check"].state, "warn");
       assert.equal(by.Codex.state, "warn");
       assert.equal(by.Backups.fix, "hewn backup now");
       assert.match(by.Install.detail, /doesn't build: ERROR: Could not resolve "zod\/v3"/);
       assert.match(by.Install.fix!, /&& npm ci$/);
-      assert.match(formatChecks(broken), /5 problems, 5 warnings\.$/);
+      assert.match(formatChecks(broken), /4 problems, 5 warnings\.$/);
 
       const healthy = await runDoctor({
         home: t.home,
@@ -137,9 +138,13 @@ describe("service and doctor", () => {
         sandbox: () => ({ ok: true, how: "Seatbelt" }),
         browser: () => "/x/chrome-headless-shell",
         loggedIn: () => true,
-        settings: async () => ({ builder: "claude", intake: "claude" }),
+        settings: async () => ({ builder: "claude", intake: "claude", jobModels: { builder: { claude: { model: "fable", effort: "high" } } } }),
       });
       assert.deepEqual(healthy.filter((c) => c.state !== "ok").map((c) => c.name), ["Backups"], "only 'no backup yet' remains");
+      // One agent does both: one line, with the model it builds on.
+      const builds = healthy.find((c) => c.name === "Builds tools");
+      assert.match(builds!.detail, /claude found, logged in · fable, high effort/);
+      assert.ok(!healthy.some((c) => c.name === "Builds" || c.name === "Talks it through"));
     } finally {
       t.cleanup();
     }

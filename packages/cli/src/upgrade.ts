@@ -174,3 +174,58 @@ export function latestRelease(now = Date.now()): string | null {
   }
   return latestCache.value;
 }
+
+/** One release's notes, from CHANGELOG.md: its version, date, and its bullets as written. */
+export interface ReleaseNotes {
+  version: string;
+  date?: string;
+  items: string[];
+}
+
+/** Where the notes are read: the changelog on the hewn repo's main branch. */
+export const CHANGELOG_RAW = "https://raw.githubusercontent.com/hewntools/hewn/main/CHANGELOG.md";
+
+/**
+ * The notes of releases newer than `version` in its 0.x line (newest first, at most `max`), from a
+ * CHANGELOG.md in this repo's format: "## 0.4.2 (2026-10-21)" headings, "- " bullets (continuation
+ * lines indented). Unreleased headings are skipped.
+ */
+export function notesSince(changelog: string, version: string, max = 3): ReleaseNotes[] {
+  const line = version.split(".").slice(0, 2).join(".");
+  const newer = (v: string) => {
+    const [a, b] = [v, version].map((x) => x.split("-")[0].split(".").map(Number));
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return false;
+  };
+  const out: ReleaseNotes[] = [];
+  let cur: ReleaseNotes | undefined;
+  for (const raw of changelog.split("\n")) {
+    const head = /^## (\d+\.\d+\.\d+)(?:\s+\(([^)]*)\))?\s*$/.exec(raw);
+    if (head) {
+      cur = /^\d{4}-\d\d-\d\d$/.test(head[2] ?? "") && head[1].startsWith(`${line}.`) && newer(head[1]) ? { version: head[1], date: head[2], items: [] } : undefined;
+      if (cur) out.push(cur);
+      continue;
+    }
+    if (/^## /.test(raw)) cur = undefined;
+    if (!cur) continue;
+    if (raw.startsWith("- ")) cur.items.push(raw.slice(2).trim());
+    else if (/^\s+\S/.test(raw) && cur.items.length) cur.items[cur.items.length - 1] += ` ${raw.trim()}`;
+  }
+  return out.slice(0, max);
+}
+
+let notesCache: { at: number; text: string | null; running: boolean } = { at: 0, text: null, running: false };
+/**
+ * The notes of the newer releases, for About's upgrade card: fetched in the background with the
+ * release check (at most twice a day). Empty until known, offline, or when up to date.
+ */
+export function latestNotes(now = Date.now(), fetchImpl: typeof fetch = fetch): ReleaseNotes[] {
+  if (!notesCache.running && now - notesCache.at > 12 * 3600_000) {
+    notesCache.running = true;
+    fetchImpl(CHANGELOG_RAW, { signal: AbortSignal.timeout(15_000) })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((text) => (notesCache = { at: Date.now(), text, running: false }))
+      .catch(() => (notesCache = { at: Date.now() - 11 * 3600_000, text: notesCache.text, running: false }));
+  }
+  return notesCache.text ? notesSince(notesCache.text, appVersion()) : [];
+}

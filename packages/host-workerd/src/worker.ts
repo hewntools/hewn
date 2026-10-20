@@ -19,7 +19,7 @@ import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, S
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
-import { ownerPrefProblems, type Settings, type SurfaceHost } from "./surface/host.ts";
+import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
@@ -46,6 +46,8 @@ interface Env {
   PORT: string;
   /** HEWN_PROXY_SECRET: when set, the public sockets take only requests carrying it ("" = off). */
   PROXY_SECRET?: string;
+  /** "1" when the host runs Hewn's builder and intake (HEWN_BUILD_URL): "remote" is a choice, and the default. */
+  REMOTE_JOBS?: string;
 }
 
 const COMPAT_DATE = "2026-09-01";
@@ -228,10 +230,12 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
     build: async (job: BuildJob, hooks) => {
-      let failure: { error: string; unavailable?: boolean } | undefined;
+      let failure: { error: string; unavailable?: boolean; refused?: boolean; modelUnavailable?: boolean } | undefined;
       try {
         await sv.stream("/workbench/build", job, (e) => {
           if (e.activity) hooks.onActivity(e.activity);
+          if (e.model) hooks.onModel?.(e.model);
+          if (e.charge) hooks.onCharge?.(e.charge);
           if (e.error) failure = e;
         }, hooks.signal);
       } catch (e) {
@@ -239,7 +243,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
         if (!hooks.signal.aborted && !(e as { unavailable?: boolean }).unavailable && !/supervisor .*HTTP/.test((e as Error).message)) throw Object.assign(e as Error, { interrupted: true });
         throw e;
       }
-      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable });
+      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, modelUnavailable: failure.modelUnavailable });
     },
     bundle: (buildId) => sv.json("/workbench/bundle", { buildId }),
     note: async (buildId, line) => void (await sv.json("/workbench/note", { buildId, line })),
@@ -335,6 +339,10 @@ export class HewnDO extends DurableObject<Env> {
         },
         logger: (m) => console.log(`[${new Date().toISOString()}] ${m}`),
         builder: () => this.settings().builder,
+        buildModel: (builder) => jobModel(this.settings(), "builder", builder),
+        agentBuildModels: (builder) => agentModels(this.settings(), builder),
+        // From the builder's model list (the supervisor reads it and keeps it a while).
+        modelEfforts: async (builder, model) => (await supervisor(env).json<ModelCatalog>("/models/catalog", { agent: builder })).models.find((m) => m.id === model)?.efforts,
         maxBuildAttempts: () => this.settings().maxBuildAttempts,
         logRetentionDays: () => this.settings().logRetentionDays,
         timezone: () => this.settings().timeZone || env.TIMEZONE || "UTC",
@@ -363,23 +371,17 @@ export class HewnDO extends DurableObject<Env> {
   }
 
   private settings(): Settings {
-    const out: Record<string, unknown> = { ...DEFAULT_SETTINGS };
+    // A host that runs the builder and intake (Hewn Cloud) makes them the default.
+    const out: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...(this.env.REMOTE_JOBS === "1" ? { builder: "remote", intake: "remote" } : {}) };
     for (const r of this.sql.prepare("SELECT key, value FROM settings").all()) out[r.key] = JSON.parse(r.value);
     return out as unknown as Settings;
   }
 
   private writeSettings(change: Record<string, unknown>): Settings {
     const next = { ...this.settings(), ...change } as Settings;
-    const bad: string[] = [];
-    if (!["codex", "claude"].includes(next.builder)) bad.push("builder must be codex or claude");
-    if (!["claude", "codex"].includes(next.intake)) bad.push("intake must be claude or codex");
-    if (!Number.isInteger(next.maxBuildAttempts) || next.maxBuildAttempts < 1 || next.maxBuildAttempts > 5) bad.push("maxBuildAttempts must be 1–5");
-    if (typeof next.sandbox !== "boolean") bad.push("sandbox must be true or false");
-    if (next.firstRunDone !== undefined && typeof next.firstRunDone !== "boolean") bad.push("firstRunDone must be true or false");
-    if (!Number.isInteger(next.logRetentionDays) || next.logRetentionDays < 0 || next.logRetentionDays > 3650) bad.push("logRetentionDays must be 0 (forever) to 3650");
-    bad.push(...ownerPrefProblems(next));
+    const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen"] as const)
+    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"] as const)
       if (next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
   }
@@ -401,7 +403,8 @@ export class HewnDO extends DurableObject<Env> {
       intake: async (req, onProgress, signal) => {
         let reply: any;
         let error: string | undefined;
-        await sv.stream("/intake", { intake: this.settings().intake, req }, (e) => {
+        const { agent, run } = intakeJob(this.settings());
+        await sv.stream("/intake", { intake: agent, run, req }, (e) => {
           if (e.progress) onProgress?.(e.progress);
           if (e.reply) reply = e.reply;
           if (e.error) error = e.error;
@@ -410,6 +413,7 @@ export class HewnDO extends DurableObject<Env> {
         return reply;
       },
       intakeLog: async (entry) => void (await sv.json("/intake/log", entry)),
+      modelCatalog: (agent) => sv.json<ModelCatalog>("/models/catalog", { agent }),
       setup: {
         list: () => sv.json("/setup/list", {}),
         // The supervisor runs the harness steps and its OAuth login; the owner approves in the web client.

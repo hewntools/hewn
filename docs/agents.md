@@ -21,7 +21,7 @@ Or, in the web client: **Agents → Add… → An agent that uses your tools**. 
 
 Start a new agent session afterwards, so it sees the tools.
 
-The same agent can also work for Hewn: [write the spec](concepts.md#hewns-three-jobs) for a new tool, and build it. The last step of connecting it offers that, or choose later in Settings › AI.
+The same agent can also [build your tools](concepts.md#hewns-two-jobs). The last step of connecting it offers that, or choose later in Settings › AI.
 
 ## claude.ai and ChatGPT
 

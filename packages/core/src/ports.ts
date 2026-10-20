@@ -117,6 +117,28 @@ export interface BuildJob {
   attempt: number;
   /** Validation log from the previous attempt, if it failed. */
   feedback?: string;
+  /** The model to build with: a name the builder's CLI takes (an alias or a full name). Unset: the CLI's default. */
+  model?: string;
+  /** Reasoning effort, as the builder's CLI names it (low, medium, high …). Unset: the model's default. */
+  effort?: string;
+}
+
+/**
+ * How a build went, beyond its files: `onModel` names the model it actually ran on (a family such as
+ * "fable" resolves to a full name).
+ */
+export interface BuildHooks {
+  onActivity: (line: string) => void;
+  signal: AbortSignal;
+  onModel?: (model: string) => void;
+  /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. Credits). */
+  onCharge?: (charge: BuildCharge) => void;
+}
+
+/** A host's charge for a build, as the owner sees it ("12 Credits"); Hewn shows it as given. */
+export interface BuildCharge {
+  amount: number;
+  unit: string;
 }
 
 export interface Workbench {
@@ -127,8 +149,12 @@ export interface Workbench {
   /** One workspace file, if present (e.g. the icon a builder writes first). */
   file(buildId: string, path: string): Promise<Uint8Array | undefined>;
   remove(buildId: string): Promise<void>;
-  /** Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't help. */
-  build(job: BuildJob, hooks: { onActivity: (line: string) => void; signal: AbortSignal }): Promise<void>;
+  /**
+   * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
+   * help, `refused: true` that the builder's host declined it (e.g. over quota; the message says why),
+   * and `modelUnavailable: true` that the model asked for can't run (the owner picks another).
+   */
+  build(job: BuildJob, hooks: BuildHooks): Promise<void>;
   /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */
   bundle(buildId: string): Promise<{ js: string; log: string[] }>;
   /** Append a line to the build's human-readable transcript. */

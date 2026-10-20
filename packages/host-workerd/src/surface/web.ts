@@ -11,7 +11,7 @@ import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
-import type { SurfaceHost } from "./host.ts";
+import { agentModels, jobModel, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
@@ -211,7 +211,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   const n = Number(url.searchParams.get("n") ?? 100);
 
   if (resource === "capabilities" && !id) {
-    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules"]) as any);
+    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
     return capabilityList(platform, owner);
   }
@@ -232,13 +232,13 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       }
       case "POST modify": {
         const body = await readJson(req);
-        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}) });
+        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort"]) });
       }
       case "DELETE widgets":
         return platform.removeWidget(owner, id, arg);
       case "POST widgets": {
         const body = await readJson(req);
-        return platform.addWidgets(owner, { capabilityId: id, ...(body.request ? { request: String(body.request) } : {}), ...(body.after ? { after: String(body.after) } : {}) });
+        return platform.addWidgets(owner, { capabilityId: id, ...(body.request ? { request: String(body.request) } : {}), ...(body.after ? { after: String(body.after) } : {}), ...pick(body, ["model", "effort"]) });
       }
       case "POST open": {
         platform.get(owner, id); // visibility
@@ -337,7 +337,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "accounts") return platform.accounts(owner);
 
-  if (resource === "inbox" && method === "GET") return inbox(platform, owner, url.searchParams.get("recent") === "1");
+  if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");
 
   if (resource === "builds") {
     // ?brief=1: without the logs (the Builds page lists up to 200).
@@ -389,7 +389,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "settings") {
     platform.agents(owner); // owner only
     if (method === "PUT") {
-      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen"]));
+      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
       return next;
     }
@@ -414,6 +414,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "tools") {
     platform.agents(owner); // owner only
+    // /api/tools/<agent>/models: what that agent's CLI (or the host's builder) offers, and the
+    // names agents may ask a build by it to use, as the platform checks them.
+    if (id && sub === "models") {
+      const catalog = host.modelCatalog ? await host.modelCatalog(id) : { agent: id, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }] };
+      return { ...catalog, agentModels: agentModels(await host.settings.read(), id) };
+    }
     return host.tools ? host.tools() : [];
   }
 
@@ -511,6 +517,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const body = (await readJson(req)) as IntakeRequest;
     const catalog = platform.list(owner).map((c) => ({ id: c.id, name: c.name, purpose: c.purpose, operations: c.operations, ...(c.kind ? { kind: c.kind } : {}) }));
     if (body.mode === "modify" && !body.capabilityId) throw new PlatformError("invalid_request", "a change needs a capabilityId");
+    if (body.session !== undefined && (typeof body.session !== "string" || !/^[\w-]{1,80}$/.test(body.session))) throw new PlatformError("invalid_request", "session must be a short id");
     const currentManifest = body.mode !== "create" && body.capabilityId ? platform.get(owner, body.capabilityId) : undefined;
     const started = Date.now();
     const finish = (reply?: IntakeReply, error?: string) => {
@@ -659,7 +666,8 @@ export function unresolvedFailures<T extends { buildId: string; capabilityId: st
 export const failureReason = (f?: { title: string; detail: string }) => (!f ? "" : f.title === "The builder stopped" && f.detail ? f.detail : f.title);
 
 export interface InboxItem {
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection";
+  /** "builder-model": the model the owner picked for building has a successor. */
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -677,10 +685,11 @@ const usdText = (n: number) => `$${n >= 10 ? Math.round(n) : n.toFixed(2).replac
  * Everything that waits for the owner, in one list (the Inbox's "Needs you"), what's building,
  * and (with `recent`) the last few Activity rows. Each "needs" row opens its own sheet.
  */
-async function inbox(platform: Platform, owner: Agent, recent: boolean) {
+async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent: boolean) {
   const needs: InboxItem[] = [];
   const caps = platform.list(owner);
-  const nameOf = (id: string) => platform.registry.getCapability(id)?.displayName ?? caps.find((c) => c.id === id)?.name ?? id;
+  // A tool in its first build isn't listed yet: its reserved name, not its id.
+  const nameOf = (id: string) => platform.registry.getCapability(id)?.displayName ?? caps.find((c) => c.id === id)?.name ?? platform.registry.getCapability(id)?.name ?? id;
   const builds = platform.registry.recentBuilds(60).map((id) => platform.getBuild(owner, id));
   const live = new Set(builds.filter((b) => LIVE.has(b.status)).map((b) => b.capabilityId));
   const agents = new Map(platform.agents(owner).map((a) => [a.id, a.name]));
@@ -697,6 +706,9 @@ async function inbox(platform: Platform, owner: Agent, recent: boolean) {
     needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger", action: "Show", at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
     needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, agentId: x.createdBy, title: nameOf(x.capabilityId), detail: `${who(x.createdBy)} wants to run ${x.operation.split("@")[0]} ${x.cadence}`, severity: "warn", action: "Review", at: x.createdAt });
+  // A schedule that stopped itself after failing in a row: whatever it keeps fresh goes stale quietly otherwise.
+  for (const x of platform.listSchedules(owner).filter((s) => s.status === "paused" && s.pausedReason))
+    needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, title: nameOf(x.capabilityId), detail: `${x.operation.split("@")[0]} stopped running ${x.cadence}: it failed ${x.failures} times in a row`, severity: "danger", action: "Resume…", at: x.lastRunAt ?? x.createdAt });
 
   // Tools (and connections) that can't run until the owner does something.
   let modelUsers = false;
@@ -741,6 +753,8 @@ async function inbox(platform: Platform, owner: Agent, recent: boolean) {
       if (cap > 0 && spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its ${usdText(cap)} cap`, severity: "danger", action: "Raise cap…" });
     }
   }
+  needs.push(...(await modelNotices(host)));
+
   const order = { danger: 0, warn: 1 };
   needs.sort((a, b) => (a.kind === "confirmation" ? -1 : b.kind === "confirmation" ? 1 : 0) || order[a.severity] - order[b.severity] || (b.at ?? "").localeCompare(a.at ?? ""));
 
@@ -748,6 +762,15 @@ async function inbox(platform: Platform, owner: Agent, recent: boolean) {
     .filter((b) => LIVE.has(b.status))
     .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null }));
   return { needs, building, ...(recent ? { recent: activity(platform, owner, { limit: 6 }).items } : {}) };
+}
+
+/** The model the owner picked for a job, when its CLI names a successor. Gone once the owner picks another. */
+async function modelNotices(host: SurfaceHost): Promise<InboxItem[]> {
+  const s = await host.settings.read();
+  const pinned = jobModel(s, "builder", s.builder).model;
+  if (!pinned || !host.modelCatalog) return [];
+  const upgrade = (await host.modelCatalog(s.builder).catch(() => undefined))?.models.find((m) => m.id === pinned)?.upgrade;
+  return upgrade ? [{ kind: "builder-model", id: "builder", title: "Builds tools", detail: `${upgrade} replaces ${pinned}`, severity: "warn", action: "Change…" }] : [];
 }
 
 export interface ActivityItem {
@@ -778,6 +801,8 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildId: b.buildId,
       buildKind: b.kind,
       builder: b.builder,
+      ...(b.model ? { buildModel: b.model } : {}),
+      ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,
       ...(b.failure ? { failure: b.failure, reason: failureReason(b.failure) } : {}),
     });

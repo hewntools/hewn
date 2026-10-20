@@ -5,7 +5,7 @@ New to Hewn? Read the [quickstart](quickstart.md), then [concepts](concepts.md).
 ## Getting started
 
 - [Quickstart](quickstart.md): install, start, upgrade, uninstall
-- [Concepts](concepts.md): tools, agents, Hewn's three jobs, grants, connections, schedules
+- [Concepts](concepts.md): tools, agents, Hewn's two jobs, grants, connections, schedules
 
 ## Using Hewn
 

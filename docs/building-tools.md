@@ -8,7 +8,7 @@ In the web client: the **New** tile on Home, or press `n`. Describe it in plain 
 
 > A habit tracker. Ask me each evening which habits I did, and show the streak.
 
-Hewn's [intake](concepts.md#hewns-three-jobs) (the agent that writes the spec, Settings › AI) asks what it needs to know, then makes a **spec proposal**: the tool, what it will do, what it needs (a site to reach, a key, another tool, a model: its [grants](concepts.md#grants)), and any widgets or [schedules](concepts.md#schedules). A big request can become a few small tools that work together; untick the ones you don't want. Reply to change it, or press **Build** (it says how many tools: "Build 1 tool").
+The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI) first talks it through: it asks what it needs to know, then makes a **spec proposal**: the tool, what it will do, what it needs (a site to reach, a key, another tool, a model: its [grants](concepts.md#grants)), and any widgets or [schedules](concepts.md#schedules). A big request can become a few small tools that work together; untick the ones you don't want. Reply to change it, or press **Build** (it says how many tools: "Build 1 tool").
 
 ![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool](images/spec-proposal.png)
 
@@ -16,7 +16,7 @@ You can also ask an agent ("make me a reading list in Hewn"), if you allowed it 
 
 ## The build
 
-The [builder](concepts.md#hewns-three-jobs) (Claude Code or Codex on your machine, in a sandbox, on however it's signed in: a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI) writes the tool. Then Hewn:
+The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code or Codex on your machine, in a sandbox, on however it's signed in: a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI) writes the tool. Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data

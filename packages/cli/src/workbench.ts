@@ -138,6 +138,10 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         platformRoot: opts.confineTo?.(),
         signal: hooks.signal,
         onActivity: hooks.onActivity,
+        ...(job.model ? { model: job.model } : {}),
+        ...(job.effort ? { effort: job.effort } : {}),
+        onModel: hooks.onModel,
+        onCharge: hooks.onCharge,
       });
     },
     async bundle(buildId) {

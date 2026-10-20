@@ -20,6 +20,14 @@ export interface BuildJob {
   platformRoot?: string;
   /** Aborted when the owner (or requester) cancels the build: stop and return/throw promptly. */
   signal?: AbortSignal;
+  /** The model to build with, as the CLI takes it (an alias or a full name). Unset: the CLI's default. */
+  model?: string;
+  /** Reasoning effort, as the CLI names it. Unset: the model's default. */
+  effort?: string;
+  /** The model the run actually used (a family resolves to a full name), when the CLI says. */
+  onModel?: (model: string) => void;
+  /** What the builder's host charged for this attempt (the remote builder). */
+  onCharge?: (charge: { amount: number; unit: string }) => void;
 }
 
 /**

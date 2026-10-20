@@ -92,13 +92,16 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     builds_retry: { handler: (a) => platform.retryBuild(agent, a.buildId) },
     builds_cancel: { handler: (a) => platform.cancelBuild(agent, a.buildId) },
   };
+  // Build tools say which models this agent may ask for (the owner ticks them in Settings › AI).
+  const models = `\n\nModels you may ask for (model): ${platform.agentModelChoices().join(", ")}.`;
+  const builds = new Set(["capabilities_create", "capabilities_modify", "capabilities_add_widgets"]);
   return AGENT_TOOLS.map((t) => {
     const impl = run[t.name];
     if (!impl) throw new Error(`no handler for the spec's tool ${t.name}`);
     return {
       name: t.name,
       scopes: [...t.scopes],
-      description: t.catalog ? t.description + known : t.description,
+      description: (t.catalog ? t.description + known : t.description) + (builds.has(t.name) ? models : ""),
       inputSchema: t.inputSchema,
       ...(t.widgetApp ? { meta: { ui: { resourceUri: WIDGET_APP_URI }, "ui/resourceUri": WIDGET_APP_URI } } : {}),
       ...impl,
