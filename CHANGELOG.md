@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.3 (unreleased)
+
+- **Fixed:** with `HEWN_BUILD_URL` set, the host's builder and intake are the default again, also after you save another setting (saving a setting no longer stores the defaults of the others, and a builder stored that way that you didn't choose is dropped when Hewn starts).
+
 ## 0.4.2 (2026-10-20)
 
 - **One choice for building.** Talking a request through and building it are one job now, "Builds tools", with one agent to pick (in the first run, Settings › AI and the command palette). The docs call them Hewn's two jobs: building tools, and thinking inside them.

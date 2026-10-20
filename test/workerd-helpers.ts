@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { RemoteJobs } from "@hewntools/cli/builders/remote.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
 import { openHome } from "@hewntools/cli/home.ts";
@@ -54,7 +55,7 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
   const scripts: Script[] = [];
   const scripted: CapabilityBuilder = {
@@ -66,7 +67,7 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
     },
   };
   const port = await freePort();
-  const sv = await startSupervisor({ home: openHome(root), port, publicPort: await freePort(), publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, log: () => {}, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" });
+  const sv = await startSupervisor({ home: openHome(root), port, publicPort: await freePort(), publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, log: () => {}, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" });
   await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1 });
   const clients: Client[] = [];
   return {
