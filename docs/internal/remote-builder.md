@@ -1,6 +1,6 @@
 # The host's builder: protocol
 
-A host can run Hewn's builder and intake itself, on its own model keys, instead of Claude Code or Codex on the owner's machine. Hewn Cloud does: each user's Hewn (a cell) holds no model key, only a token for the build service, and builds run on separate short-lived machines with no state or secrets.
+A host can run Hewn's builder and intake itself, on its own model keys, instead of Claude Code or Codex on the owner's machine. Then each user's Hewn can hold no model key, only a token for the build service, and builds can run on separate short-lived machines with no state or secrets.
 
 Hewn's side is `packages/cli/src/builders/remote.ts`. Validation, tests, the visual check and promotion stay in Hewn, exactly as for a local builder: the service only turns a workspace into a candidate, and a request into a reply.
 
@@ -10,7 +10,7 @@ Hewn's side is `packages/cli/src/builders/remote.ts`. Validation, tests, the vis
 | --- | --- |
 | `HEWN_BUILD_URL` | The service's base URL: `https://…` (plain `http` only to localhost, since the token goes with every request). Set: the `remote` builder and intake exist, and are the default. |
 | `HEWN_BUILD_TOKEN` | This Hewn's token, sent as `Authorization: Bearer <token>`. |
-| `HEWN_BUILD_NAME` | What the owner sees it called (default "Remote builder"), e.g. "Hewn Cloud". |
+| `HEWN_BUILD_NAME` | What the owner sees it called (default "Remote builder"). |
 
 `hewn doctor` reports it as "the host's builder (HEWN_BUILD_URL)".
 
@@ -50,7 +50,7 @@ Events:
 | --- | --- |
 | `{ "activity": "→ Edit src/index.ts" }` | One line of what the builder is doing (the build page and `builds_wait` show it). |
 | `{ "model": "claude-fable-5-5" }` | The model it runs on, once known. |
-| `{ "charge": { "amount": 12, "unit": "Credits" } }` | What this attempt costs the owner, in the host's own unit. Hewn adds up a build's attempts and shows it as given ("12 Credits") on the build page and in Activity; it never converts or prices anything. Leave it out when nothing is charged. |
+| `{ "charge": { "amount": 12, "unit": "points" } }` | What this attempt costs the owner, in the host's own unit. Hewn adds up a build's attempts and shows it as given ("12 points") on the build page and in Activity; it never converts or prices anything. Leave it out when nothing is charged. |
 | `{ "heartbeat": true }` (or any other key) | Ignored: keeps the connection open. |
 | `{ "file": { "path": "ui/icon.svg", "content": "<base64>" } }` | Optional: one file as the builder writes it, before the build ends. Hewn writes it into the workspace at once, so the icon (`ui/icon.svg`, and `hue` in `capability.json`) shows on Home and the build page while it builds. Same path rules as `files`; a path Hewn won't write is ignored. The `files` event still decides the candidate. |
 | `{ "files": { "<path>": "<base64>", … } }` | The workspace as the builder left it: the whole tree. Paths it doesn't list are deleted. Paths must be relative, inside the workspace, and not artefacts (`node_modules` …); one that isn't fails the attempt before anything is written. |

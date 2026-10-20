@@ -36,7 +36,7 @@ describe("remote builder and intake", () => {
       await handle(body, req, res);
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-    remote = { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, token: "cell-token", label: "Test Cloud" };
+    remote = { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, token: "hewn-token", label: "Test Cloud" };
   });
   after(() => server.close());
 
@@ -65,7 +65,7 @@ describe("remote builder and intake", () => {
         { activity: "→ Write src/index.ts" },
         { model: "claude-fable-5-5" },
         { heartbeat: true },
-        { charge: { amount: 12, unit: "Credits" } },
+        { charge: { amount: 12, unit: "points" } },
         { files: { "BUILDER.md": b64("brief"), "src/index.ts": b64("export const operations = {};"), "capability.json": b64("{}") } },
         { done: true },
       ]);
@@ -75,7 +75,7 @@ describe("remote builder and intake", () => {
     await remoteBuilder(remote).build(j);
     const sent = seen.at(-1)!;
     assert.equal(sent.path, "/v1/builds");
-    assert.equal(sent.auth, "Bearer cell-token");
+    assert.equal(sent.auth, "Bearer hewn-token");
     assert.equal(sent.body.model, "fable");
     assert.equal(sent.body.effort, "high");
     assert.equal(sent.body.feedback, "1 test failed");
@@ -83,7 +83,7 @@ describe("remote builder and intake", () => {
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);
     assert.deepEqual(j.models, ["claude-fable-5-5"]);
-    assert.deepEqual(charges, [{ amount: 12, unit: "Credits" }]);
+    assert.deepEqual(charges, [{ amount: 12, unit: "points" }]);
     assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "export const operations = {};");
     assert.ok(existsSync(join(dir, "capability.json")));
     assert.ok(!existsSync(join(dir, "old.txt")), "files it didn't return are gone");

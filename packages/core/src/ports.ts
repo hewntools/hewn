@@ -131,11 +131,11 @@ export interface BuildHooks {
   onActivity: (line: string) => void;
   signal: AbortSignal;
   onModel?: (model: string) => void;
-  /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. Credits). */
+  /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. points). */
   onCharge?: (charge: BuildCharge) => void;
 }
 
-/** A host's charge for a build, as the owner sees it ("12 Credits"); Hewn shows it as given. */
+/** A host's charge for a build, as the owner sees it ("12 points"); Hewn shows it as given. */
 export interface BuildCharge {
   amount: number;
   unit: string;

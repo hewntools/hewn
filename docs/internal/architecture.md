@@ -131,7 +131,7 @@ A build runs on a model and effort: what the requester asked for, else the owner
 
 ## The host's builder (`remote`)
 
-With `HEWN_BUILD_URL` (and `HEWN_BUILD_TOKEN`, `HEWN_BUILD_NAME`), the supervisor adds a builder and an intake that run on the host's service and model keys, and makes them the default: Hewn Cloud runs builds on separate short-lived machines, so a cell holds no model key. They sit behind the same `CapabilityBuilder` and `Intake` contracts: validation, tests and promotion stay in Hewn. A refusal (over quota) fails the build at once with the service's reason. The protocol: [remote-builder.md](remote-builder.md).
+With `HEWN_BUILD_URL` (and `HEWN_BUILD_TOKEN`, `HEWN_BUILD_NAME`), the supervisor adds a builder and an intake that run on the host's service and model keys, and makes them the default: the host can run builds on separate short-lived machines, so its Hewn holds no model key. They sit behind the same `CapabilityBuilder` and `Intake` contracts: validation, tests and promotion stay in Hewn. A refusal (over quota) fails the build at once with the service's reason. The protocol: [remote-builder.md](remote-builder.md).
 
 ## Web client and tool UIs
 

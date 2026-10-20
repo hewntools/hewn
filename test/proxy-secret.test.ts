@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // HEWN_PROXY_SECRET: a host whose public listener is reachable directly as well as through its own
-// proxy (Hewn Cloud's cells) takes public requests only from that proxy.
+// proxy takes public requests only from that proxy.
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { after, before, describe, test } from "node:test";
@@ -27,11 +27,11 @@ describe("the public gate with a proxy secret", () => {
   });
 
   test("set, with the right header: passes, the header is gone, X-Forwarded-* honoured", () => {
-    const { out } = gate(req({ [PROXY_SECRET_HEADER]: SECRET, "x-forwarded-for": "198.51.100.1, 203.0.113.5", "x-forwarded-host": "alice.hewn.tools" }), SECRET);
+    const { out } = gate(req({ [PROXY_SECRET_HEADER]: SECRET, "x-forwarded-for": "198.51.100.1, 203.0.113.5", "x-forwarded-host": "alice.example.net" }), SECRET);
     assert.ok(out instanceof Request);
     assert.equal(out.headers.has(PROXY_SECRET_HEADER), false);
     assert.equal(out.headers.get(CLIENT_IP_HEADER), "203.0.113.5");
-    assert.equal(out.headers.get("x-forwarded-host"), "alice.hewn.tools");
+    assert.equal(out.headers.get("x-forwarded-host"), "alice.example.net");
   });
 
   test("set, header missing or wrong: 403, logged without the secret or the claimed address", async () => {
@@ -68,25 +68,25 @@ describe("workerd: the public socket with HEWN_PROXY_SECRET", () => {
 
   test("X-Forwarded-Host counts only with the secret; without it, 403", async () => {
     const meta = "/.well-known/oauth-authorization-server";
-    const withSecret = await fetch(`${h.sv.publicUrl}${meta}`, { headers: { "x-forwarded-host": "alice.hewn.tools", [PROXY_SECRET_HEADER]: SECRET } });
+    const withSecret = await fetch(`${h.sv.publicUrl}${meta}`, { headers: { "x-forwarded-host": "alice.example.net", [PROXY_SECRET_HEADER]: SECRET } });
     assert.equal(withSecret.status, 200);
-    assert.equal((await withSecret.json()).issuer, "https://alice.hewn.tools");
-    for (const headers of [{ "x-forwarded-host": "alice.hewn.tools" }, { "x-forwarded-host": "alice.hewn.tools", [PROXY_SECRET_HEADER]: "wrong" }] as Record<string, string>[]) {
+    assert.equal((await withSecret.json()).issuer, "https://alice.example.net");
+    for (const headers of [{ "x-forwarded-host": "alice.example.net" }, { "x-forwarded-host": "alice.example.net", [PROXY_SECRET_HEADER]: "wrong" }] as Record<string, string>[]) {
       const res = await fetch(`${h.sv.publicUrl}${meta}`, { headers });
       assert.equal(res.status, 403);
       assert.equal((await res.json()).error, "forbidden");
     }
-    const mcp = await fetch(`${h.sv.publicUrl}/mcp`, { method: "POST", headers: { [PROXY_SECRET_HEADER]: SECRET, "x-forwarded-host": "alice.hewn.tools" }, body: "{}" });
+    const mcp = await fetch(`${h.sv.publicUrl}/mcp`, { method: "POST", headers: { [PROXY_SECRET_HEADER]: SECRET, "x-forwarded-host": "alice.example.net" }, body: "{}" });
     assert.equal(mcp.status, 401);
-    assert.match(mcp.headers.get("www-authenticate")!, /https:\/\/alice\.hewn\.tools\//);
+    assert.match(mcp.headers.get("www-authenticate")!, /https:\/\/alice\.example\.net\//);
   });
 
   test("the web client on the public URL's host: only through the proxy", async () => {
-    await h.sv.admin("call", { method: "setPublicUrl", args: ["https://alice.hewn.tools"] });
+    await h.sv.admin("call", { method: "setPublicUrl", args: ["https://alice.example.net"] });
     try {
-      assert.equal(await status("/", { host: "alice.hewn.tools", [PROXY_SECRET_HEADER]: SECRET }), 401, "the sign-in page");
-      assert.equal(await status("/", { host: "alice.hewn.tools" }), 403);
-      assert.equal(await status("/", { host: "hewn-cell-alice.fly.dev", "x-forwarded-host": "alice.hewn.tools" }), 403, "a spoofed X-Forwarded-Host goes nowhere");
+      assert.equal(await status("/", { host: "alice.example.net", [PROXY_SECRET_HEADER]: SECRET }), 401, "the sign-in page");
+      assert.equal(await status("/", { host: "alice.example.net" }), 403);
+      assert.equal(await status("/", { host: "hewn-alice.internal.example", "x-forwarded-host": "alice.example.net" }), 403, "a spoofed X-Forwarded-Host goes nowhere");
     } finally {
       await h.sv.admin("call", { method: "setPublicUrl", args: [null] });
     }

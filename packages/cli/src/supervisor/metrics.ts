@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The metrics endpoint: Prometheus text on HEWN_METRICS_PORT (off unless set), for a host that scrapes Hewn
-// (Hewn Cloud's cells: Fly scrapes it into its managed Prometheus). Aggregates only, never what's in the tools.
+// (e.g. into a managed Prometheus). Aggregates only, never what's in the tools.
 import http from "node:http";
 
 type Snapshot = {

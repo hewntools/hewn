@@ -3160,7 +3160,7 @@ async function buildPage(id) {
  */
 /** What a build runs on, in words ("Fable · high effort"; the model it ran on, once the builder says). */
 const buildModelWords = (b) => (b.model && (b.model.ran || b.model.model || b.model.effort) ? modelWords({ model: b.model.ran ?? b.model.model, effort: b.model.effort }) : "");
-/** What the builder's host charged, as it says it: "12 Credits" (1 decimal at most). */
+/** What the builder's host charged, as it says it: "12 points" (1 decimal at most). */
 const chargeWords = (c) => (c ? `${Math.round(c.amount * 10) / 10} ${c.unit}` : "");
 
 /**
