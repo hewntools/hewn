@@ -411,7 +411,6 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .mm-effort { display: flex; flex-direction: column; gap: 6px; padding: 6px 12px 10px; font-size: var(--fs-sm); }
 .effort-slider { width: 100%; accent-color: var(--accent); }
 .mm-other { padding: 6px 12px; }
-.mm-note { padding: 6px 12px 4px; }
 
 /* Settings › AI › Advanced: the two halves of building, each with its own agent and model. */
 .advanced > summary { cursor: pointer; padding: 12px 0; list-style-position: inside; }

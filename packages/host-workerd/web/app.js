@@ -2735,7 +2735,6 @@ function modelChip() {
       split
         ? [section(["builder"], bCat, `Builds · ${tool("builder")?.label ?? ctx.s.builder}`), h("hr"), iCat ? section(["intake"], iCat, `Talks it through · ${tool("intake")?.label ?? ctx.s.intake}`) : null]
         : section(["builder", "intake"], bCat, null),
-      h("div", { class: "small faint mm-note" }, "Your setting for everything you build (as in Settings › AI)."),
     );
     place();
   };
@@ -2761,6 +2760,7 @@ function modelChip() {
     document.removeEventListener("click", outside, true);
     document.removeEventListener("keydown", onKey, true);
     removeEventListener("resize", close);
+    removeEventListener("blur", close);
   };
   const outside = (e) => menu && !menu.contains(e.target) && !chip.contains(e.target) && close();
   const onKey = (e) => e.key === "Escape" && (e.stopPropagation(), close(), chip.focus());
@@ -2780,6 +2780,8 @@ function modelChip() {
     document.addEventListener("click", outside, true);
     document.addEventListener("keydown", onKey, true);
     addEventListener("resize", close);
+    // A click in a tool (its own frame) never reaches this page; the page losing focus to it does.
+    addEventListener("blur", close);
   });
   onLeave(close);
   return chip;
