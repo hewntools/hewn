@@ -1,6 +1,6 @@
 {
   "name": "@hewntools/host-workerd",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "description": "Hewn on workerd: the Worker, the capability runtime, the HTTP and MCP surface, the web client",

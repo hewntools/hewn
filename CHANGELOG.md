@@ -2,7 +2,7 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
-## 0.4.3 (unreleased)
+## 0.4.3 (2026-10-20)
 
 - **Fixed:** with `HEWN_BUILD_URL` set, the host's builder and intake are the default again, also after you save another setting (saving a setting no longer stores the defaults of the others, and a builder stored that way that you didn't choose is dropped when Hewn starts).
 - **The host's builder shows Hewn's icon** wherever a builder is shown, under the name the host gives it, and the "on the host's keys" notes are gone.

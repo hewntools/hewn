@@ -1,6 +1,6 @@
 {
   "name": "@hewntools/ui",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "description": "The UI kit tool UIs load from /_platform/: ui.css, session.js, widgets.js, chart.js, ascii.js",
