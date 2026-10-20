@@ -5,6 +5,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.4 (unreleased)
 
 - **For hosts: hosted mode** (`HEWN_HOSTED=1`, with `HEWN_BUILD_URL`; optional `HEWN_HOST_SIGNIN_URL`). For an owner who has no terminal: signed-out pages and agent approval send them to the host's sign-in instead of a command, the first run goes straight to making something (no "who builds" step), and Settings hides what the host manages. See [remote access](docs/remote-access.md#running-hewn-for-someone-else-hewn_hosted).
+- **Signing in to approve an agent lands on Agents,** where its request waits, also when the sign-in comes back from a link (the host's, or `hewn open --print`).
 - **The first run uses the intake's box:** describe the tool, see the model it builds with, Send.
 - **Remote access** no longer offers to add a passkey on a browser that already has one (made there, or signed in with), and no longer says "tool apps open from Home".
 - **Agents are sent to the web client only:** a tool waiting for the owner's sign-in or approval tells the agent to open it in Hewn (Accounts), not `hewn connect`; a deleted tool's id says it can be restored under Settings › Data.

@@ -46,11 +46,11 @@ export const withShim = (html: string) => (/<head[^>]*>/i.test(html) ? html.repl
  * when the sign-in link is opened from another origin (the web client), browsers withhold
  * SameSite=Strict cookies on the rest of that redirect chain.
  */
-export const signedIn = (setCookie: string, to = "/") =>
-  new Response(`<!doctype html><meta http-equiv="refresh" content="0;url=${to}"><title>Signing in…</title>`, {
-    status: 200,
-    headers: { "set-cookie": setCookie, "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'", "cache-control": "no-store" },
-  });
+export const signedIn = (setCookie: string | string[], to = "/") => {
+  const headers = new Headers({ "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'", "cache-control": "no-store" });
+  for (const c of [setCookie].flat()) headers.append("set-cookie", c);
+  return new Response(`<!doctype html><meta http-equiv="refresh" content="0;url=${to}"><title>Signing in…</title>`, { status: 200, headers });
+};
 
 const PLATFORM_ASSETS = new Set(["ui.css", "chart.js", "widgets.js", "ascii.js", "session.js"]);
 

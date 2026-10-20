@@ -22,6 +22,13 @@ const SESSION_MAX_AGE = 30 * 86400;
 // On the public URL the cookie is __Host- (Secure, this exact host, Path=/). Capability UIs under
 // /tools/ run on opaque origins: they can neither read it nor send it (their requests are cross-site).
 const cookieName = (site: Site) => (site.secure ? "__Host-hewn_web" : "hewn_web");
+/**
+ * Where to go after signing in, when it wasn't Home: set by the signed-out /approve page (an agent
+ * waits for approval), read once by /auth. Lax, so it comes back from the host's sign-in page.
+ */
+const nextName = (site: Site) => (site.secure ? "__Host-hewn_next" : "hewn_next");
+const nextCookie = (site: Site, maxAge: number) => `${nextName(site)}=agents; HttpOnly;${site.secure ? " Secure;" : ""} SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+const withNext = (site: Site, res: Response) => (res.headers.append("set-cookie", nextCookie(site, 15 * 60)), res);
 const sessionCookie = (site: Site, session: string, maxAge = SESSION_MAX_AGE) =>
   `${cookieName(site)}=${session}; HttpOnly;${site.secure ? " Secure;" : ""} SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 
@@ -149,6 +156,8 @@ export async function handleWeb(platform: Platform, host: SurfaceHost, site: Sit
   if (path === "/auth") {
     const session = platform.redeemWebTicket(url.searchParams.get("ticket") ?? "", req.headers.get("user-agent") ?? undefined);
     if (!session) return signIn(401, "This link has expired.", "Sign-in links work once, for two minutes. Get a new one in a terminal:", command, "Sign-in links work once, for two minutes. ");
+    // Signed in to approve an agent: to Agents, where its request waits.
+    if (cookieValue(req, nextName(site)) === "agents") return signedIn([sessionCookie(site, session), nextCookie(site, 0)], "/#/agents");
     // On the public URL a link is how a device gets in the first time: offer it a passkey.
     return signedIn(sessionCookie(site, session), site.kind === "public" ? "/#/passkey" : "/");
   }
@@ -177,9 +186,9 @@ export async function handleWeb(platform: Platform, host: SurfaceHost, site: Sit
   // isn't signed in to Hewn: then say how to approve from a terminal instead of a dead end.
   if (path === "/approve") {
     if (owner) return new Response(null, { status: 302, headers: { location: "/#/agents" } });
-    if (site.kind === "public" && (platform.hasPasskeys(site.rpId!) || host.hosted)) return publicSignIn(platform, site, 401, "Sign in to approve it.", host.hosted);
+    if (site.kind === "public" && (platform.hasPasskeys(site.rpId!) || host.hosted)) return withNext(site, publicSignIn(platform, site, 401, "Sign in to approve it.", host.hosted));
     const code = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/.test(url.searchParams.get("code") ?? "") ? url.searchParams.get("code")! : undefined;
-    if (host.hosted) return signIn(401, "Sign in to approve it.", "", "");
+    if (host.hosted) return withNext(site, signIn(401, "Sign in to approve it.", "", ""));
     return signedOutPage(site, 401, "Approve it in a terminal.", "This browser isn't signed in to Hewn. Approve the agent with:", code ? `hewn agents approve ${code}` : "hewn agents pending");
   }
   if (!owner) {

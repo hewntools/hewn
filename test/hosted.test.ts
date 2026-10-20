@@ -86,6 +86,13 @@ describe("hosted mode: the public web client", () => {
     assert.equal(page.status, 401);
     assert.match(page.body, /Sign in to approve it/);
     assert.doesNotMatch(page.body, /hewn agents/);
+    // Back from the host's sign-in: to Agents, where the request waits (once), not the passkey offer.
+    const next = [page.headers["set-cookie"]].flat().find((c) => c?.startsWith("__Host-hewn_next="))!;
+    assert.match(next, /SameSite=Lax/);
+    const back = await http(`/auth?ticket=${t.platform.createWebTicket(USER)}`, { cookie: next.split(";")[0] });
+    assert.match(back.body, /url=\/#\/agents/);
+    assert.ok([back.headers["set-cookie"]].flat().some((c) => c?.startsWith("__Host-hewn_next=") && c.includes("Max-Age=0")), "used once");
+    assert.match((await http(`/auth?ticket=${t.platform.createWebTicket(USER)}`)).body, /url=\/#\/passkey/, "otherwise the passkey offer");
   });
 
   test("an agent's sign-in page links to Hewn to approve", async () => {
