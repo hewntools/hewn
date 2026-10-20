@@ -122,6 +122,7 @@ describe("remote builder and intake", () => {
       ndjson(res, [
         { file: { path: "ui/icon.svg", content: b64(icon) } },
         { file: { path: "../escape.svg", content: b64("x") } },
+        { file: { path: "ui", content: b64("x") } },
         { activity: "→ Write src/index.ts" },
         { files: { "BUILDER.md": b64("brief"), "ui/icon.svg": b64(icon), "src/index.ts": b64("export const operations = {};") } },
         { done: true },
@@ -131,6 +132,7 @@ describe("remote builder and intake", () => {
     await remoteBuilder(remote).build(job(dir, { onActivity: () => (iconWhileBuilding = readFileSync(join(dir, "ui", "icon.svg"), "utf8")) }));
     assert.equal(iconWhileBuilding, icon, "written before the build ended");
     assert.ok(!existsSync(join(dir, "..", "escape.svg")), "a path outside the workspace is ignored");
+    // "ui" is a directory by then: that file can't be written, and the build goes on.
     assert.equal(readFileSync(join(dir, "ui", "icon.svg"), "utf8"), icon);
     assert.ok(!existsSync(join(dir, "old.txt")));
     rmSync(dir, { recursive: true, force: true });
