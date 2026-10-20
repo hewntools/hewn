@@ -110,7 +110,7 @@ try {
     await page.locator(".inbox-count:not([hidden])").waitFor({ timeout: 20_000 });
     await page.locator(".inbox-btn").click();
     const row = page.locator(".inbox-row", { hasText: "wants to connect" });
-    await row.getByRole("button", { name: "Review" }).click();
+    await row.click();
     const sheet = page.locator("dialog[open]", { hasText: "Claude Code (hewn) wants to connect" });
     await sheet.waitFor();
     const code = (await sheet.locator(".user-code").textContent())!.trim();
