@@ -2,7 +2,7 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
-## 0.4.2 (unreleased)
+## 0.4.2 (2026-10-20)
 
 - **One choice for building.** Talking a request through and building it are one job now, "Builds tools", with one agent to pick (in the first run, Settings › AI and the command palette). The docs call them Hewn's two jobs: building tools, and thinking inside them.
 - **Choose the model and effort for building.** Settings › AI lists what the agent offers: Default, a family that follows the newest (Claude Code's Fable, Opus, Sonnet, Haiku), or a pinned model (any Codex model, or a full Claude name), with an effort. Switching agent means choosing its model; Hewn remembers the last one for each. A model that's gone or misspelled stops the build (or the chat) at once with "… isn't available. Pick another model"; nothing is built on a model you didn't choose.
