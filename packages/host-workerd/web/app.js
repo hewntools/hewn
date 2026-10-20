@@ -1988,6 +1988,21 @@ const inFuture = (iso) => {
   return d === 1 ? "tomorrow" : `in ${d} days`;
 };
 
+/** Text kept to two lines, with a caret that shows all of it (long text only). */
+function expandable(text, cls = "") {
+  const body = h("span", { class: "clamp-2" }, text);
+  if (text.length <= 90) return h("span", { class: cls }, text);
+  const caret = h("button", { type: "button", class: "caret-btn", "aria-expanded": "false", "aria-label": "Show the whole message" });
+  caret.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = caret.getAttribute("aria-expanded") !== "true";
+    caret.setAttribute("aria-expanded", String(open));
+    caret.setAttribute("aria-label", open ? "Show less" : "Show the whole message");
+    body.classList.toggle("clamp-2", !open);
+  });
+  return h("span", { class: `${cls} expandable` }, body, caret);
+}
+
 /** "operation_failed: fetch_tonight@1 failed: NOAA is unreachable" → "NOAA is unreachable". */
 const runFailure = (outcome, operation) => String(outcome).replace(/^\w+: /, "").replace(new RegExp(`^${operation.split("@")[0]}(@\\d+)? failed: `), "");
 
@@ -2026,7 +2041,7 @@ async function schedulesSheet(c, ops) {
                       ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `${cadenceText(x.cadence)} · paused after ${x.failures} failures in a row` : `${cadenceText(x.cadence)} · paused`)
                       : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
                 // Why the last run failed, and when: the tool's own words, without the call's prefixes.
-                const why = failed && h("span", { class: "sub danger-text clamp-2", title: x.lastOutcome }, `Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`);
+                const why = failed && expandable(`Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`, "sub danger-text");
                 return h(
                   "li",
                   {},
