@@ -78,7 +78,7 @@ describe("workerd: the public socket with HEWN_PROXY_SECRET", () => {
     }
     const mcp = await fetch(`${h.sv.publicUrl}/mcp`, { method: "POST", headers: { [PROXY_SECRET_HEADER]: SECRET, "x-forwarded-host": "alice.example.net" }, body: "{}" });
     assert.equal(mcp.status, 401);
-    assert.match(mcp.headers.get("www-authenticate")!, /https:\/\/alice\.hewn\.tools\//);
+    assert.match(mcp.headers.get("www-authenticate")!, /https:\/\/alice\.example\.net\//);
   });
 
   test("the web client on the public URL's host: only through the proxy", async () => {
