@@ -262,6 +262,17 @@ CREATE TABLE IF NOT EXISTS build_charges (
   amount         REAL NOT NULL,
   unit           TEXT NOT NULL
 );
+-- Everything the host charged, one row per charge (a build attempt, an intake turn, a model call),
+-- in its own unit: "Credits used this month" when it runs them.
+CREATE TABLE IF NOT EXISTS host_charges (
+  at             TEXT NOT NULL,
+  month          TEXT NOT NULL,
+  kind           TEXT NOT NULL,
+  capability_id  TEXT,
+  amount         REAL NOT NULL,
+  unit           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS host_charges_by_month ON host_charges (month);
 `;
 
 type Row = Record<string, any>;
@@ -575,6 +586,20 @@ export class Registry {
   setRanModel(buildId: string, model: string) {
     this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
     this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(model, buildId);
+  }
+
+  /** One charge from the host, for the month's total. */
+  addHostCharge(kind: "build" | "intake" | "model", c: { amount: number; unit: string }, capabilityId?: string) {
+    const at = now();
+    this.db.prepare("INSERT INTO host_charges (at, month, kind, capability_id, amount, unit) VALUES (?, ?, ?, ?, ?, ?)").run(at, at.slice(0, 7), kind, capabilityId ?? null, c.amount, c.unit);
+  }
+
+  /** What the host charged in a month, per unit and kind (amounts are decimals: a model call is often a fraction). */
+  hostCharges(month: string): { unit: string; kind: string; amount: number; count: number }[] {
+    return this.db
+      .prepare("SELECT unit, kind, SUM(amount) AS amount, COUNT(*) AS n FROM host_charges WHERE month = ? GROUP BY unit, kind ORDER BY unit, kind")
+      .all(month)
+      .map((r) => ({ unit: String(r.unit), kind: String(r.kind), amount: Number(r.amount), count: Number(r.n) }));
   }
 
   /** Add an attempt's charge to the build's (a different unit replaces it). */

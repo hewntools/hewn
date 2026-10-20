@@ -11,7 +11,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { type Agent, USER } from "@hewntools/core/auth.ts";
 import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import type { GenerateRequest, GenerateResult } from "@hewntools/core/models.ts";
+import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
@@ -354,6 +354,16 @@ export class HewnDO extends DurableObject<Env> {
         onSchedulesChanged: () => void this.armAlarm(),
         // Model providers are called from here (host-side), never from capability code.
         modelFetch: (url, init) => fetch(url, init),
+        // Hosted: tools' model calls go to the host, through the supervisor (it holds the host's token).
+        ...(env.HOSTED === "1"
+          ? {
+              hostModels: async (req, signal) => {
+                const j = (await (await supervisor(env).call("/models/generate", { method: "POST", body: JSON.stringify(req), signal })).json()) as { result?: HostGenerateResult; error?: string; refused?: boolean; charge?: unknown };
+                if (j.error !== undefined || !j.result) throw Object.assign(new Error(j.error ?? "no reply"), { refused: !!j.refused, charge: j.charge });
+                return j.result;
+              },
+            }
+          : {}),
       });
       this.sessions = new McpSessions(this.platform, (m) => console.log(`[${new Date().toISOString()}] ${m}`), (p) => this.surfaceHost().asset(p));
       await this.armAlarm();

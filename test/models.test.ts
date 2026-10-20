@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { Deadline } from "@hewntools/core/deadline.ts";
 import { validateManifest } from "@hewntools/core/manifest.ts";
-import { CATALOG_URL, imageSize, imageTokens, inspectRequest, parseCatalog, providerSchema, suggestTiers } from "@hewntools/core/models.ts";
+import { CATALOG_URL, type HostModels, imageSize, imageTokens, inspectRequest, parseCatalog, providerSchema, suggestTiers } from "@hewntools/core/models.ts";
 import { MODEL_KEYS } from "@hewntools/core/platform.ts";
 import { FIXTURES, installFrom, setup } from "./helpers.ts";
 
@@ -325,5 +325,52 @@ describe("model port: the platform", () => {
     await t.platform.setModelKey(USER, "openrouter", "sk-or-123456789");
     assert.equal(t.platform.secrets.get(MODEL_KEYS, "openrouter"), "sk-or-123456789");
     assert.ok(t.platform.registry.authorityEvents().some((e) => e.action === "model_key_set" && e.subject === "openrouter"));
+  });
+});
+
+describe("model port: hosted (tools' model calls on the host)", () => {
+  let t: ReturnType<typeof setup>;
+  type Asked = Parameters<HostModels>[0];
+  const asked: Asked[] = [];
+  let answer: (req: Asked) => Promise<Awaited<ReturnType<HostModels>>> = async () => ({ text: JSON.stringify({ explanation: "Pleased." }), usage: { inputTokens: 900, outputTokens: 80 }, model: "claude-haiku-5-5", charge: { amount: 0.37, unit: "Credits" } });
+  beforeEach(async () => {
+    asked.length = 0;
+    t = setup({ hostModels: async (req) => (asked.push(req), answer(req)) });
+    await installFrom(t.platform, join(FIXTURES, "word-explainer"));
+  });
+  afterEach(() => t.cleanup());
+
+  test("no provider or key: ready once the owner approves; the host gets the tier and the request", async () => {
+    assert.equal(t.platform.readiness("word-explainer").missingModel, undefined);
+    t.platform.approveGrants(USER, "word-explainer");
+    const r = await t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } });
+    assert.equal((r.result as { explanation: string }).explanation, "Pleased.");
+    assert.equal(asked.length, 1);
+    assert.equal(asked[0].capabilityId, "word-explainer");
+    assert.equal(asked[0].tier, "light");
+    assert.equal(asked[0].messages[0].role, "user");
+    assert.equal(asked[0].schema?.type, "object");
+    // Logged for Activity at $0; the charge counts as given, summed as a decimal.
+    assert.equal(t.platform.modelSpend(USER).totalUsd, 0);
+    await t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "ruth" } });
+    assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 0.74 }]);
+    assert.deepEqual(t.platform.models(USER).host?.charges.totals, [{ unit: "Credits", amount: 0.74 }]);
+  });
+
+  test("a refusal reaches the caller as the host words it; a failed call that was answered still counts", async () => {
+    t.platform.approveGrants(USER, "word-explainer");
+    answer = async () => {
+      throw Object.assign(new Error("This Hewn has used this month's 800 Credits. They renew on the 1st."), { refused: true });
+    };
+    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }), /used this month's 800 Credits/);
+    answer = async () => {
+      throw Object.assign(new Error("the model refused"), { charge: { amount: 0.12, unit: "Credits" } });
+    };
+    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }), /the host's model: the model refused/);
+    assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 0.12 }]);
+    // Nonsense from the host isn't counted.
+    t.platform.recordHostCharge(USER, "intake", { amount: -1, unit: "Credits" });
+    t.platform.recordHostCharge(USER, "intake", { amount: 4, unit: "Credits" });
+    assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 4.12 }]);
   });
 });

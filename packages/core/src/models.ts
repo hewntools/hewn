@@ -15,6 +15,43 @@ export type { ContentPart, GenerateRequest, GenerateResult, ModelMessage };
 /** Called by the runtime when capability code calls ctx.model.generate. */
 export type ModelHandler = (req: GenerateRequest) => Promise<GenerateResult>;
 
+/** What the host charged for something it ran, in its own unit ("12 Credits"); shown as given. */
+export interface HostCharge {
+  amount: number;
+  unit: string;
+}
+
+/** A tool's model call, as it goes to the host (hosted: the host runs tools' model calls on its keys). */
+export interface HostGenerateRequest {
+  capabilityId: string;
+  /** What the tool's manifest asks for (`requires.model`): a tier the host maps, or a pinned model. */
+  tier?: ModelTier;
+  model?: string;
+  system?: string;
+  messages: ModelMessage[];
+  schema?: Record<string, unknown>;
+  maxTokens: number;
+}
+
+export interface HostGenerateResult {
+  text: string;
+  usage: { inputTokens: number; outputTokens: number };
+  /** The model it ran on. */
+  model: string;
+  charge?: HostCharge;
+}
+
+/**
+ * The host's model port. Throws with `refused: true` when the host declines (over the month, a
+ * model it can't run): that reason goes to the tool's caller as is. A thrown error may carry the
+ * `charge` for a call the model answered but that still failed.
+ */
+export type HostModels = (req: HostGenerateRequest, signal: AbortSignal) => Promise<HostGenerateResult>;
+
+/** A charge from the host is shown as given: only a sane amount and a short unit are kept. */
+export const saneCharge = (c: unknown): c is HostCharge =>
+  !!c && typeof c === "object" && Number.isFinite((c as HostCharge).amount) && (c as HostCharge).amount >= 0 && (c as HostCharge).amount <= 1e6 && typeof (c as HostCharge).unit === "string" && /^[A-Za-z][A-Za-z ]{0,19}$/.test((c as HostCharge).unit);
+
 // ---------- limits ----------
 
 export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;

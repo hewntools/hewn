@@ -10,7 +10,7 @@ import { ABI } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
-import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
+import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
@@ -567,7 +567,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       { "content-security-policy": WEB_CSP },
       async (event, signal) => {
         try {
-          const reply = await intake(request, (p) => event("progress", p), signal);
+          const reply = await intake(request, (p) => ((p as IntakeProgress).charge !== undefined ? platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge) : event("progress", p)), signal);
           event("reply", reply);
           finish(reply);
         } catch (e) {

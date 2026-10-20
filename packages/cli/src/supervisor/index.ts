@@ -27,7 +27,7 @@ import { type KeySource, masterKey } from "./master-key.ts";
 import { Tunnel, validTunnelConfig } from "./tunnel.ts";
 import { toolStatus } from "../setup/tools.ts";
 import { modelCatalogs } from "../builders/models.ts";
-import type { RemoteJobs } from "../builders/remote.ts";
+import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { workerdBinary } from "../app-dir.ts";
@@ -295,6 +295,18 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       }
       res.end();
       return STREAMED;
+    },
+    // Hosted: a tool's model call, on the host's keys. Errors come back as data (refused, charge).
+    "/models/generate": async (b, _req, res) => {
+      const abort = new AbortController();
+      res.on("close", () => !res.writableFinished && abort.abort());
+      if (!o.hosted || !o.remote) return { error: "tools' model calls aren't run by the host here" };
+      try {
+        return { result: await remoteGenerate(o.remote)(b, abort.signal) };
+      } catch (e) {
+        const x = e as Error & { refused?: boolean; charge?: unknown };
+        return { error: x.message, ...(x.refused ? { refused: true } : {}), ...(x.charge ? { charge: x.charge } : {}) };
+      }
     },
     "/intake/log": async (b) => {
       const dir = join(o.home.root, "intake");
