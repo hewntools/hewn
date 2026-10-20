@@ -3789,7 +3789,6 @@ const logoTile = (hue, logo, letters, size) =>
   h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
 /** An agent's tile, by id (claude-code-2 → claude-code) or by its name. */
 const agentTile = (id, label = id, size = 44) => {
-  // The host's builder and intake (Hewn Cloud) are Hewn's own.
   if (id === "remote") return brandTile(size);
   const entry = AGENT_CATALOG.find((c) => id === c.id || String(id).startsWith(`${c.id}-`) || c.label === label || c.label === id);
   const [hue, logo] = TILES[entry?.id ?? id] ?? [260, null];

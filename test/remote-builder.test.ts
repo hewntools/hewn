@@ -179,7 +179,7 @@ describe("remote builder and intake", () => {
     const c = await remoteCatalog(remote.url, remote.token);
     assert.deepEqual(c.models.map((m) => m.id), ["default", "fast"]);
     assert.equal(remoteJobsFromEnv({}), undefined);
-    assert.deepEqual(remoteJobsFromEnv({ HEWN_BUILD_URL: "https://builds.example/", HEWN_BUILD_TOKEN: "t", HEWN_BUILD_NAME: "Hewn Cloud" }), { url: "https://builds.example/", token: "t", label: "Hewn Cloud" });
+    assert.deepEqual(remoteJobsFromEnv({ HEWN_BUILD_URL: "https://builds.example/", HEWN_BUILD_TOKEN: "t", HEWN_BUILD_NAME: "Hewn Cloud" }), { url: "https://builds.example/", token: "t", label: "Test Cloud" });
     assert.throws(() => remoteJobsFromEnv({ HEWN_BUILD_URL: "file:///etc" }), /https/);
     assert.throws(() => remoteJobsFromEnv({ HEWN_BUILD_URL: "http://builds.example/" }), /https/, "the token never goes in clear text");
     assert.ok(remoteJobsFromEnv({ HEWN_BUILD_URL: "http://127.0.0.1:9/" }));

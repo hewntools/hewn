@@ -9,7 +9,7 @@ describe("settings with the host's builder", () => {
   let h: TestHost;
   const settings = (change?: Record<string, unknown>) => h.sv.admin("settings", change);
   before(async () => {
-    h = await startTestHost({ remote: { url: "http://127.0.0.1:9/", token: "t", label: "Hewn Cloud" } });
+    h = await startTestHost({ remote: { url: "http://127.0.0.1:9/", token: "t", label: "Test Cloud" } });
   });
   after(() => h.stop());
 
