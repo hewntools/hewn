@@ -37,16 +37,32 @@ export interface PlatformConfig {
 
 export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14 };
 
+/** The defaults here: a host that runs the builder and intake (HEWN_BUILD_URL) makes them the default. */
+const defaults = (): PlatformConfig => ({ ...DEFAULT_CONFIG, ...(process.env.HEWN_BUILD_URL ? { builder: "remote", intake: "remote" } : {}) });
+
+const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels"] as const;
+
 const path = (home: Home) => join(home.root, "platform.json");
+
+/**
+ * What platform.json holds. Up to 0.4.2 every write (and setup) stored the defaults too; with
+ * HEWN_BUILD_URL set, a builder or intake the owner didn't choose (jobsChosen) is one of those.
+ */
+function stored(home: Home): Partial<Record<(typeof KEYS)[number], unknown>> {
+  const p = path(home);
+  const raw: Record<string, unknown> = existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : {};
+  const out = Object.fromEntries(KEYS.filter((k) => raw[k] !== undefined).map((k) => [k, raw[k]]));
+  const chosen = Array.isArray(raw.jobsChosen) ? raw.jobsChosen : [];
+  if (process.env.HEWN_BUILD_URL) for (const k of ["builder", "intake"] as const) if (out[k] !== "remote" && !chosen.includes(k)) delete out[k];
+  return out;
+}
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 /** Re-read on every call so edits apply without restarting Hewn. */
 export function readConfig(home: Home): PlatformConfig {
-  const p = path(home);
-  if (!existsSync(p)) return { ...DEFAULT_CONFIG };
   // Unknown keys (e.g. the retired "discovery") are ignored.
-  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels } = { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(p, "utf8")) };
+  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels } = { ...defaults(), ...stored(home) } as Record<string, any>;
   return {
     builder,
     maxBuildAttempts,
@@ -63,7 +79,10 @@ export function readConfig(home: Home): PlatformConfig {
   };
 }
 
-/** Validate and persist a partial change (owner only: the web Settings page and the CLI). */
+/**
+ * Validate a partial change and persist it (owner only: the web Settings page and the CLI). Only
+ * the changed keys are stored: settings left alone keep following their defaults.
+ */
 export function writeConfig(home: Home, change: Partial<Omit<PlatformConfig, "backupDir" | "publicListen">> & { backupDir?: string | null; publicListen?: string | null }): PlatformConfig {
   const { backupDir, publicListen, ...rest } = change;
   const next: PlatformConfig = { ...readConfig(home), ...rest };
@@ -92,10 +111,16 @@ export function writeConfig(home: Home, change: Partial<Omit<PlatformConfig, "ba
   }
   bad.push(...settingsProblems(next as unknown as Record<string, unknown>, { remote: !!process.env.HEWN_BUILD_URL, changed: Object.keys(rest) }));
   if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-  writeFileSync(path(home), JSON.stringify(next, null, 2) + "\n");
+  const out: Record<string, unknown> = stored(home);
+  for (const k of [...Object.keys(rest), ...(backupDir !== undefined ? ["backupDir"] : []), ...(publicListen !== undefined ? ["publicListen"] : [])] as (keyof PlatformConfig)[]) {
+    if (next[k] === undefined) delete out[k];
+    else out[k] = next[k];
+  }
+  writeFileSync(path(home), JSON.stringify(out, null, 2) + "\n");
   return next;
 }
 
+/** An empty platform.json: every setting starts at its default. */
 export function initConfig(home: Home) {
-  if (!existsSync(path(home))) writeFileSync(path(home), JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n");
+  if (!existsSync(path(home))) writeFileSync(path(home), "{}\n");
 }

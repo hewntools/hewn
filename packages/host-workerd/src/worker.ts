@@ -324,6 +324,7 @@ export class HewnDO extends DurableObject<Env> {
     super(ctx, env);
     this.sql = doSql(ctx.storage);
     this.sql.exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    if (env.REMOTE_JOBS === "1") this.forgetFrozenJobs();
     ctx.blockConcurrencyWhile(async () => {
       this.secrets = await EncryptedSecretStore.open(this.sql, env.SECRETS_KEY);
       this.platform = new Platform({
@@ -377,13 +378,31 @@ export class HewnDO extends DurableObject<Env> {
     return out as unknown as Settings;
   }
 
+  /** Validate the whole result, store only what changed: settings left alone keep following their defaults. */
   private writeSettings(change: Record<string, unknown>): Settings {
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
     for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"] as const)
-      if (next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
+      if (k in change && next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
+  }
+
+  /**
+   * Up to 0.4.2 saving any setting stored every default with it, so a home could hold builder or
+   * intake "claude" that the owner never picked, hiding the host's builder (the default here). Drop
+   * a job's stored agent unless the owner chose it (jobsChosen); the host's default applies again.
+   */
+  private forgetFrozenJobs() {
+    const stored = (k: string): unknown => {
+      const r = this.sql.prepare("SELECT value FROM settings WHERE key = ?").get(k);
+      return r === undefined ? undefined : JSON.parse(r.value);
+    };
+    const chosen = stored("jobsChosen");
+    for (const k of ["builder", "intake"]) {
+      const agent = stored(k);
+      if (agent !== undefined && agent !== "remote" && !(Array.isArray(chosen) && chosen.includes(k))) this.sql.prepare("DELETE FROM settings WHERE key = ?").run(k);
+    }
   }
 
   private surfaceHost(): SurfaceHost {

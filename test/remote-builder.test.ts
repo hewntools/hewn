@@ -12,6 +12,8 @@ import { after, before, describe, test } from "node:test";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv, type RemoteJobs } from "@hewntools/cli/builders/remote.ts";
 import { remoteCatalog } from "@hewntools/cli/builders/models.ts";
 import type { BuildJob } from "@hewntools/cli/builders/types.ts";
+import { initConfig, readConfig, writeConfig } from "@hewntools/cli/config.ts";
+import { openHome } from "@hewntools/cli/home.ts";
 
 type Handler = (body: any, req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 const b64 = (s: string) => Buffer.from(s).toString("base64");
@@ -161,5 +163,28 @@ describe("remote builder and intake", () => {
     assert.throws(() => remoteJobsFromEnv({ HEWN_BUILD_URL: "file:///etc" }), /https/);
     assert.throws(() => remoteJobsFromEnv({ HEWN_BUILD_URL: "http://builds.example/" }), /https/, "the token never goes in clear text");
     assert.ok(remoteJobsFromEnv({ HEWN_BUILD_URL: "http://127.0.0.1:9/" }));
+  });
+
+  test("platform.json: the host's builder and intake are the default; a save stores only what changed", (t) => {
+    const home = openHome(mkdtempSync(join(tmpdir(), "hewn-remote-config-")));
+    const file = () => JSON.parse(readFileSync(join(home.root, "platform.json"), "utf8"));
+    const was = process.env.HEWN_BUILD_URL;
+    delete process.env.HEWN_BUILD_URL;
+    t.after(() => {
+      if (was === undefined) delete process.env.HEWN_BUILD_URL;
+      else process.env.HEWN_BUILD_URL = was;
+      rmSync(home.root, { recursive: true, force: true });
+    });
+    initConfig(home);
+    writeConfig(home, { timeZone: "Europe/Stockholm" });
+    assert.deepEqual(file(), { timeZone: "Europe/Stockholm" }, "no defaults stored");
+    assert.equal(readConfig(home).builder, "claude");
+    process.env.HEWN_BUILD_URL = "http://127.0.0.1:9/";
+    assert.deepEqual([readConfig(home).builder, readConfig(home).intake], ["remote", "remote"]);
+    // Stored by 0.4.2 without the owner choosing it: the host's default applies.
+    writeFileSync(join(home.root, "platform.json"), JSON.stringify({ builder: "claude", intake: "claude", maxBuildAttempts: 3 }));
+    assert.equal(readConfig(home).builder, "remote");
+    writeConfig(home, { builder: "codex", intake: "codex", jobsChosen: ["builder", "intake"] });
+    assert.deepEqual([readConfig(home).builder, readConfig(home).intake], ["codex", "codex"]);
   });
 });
