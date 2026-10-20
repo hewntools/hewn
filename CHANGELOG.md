@@ -12,6 +12,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **At most 5 builds run at once**; the rest wait their turn (and can be cancelled while they wait).
 - **The build page** shows who asked, the builder, the model and the effort in one strip, and "Spec agreed" opens to the spec. Cancel build is in the card; a building tile or Inbox row opens its build.
 - **The Inbox:** every row opens what it's about with one tap, and a schedule that stopped itself after failing (say a fetch whose service was down) shows there, so a widget doesn't go stale quietly.
+- **Schedules say why a run failed,** with when, in the tool's own words ("Last run 3 h ago failed: NOAA is unreachable").
 - **Reviewing an agent's change:** each new operation leads with its first sentence; the agent-facing rest is under "Full description".
 - **Fixed:** authorizing a tool that uses a model failed ("keyBlock?.saveBudget is not a function") when a model key was already set.
 - **About shows what's new** in a newer release, from the changelog, above the upgrade command.

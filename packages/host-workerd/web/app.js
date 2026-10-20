@@ -1988,6 +1988,9 @@ const inFuture = (iso) => {
   return d === 1 ? "tomorrow" : `in ${d} days`;
 };
 
+/** "operation_failed: fetch_tonight@1 failed: NOAA is unreachable" → "NOAA is unreachable". */
+const runFailure = (outcome, operation) => String(outcome).replace(/^\w+: /, "").replace(new RegExp(`^${operation.split("@")[0]}(@\\d+)? failed: `), "");
+
 /**
  * K1 + K2 Schedules for one tool: each schedule a row with a switch and its next run (paused ones
  * say why and offer Resume), then a New schedule block with preset cadences in the owner's time zone.
@@ -2015,16 +2018,19 @@ async function schedulesSheet(c, ops) {
             ? all.map((x) => {
                 const sw = h("input", { type: "checkbox", class: "switch", checked: x.status === "active", "aria-label": "On" });
                 sw.addEventListener("change", () => act(x.id, { status: sw.checked ? "active" : "paused" }, sw.checked ? "Schedule on" : "Schedule paused")());
+                const failed = x.lastRunAt && x.lastOutcome && x.lastOutcome !== "ok";
                 const sub =
                   x.status === "proposed"
                     ? h("span", { class: "sub" }, `${cadenceText(x.cadence)} · proposed by ${actorLabel(x.createdBy)}`)
                     : x.status === "paused"
-                      ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `Paused ${x.pausedReason}` : `${cadenceText(x.cadence)} · paused`)
-                      : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}${x.lastRunAt && x.lastOutcome !== "ok" ? ` · last run failed` : ""}`);
+                      ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `${cadenceText(x.cadence)} · paused after ${x.failures} failures in a row` : `${cadenceText(x.cadence)} · paused`)
+                      : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
+                // Why the last run failed, and when: the tool's own words, without the call's prefixes.
+                const why = failed && h("span", { class: "sub danger-text clamp-2", title: x.lastOutcome }, `Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`);
                 return h(
                   "li",
                   {},
-                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub),
+                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why),
                   x.status === "proposed" ? h("button", { class: "sm primary", onclick: act(x.id, { status: "active" }, "Schedule enabled") }, "Enable") : x.status === "paused" && x.pausedReason ? h("button", { class: "sm", onclick: act(x.id, { status: "active" }, "Resumed") }, "Resume") : sw,
                   h("button", { class: "ghost sm icon-only", "aria-label": "Delete schedule", onclick: act(x.id, null, "Schedule deleted") }, "×"),
                 );
