@@ -133,6 +133,10 @@ A build runs on a model and effort: what the requester asked for, else the owner
 
 With `HEWN_BUILD_URL` (and `HEWN_BUILD_TOKEN`, `HEWN_BUILD_NAME`), the supervisor adds a builder and an intake that run on the host's service and model keys, and makes them the default: the host can run builds on separate short-lived machines, so its Hewn holds no model key. They sit behind the same `CapabilityBuilder` and `Intake` contracts: validation, tests and promotion stay in Hewn. A refusal (over quota) fails the build at once with the service's reason. The protocol: [remote-builder.md](remote-builder.md).
 
+## Hosted mode (`HEWN_HOSTED`)
+
+With `HEWN_HOSTED=1` (which needs `HEWN_BUILD_URL`; `hostedFromEnv` in the supervisor), a host runs Hewn for an owner who has no terminal. The workerd host gets `HOSTED` and `HOST_SIGNIN_URL` and gives the surface `host.hosted` instead of `setup` (local agents) and `tunnel`. Signed-out pages, `/approve` and the OAuth approval page send the owner to the host's sign-in link instead of a command; `/api/settings` adds `hosted: true` and always reports the host's builder and intake (another can't be stored), and the web client hides the builder choice, the first run's builder step, Remote access set-up, the sandbox and backup folder settings, and the upgrade command. The admin channel stays: it's how the host runs `hewn open --print`, `hewn backup now` and `hewn status` in the machine. Agents' OAuth, scopes and grants are unchanged.
+
 ## Web client and tool UIs
 
 The web client (`packages/host-workerd/web/`) is plain ES modules and DOM APIs with a strict CSP: no inline script, no HTML sinks (`test/web.test.ts` checks). It lives at `http://hewn.localhost:<port>` and, when the owner sets a public URL, on that host through the public socket.

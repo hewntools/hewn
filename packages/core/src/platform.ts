@@ -773,8 +773,8 @@ export class Platform {
               : missingDependencies.length
               ? `It depends on operations that no longer exist (${missingDependencies.join(", ")}); it needs a change.`
               : connectOperation(manifest) && !pendingGrants.length && !missingConfig.length
-                ? `Needs the owner to sign in to the service (never in an agent): Accounts in the Hewn web client, or run: hewn connect ${capabilityId}.`
-                : `Needs authorization by the owner (never paste secrets into an agent): open it in the Hewn web client, or run: hewn connect ${capabilityId}. You can file a request with capabilities_request_access.`,
+                ? `Needs the owner to sign in to the service (never in an agent): Accounts in the Hewn web client.`
+                : `Needs authorization by the owner (never paste secrets into an agent): open it in the Hewn web client. You can file a request with capabilities_request_access.`,
           }),
     };
   }
@@ -940,7 +940,7 @@ export class Platform {
   async passkeySignIn(site: { origin: string; rpId: string }, body: { challenge: string; response: AssertionResponse }, userAgent?: string): Promise<string> {
     this.takeChallenge(String(body.challenge ?? ""), "get");
     const stored = this.registry.passkey(String(body.response?.id ?? ""));
-    if (!stored || stored.rpId !== site.rpId) throw new PlatformError("unauthenticated", "this passkey isn't one of Hewn's (it may have been removed); sign in with a link: hewn open --print");
+    if (!stored || stored.rpId !== site.rpId) throw new PlatformError("unauthenticated", "this passkey isn't one of Hewn's (it may have been removed): sign in another way, then add a new one");
     try {
       const { signCount } = await verifyAssertion(body.response, { challenge: body.challenge, origin: site.origin, rpId: site.rpId }, { key: JSON.parse(stored.publicKey) as StoredKey, signCount: stored.signCount });
       this.registry.usePasskey(stored.credentialId, signCount);
@@ -1834,7 +1834,7 @@ export class Platform {
     const status = this.readiness(cap.id);
     const signIn = connectOperation(this.activeManifest(cap.id));
     const isSignIn = !!signIn && req.operation === "connect";
-    if (isSignIn && agent.kind !== "user") throw new PlatformError("forbidden", `connect is ${cap.id}'s sign-in step: only the owner runs it, under Accounts in Hewn (or hewn connect ${cap.id})`);
+    if (isSignIn && agent.kind !== "user") throw new PlatformError("forbidden", `connect is ${cap.id}'s sign-in step: only the owner runs it, under Accounts in Hewn`);
     // The sign-in step fills the secrets, so it runs without them (everything else must be in place).
     const missingOnlySecrets = !status.ready && !status.unsupportedAbi && !status.pendingGrants.length && !status.missingConfig.length && !status.missingDependencies.length;
     if (!status.ready && !(isSignIn && missingOnlySecrets)) throw new PlatformError("not_ready", `${cap.id} is not ready`, status);
@@ -2376,7 +2376,7 @@ export class Platform {
     if (!id) throw new PlatformError("invalid_request", "name must contain letters or digits");
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     const existing = this.registry.getCapability(id);
-    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); restore it with: hewn restore ${id}`);
+    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn (Settings › Data › Deleted tools), or pick another id`);
     if (existing) throw new PlatformError("conflict", `capability '${id}' already exists`);
     if (req.kind !== undefined && req.kind !== "capability" && req.kind !== "connection") throw new PlatformError("invalid_request", 'kind must be "capability" or "connection"');
     const dependsOn = this.dependency(agent, req.after);

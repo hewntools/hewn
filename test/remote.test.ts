@@ -329,7 +329,7 @@ describe("remote web access: the public listener on the public URL", () => {
     assert.match(r.body, /url=\/"/);
     const add = await http(server, "/api/passkeys/options", { host: local, cookie: c.split(";")[0], body: {} });
     assert.equal(add.status, 400);
-    assert.match(JSON.parse(add.body).message, /public URL/);
+    assert.match(JSON.parse(add.body).message, /public address/);
     assert.equal((await http(server, "/passkey/options", { host: local, body: {} })).status, 404);
   });
 

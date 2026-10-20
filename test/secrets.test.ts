@@ -25,7 +25,8 @@ describe("secrets and grants", () => {
     const { status } = t.platform.get(t.codex, "secret-echo");
     assert.deepEqual(status.missingSecrets, ["API_TOKEN"]);
     assert.deepEqual(status.pendingGrants, ["secret:API_TOKEN"]);
-    assert.match(status.userAction!, /hewn connect secret-echo/);
+    assert.match(status.userAction!, /open it in the Hewn web client/);
+    assert.doesNotMatch(status.userAction!, /hewn connect/, "agents are sent to the web client, never to a command");
     await assert.rejects(whoami(), code("not_ready"));
   });
 

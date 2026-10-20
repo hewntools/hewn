@@ -48,6 +48,10 @@ interface Env {
   PROXY_SECRET?: string;
   /** "1" when the host runs Hewn's builder and intake (HEWN_BUILD_URL): "remote" is a choice, and the default. */
   REMOTE_JOBS?: string;
+  /** "1" when a host runs this Hewn for its owner (HEWN_HOSTED): no terminal, no local agents. */
+  HOSTED?: string;
+  /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
+  HOST_SIGNIN_URL?: string;
 }
 
 const COMPAT_DATE = "2026-09-01";
@@ -375,11 +379,14 @@ export class HewnDO extends DurableObject<Env> {
     // A host that runs the builder and intake makes them the default.
     const out: Record<string, unknown> = { ...DEFAULT_SETTINGS, ...(this.env.REMOTE_JOBS === "1" ? { builder: "remote", intake: "remote" } : {}) };
     for (const r of this.sql.prepare("SELECT key, value FROM settings").all()) out[r.key] = JSON.parse(r.value);
+    // Hosted: the host builds, whatever was stored before (a home moved from a machine with agents).
+    if (this.env.HOSTED === "1") Object.assign(out, { builder: "remote", intake: "remote" });
     return out as unknown as Settings;
   }
 
   /** Validate the whole result, store only what changed: settings left alone keep following their defaults. */
   private writeSettings(change: Record<string, unknown>): Settings {
+    if (this.env.HOSTED === "1" && [change.builder, change.intake].some((a) => a !== undefined && a !== "remote")) throw new PlatformError("invalid_request", "the host builds tools here");
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
@@ -408,6 +415,7 @@ export class HewnDO extends DurableObject<Env> {
   private surfaceHost(): SurfaceHost {
     const env = this.env;
     const sv = supervisor(env);
+    const hosted = env.HOSTED === "1";
     return {
       port: Number(env.PORT),
       log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
@@ -433,18 +441,25 @@ export class HewnDO extends DurableObject<Env> {
       },
       intakeLog: async (entry) => void (await sv.json("/intake/log", entry)),
       modelCatalog: (agent) => sv.json<ModelCatalog>("/models/catalog", { agent }),
-      setup: {
-        list: () => sv.json("/setup/list", {}),
-        // The supervisor runs the harness steps and its OAuth login; the owner approves in the web client.
-        connect: (agentId, mcpUrl, event) => sv.stream("/setup/connect", { agentId, mcpUrl }, (e) => event(e.name, e.data)),
-      },
+      // The supervisor checked the link is https; checked again, as it goes into an href.
+      ...(hosted ? { hosted: env.HOST_SIGNIN_URL && URL.canParse(env.HOST_SIGNIN_URL) && new URL(env.HOST_SIGNIN_URL).protocol === "https:" ? { signInUrl: env.HOST_SIGNIN_URL } : {} } : {}),
+      // Hosted: no local agents to connect, and the public address is the host's (no tunnel).
+      ...(hosted
+        ? {}
+        : {
+            setup: {
+              list: () => sv.json("/setup/list", {}),
+              // The supervisor runs the harness steps and its OAuth login; the owner approves in the web client.
+              connect: (agentId, mcpUrl, event) => sv.stream("/setup/connect", { agentId, mcpUrl }, (e) => event(e.name, e.data)),
+            },
+            tunnel: () => sv.json("/tunnel/status", {}),
+          }),
       backups: {
         location: async () => (await sv.json<{ dir: string }>("/backups/list", {})).dir,
         list: async () => (await sv.json<{ backups: unknown[] }>("/backups/list", {})).backups,
         now: () => sv.json("/backups/now", {}),
         sameDisk: async () => (await sv.json<{ sameDisk?: boolean | null }>("/backups/list", {})).sameDisk ?? null,
       },
-      tunnel: () => sv.json("/tunnel/status", {}),
       tools: () => sv.json("/setup/tools", {}),
       status: () => sv.json("/status/info", {}),
     };

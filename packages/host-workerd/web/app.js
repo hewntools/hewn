@@ -48,7 +48,7 @@ import {
   toast,
   withContextMenu,
 } from "./kit.js";
-import { addPasskey, passkeyError, passkeysSupported } from "./passkey.js";
+import { addPasskey, knownPasskeys, passkeyError, passkeysSupported } from "./passkey.js";
 
 const app = document.getElementById("app");
 const go = (hash) => (location.hash === hash ? route() : (location.hash = hash));
@@ -129,6 +129,7 @@ const loadSettings = async () => {
 };
 const sandboxNotice = () =>
   settings?.sandbox === false &&
+  !settings.hosted &&
   h("div", { class: "notice danger sandbox-off" }, h("span", {}, "Sandbox is off. Tool code runs with your full access. ", h("a", { href: "#/settings/general" }, "Settings")));
 
 const GLYPH = ["##..#", ".#..#", ".####", ".#..#", ".#..#"];
@@ -390,7 +391,8 @@ async function paletteItems() {
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
     act("Connect an agent", () => connectDialog(), "claude codex chatgpt mcp", "agent"),
     act("Add a connection", () => addConnectionSheet(), "account service", "link"),
-    act("Who builds tools…", () => jobPicker({ thenModel: true }), "builder intake job model", "hammer"),
+    // Hosted: the host builds; the model is under Settings › AI.
+    !settings?.hosted && act("Who builds tools…", () => jobPicker({ thenModel: true }), "builder intake job model", "hammer"),
     act("Back up now", () => api("/backups", { method: "POST" }).then((b) => toast(`Backed up · ${Math.round(b.bytes / 1024)} KB`), fail), "backup", "backup"),
     act(`Switch to ${isDark() ? "light" : "dark"} appearance`, () => {
       const t = isDark() ? "light" : "dark";
@@ -406,7 +408,9 @@ async function paletteItems() {
     place("Accounts", "#/accounts", "connections", "key"),
     ...SECTIONS.map(([k, label]) => place(`Settings › ${label}`, `#/settings/${k}`)),
     place("Settings › AI › Models", "#/settings/ai/models", "provider key budget spend tier", "chip"),
-  ].map(([label, group, run, icon, words = "", more = false]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more }));
+  ]
+    .filter(Boolean)
+    .map(([label, group, run, icon, words = "", more = false]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more }));
 }
 
 /** ⌘K: one search over tools, places and actions. Arrows move, Enter runs, Esc closes. */
@@ -702,7 +706,7 @@ async function iconDialog(c) {
  * "Builds tools": the intake talks a request through and proposes it, the builder builds it. One
  * agent does both; the settings keep both keys (`intake`, `builder`) and the web client sets them together.
  */
-const jobChosen = (s, key) => !!s && (s.jobsChosen?.includes(key) || s.firstRunDone === true);
+const jobChosen = (s, key) => !!s && (s.hosted || s.jobsChosen?.includes(key) || s.firstRunDone === true);
 /** Both jobs have an agent (the first run asks until they do). */
 const buildsChosen = (s) => jobChosen(s, "builder") && jobChosen(s, "intake");
 /** The model and effort the owner picked for a job on an agent ({} = the agent's default). */
@@ -1270,7 +1274,15 @@ async function firstRun() {
   const make = h("div", { class: "stack-sm first-make" });
   let builderOk = false;
 
+  // Hosted: no agents on the machine, and the host builds (no step 2).
+  const hosted = !!settings?.hosted;
   const renderAgents = async () => {
+    if (hosted)
+      return put(
+        agentsCard,
+        h("div", { class: "eyebrow card-eyebrow" }, "1 · Connect your agents"),
+        h("ul", { class: "list" }, h("li", {}, h("div", { class: "grow" }, h("span", {}, "claude.ai, ChatGPT and other agents"), h("span", { class: "sub" }, "They use your tools, and can build new ones")), h("button", { class: "sm", onclick: () => connectDialog().then(renderAll) }, "Connect…"))),
+      );
     const harnesses = await api("/setup/agents").catch(() => []);
     const local = harnesses.filter((x) => x.found && !x.cloud);
     put(
@@ -1295,6 +1307,11 @@ async function firstRun() {
     );
   };
   const renderJobs = async () => {
+    if (hosted) {
+      builderOk = true;
+      jobsCard.hidden = true;
+      return renderMake();
+    }
     const [{ tools, ready }, s] = await Promise.all([buildJobs(), loadSettings()]);
     builderOk = buildsChosen(s) && ready(tools.find((t) => t.name === s.builder));
     const t = tools.find((x) => x.name === s?.builder);
@@ -1317,8 +1334,12 @@ async function firstRun() {
     renderMake();
   };
   const renderMake = () => {
-    const ask = h("input", { type: "text", placeholder: "Describe it…", "aria-label": "Describe it", disabled: !builderOk });
-    const next = h("button", { type: "submit", class: "primary", disabled: !builderOk }, "Next");
+    // The intake's box: the message, then the model it builds with and Send (the same as New tool).
+    const ask = h("textarea", { class: "composer-input", rows: 1, placeholder: "Track my coffee beans and how I rated each brew", "aria-label": "Describe it", disabled: !builderOk });
+    const next = h("button", { type: "submit", class: "lg", disabled: !builderOk }, "Send");
+    const start = () => ask.value.trim() && go(`#/new?m=${enc(ask.value.trim())}&send=1`);
+    ask.addEventListener("input", () => ((ask.style.height = "auto"), (ask.style.height = `${ask.scrollHeight + ask.offsetHeight - ask.clientHeight}px`)));
+    ask.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), start()));
     const starters = STARTERS.map((st) =>
       h(
         "button",
@@ -1344,8 +1365,8 @@ async function firstRun() {
     make.classList.toggle("disabled", !builderOk);
     put(
       make,
-      h("div", { class: "eyebrow" }, "3 · Make something"),
-      h("form", { class: "row tight", onsubmit: (e) => (e.preventDefault(), ask.value.trim() && go(`#/new?m=${enc(ask.value.trim())}&send=1`)) }, ask, next),
+      h("div", { class: "eyebrow" }, hosted ? "2 · Make something" : "3 · Make something"),
+      h("form", { class: "composer boxed", onsubmit: (e) => (e.preventDefault(), start()) }, ask, h("div", { class: "composer-tools" }, builderOk && modelChip(), next)),
       h("div", { class: "row tight wrap" }, starters),
     );
   };
@@ -4209,7 +4230,8 @@ async function addSheet() {
           "ul",
           { class: "list" },
           choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
-          choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
+          // Hosted: the host builds; there are no agents on the machine to work for Hewn.
+          !settings?.hosted && choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
           choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
@@ -4274,10 +4296,13 @@ function connectDialog(agentId) {
         let list = [];
         let err = null;
         const machine = await hewnMachine();
-        try {
-          list = await api("/setup/agents");
-        } catch (e) {
-          err = e;
+        // Hosted: no agents on the machine to list; everything connects through the public address.
+        if (!settings?.hosted) {
+          try {
+            list = await api("/setup/agents");
+          } catch (e) {
+            err = e;
+          }
         }
         if (agentId === "cloud" || agentId === "other" || agentId === "cloud-desktop") {
           const how = agentId;
@@ -4334,11 +4359,13 @@ function connectDialog(agentId) {
       const manual = async (cloud, desktop = false) => {
         const m = await api("/setup/manual").catch((e) => (fail(e), null));
         if (!m) return;
-        const address = cloud ? m.publicUrl : m.url;
+        const address = cloud || settings?.hosted ? m.publicUrl : m.url;
         put(
           body,
           h("div", { class: "sheet-title" }, desktop ? "Claude Desktop" : cloud ? "claude.ai and ChatGPT" : "Another MCP client"),
-          cloud && !address
+          cloud && !address && settings?.hosted
+            ? h("div", { class: "notice" }, h("span", {}, "Your address isn't ready yet. Try again in a minute."))
+            : cloud && !address
             ? [h("div", { class: "notice" }, h("span", {}, m.tunnel?.kind ? `Your tunnel is ${m.tunnel.state}${m.tunnel.error ? `: ${m.tunnel.error}` : ""}.` : "Agents in the cloud need a public address. Only MCP and sign-in go through it.")), h("div", { class: "small" }, "Start a tunnel in a terminal (only a terminal can):"), commandBlock(`${CLI} tunnel start --quick`)]
             : commandBlock(address, "Address"),
           address &&
@@ -4509,7 +4536,8 @@ async function generalSection() {
     settingsCard(
       setting("Appearance", null, appearance),
       setting("Time zone", `${zone}${zone === browserZone() ? " · from this browser" : ""} · new schedules use it`, h("button", { class: "sm", onclick: () => timeZoneSheet(zone) }, "Change")),
-      setting("Sandbox", "Confines tool code and its network access", sandbox),
+      // Hosted: the host runs the sandbox.
+      !s.hosted && setting("Sandbox", "Confines tool code and its network access", sandbox),
     ),
   );
 }
@@ -4549,7 +4577,8 @@ async function aiSection() {
       { class: "setting" },
       h("div", { class: "grow" }, h("span", { class: "strong" }, "Builds tools"), h("span", { class: "sub row tight" }, chosen && builder ? [tile(builder), `${agentWords(builder)} · ${modelWords(jobModelOf(s, "builder"), catalogs.get(builder.name))}`] : "Not chosen")),
       chosen && builder && h("button", { class: "sm", onclick: () => modelSheet(builder).then((saved) => saved && route()) }, "Model…"),
-      h("button", { class: "sm", onclick: () => jobPicker({ thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
+      // Hosted: the host builds; only the model and effort are the owner's.
+      !s.hosted && h("button", { class: "sm", onclick: () => jobPicker({ thenModel: true }).then(() => route()) }, chosen ? "Change" : "Choose…"),
     );
   };
   const n = s.maxBuildAttempts;
@@ -4599,7 +4628,7 @@ async function aiSection() {
 async function remoteSection() {
   const [remote, sessions] = await Promise.all([api("/remote").catch(() => null), api("/sessions").catch(() => [])]);
   const removePasskey = (p) => async () => {
-    if (!(await confirmDialog({ title: `Remove “${p.name}”?`, body: "That device then needs a sign-in link from the server again.", confirm: "Remove", danger: true }))) return;
+    if (!(await confirmDialog({ title: `Remove “${p.name}”?`, body: settings?.hosted ? "That device then signs in from your account again." : "That device then needs a sign-in link from the server again.", confirm: "Remove", danger: true }))) return;
     try {
       await api(`/passkeys/${enc(p.id)}`, { method: "DELETE" });
       toast("Passkey removed");
@@ -4652,15 +4681,17 @@ async function remoteSection() {
   settingsFrame(
     "remote",
     h("h1", { class: "flush" }, "Remote access"),
-    settingsCard(setting("Public address", remote?.url ? `${remote.url} · tool apps open from Home` : "Not set: Hewn is only on this machine", h("button", { class: "sm", onclick: setUp }, "Set up…"))),
+    // Hosted: the address is the host's; nothing to set up.
+    settingsCard(setting("Public address", remote?.url ? remote.url : settings?.hosted ? "Not set up yet" : "Not set: Hewn is only on this machine", !settings?.hosted && h("button", { class: "sm", onclick: setUp }, "Set up…"))),
     remote &&
       h(
         "div",
         { class: "card settings-card" },
         h("div", { class: "eyebrow card-eyebrow" }, "Passkeys"),
         remote.passkeys.map((p) => setting(p.name, `${p.works ? "Passkey" : `For ${p.host}, not the current address`} · added ${ago(p.createdAt)} · last used ${p.lastUsedAt ? ago(p.lastUsedAt) : "never"}`, h("button", { class: "sm ghost danger", onclick: removePasskey(p) }, "Remove"))),
-        !remote.passkeys.length && setting("None yet", remote.url ? `Added on the device that uses them: sign in there with ${CLI} open --print, then add one.` : "Passkeys work on the public address."),
-        remote.here === "public" && passkeysSupported() && setting("Add a passkey", "On this device: it signs in with Face ID, a fingerprint or the screen lock", h("button", { class: "sm", onclick: addHere }, "Add passkey")),
+        !remote.passkeys.length && setting("None yet", settings?.hosted ? "Added on the device that uses them: sign in there from your account, then add one." : remote.url ? `Added on the device that uses them: sign in there with ${CLI} open --print, then add one.` : "Passkeys work on the public address."),
+        // Not once this browser has one for this address (made here, or signed in with).
+        remote.here === "public" && passkeysSupported() && !remote.passkeys.some((p) => p.works && knownPasskeys().includes(p.id)) && setting("Add a passkey", "On this device: it signs in with Face ID, a fingerprint or the screen lock", h("button", { class: "sm", onclick: addHere }, "Add passkey")),
       ),
     h(
       "div",
@@ -4746,10 +4777,11 @@ async function dataSection() {
   settingsFrame(
     "data",
     h("h1", { class: "flush" }, "Data"),
-    backups?.sameDisk && h("div", { class: "notice" }, h("span", {}, "Backups are on the same disk as your data. If the disk fails, both are lost.")),
+    // Hosted: the host keeps backups off the machine; the folder is its business.
+    !s.hosted && backups?.sameDisk && h("div", { class: "notice" }, h("span", {}, "Backups are on the same disk as your data. If the disk fails, both are lost.")),
     settingsCard(
       backups && setting("Backups", last ? `Last ${ago(last.at)} · ${Math.round(last.bytes / 1024)} KB · nightly, 7 daily and 4 weekly kept` : "Nightly; 7 daily and 4 weekly kept. Never includes secrets.", backupBtn),
-      backups && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Folder"), h("span", { class: "sub mono" }, backups.dir)), h("button", { class: "sm", onclick: folderSheet }, "Change")),
+      !s.hosted && backups && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Folder"), h("span", { class: "sub mono" }, backups.dir)), h("button", { class: "sm", onclick: folderSheet }, "Change")),
       setting("Keep call logs", "Builds, grants and access changes are always kept", keep),
     ),
     deleted.length > 0 &&
@@ -4777,7 +4809,7 @@ async function aboutSection() {
       "div",
       { class: "card about-card" },
       brandTile(56),
-      h("div", { class: "grow col" }, h("span", { class: "about-name" }, `${BRAND} ${status.version ?? ""}`), h("span", { class: "small muted" }, [status.dataFormat && `Data format ${status.dataFormat}`, status.abi && `ABI ${status.abi}`, `on ${machine.word}`].filter(Boolean).join(" · "))),
+      h("div", { class: "grow col" }, h("span", { class: "about-name" }, `${BRAND} ${status.version ?? ""}`), h("span", { class: "small muted" }, [status.dataFormat && `Data format ${status.dataFormat}`, status.abi && `ABI ${status.abi}`, !settings?.hosted && `on ${machine.word}`].filter(Boolean).join(" · "))),
       newer ? h("span", { class: "pill warn with-dot" }, "update") : status.latest ? h("span", { class: "pill ok with-dot" }, "up to date") : h("span", { class: "pill" }, "can't check now"),
     ),
     newer &&
@@ -4786,8 +4818,10 @@ async function aboutSection() {
         { class: "card stack-sm upgrade-card" },
         h("span", { class: "strong" }, `${status.latest} is out`),
         (status.notes ?? []).map((r) => releaseNotes(r, status.notes.length > 1)),
-        h("div", { class: "small muted" }, "Upgrade from a terminal. Backups run first; your tools and data stay."),
-        commandBlock(`${CLI} upgrade`),
+        // Hosted: the host moves this Hewn to new releases.
+        settings?.hosted
+          ? h("div", { class: "small muted" }, "Your host upgrades Hewn. Your tools and data stay.")
+          : [h("div", { class: "small muted" }, "Upgrade from a terminal. Backups run first; your tools and data stay."), commandBlock(`${CLI} upgrade`)],
         h("a", { class: "small", href: CHANGELOG_URL, target: "_blank", rel: "noopener" }, "What's new ›"),
       ),
     settingsCard(

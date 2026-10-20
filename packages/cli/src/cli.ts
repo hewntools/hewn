@@ -21,7 +21,7 @@ import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remot
 import * as service from "./service.ts";
 import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
-import { startSupervisor, supervisorFile } from "./supervisor/index.ts";
+import { hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
 import { checkFormat, writeFormat } from "./supervisor/format.ts";
 import { renderUnicodeCompact } from "uqr";
 import { dnsRecords, localSite, publicSite } from "@hewntools/host-workerd/surface/site.ts";
@@ -128,6 +128,9 @@ async function main() {
       // A host that runs Hewn's builder and intake on its own keys (HEWN_BUILD_URL) adds "remote".
       const remote = remoteJobsFromEnv();
       if (remote) log(`builder and intake: also ${remote.label} (${new URL(remote.url).host})`);
+      // A host that runs this Hewn for its owner, who has no terminal (HEWN_HOSTED).
+      const hosted = hostedFromEnv();
+      if (hosted) log("hosted: the web client sends the owner to the host, not to a terminal");
       const sv = await startSupervisor({
         home,
         port,
@@ -142,6 +145,7 @@ async function main() {
           return cliIntake(which as "claude" | "codex", home.root, run);
         },
         ...(remote ? { remote } : {}),
+        ...(hosted ? { hosted } : {}),
         setup: await realSetupHooks(),
         sandbox: !flag("no-sandbox"),
         sandboxBuilders: () => readConfig(home).sandbox,

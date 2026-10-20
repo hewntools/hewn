@@ -11,8 +11,8 @@ import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
-import { agentModels, jobModel, type SurfaceHost } from "./host.ts";
-import { body, cookieValue, errorBody, json, readJson, sse, STATUS, typeOf } from "./http.ts";
+import { agentModels, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
+import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
 
@@ -22,6 +22,13 @@ const SESSION_MAX_AGE = 30 * 86400;
 // On the public URL the cookie is __Host- (Secure, this exact host, Path=/). Capability UIs under
 // /tools/ run on opaque origins: they can neither read it nor send it (their requests are cross-site).
 const cookieName = (site: Site) => (site.secure ? "__Host-hewn_web" : "hewn_web");
+/**
+ * Where to go after signing in, when it wasn't Home: set by the signed-out /approve page (an agent
+ * waits for approval), read once by /auth. Lax, so it comes back from the host's sign-in page.
+ */
+const nextName = (site: Site) => (site.secure ? "__Host-hewn_next" : "hewn_next");
+const nextCookie = (site: Site, maxAge: number) => `${nextName(site)}=agents; HttpOnly;${site.secure ? " Secure;" : ""} SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+const withNext = (site: Site, res: Response) => (res.headers.append("set-cookie", nextCookie(site, 15 * 60)), res);
 const sessionCookie = (site: Site, session: string, maxAge = SESSION_MAX_AGE) =>
   `${cookieName(site)}=${session}; HttpOnly;${site.secure ? " Secure;" : ""} SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 
@@ -42,12 +49,17 @@ const send = (status: number, body: unknown, headers: Record<string, string> = {
  * so the strict CSP holds (and on this machine no script at all). On the public URL with a passkey it offers passkey sign-in (passkey.js);
  * a sign-in link from the server is the other way in.
  */
-function signedOutPage(site: Site, status: number, title: string, line: string, command = "hewn open", passkey = false): Response {
+function signedOutPage(site: Site, status: number, title: string, line: string, command = "hewn open", passkey = false, hosted?: Hosted): Response {
+  // Hosted: the owner has no terminal; the host signs them in (a link, when it gives one).
+  const fromHost = hosted?.signInUrl ? `<a class="btn primary lg wide" href="${esc(hosted.signInUrl)}">Sign in</a>` : "";
   const action = passkey
     ? `<button id="passkey" class="primary lg wide" type="button">Sign in with a passkey</button>
       <div id="passkey-error" class="small danger-text" role="alert" hidden></div>
-      <div class="small faint center">New device? On the server run <span class="mono">${command}</span> and scan the code.</div>`
-    : `<div class="muted">${line}</div>
+      ${hosted ? `<div class="small faint center">New device? ${hosted.signInUrl ? `<a href="${esc(hosted.signInUrl)}">Sign in from your account</a>.` : "Open Hewn again from your account."}</div>` : `<div class="small faint center">New device? On the server run <span class="mono">${command}</span> and scan the code.</div>`}`
+    : hosted
+      ? `<div class="muted">${line}</div>
+      ${fromHost}`
+      : `<div class="muted">${line}</div>
       <div class="command-block"><span>${command}</span></div>`;
   return new Response(
     `<!doctype html>
@@ -78,11 +90,14 @@ function signedOutPage(site: Site, status: number, title: string, line: string, 
 }
 
 /** Signed out on the public URL: passkey sign-in if one exists for this host, else the link. */
-function publicSignIn(platform: Platform, site: Site, status: number, title?: string): Response {
-  return platform.hasPasskeys(site.rpId!)
-    ? signedOutPage(site, status, title ?? "Sign in to Hewn.", "Use the passkey you added on this device.", "hewn open --print", true)
-    : signedOutPage(site, status, title ?? "Sign in to Hewn.", "Sign in once with a link from the server (run this there over SSH), then add a passkey so this device can sign in on its own:", "hewn open --print");
+function publicSignIn(platform: Platform, site: Site, status: number, title?: string, hosted?: Hosted): Response {
+  if (platform.hasPasskeys(site.rpId!)) return signedOutPage(site, status, title ?? "Sign in to Hewn.", "Use the passkey you added on this device.", "hewn open --print", true, hosted);
+  if (hosted) return signedOutPage(site, status, title ?? "Sign in to Hewn.", hostedLine(hosted), "", false, hosted);
+  return signedOutPage(site, status, title ?? "Sign in to Hewn.", "Sign in once with a link from the server (run this there over SSH), then add a passkey so this device can sign in on its own:", "hewn open --print");
 }
+
+/** What a signed-out hosted owner does: sign in through the host (they have no terminal). */
+const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your account." : "Open Hewn again from your account.");
 
 /**
  * A fingerprint of the web client's code, sent on every API response (x-hewn-web) so a page that
@@ -134,10 +149,15 @@ export async function handleWeb(platform: Platform, host: SurfaceHost, site: Sit
   const asset = await platformAsset(host, path);
   if (asset) return asset;
   const command = site.kind === "public" ? "hewn open --print" : "hewn open";
+  /** Signed out: the command to run, or (hosted) the host's sign-in, after `hostedLead`. */
+  const signIn = (status: number, title: string, line: string, cmd: string, hostedLead = "") =>
+    host.hosted ? signedOutPage(site, status, title, `${hostedLead}${hostedLine(host.hosted)}`, "", false, host.hosted) : signedOutPage(site, status, title, line, cmd);
 
   if (path === "/auth") {
     const session = platform.redeemWebTicket(url.searchParams.get("ticket") ?? "", req.headers.get("user-agent") ?? undefined);
-    if (!session) return signedOutPage(site, 401, "This link has expired.", "Sign-in links work once, for two minutes. Get a new one in a terminal:", command);
+    if (!session) return signIn(401, "This link has expired.", "Sign-in links work once, for two minutes. Get a new one in a terminal:", command, "Sign-in links work once, for two minutes. ");
+    // Signed in to approve an agent: to Agents, where its request waits.
+    if (cookieValue(req, nextName(site)) === "agents") return signedIn([sessionCookie(site, session), nextCookie(site, 0)], "/#/agents");
     // On the public URL a link is how a device gets in the first time: offer it a passkey.
     return signedIn(sessionCookie(site, session), site.kind === "public" ? "/#/passkey" : "/");
   }
@@ -166,14 +186,15 @@ export async function handleWeb(platform: Platform, host: SurfaceHost, site: Sit
   // isn't signed in to Hewn: then say how to approve from a terminal instead of a dead end.
   if (path === "/approve") {
     if (owner) return new Response(null, { status: 302, headers: { location: "/#/agents" } });
-    if (site.kind === "public" && platform.hasPasskeys(site.rpId!)) return publicSignIn(platform, site, 401, "Sign in to approve it.");
+    if (site.kind === "public" && (platform.hasPasskeys(site.rpId!) || host.hosted)) return withNext(site, publicSignIn(platform, site, 401, "Sign in to approve it.", host.hosted));
     const code = /^[A-Z0-9]{3}-[A-Z0-9]{3}$/.test(url.searchParams.get("code") ?? "") ? url.searchParams.get("code")! : undefined;
+    if (host.hosted) return withNext(site, signIn(401, "Sign in to approve it.", "", ""));
     return signedOutPage(site, 401, "Approve it in a terminal.", "This browser isn't signed in to Hewn. Approve the agent with:", code ? `hewn agents approve ${code}` : "hewn agents pending");
   }
   if (!owner) {
-    if (path.startsWith("/api/")) return send(401, { error: `not signed in; run: ${command}` });
-    if (site.kind === "public") return publicSignIn(platform, site, 401);
-    return signedOutPage(site, 401, "Signed out.", "To sign in, run this in a terminal:");
+    if (path.startsWith("/api/")) return send(401, { error: host.hosted ? "not signed in" : `not signed in; run: ${command}` });
+    if (site.kind === "public") return publicSignIn(platform, site, 401, undefined, host.hosted);
+    return signIn(401, "Signed out.", "To sign in, run this in a terminal:", command);
   }
 
   // Loading the app renews the cookie, matching the session's sliding 30 days.
@@ -391,9 +412,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (method === "PUT") {
       const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
-      return next;
+      return { ...next, ...(host.hosted ? { hosted: true } : {}) };
     }
-    return host.settings.read();
+    return { ...(await host.settings.read()), ...(host.hosted ? { hosted: true } : {}) };
   }
 
   // Settings → Models: provider keys (write-only), tiers, budget, the model catalog, spend.
@@ -463,7 +484,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "passkeys") {
     if (method === "GET" && !id) return platform.passkeys(owner);
     if (method === "DELETE" && id) return platform.removePasskey(owner, id), { ok: true };
-    if (site.kind !== "public") throw new PlatformError("invalid_request", "passkeys are added on the public URL (hewn url), from the device that will use them");
+    if (site.kind !== "public") throw new PlatformError("invalid_request", "passkeys are added on the public address, from the device that will use them");
     if (method === "POST" && id === "options") return platform.passkeyCreateOptions(owner, site.rpId!);
     if (method === "POST" && !id) return platform.addPasskey(owner, { origin: site.web, rpId: site.rpId! }, await readJson(req));
   }
@@ -845,7 +866,7 @@ async function setupRoute(platform: Platform, host: SurfaceHost, owner: Agent, r
     const reachable = platform.publicUrl() ?? (tunnel?.state === "up" && tunnel.url ? tunnel.url : null);
     return { url: mcpUrl, publicUrl: reachable ? `${reachable}/mcp` : null, tunnel, pointer: AGENT_POINTER };
   }
-  if (!host.setup) throw new PlatformError("not_found", "connecting agents from the web is not available here; run: hewn setup");
+  if (!host.setup) throw new PlatformError("not_found", host.hosted ? "there are no local agents to connect here: connect claude.ai, ChatGPT or another agent through your address" : "connecting agents from the web is not available here; run: hewn setup");
   const setup = host.setup;
   if (id !== "agents") throw new PlatformError("not_found", `no route ${method} /api/setup/${id ?? ""}`);
   const all = await setup.list();
