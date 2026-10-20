@@ -212,6 +212,20 @@ describe("widgets: running", () => {
     await assert.rejects(t.platform.refreshHomeWidget(USER, "nope"), /no such widget/);
   });
 
+  test("a placed widget whose options a later version no longer takes doesn't block saving Home", () => {
+    // As stored before the tool changed: an input its operation doesn't take now.
+    const stale = { type: "widget", key: "k1", id: "widget-counter", widget: "count", size: "small", input: { nope: 1 } };
+    (t.platform as any).registry.setKv("home:layout", [stale]);
+    // Moving things around (the same widget, the same input) saves.
+    const layout = t.platform.setHomeLayout(USER, [{ type: "icon", id: "widget-counter" }, stale]);
+    assert.deepEqual(layout.map((e) => e.type), ["icon", "widget"]);
+    // New options are checked: still wrong is refused, right is saved.
+    assert.throws(() => t.platform.setHomeLayout(USER, [{ ...stale, input: { nope: 2 } }]), /input doesn't match/);
+    assert.equal((t.platform.setHomeLayout(USER, [{ ...stale, input: { caption: "x" } }])[0] as any).input.caption, "x");
+    // A new key with the stale input is a new placement: checked.
+    assert.throws(() => t.platform.setHomeLayout(USER, [{ ...stale, key: "k2" }]), /input doesn't match/);
+  });
+
   test("a placed size the widget no longer offers shows at its biggest", () => {
     (t.platform as any).registry.setKv("home:layout", [{ type: "widget", key: "k1", id: "widget-counter", widget: "count", size: "large" }]);
     assert.equal((t.platform.homeLayout(USER)[0] as { size: string }).size, "medium");

@@ -16,6 +16,8 @@ Right-click a tool for its menu:
 - **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour, or upload an image) and **Export data**
 - **Delete…**
 
+Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget that takes options, such as which item to show: the same form as when you added it, with a preview), **Change…** and **Remove widget**.
+
 **Edit Home:** right-click empty space and choose Edit Home, or press `e`. Drag tiles to move them. Tap a widget's size tag (S, M or L) to switch to its next size, or × to remove it. × on a tool hides it from Home: it's still in search, and **Show on Home** in its menu brings it back. **+ Add widget** shows every widget your tools offer, with a preview. **Done** (or Esc) saves.
 
 ![Edit Home: an × on every tile and widget, each widget's size below it, and + Add widget and Done at the top](images/edit-home.png)

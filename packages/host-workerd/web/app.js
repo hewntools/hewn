@@ -751,7 +751,10 @@ async function home({ editing = false } = {}) {
     if (!c) continue;
     if (e.type === "icon" && !tiles.has(c.id)) addTile(c);
     if (e.type === "widget") {
-      const w = widgetTile(e, c, { remove: () => (w.el.remove(), widgets.splice(widgets.indexOf(w), 1), saveLayout(grid, widgets, hiddenIds).then(() => home(), fail)) });
+      // Its options (the operation's input), when it takes any: set when placed, changeable here.
+      const gw = homeData.gallery.find((g) => g.capabilityId === e.id)?.widgets.find((x) => x.name === e.widget);
+      const options = Object.keys(gw?.inputSchema?.properties ?? {}).length ? () => widgetOptionsSheet(w.entry, c, gw).then((saved) => saved && home(), fail) : undefined;
+      const w = widgetTile(e, c, { remove: () => (w.el.remove(), widgets.splice(widgets.indexOf(w), 1), saveLayout(grid, widgets, hiddenIds).then(() => home(), fail)), options });
       widgets.push(w);
       items.push(w.el);
     }
@@ -930,7 +933,7 @@ const renderer = async () => (widgetRenderer ??= (await import("/_platform/widge
  * A placed widget (F6): the platform draws its view model (no tool code on Home). It shows the
  * cached view first; a failed refresh keeps that view and says how old it is. Tap opens the tool.
  */
-function widgetTile(e, c, { remove }) {
+function widgetTile(e, c, { remove, options }) {
   const slot = h("div", { class: "widget-slot" });
   const staleNote = h("span", { class: "jw-stale-note", hidden: true });
   const el = h("div", { class: `tile-widget w-${e.size}`, role: "button", tabindex: 0, "data-key": e.key }, slot, staleNote);
@@ -985,6 +988,7 @@ function widgetTile(e, c, { remove }) {
   withContextMenu(el, () => [
     ["Open", open],
     !e.missing && ["Refresh", refresh],
+    !e.missing && options && ["Options…", options],
     !e.missing && ["Change…", () => openChange(c, { widget: e.widget })],
     "-",
     ["Remove widget", remove, { danger: true }],
@@ -1122,6 +1126,50 @@ async function addWidgetSheet({ capabilityId, widget, onAdded } = {}) {
     { width: 520 },
   );
   if (added) onAdded ? onAdded() : (location.hash === "" || location.hash === "#/") && route();
+}
+
+/** A placed widget's options: the form it was added with, filled in, live preview; saves the layout with the new input. */
+async function widgetOptionsSheet(e, c, w) {
+  let saved = false;
+  await modal(
+    (close) => {
+      const required = new Set(w.inputSchema?.required ?? []);
+      const fields = Object.entries(w.inputSchema?.properties ?? {}).map(([n, s]) => [n, field(n, s, required.has(n))]);
+      for (const [n, f] of fields) f.write(e.input?.[n]);
+      const readInput = () => Object.fromEntries(fields.map(([n, f]) => [n, f.read()]).filter(([, v]) => v !== undefined));
+      const preview = widgetPreview(c, e.id, w, { size: e.size, input: e.input ?? {} });
+      for (const [, f] of fields) f.el.addEventListener("change", () => preview.load(readInput()));
+      const saveBtn = h("button", { class: "primary", type: "submit" }, "Save");
+      const form = h(
+        "form",
+        {
+          class: "stack-md",
+          onsubmit: async (ev) => {
+            ev.preventDefault();
+            try {
+              saveBtn.disabled = true;
+              const input = readInput();
+              // The layout as stored, with this widget's input replaced.
+              const { layout } = await api("/home");
+              const entries = layout.map((x) => (x.type === "icon" ? { type: "icon", id: x.id, ...(x.hidden ? { hidden: true } : {}) } : { type: "widget", key: x.key, id: x.id, widget: x.widget, size: x.size, ...(x.key === e.key ? (Object.keys(input).length ? { input } : {}) : x.input ? { input: x.input } : {}) }));
+              await api("/home/layout", { method: "PUT", body: { entries } });
+              saved = true;
+              close();
+            } catch (err) {
+              saveBtn.disabled = false;
+              fail(err);
+            }
+          },
+        },
+        preview.el,
+        h("div", { class: "fields" }, fields.map(([, f]) => f.el)),
+        sheetActions(h("button", { type: "button", onclick: () => close() }, "Cancel"), saveBtn),
+      );
+      return [sheetHead(appIcon(c, { size: 44 }), e.title ?? w.title, c.name), form];
+    },
+    { width: 520 },
+  );
+  return saved;
 }
 
 /** New widgets come from the intake, for one tool (it suggests a few; only the ticked ones are built). */
@@ -3175,6 +3223,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
 
   (async () => {
     const [b0, all] = await Promise.all([api(`/builds/${enc(id)}`), caps(true).catch(() => new Map())]);
+    // The host's builder goes by the name the host gives it, which only /tools knows.
+    if (b0.builder === "remote" && builderLabel("remote") === "remote") for (const t of await api("/tools").catch(() => [])) if (t.remote) rememberAgents([{ id: t.name, name: t.label }]);
     let b = b0;
     const cap = () => all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.request?.name ?? b.capabilityId };
     if (!compact) setWallpaper(await hues([hueOf(cap()), 125]));

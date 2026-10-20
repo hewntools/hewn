@@ -427,6 +427,7 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .meta-label { font: 500 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .meta-value { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta-sub { font-size: var(--fs-xs, 11px); color: var(--text-3); }
+.meta-value .app-icon { box-shadow: none; } /* the cell clips a glow */
 .meta-value .meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
 .meta-value .meter i { width: 3px; border-radius: 1px; background: var(--border-strong); }
 .meta-value .meter i:nth-child(1) { height: 4px; } .meta-value .meter i:nth-child(2) { height: 6px; } .meta-value .meter i:nth-child(3) { height: 8px; } .meta-value .meter i:nth-child(4) { height: 10px; } .meta-value .meter i:nth-child(5) { height: 12px; }

@@ -5,7 +5,9 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.3 (unreleased)
 
 - **Fixed:** with `HEWN_BUILD_URL` set, the host's builder and intake are the default again, also after you save another setting (saving a setting no longer stores the defaults of the others, and a builder stored that way that you didn't choose is dropped when Hewn starts).
-- **The host's builder shows Hewn's icon** wherever a builder is shown, and the "on the host's keys" notes are gone.
+- **The host's builder shows Hewn's icon** wherever a builder is shown, under the name the host gives it, and the "on the host's keys" notes are gone.
+- **A widget's options can be changed** after it's on Home: **Options…** in its menu opens the form it was added with, filled in, with a preview.
+- **Fixed:** Edit Home couldn't save (Done, + Add widget) when a widget's options no longer matched its tool after a change. A widget placed earlier now saves as it is and shows its error until you set new options.
 - **The icon shows while the host's builder works:** the build service can send a file mid-build (`{ "file": … }`, see the remote builder protocol), so the tool's icon appears on Home and the build page as soon as it's written, not when the build ends.
 - **The build page has the standard top bar** (Hewn, the tabs, Search and the Inbox), like other pages.
 - **The intake says "Thinking…"** while the model thinks before it answers (Claude Code, and the host's intake when the service sends it).
