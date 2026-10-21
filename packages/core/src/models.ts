@@ -257,12 +257,14 @@ export interface ModelSettings {
   monthlyCapUsd: number;
   /** Optional monthly caps per capability, USD. */
   capabilityCapsUsd: Record<string, number>;
+  /** Hosted: optional monthly caps per capability, in the host's unit (Credits). */
+  capabilityCapsHost: Record<string, number>;
   /** Owner-set prices (per token, USD) by "<provider>/<model-id>"; they win over the catalog. */
   prices: Record<string, ModelPrice>;
 }
 
 /** A safe start: no provider, a small monthly cap the owner raises in Settings. */
-export const DEFAULT_MODEL_SETTINGS: ModelSettings = { tiers: {}, monthlyCapUsd: 5, capabilityCapsUsd: {}, prices: {} };
+export const DEFAULT_MODEL_SETTINGS: ModelSettings = { tiers: {}, monthlyCapUsd: 5, capabilityCapsUsd: {}, capabilityCapsHost: {}, prices: {} };
 
 /** Settings as stored, over the defaults. */
 export function normalizeModelSettings(stored: Record<string, any> | undefined): ModelSettings {

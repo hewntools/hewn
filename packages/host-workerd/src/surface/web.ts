@@ -423,7 +423,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   // Settings → Models: provider keys (write-only), tiers, budget, the model catalog, spend.
   if (resource === "models") {
     if (!id && method === "GET") return platform.models(owner);
-    if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsUsd", "prices"]));
+    if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsHost", "capabilityCapsUsd", "prices"]));
     if (id === "keys" && sub && method === "PUT") return platform.setModelKey(owner, sub, String((await readJson(req)).key ?? ""));
     if (id === "keys" && sub && method === "DELETE") return platform.setModelKey(owner, sub, null);
     if (id === "check" && sub && method === "POST") return platform.checkModelProvider(owner, sub);
@@ -772,6 +772,12 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     if (capUsd > 0 && totalUsd >= capUsd)
       needs.push({ kind: "spend", id: "all", title: "Models", detail: `${usdText(totalUsd)} of ${usdText(capUsd)}: calls are refused until you raise the cap`, severity: "danger", action: "Raise cap…" });
     else if (capUsd > 0 && totalUsd >= 0.8 * capUsd) needs.push({ kind: "spend", id: "all", title: "Models", detail: `${Math.round((totalUsd / capUsd) * 100)}% of this month's ${usdText(capUsd)}`, severity: "warn", action: "Open" });
+    // Hosted: a tool over its own cap (in the host's unit).
+    for (const [id, cap] of Object.entries(m.host ? m.capabilityCapsHost : {})) {
+      const used = m.host!.charges.byCapability.filter((x) => x.capabilityId === id);
+      const spent = used.reduce((n, x) => n + x.amount, 0);
+      if (spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its cap of ${cap} ${used[0]?.unit ?? "Credits"}`, severity: "danger", action: "Raise cap…" });
+    }
     for (const [id, cap] of Object.entries(m.capabilityCapsUsd)) {
       const spent = rows.filter((r) => r.capabilityId === id).reduce((n, r) => n + r.costUsd, 0);
       if (cap > 0 && spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its ${usdText(cap)} cap`, severity: "danger", action: "Raise cap…" });

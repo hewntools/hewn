@@ -374,6 +374,19 @@ describe("model port: hosted (tools' model calls on the host)", () => {
     assert.deepEqual(t.platform.models(USER).host?.charges.totals, [{ unit: "Credits", amount: 0.74 }]);
   });
 
+  test("a tool's own cap, in the host's unit: checked before each call; over it, calls are refused", async () => {
+    t.platform.approveGrants(USER, "word-explainer");
+    assert.throws(() => t.platform.setModelSettings(USER, { capabilityCapsHost: { "word-explainer": -1 } }), /from 0 to 1000000/);
+    t.platform.setModelSettings(USER, { capabilityCapsHost: { "word-explainer": 0.5 } });
+    assert.deepEqual(t.platform.models(USER).capabilityCapsHost, { "word-explainer": 0.5 });
+    const explain = () => t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } });
+    await explain();
+    await explain(); // 0.37 used: under 0.5, so it runs
+    await assert.rejects(explain(), /word-explainer has used 0\.74 of its 0\.5 Credits this month/);
+    assert.equal(asked.length, 2, "the refused call never reached the host");
+    assert.deepEqual(t.platform.hostCharges(USER).byCapability, [{ capabilityId: "word-explainer", unit: "Credits", amount: 0.74, count: 2 }]);
+  });
+
   test("a refusal reaches the caller as the host words it; a failed call that was answered still counts", async () => {
     t.platform.approveGrants(USER, "word-explainer");
     answer = async () => {
@@ -383,7 +396,7 @@ describe("model port: hosted (tools' model calls on the host)", () => {
     answer = async () => {
       throw Object.assign(new Error("the model refused"), { charge: { amount: 0.12, unit: "Credits" } });
     };
-    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }), /the host's model: the model refused/);
+    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }), /the model: the model refused/);
     assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 0.12 }]);
     // Cut off at the tool's limit: the host's stop reason, Hewn's wording.
     answer = async () => {
