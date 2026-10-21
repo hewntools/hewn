@@ -1420,14 +1420,15 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
     intake = null;
     const panel = buildPanel(buildId, {
       compact: true,
-      onPromoted: (b) =>
-        h(
-          "div",
-          { class: "notice ok drawer-ready" },
-          h("span", { class: "grow" }, h("b", {}, `v${b.resultVersion ?? ""} is ready.`), " Reload to see it."),
-          h("button", { class: "sm primary", onclick: () => onReload() }, "Reload"),
-          h("button", { class: "sm ghost", onclick: () => undoChange(c, b).then(onReload, fail) }, "Undo"),
-        ),
+      onPromoted: (b) => {
+        const v = `v${b.resultVersion ?? ""}`;
+        const notice = h("div", { class: "notice ok drawer-ready" });
+        const undo = h("button", { class: "sm ghost", onclick: () => undoChange(c, b).then(onReload, fail) }, "Undo");
+        // Once reloaded, it says so (no Reload to press again), and offers the next change.
+        const shown = () => put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is on screen.`)), h("button", { class: "sm", onclick: showIntake }, "Change more"), undo);
+        put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is ready.`), " Reload to see it."), h("button", { class: "sm primary", onclick: () => (onReload(), shown()) }, "Reload"), undo);
+        return notice;
+      },
     });
     put(body, panel.el);
   };
@@ -1498,6 +1499,10 @@ async function appPage(id, q) {
     invalidateCaps();
     frame.classList.add("loading");
     frame.src = await openUrl();
+    // The bar's version follows (v1 → v2).
+    const now = (await caps(true).catch(() => new Map())).get(c.id);
+    const pill = barEl.querySelector(".app-title .pill");
+    if (now?.version && pill) pill.textContent = `v${now.version}`;
   };
   const [barEl, layout] = withDrawer(c, q, frame, { reload });
   barEl.querySelector(".app-title")?.append(subtitle);
