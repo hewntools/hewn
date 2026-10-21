@@ -5,6 +5,8 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.5 (unreleased)
 
 - **For hosts: tools that think run on the host's models** (hosted mode, `HEWN_HOSTED`). A tool's `ctx.model` goes to the host's `/v1/generate` (through the supervisor, which holds the token), so the owner needs no API key. Settings › AI › Models shows what each tier runs on and what the host charged this month (builds, talking requests through, tools that think), with no providers, keys or USD caps. A refusal (over the month) reaches the tool's caller in the host's words. See the [remote builder protocol](docs/internal/remote-builder.md#tools-model-calls-post-v1generate-hosted).
+- **A model reply cut off at the tool's limit fails clearly** (Anthropic, OpenAI, OpenRouter and the host's models): "The model's reply was cut off at this tool's limit of N tokens (maxTokens). The tool needs a fix: ask the builder to raise its limit." instead of half a reply. It's still paid for.
+- **Builders size `maxTokens` to the reply and pass `schema`** whenever the code reads data from it (the builder brief).
 
 ## 0.4.4 (2026-10-20)
 

@@ -368,7 +368,12 @@ export interface ProviderReply {
   outputTokens: number;
   /** Cost the provider reported (OpenRouter), USD. */
   cost?: number;
+  /** The reply reached `maxTokens` and was cut off (Anthropic max_tokens, OpenAI finish_reason length). */
+  cutOff?: boolean;
 }
+
+/** A reply cut off at the tool's own limit: the tool needs a fix (worded as the host's builder words it). */
+export const cutOffMessage = (maxTokens: number) => `The model's reply was cut off at this tool's limit of ${maxTokens} tokens (maxTokens). The tool needs a fix: ask the builder to raise its limit.`;
 
 /** Strip JSON Schema keywords providers' structured output rejects; the platform checks them on the reply. */
 export function providerSchema(schema: unknown): unknown {
@@ -434,14 +439,14 @@ export function parseReply(provider: ModelProvider, body: any): ProviderReply {
   if (provider === "anthropic") {
     if (body?.stop_reason === "refusal") throw new PlatformError("operation_failed", "the model declined this request (refusal)", { model: { provider, refusal: true } });
     const text = (body?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("");
-    return { text, inputTokens: Number(body?.usage?.input_tokens ?? 0) + Number(body?.usage?.cache_creation_input_tokens ?? 0) + Number(body?.usage?.cache_read_input_tokens ?? 0), outputTokens: Number(body?.usage?.output_tokens ?? 0) };
+    return { text, inputTokens: Number(body?.usage?.input_tokens ?? 0) + Number(body?.usage?.cache_creation_input_tokens ?? 0) + Number(body?.usage?.cache_read_input_tokens ?? 0), outputTokens: Number(body?.usage?.output_tokens ?? 0), ...(body?.stop_reason === "max_tokens" ? { cutOff: true } : {}) };
   }
   const choice = body?.choices?.[0];
   if (choice?.message?.refusal) throw new PlatformError("operation_failed", "the model declined this request (refusal)", { model: { provider, refusal: true } });
   const content = choice?.message?.content;
   const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((c: any) => c?.text ?? "").join("") : "";
   const cost = Number(body?.usage?.cost);
-  return { text, inputTokens: Number(body?.usage?.prompt_tokens ?? 0), outputTokens: Number(body?.usage?.completion_tokens ?? 0), ...(provider === "openrouter" && Number.isFinite(cost) ? { cost } : {}) };
+  return { text, inputTokens: Number(body?.usage?.prompt_tokens ?? 0), outputTokens: Number(body?.usage?.completion_tokens ?? 0), ...(provider === "openrouter" && Number.isFinite(cost) ? { cost } : {}), ...(choice?.finish_reason === "length" ? { cutOff: true } : {}) };
 }
 
 /** Parse and check a structured reply against the capability's own schema. */

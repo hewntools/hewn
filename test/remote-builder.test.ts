@@ -194,6 +194,8 @@ describe("remote builder and intake", () => {
     }
     handle = (_b, _r, res) => json(res, 401, {});
     await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { unavailable?: boolean }) => e.unavailable === true && /token/.test(e.message));
+    handle = (_b, _r, res) => json(res, 502, { error: "cut off", stop: "max_tokens", charge: { amount: 3, unit: "Credits" } });
+    await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { stop?: string }) => e.stop === "max_tokens");
     handle = (_b, _r, res) => json(res, 502, { error: "the model refused", charge: { amount: 0.12, unit: "Credits" } });
     await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { charge?: unknown; refused?: boolean }) => !e.refused && /the model refused/.test(e.message) && (e.charge as { amount: number }).amount === 0.12);
     // An intake turn's charge goes to the caller as progress (recorded, not shown).

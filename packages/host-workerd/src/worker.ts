@@ -358,8 +358,8 @@ export class HewnDO extends DurableObject<Env> {
         ...(env.HOSTED === "1"
           ? {
               hostModels: async (req, signal) => {
-                const j = (await (await supervisor(env).call("/models/generate", { method: "POST", body: JSON.stringify(req), signal })).json()) as { result?: HostGenerateResult; error?: string; refused?: boolean; charge?: unknown };
-                if (j.error !== undefined || !j.result) throw Object.assign(new Error(j.error ?? "no reply"), { refused: !!j.refused, charge: j.charge });
+                const j = (await (await supervisor(env).call("/models/generate", { method: "POST", body: JSON.stringify(req), signal })).json()) as { result?: HostGenerateResult; error?: string; refused?: boolean; charge?: unknown; stop?: string };
+                if (j.error !== undefined || !j.result) throw Object.assign(new Error(j.error ?? "no reply"), { refused: !!j.refused, charge: j.charge, stop: j.stop });
                 return j.result;
               },
             }

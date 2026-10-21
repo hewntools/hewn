@@ -304,8 +304,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       try {
         return { result: await remoteGenerate(o.remote)(b, abort.signal) };
       } catch (e) {
-        const x = e as Error & { refused?: boolean; charge?: unknown };
-        return { error: x.message, ...(x.refused ? { refused: true } : {}), ...(x.charge ? { charge: x.charge } : {}) };
+        const x = e as Error & { refused?: boolean; charge?: unknown; stop?: string };
+        return { error: x.message, ...(x.refused ? { refused: true } : {}), ...(x.charge ? { charge: x.charge } : {}), ...(x.stop ? { stop: x.stop } : {}) };
       }
     },
     "/intake/log": async (b) => {

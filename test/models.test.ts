@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { Deadline } from "@hewntools/core/deadline.ts";
 import { validateManifest } from "@hewntools/core/manifest.ts";
-import { CATALOG_URL, type HostModels, imageSize, imageTokens, inspectRequest, parseCatalog, providerSchema, suggestTiers } from "@hewntools/core/models.ts";
+import { CATALOG_URL, type HostModels, imageSize, imageTokens, inspectRequest, parseCatalog, parseReply, providerSchema, suggestTiers } from "@hewntools/core/models.ts";
 import { MODEL_KEYS } from "@hewntools/core/platform.ts";
 import { FIXTURES, installFrom, setup } from "./helpers.ts";
 
@@ -78,6 +78,13 @@ describe("model port: pure parts", () => {
     const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x10, 0x00, 0x20, 0x00]);
     assert.deepEqual(imageSize(gif, "image/gif"), { width: 16, height: 32 });
     assert.ok(imageTokens({ width: 8000, height: 8000 }) <= 4784 + 85);
+  });
+
+  test("a reply cut off at maxTokens is flagged, from each provider's own stop reason", () => {
+    assert.equal(parseReply("anthropic", { content: [{ type: "text", text: "{" }], stop_reason: "max_tokens", usage: {} }).cutOff, true);
+    assert.equal(parseReply("anthropic", { content: [{ type: "text", text: "{}" }], stop_reason: "end_turn", usage: {} }).cutOff, undefined);
+    assert.equal(parseReply("openai", { choices: [{ message: { content: "{" }, finish_reason: "length" }], usage: {} }).cutOff, true);
+    assert.equal(parseReply("openrouter", { choices: [{ message: { content: "{}" }, finish_reason: "stop" }], usage: {} }).cutOff, undefined);
   });
 
   test("the catalog lists OpenRouter models under their own provider too", () => {
@@ -206,6 +213,16 @@ describe("model port: the platform", () => {
     assert.equal(net.calls.length, 0);
     t.platform.setModelSettings(USER, { monthlyCapUsd: 5, capabilityCapsUsd: { "word-explainer": 0 } });
     await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "x" } }), /word-explainer has spent/);
+  });
+
+  test("a reply cut off at maxTokens fails the call, says how to fix it, and is still paid for", async () => {
+    await setUp({ reply: () => ({ content: [{ type: "text", text: '{"explanation": "Plea' }], stop_reason: "max_tokens", usage: { input_tokens: 1000, output_tokens: 100 } }) });
+    await configure();
+    await assert.rejects(
+      t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }),
+      /cut off at this tool's limit of \d+ tokens \(maxTokens\)\. The tool needs a fix: ask the builder to raise its limit\./,
+    );
+    assert.ok(t.platform.modelSpend(USER).totalUsd > 0, "the provider billed it");
   });
 
   test("a provider error fails the call and spends nothing", async () => {
@@ -368,9 +385,15 @@ describe("model port: hosted (tools' model calls on the host)", () => {
     };
     await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }), /the host's model: the model refused/);
     assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 0.12 }]);
+    // Cut off at the tool's limit: the host's stop reason, Hewn's wording.
+    answer = async () => {
+      throw Object.assign(new Error("whatever the host said"), { stop: "max_tokens", charge: { amount: 3, unit: "Credits" } });
+    };
+    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "gruntled" } }), /cut off at this tool's limit of \d+ tokens/);
+    assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 3.12 }]);
     // Nonsense from the host isn't counted.
     t.platform.recordHostCharge(USER, "intake", { amount: -1, unit: "Credits" });
     t.platform.recordHostCharge(USER, "intake", { amount: 4, unit: "Credits" });
-    assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 4.12 }]);
+    assert.deepEqual(t.platform.hostCharges(USER).totals, [{ unit: "Credits", amount: 7.12 }]);
   });
 });

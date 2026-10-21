@@ -217,7 +217,8 @@ export function remoteGenerate(r: RemoteJobs): HostModels {
     if (typeof j.refused === "string") throw failure(j.refused, "refused");
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) throw failure(`${r.label} didn't accept this Hewn's token (HTTP ${res.status})`, "unavailable");
-      throw Object.assign(new Error(typeof j.error === "string" ? j.error : `HTTP ${res.status}`), j.charge ? { charge: j.charge } : {});
+      // `stop: "max_tokens"`: the reply was cut off at the tool's limit (the tool needs a fix).
+      throw Object.assign(new Error(typeof j.error === "string" ? j.error : `HTTP ${res.status}`), j.charge ? { charge: j.charge } : {}, typeof j.stop === "string" ? { stop: j.stop } : {});
     }
     if (typeof j.text !== "string") throw new Error(`${r.label} returned no reply`);
     return j as HostGenerateResult;

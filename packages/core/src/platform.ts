@@ -61,6 +61,7 @@ import {
   providerOf,
   resolveModel,
   saneCharge,
+  cutOffMessage,
   structured,
 } from "./models.ts";
 import { EFFORT, MODEL_NAME } from "./build-models.ts";
@@ -1689,8 +1690,10 @@ export class Platform {
         deadline.endWait();
       }
       const cost = reply.cost ?? costOf(price, reply.inputTokens, reply.outputTokens);
-      this.registry.settleModelSpend(id, { costUsd: cost, inputTokens: reply.inputTokens, outputTokens: reply.outputTokens });
+      // Billed all the same; half a reply is no reply.
+      this.registry.settleModelSpend(id, { costUsd: cost, inputTokens: reply.inputTokens, outputTokens: reply.outputTokens, ...(reply.cutOff ? { error: cutOffMessage(r.maxTokens) } : {}) });
       this.warnNearCap(capabilityId, month, settings);
+      if (reply.cutOff) throw new PlatformError("operation_failed", cutOffMessage(r.maxTokens), { model: { stop: "max_tokens" } });
       const json = r.schema ? structured(reply.text, r.schema) : undefined;
       return { text: reply.text, ...(json !== undefined ? { json } : {}), usage: { inputTokens: reply.inputTokens, outputTokens: reply.outputTokens }, cost, model };
     };
@@ -1719,9 +1722,11 @@ export class Platform {
       } catch (e) {
         charge((e as { charge?: unknown }).charge);
         const timedOut = (e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError";
-        const message = timedOut ? "the host's model: no reply in time" : (e as { refused?: boolean }).refused ? (e as Error).message : `the host's model: ${(e as Error).message}`;
+        const cutOff = (e as { stop?: string }).stop === "max_tokens";
+        // A refusal, or a reply cut off at the tool's limit, is worded for the owner: kept as is.
+        const message = timedOut ? "the host's model: no reply in time" : cutOff ? cutOffMessage(r.maxTokens) : (e as { refused?: boolean }).refused ? (e as Error).message : `the host's model: ${(e as Error).message}`;
         this.registry.settleModelSpend(id, { costUsd: 0, inputTokens: 0, outputTokens: 0, error: message.slice(0, 300) });
-        throw new PlatformError("operation_failed", message);
+        throw new PlatformError("operation_failed", message, cutOff ? { model: { stop: "max_tokens" } } : undefined);
       } finally {
         deadline.endWait();
       }
