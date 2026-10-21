@@ -452,3 +452,6 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .caret-btn::before { content: ""; display: block; width: 6px; height: 6px; margin: 4px auto 0; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
 .caret-btn[aria-expanded="true"]::before { transform: rotate(225deg); margin-top: 8px; }
 .caret-btn:hover, .caret-btn:focus, .caret-btn:active { background: none; transform: none; }
+.fix-slot:empty { display: none; }
+.fix-slot { padding: 0 var(--s6) var(--s2); } /* "Ask builder to fix this", under a tool's bar */
+.fix-bar { align-items: center; }

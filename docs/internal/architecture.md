@@ -139,6 +139,10 @@ With `HEWN_HOSTED=1` (which needs `HEWN_BUILD_URL`; `hostedFromEnv` in the super
 
 Tools' model calls, hosted: the platform gets `hostModels` (`PlatformOptions`), so `modelProblem` needs no provider or key and `ctx.model.generate` goes to `hostModelHandler`: the request is checked as for a provider, sent through the supervisor (`/models/generate`, which holds the host's token) to the host's `/v1/generate`, and the reply's JSON is checked against the schema. Calls are logged in `model_calls` at $0, outside the USD caps; what the host charges (builds, intake turns, model calls) goes to `host_charges`, summed per unit for Settings › AI › Models.
 
+## Failed calls ("Ask builder to fix this")
+
+A failed call (inside `execute`, or a result withheld for carrying a stored secret) is also noted under `failures:<id>` in `platform_kv`: the last ten, with caller, operation, error, the reduced input and last log lines (see [security-and-authority.md](security-and-authority.md#failed-calls-for-ask-builder-to-fix-this)). The web client offers a Change from them: on the tool's page when `session.js` posts `failed` (only that; the client reads the record), in Info's Run view, in a widget's menu and on a schedule's failed run. Calls refused before they run (not ready, a confirmation pending) aren't the tool's bug and aren't noted.
+
 ## Web client and tool UIs
 
 The web client (`packages/host-workerd/web/`) is plain ES modules and DOM APIs with a strict CSP: no inline script, no HTML sinks (`test/web.test.ts` checks). It lives at `http://hewn.localhost:<port>` and, when the owner sets a public URL, on that host through the public socket.

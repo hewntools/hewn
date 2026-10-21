@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
+import { maskInput } from "@hewntools/core/platform.ts";
 import { editJson, installFrom, setup } from "./helpers.ts";
 
 const FIXTURE = resolve(import.meta.dirname, "fixtures/secret-echo");
@@ -28,6 +29,35 @@ describe("secrets and grants", () => {
     assert.match(status.userAction!, /open it in the Hewn web client/);
     assert.doesNotMatch(status.userAction!, /hewn connect/, "agents are sent to the web client, never to a command");
     await assert.rejects(whoami(), code("not_ready"));
+  });
+
+  test("a failed call is kept for 'Ask builder to fix this': operation, error, input, newest first; secrets redacted", async () => {
+    t.platform.setSecret(USER, "secret-echo", "API_TOKEN", "TOPSECRETVALUE");
+    t.platform.approveGrants(USER, "secret-echo");
+    await assert.rejects(whoami({ leak: "error" }));
+    await assert.rejects(whoami({ leak: "error" }, USER));
+    const [last, first] = t.platform.recentFailures(USER, "secret-echo");
+    assert.equal(last.caller, "user");
+    assert.equal(last.operation, "whoami");
+    assert.match(last.error, /upstream refused \[secret\]/);
+    assert.deepEqual(JSON.parse(last.input), { leak: "error" });
+    assert.equal(first.caller, "codex");
+    assert.ok(!JSON.stringify(t.platform.recentFailures(USER, "secret-echo")).includes("TOPSECRETVALUE"), "never a stored secret");
+    assert.throws(() => t.platform.recentFailures(t.codex, "secret-echo"), /owner/);
+  });
+
+  test("the failure record: credential-like inputs masked, kept no longer than the call log, gone with a purged tool", async () => {
+    assert.deepEqual(maskInput({ q: "milk", password: "hunter2", nested: { apiKey: "k", list: [{ token: "t", n: 1 }] } }), { q: "milk", password: "[hidden]", nested: { apiKey: "[hidden]", list: [{ token: "[hidden]", n: 1 }] } });
+    t.platform.setSecret(USER, "secret-echo", "API_TOKEN", "TOPSECRETVALUE");
+    t.platform.approveGrants(USER, "secret-echo");
+    // An entry older than the log's retention (14 days by default) is dropped when the next one comes.
+    t.platform.registry.setKv("failures:secret-echo", [{ at: "2020-01-01T00:00:00.000Z", caller: "user", operation: "whoami", error: "old", input: "{}", logs: [] }]);
+    await assert.rejects(whoami({ leak: "error" }, USER));
+    assert.equal(t.platform.recentFailures(USER, "secret-echo").length, 1);
+    assert.match(t.platform.recentFailures(USER, "secret-echo")[0].error, /upstream refused/);
+    await t.platform.archive(USER, "secret-echo");
+    await t.platform.purge(USER, "secret-echo", "secret-echo");
+    assert.equal(t.platform.registry.getKv("failures:secret-echo"), undefined, "purged with the tool");
   });
 
   test("secret alone is not enough: the grant must be approved too", async () => {

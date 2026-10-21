@@ -251,6 +251,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.invoke(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input });
       }
+      // Its last failed calls, for "Ask builder to fix this".
+      case "GET failures":
+        return platform.recentFailures(owner, id);
       case "POST modify": {
         const body = await readJson(req);
         return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort"]) });
