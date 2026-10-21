@@ -67,7 +67,20 @@ One request per turn of the conversation; `session` is the same for every turn o
 
 - `prompt` is Hewn's intake prompt with the conversation in it; `schema` is the JSON Schema the reply must follow. The service may give the model web search and fetching (the owner reviews every draft before anything is built).
 
-Events: `{ "text": "<delta>" }` as the reply is written (Hewn shows its message and questions as they arrive), `{ "activity": "Searching the web" }` (and `{ "activity": "Thinking" }` while the model thinks before it writes, so the owner sees more than the typing dots), then `{ "result": "<the reply: JSON text following the schema>" }`. Or `refused` / `error` (`unavailable` as above).
+Events: `{ "text": "<delta>" }` as the reply is written (Hewn shows its message and questions as they arrive), `{ "activity": "Searching the web" }` (and `{ "activity": "Thinking" }` while the model thinks before it writes, so the owner sees more than the typing dots), then `{ "result": "<the reply: JSON text following the schema>" }`. Or `refused` / `error` (`unavailable` as above). A `{ "charge": { "amount": 4, "unit": "Credits" } }` event, as for builds, counts the turn in "used this month" (not shown in the chat).
+
+## Tools' model calls: `POST /v1/generate` (hosted)
+
+Only with `HEWN_HOSTED=1`: then a tool's `ctx.model.generate` goes to the host instead of a provider on the owner's key. Hewn checks the request first (shape, sizes, images) and the result's JSON against the schema after, as for its own providers. Plain JSON both ways, no streaming.
+
+```json
+{ "capabilityId": "word-explainer", "tier": "light", "system": "…", "messages": [{ "role": "user", "content": "Explain \"gruntled\"." }], "schema": { "type": "object", … }, "maxTokens": 1024 }
+```
+
+- `tier` (`light`, `standard`, `strong`, `max`) or `model` (a pinned name), from the tool's `requires.model`. `content` is a string or parts (`{ "type": "text", "text" }`, `{ "type": "image", "data": "<base64>", "mediaType" }`).
+- 200: `{ "text": "…", "usage": { "inputTokens": 900, "outputTokens": 80 }, "model": "<the model it ran on>", "charge": { "amount": 0.37, "unit": "Credits" } }`. Amounts may be fractions; Hewn sums them as decimals.
+- A refusal, any status with `{ "refused": "…" }` (over the month, a model it can't run, too many at once): the tool's call fails with that reason, not retried. `401`/`403` without `refused`: the token isn't accepted. Otherwise `{ "error": "…", "charge"? }`: an ordinary failed call, its charge still counted (the model answered).
+- Hewn calls it from the supervisor, which holds the token; a tool never sees it. Calls are logged for Activity at $0; the USD caps don't apply. A tool's own monthly cap, in the host's unit (`capabilityCapsHost`), is checked before each call against what the host charged its calls this month.
 
 ## Models: `GET /v1/models`
 
@@ -76,3 +89,5 @@ Events: `{ "text": "<delta>" }` as the reply is written (Hewn shows its message 
 ```
 
 `kind`: `default` (the service decides), `family` (follows the newest), or `pinned` (exactly that model; `upgrade` may name its successor). Settings › AI and the model menu in the intake's chat box list these; the owner ticks which ones agents may ask for.
+
+Hosted, `"tiers": { "light": "Haiku 5.5", "standard": "Sonnet 5.5", "strong": "Opus 5.5", "max": "Fable 5.1" }` says what each tier runs on for tools' model calls (labels for Settings › AI › Models; the service resolves the tier itself on `/v1/generate`).

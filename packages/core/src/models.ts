@@ -15,6 +15,43 @@ export type { ContentPart, GenerateRequest, GenerateResult, ModelMessage };
 /** Called by the runtime when capability code calls ctx.model.generate. */
 export type ModelHandler = (req: GenerateRequest) => Promise<GenerateResult>;
 
+/** What the host charged for something it ran, in its own unit ("12 Credits"); shown as given. */
+export interface HostCharge {
+  amount: number;
+  unit: string;
+}
+
+/** A tool's model call, as it goes to the host (hosted: the host runs tools' model calls on its keys). */
+export interface HostGenerateRequest {
+  capabilityId: string;
+  /** What the tool's manifest asks for (`requires.model`): a tier the host maps, or a pinned model. */
+  tier?: ModelTier;
+  model?: string;
+  system?: string;
+  messages: ModelMessage[];
+  schema?: Record<string, unknown>;
+  maxTokens: number;
+}
+
+export interface HostGenerateResult {
+  text: string;
+  usage: { inputTokens: number; outputTokens: number };
+  /** The model it ran on. */
+  model: string;
+  charge?: HostCharge;
+}
+
+/**
+ * The host's model port. Throws with `refused: true` when the host declines (over the month, a
+ * model it can't run): that reason goes to the tool's caller as is. A thrown error may carry the
+ * `charge` for a call the model answered but that still failed.
+ */
+export type HostModels = (req: HostGenerateRequest, signal: AbortSignal) => Promise<HostGenerateResult>;
+
+/** A charge from the host is shown as given: only a sane amount and a short unit are kept. */
+export const saneCharge = (c: unknown): c is HostCharge =>
+  !!c && typeof c === "object" && Number.isFinite((c as HostCharge).amount) && (c as HostCharge).amount >= 0 && (c as HostCharge).amount <= 1e6 && typeof (c as HostCharge).unit === "string" && /^[A-Za-z][A-Za-z ]{0,19}$/.test((c as HostCharge).unit);
+
 // ---------- limits ----------
 
 export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
@@ -220,12 +257,14 @@ export interface ModelSettings {
   monthlyCapUsd: number;
   /** Optional monthly caps per capability, USD. */
   capabilityCapsUsd: Record<string, number>;
+  /** Hosted: optional monthly caps per capability, in the host's unit (Credits). */
+  capabilityCapsHost: Record<string, number>;
   /** Owner-set prices (per token, USD) by "<provider>/<model-id>"; they win over the catalog. */
   prices: Record<string, ModelPrice>;
 }
 
 /** A safe start: no provider, a small monthly cap the owner raises in Settings. */
-export const DEFAULT_MODEL_SETTINGS: ModelSettings = { tiers: {}, monthlyCapUsd: 5, capabilityCapsUsd: {}, prices: {} };
+export const DEFAULT_MODEL_SETTINGS: ModelSettings = { tiers: {}, monthlyCapUsd: 5, capabilityCapsUsd: {}, capabilityCapsHost: {}, prices: {} };
 
 /** Settings as stored, over the defaults. */
 export function normalizeModelSettings(stored: Record<string, any> | undefined): ModelSettings {
@@ -331,7 +370,12 @@ export interface ProviderReply {
   outputTokens: number;
   /** Cost the provider reported (OpenRouter), USD. */
   cost?: number;
+  /** The reply reached `maxTokens` and was cut off (Anthropic max_tokens, OpenAI finish_reason length). */
+  cutOff?: boolean;
 }
+
+/** A reply cut off at the tool's own limit: the tool needs a fix (worded as the host's builder words it). */
+export const cutOffMessage = (maxTokens: number) => `The model's reply was cut off at this tool's limit of ${maxTokens} tokens (maxTokens). The tool needs a fix: ask the builder to raise its limit.`;
 
 /** Strip JSON Schema keywords providers' structured output rejects; the platform checks them on the reply. */
 export function providerSchema(schema: unknown): unknown {
@@ -397,14 +441,14 @@ export function parseReply(provider: ModelProvider, body: any): ProviderReply {
   if (provider === "anthropic") {
     if (body?.stop_reason === "refusal") throw new PlatformError("operation_failed", "the model declined this request (refusal)", { model: { provider, refusal: true } });
     const text = (body?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("");
-    return { text, inputTokens: Number(body?.usage?.input_tokens ?? 0) + Number(body?.usage?.cache_creation_input_tokens ?? 0) + Number(body?.usage?.cache_read_input_tokens ?? 0), outputTokens: Number(body?.usage?.output_tokens ?? 0) };
+    return { text, inputTokens: Number(body?.usage?.input_tokens ?? 0) + Number(body?.usage?.cache_creation_input_tokens ?? 0) + Number(body?.usage?.cache_read_input_tokens ?? 0), outputTokens: Number(body?.usage?.output_tokens ?? 0), ...(body?.stop_reason === "max_tokens" ? { cutOff: true } : {}) };
   }
   const choice = body?.choices?.[0];
   if (choice?.message?.refusal) throw new PlatformError("operation_failed", "the model declined this request (refusal)", { model: { provider, refusal: true } });
   const content = choice?.message?.content;
   const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((c: any) => c?.text ?? "").join("") : "";
   const cost = Number(body?.usage?.cost);
-  return { text, inputTokens: Number(body?.usage?.prompt_tokens ?? 0), outputTokens: Number(body?.usage?.completion_tokens ?? 0), ...(provider === "openrouter" && Number.isFinite(cost) ? { cost } : {}) };
+  return { text, inputTokens: Number(body?.usage?.prompt_tokens ?? 0), outputTokens: Number(body?.usage?.completion_tokens ?? 0), ...(provider === "openrouter" && Number.isFinite(cost) ? { cost } : {}), ...(choice?.finish_reason === "length" ? { cutOff: true } : {}) };
 }
 
 /** Parse and check a structured reply against the capability's own schema. */

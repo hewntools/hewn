@@ -270,7 +270,8 @@ fieldset.job legend .sub { color: var(--text-2); }
 .with-drawer { min-height: 0; }
 .drawer-main { display: flex; flex-direction: column; min-height: 0; }
 .drawer-main > .run { overflow: auto; }
-.drawer-intake { display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s3); min-height: 100%; }
+.drawer-intake { display: flex; flex-direction: column; gap: var(--s3); min-height: 100%; }
+.drawer-intake > :first-child { margin-top: auto; }
 .drawer-title { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
 .drawer .composer textarea { min-height: 72px; }
 .drawer .bubble { max-width: 90%; }
@@ -392,6 +393,8 @@ dialog.palette { margin-top: 12vh; padding: 10px; gap: 6px; }
 .composer.boxed { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 8px 8px 6px; background: var(--field); border: 1px solid var(--field-border); border-radius: 22px; box-shadow: var(--field-inset); transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .composer.boxed:focus-within { border-color: var(--accent-ink); background-color: var(--surface-solid); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer.boxed textarea.composer-input, .composer.boxed textarea.composer-input:focus { border: 0; background: transparent; box-shadow: none; padding: 8px 10px; min-height: 44px; }
+/* In the boxed (column) composer the box grows with its text: flex: 1 would ignore the height set for it. */
+.composer.boxed textarea.composer-input { flex: none; }
 .composer-tools { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); }
 .composer-tools > button[type=submit], .composer-tools > .stop-btn { border-radius: var(--radius-pill); }
 .model-chip { gap: 6px; color: var(--text-2); font-weight: 450; border-radius: var(--radius-pill); }

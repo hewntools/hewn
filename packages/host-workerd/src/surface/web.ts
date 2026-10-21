@@ -10,7 +10,7 @@ import { ABI } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
-import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
+import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
@@ -420,7 +420,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   // Settings → Models: provider keys (write-only), tiers, budget, the model catalog, spend.
   if (resource === "models") {
     if (!id && method === "GET") return platform.models(owner);
-    if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsUsd", "prices"]));
+    if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsHost", "capabilityCapsUsd", "prices"]));
     if (id === "keys" && sub && method === "PUT") return platform.setModelKey(owner, sub, String((await readJson(req)).key ?? ""));
     if (id === "keys" && sub && method === "DELETE") return platform.setModelKey(owner, sub, null);
     if (id === "check" && sub && method === "POST") return platform.checkModelProvider(owner, sub);
@@ -567,7 +567,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       { "content-security-policy": WEB_CSP },
       async (event, signal) => {
         try {
-          const reply = await intake(request, (p) => event("progress", p), signal);
+          const reply = await intake(request, (p) => ((p as IntakeProgress).charge !== undefined ? platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge) : event("progress", p)), signal);
           event("reply", reply);
           finish(reply);
         } catch (e) {
@@ -769,6 +769,12 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     if (capUsd > 0 && totalUsd >= capUsd)
       needs.push({ kind: "spend", id: "all", title: "Models", detail: `${usdText(totalUsd)} of ${usdText(capUsd)}: calls are refused until you raise the cap`, severity: "danger", action: "Raise cap…" });
     else if (capUsd > 0 && totalUsd >= 0.8 * capUsd) needs.push({ kind: "spend", id: "all", title: "Models", detail: `${Math.round((totalUsd / capUsd) * 100)}% of this month's ${usdText(capUsd)}`, severity: "warn", action: "Open" });
+    // Hosted: a tool over its own cap (in the host's unit).
+    for (const [id, cap] of Object.entries(m.host ? m.capabilityCapsHost : {})) {
+      const { spent, unit } = m.hostCapUse[id] ?? { spent: 0, unit: "Credits" };
+      // As for the USD caps: 0 is "none for this tool", not something to flag.
+      if (cap > 0 && spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its cap of ${cap} ${unit}`, severity: "danger", action: "Raise cap…" });
+    }
     for (const [id, cap] of Object.entries(m.capabilityCapsUsd)) {
       const spent = rows.filter((r) => r.capabilityId === id).reduce((n, r) => n + r.costUsd, 0);
       if (cap > 0 && spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its ${usdText(cap)} cap`, severity: "danger", action: "Raise cap…" });

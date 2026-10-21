@@ -102,6 +102,8 @@ export interface IntakeProgress {
   questions?: string[];
   /** What it is doing right now, e.g. "Looking up goodreads.com". */
   activity?: string;
+  /** What the host charged for this turn (its intake), in its own unit: recorded, not shown in the chat. */
+  charge?: { amount: number; unit: string };
 }
 /** `signal`: the owner stopped it (the CLI is stopped too). */
 export type Intake = (req: IntakeRequest, onProgress?: (p: IntakeProgress) => void, signal?: AbortSignal) => Promise<IntakeReply>;

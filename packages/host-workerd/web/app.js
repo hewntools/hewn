@@ -1420,14 +1420,17 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
     intake = null;
     const panel = buildPanel(buildId, {
       compact: true,
-      onPromoted: (b) =>
-        h(
-          "div",
-          { class: "notice ok drawer-ready" },
-          h("span", { class: "grow" }, h("b", {}, `v${b.resultVersion ?? ""} is ready.`), " Reload to see it."),
-          h("button", { class: "sm primary", onclick: () => onReload() }, "Reload"),
-          h("button", { class: "sm ghost", onclick: () => undoChange(c, b).then(onReload, fail) }, "Undo"),
-        ),
+      onPromoted: (b) => {
+        const v = `v${b.resultVersion ?? ""}`;
+        const notice = h("div", { class: "notice ok drawer-ready" });
+        const more = () => h("button", { class: "sm", onclick: showIntake }, "Change more");
+        // Undone: say so (the notice no longer names the version that's gone).
+        const undo = h("button", { class: "sm ghost", onclick: () => undoChange(c, b).then(() => (onReload(), put(notice, h("span", { class: "grow" }, h("b", {}, `Back to v${(b.resultVersion ?? 2) - 1}.`)), more())), fail) }, "Undo");
+        // Once reloaded, it says so (no Reload to press again), and offers the next change.
+        const shown = () => put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is on screen.`)), more(), undo);
+        put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is ready.`), " Reload to see it."), h("button", { class: "sm primary", onclick: () => (onReload(), shown()) }, "Reload"), undo);
+        return notice;
+      },
     });
     put(body, panel.el);
   };
@@ -1498,6 +1501,10 @@ async function appPage(id, q) {
     invalidateCaps();
     frame.classList.add("loading");
     frame.src = await openUrl();
+    // The bar's version follows (v1 → v2).
+    const now = (await caps(true).catch(() => new Map())).get(c.id);
+    const pill = barEl.querySelector(".app-title .pill");
+    if (now?.version && pill) pill.textContent = `v${now.version}`;
   };
   const [barEl, layout] = withDrawer(c, q, frame, { reload });
   barEl.querySelector(".app-title")?.append(subtitle);
@@ -1823,7 +1830,8 @@ async function grantsSheet(capId) {
   const modelReq = cap.requires?.model;
   const m = modelReq ? await api("/models").catch(() => null) : null;
   // No usable provider: the key block, even when the grant itself is approved.
-  const needsKey = !!modelReq && !!m && (!m.provider || !m.providers.find((p) => p.id === m.provider)?.keySet);
+  // Hosted: the host runs tools' model calls; no key to give.
+  const needsKey = !!modelReq && !!m && !m.host && (!m.provider || !m.providers.find((p) => p.id === m.provider)?.keySet);
   const pending = items.filter((i) => !i.approved || (i.kind === "secret" && missingSecrets.has(i.grant.slice(7))) || (i.kind === "model" && needsKey));
   const thenSignIn = async (ready) => (signIn && !ready && (await api(`/capabilities/${id}`)).status.missingSecrets.length ? signInDialog(capId) : ready);
 
@@ -2216,6 +2224,8 @@ async function proposalSheet(x) {
  */
 async function toolModelSheet(c, { replace = false } = {}) {
   const [cap, m] = await Promise.all([api(`/capabilities/${enc(c.id)}`), api("/models")]);
+  // Hosted: the tiers are the host's (labels from its model list), and the cap is in its unit.
+  const hostTiers = m.host ? (await api("/tools/remote/models").catch(() => null))?.tiers ?? {} : null;
   const req = cap.requires?.model;
   if (!req) return fail(new Error(`${c.name} doesn't use a model`));
   const prov = m.providers.find((p) => p.id === m.provider);
@@ -2225,12 +2235,18 @@ async function toolModelSheet(c, { replace = false } = {}) {
   const rows = m.spend.rows.filter((r) => r.capabilityId === c.id);
   const spent = rows.reduce((n, r) => n + r.costUsd, 0);
   const calls = rows.reduce((n, r) => n + r.calls, 0);
+  const hostUsed = m.host?.charges.byCapability.filter((x) => x.capabilityId === c.id) ?? [];
+  const unit = hostUsed[0]?.unit ?? m.host?.charges.totals[0]?.unit ?? "Credits";
+  const used = Math.round(hostUsed.reduce((n, x) => n + x.amount, 0) * 100) / 100;
   return modal(
     (close) => {
-      const ok = h("button", { class: "primary" }, "Use it");
+      const ok = h("button", { class: "primary" }, "Save");
       const pickLine = h("span", { class: "sub" });
+      const modelChanged = () => (pinned ? pinned !== req.model : tier !== req.tier);
+      const capChanged = () => capInput.value.trim() !== String(own ?? "");
+      // One Save for both: the cap (a setting) and the model (a quick change: a new version, no builder).
       const sync = () => {
-        ok.disabled = pinned ? pinned === req.model : tier === req.tier;
+        ok.disabled = !modelChanged() && !capChanged();
         pickLine.textContent = pinned ? `${pinned}${retired && pinned === req.model ? " · no longer available" : ""}` : "Pin one model";
       };
       const radio = (checked, onChange) => {
@@ -2242,6 +2258,7 @@ async function toolModelSheet(c, { replace = false } = {}) {
       const tierRows = (m.tierNames ?? TIERS).map((t) => {
         const x = tierModel(m, t);
         tierRadios[t] = radio(!pinned && tier === t, () => ((tier = t), (pinned = null), sync()));
+        if (hostTiers) return h("label", { class: "job-option" }, tierRadios[t], h("span", { class: "grow col" }, h("span", {}, `${titleCase(t)} tier`), h("span", { class: "sub" }, hostTiers[t] ?? TIER_TEXT[t])));
         return h("label", { class: "job-option" }, tierRadios[t], h("span", { class: "grow col" }, h("span", {}, `${titleCase(t)} tier`), h("span", { class: "sub" }, x ? `${x.name}${x.price ? ` · about ${usd(perCall(x.price))} a call` : ""}` : "Not set up")));
       });
       const pickModel = async () => {
@@ -2254,23 +2271,24 @@ async function toolModelSheet(c, { replace = false } = {}) {
       };
       const specific = h("label", { class: "job-option" }, radio(!!pinned, pickModel), h("span", { class: "grow col" }, h("span", {}, "A specific model"), pickLine));
       // This month: what it spent, and its own cap (inline).
-      const own = m.capabilityCapsUsd[c.id];
-      const capInput = h("input", { type: "number", min: 0, step: 1, value: own ?? "", placeholder: "No cap", class: "model-cap", "aria-label": "Cap in USD a month" });
+      // Hosted: in the host's unit, from what it charged this tool's model calls.
+      const capsKey = m.host ? "capabilityCapsHost" : "capabilityCapsUsd";
+      const own = m[capsKey][c.id];
+      const capInput = h("input", { type: "number", min: 0, step: 1, value: own ?? "", placeholder: "No cap", class: "model-cap", "aria-label": m.host ? `Cap in ${unit} a month` : "Cap in USD a month" });
+      capInput.addEventListener("input", () => sync());
       const saveCap = async () => {
-        const capsUsd = { ...m.capabilityCapsUsd };
-        if (capInput.value.trim() === "") delete capsUsd[c.id];
-        else capsUsd[c.id] = Number(capInput.value);
-        try {
-          await api("/models", { method: "PUT", body: { capabilityCapsUsd: capsUsd } });
-          toast(capInput.value.trim() === "" ? `${c.name}: no cap of its own` : `${c.name}: at most $${Number(capInput.value)} a month`);
-          pollInbox();
-        } catch (e) {
-          fail(e);
-        }
+        const caps = { ...m[capsKey] };
+        if (capInput.value.trim() === "") delete caps[c.id];
+        else caps[c.id] = Number(capInput.value);
+        await api("/models", { method: "PUT", body: { [capsKey]: caps } });
+        toast(capInput.value.trim() === "" ? `${c.name}: no cap of its own` : m.host ? `${c.name}: at most ${Number(capInput.value)} ${unit} a month` : `${c.name}: at most $${Number(capInput.value)} a month`);
+        pollInbox();
       };
       ok.addEventListener("click", async () => {
         try {
           ok.disabled = true;
+          if (capChanged()) await saveCap();
+          if (!modelChanged()) return close(true);
           const b = await api(`/capabilities/${enc(c.id)}/model`, { method: "POST", body: pinned ? { model: pinned } : { tier } });
           close(true);
           go(`#/b/${enc(b.buildId)}`);
@@ -2283,12 +2301,13 @@ async function toolModelSheet(c, { replace = false } = {}) {
       if (replace && retired) setTimeout(pickModel);
       return [
         sheetHead(appIcon(c, { size: 44 }), `${c.name} · model`, retired ? `${retired.model} is no longer available` : null),
-        h("fieldset", { class: "job" }, tierRows, specific),
+        // Hosted: tiers only (the host runs what each tier names).
+        h("fieldset", { class: "job" }, tierRows, !m.host && specific),
         h(
           "div",
           { class: "inset-block row between" },
-          h("div", { class: "col" }, h("span", { class: "eyebrow" }, "This month"), h("span", {}, `${usd(spent)} · ${calls ? `${calls} call${calls === 1 ? "" : "s"}` : "no calls yet"}`)),
-          h("span", { class: "row tight nowrap" }, h("span", { class: "small faint" }, "Cap $"), capInput, h("button", { class: "sm", onclick: saveCap }, "Save")),
+          h("div", { class: "col" }, h("span", { class: "eyebrow" }, "This month"), h("span", {}, m.host ? `${used} ${unit} · ${calls ? `${calls} call${calls === 1 ? "" : "s"}` : "no calls yet"}` : `${usd(spent)} · ${calls ? `${calls} call${calls === 1 ? "" : "s"}` : "no calls yet"}`)),
+          h("span", { class: "row tight nowrap" }, h("span", { class: "small faint" }, m.host ? "Cap" : "Cap $"), capInput, m.host && h("span", { class: "small faint" }, unit)),
         ),
         sheetActions(h("button", { onclick: () => close(false) }, "Cancel"), ok),
       ];
@@ -2622,6 +2641,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   input.value = q?.get("m") || (widgetsMode ? "Suggest some widgets." : connection ? `A connection to ${connection}, so my tools can use it.` : "");
   const grow = () => ((input.style.height = "auto"), (input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`));
   input.addEventListener("input", grow);
+  // Text put in for you ("Ask builder to fix this"): tall enough to read it whole, once it's on screen.
+  let tries = 0;
+  const growWhenShown = () => (input.offsetParent ? grow() : ++tries < 120 && requestAnimationFrame(growWhenShown));
+  if (input.value) requestAnimationFrame(growWhenShown);
   window.addEventListener("resize", grow);
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));
@@ -4232,7 +4255,8 @@ async function addSheet() {
           choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
           // Hosted: the host builds; there are no agents on the machine to work for Hewn.
           !settings?.hosted && choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
-          choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
+          // Hosted: tools that think run on the host's models.
+          !settings?.hosted && choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
       ];
@@ -4614,7 +4638,16 @@ async function aiSection() {
           "div",
           { class: "grow" },
           h("span", { class: "strong" }, "Thinks inside tools"),
-          h("span", { class: "sub row tight" }, prov ? [providerTile(prov.id, 20), `${PROVIDERS[prov.id].label} API · your key · ${usd(m.spend.totalUsd)} of ${usd(m.spend.capUsd)} this month`] : "No provider yet · your key, metered"),
+          h(
+            "span",
+            { class: "sub row tight" },
+            // Hosted: included; what was used this month (it's implied who runs them).
+            m?.host
+              ? m.host.charges.totals.length ? `${m.host.charges.totals.map(creditWords).join(", ")} used this month` : "Included"
+              : prov
+                ? [providerTile(prov.id, 20), `${PROVIDERS[prov.id].label} API · your key · ${usd(m.spend.totalUsd)} of ${usd(m.spend.capUsd)} this month`]
+                : "No provider yet · your key, metered",
+          ),
         ),
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
@@ -4820,7 +4853,7 @@ async function aboutSection() {
         (status.notes ?? []).map((r) => releaseNotes(r, status.notes.length > 1)),
         // Hosted: the host moves this Hewn to new releases.
         settings?.hosted
-          ? h("div", { class: "small muted" }, "Your host upgrades Hewn. Your tools and data stay.")
+          ? h("div", { class: "small muted" }, "Upgrades happen for you. Your tools and data stay.")
           : [h("div", { class: "small muted" }, "Upgrade from a terminal. Backups run first; your tools and data stay."), commandBlock(`${CLI} upgrade`)],
         h("a", { class: "small", href: CHANGELOG_URL, target: "_blank", rel: "noopener" }, "What's new ›"),
       ),
@@ -5007,8 +5040,51 @@ const meter = (n, on, warn) => h("div", { class: `blocks ${warn ? "warn" : ""}`,
  * saved, no key), then the tiers. Pinned models only when a tool has one; caps per tool are on each
  * tool's model sheet (J3).
  */
+/** "12.37 Credits": a host's charge as given (2 decimals at most). */
+const creditWords = (t) => `${Math.round(t.amount * 100) / 100} ${t.unit}`;
+const CHARGE_KINDS = { build: "builds", intake: "talking requests through", model: "tools that think" };
+
+/**
+ * Hosted: tools' model calls run on the host's models and count in its unit (Credits). No
+ * providers, keys or USD caps: what each tier runs on, and what was used this month.
+ */
+async function hostedModelsPage(m, all) {
+  const catalog = await api(`/tools/remote/models`).catch(() => null);
+  const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
+  const { totals, rows } = m.host.charges;
+  const tierRow = (tier) => {
+    const users = m.usage[tier] ?? [];
+    return h(
+      "div",
+      { class: "setting tier-row" },
+      h("div", { class: "tier-name strong" }, titleCase(tier)),
+      h("div", { class: "grow" }, h("span", {}, catalog?.tiers?.[tier] ?? "Picked for you"), h("span", { class: "sub" }, [TIER_TEXT[tier], users.length ? `used by ${users.map((u) => u.name).join(", ")}` : null].filter(Boolean).join(" · "))),
+    );
+  };
+  settingsFrame(
+    "ai",
+    h("div", { class: "row tight baseline" }, back, h("h1", { class: "flush" }, "Models")),
+    h(
+      "div",
+      { class: "card stack-sm month-card" },
+      h("span", { class: "eyebrow" }, "This month"),
+      totals.length ? totals.map((t) => h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, creditWords(t)), h("span", { class: "muted" }, "used"))) : h("div", { class: "muted" }, "Nothing used yet"),
+      rows.length > 0 && h("div", { class: "small muted" }, rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")),
+    ),
+    h("div", { class: "card settings-card" }, h("div", { class: "eyebrow card-eyebrow" }, "Tiers"), m.tierNames.map(tierRow)),
+    m.pinned.length > 0 &&
+      h(
+        "div",
+        { class: "card settings-card" },
+        h("div", { class: "eyebrow card-eyebrow" }, "Pinned models"),
+        m.pinned.map((c) => h("div", { class: "setting" }, appIcon(all.get(c.id) ?? c, { size: 28 }), h("div", { class: "grow" }, h("span", {}, c.name), h("span", { class: "sub mono" }, c.model)))),
+      ),
+  );
+}
+
 async function modelsPage() {
   const [m, all] = await Promise.all([api("/models"), caps().catch(() => new Map())]);
+  if (m.host) return hostedModelsPage(m, all);
   const reload = (next) => next && route();
   const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
   const spend = m.spend;

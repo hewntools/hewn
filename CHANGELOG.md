@@ -2,6 +2,16 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.5 (unreleased)
+
+- **For hosts: tools that think run on the host's models** (hosted mode, `HEWN_HOSTED`). A tool's `ctx.model` goes to the host's `/v1/generate` (through the supervisor, which holds the token), so the owner needs no API key. Settings › AI › Models shows what each tier runs on and what the host charged this month (builds, talking requests through, tools that think), with no providers, keys or USD caps. A refusal (over the month) reaches the tool's caller in the host's words. See the [remote builder protocol](docs/internal/remote-builder.md#tools-model-calls-post-v1generate-hosted).
+- **A tool's own monthly cap, when hosted:** in Credits, in the tool's model settings; over it, its calls are refused and the Inbox says so.
+- **A tool's model settings save with one button:** the cap and the model together (Save), no separate Save for the cap.
+- **After Reload, the change drawer says the new version is on screen** (with Change more and Undo) instead of offering Reload again, and the tool's bar shows the new version.
+- **Fixed:** the change drawer's conversation couldn't be scrolled up once it was longer than the drawer; text put in the message box for you shows whole.
+- **A model reply cut off at the tool's limit fails clearly** (Anthropic, OpenAI, OpenRouter and the host's models): "The model's reply was cut off at this tool's limit of N tokens (maxTokens). The tool needs a fix: ask the builder to raise its limit." instead of half a reply. It's still paid for.
+- **Builders size `maxTokens` to the reply and pass `schema`** whenever the code reads data from it (the builder brief).
+
 ## 0.4.4 (2026-10-20)
 
 - **For hosts: hosted mode** (`HEWN_HOSTED=1`, with `HEWN_BUILD_URL`; optional `HEWN_HOST_SIGNIN_URL`). For an owner who has no terminal: signed-out pages and agent approval send them to the host's sign-in instead of a command, the first run goes straight to making something (no "who builds" step), and Settings hides what the host manages. See [remote access](docs/remote-access.md#running-hewn-for-someone-else-hewn_hosted).

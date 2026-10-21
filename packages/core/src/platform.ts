@@ -41,8 +41,11 @@ import {
   costOf,
   estimateInputTokens,
   type GenerateRequest,
+  type HostGenerateResult,
+  type HostModels,
   inspectRequest,
   type ModelHandler,
+  type ModelMessage,
   type ModelPrice,
   type ModelSettings,
   listModelsCall,
@@ -57,6 +60,8 @@ import {
   providerError,
   providerOf,
   resolveModel,
+  saneCharge,
+  cutOffMessage,
   structured,
 } from "./models.ts";
 import { EFFORT, MODEL_NAME } from "./build-models.ts";
@@ -219,6 +224,11 @@ export interface PlatformOptions {
   confirmWaitMs?: number;
   /** HTTP for the model port (provider calls, the model catalog). Absent: models can't run on this host. */
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
+  /**
+   * Hosted (HEWN_HOSTED): the host runs tools' model calls on its own keys. Then no provider or key
+   * is needed, the host decides what a tier runs on, and it charges in its own unit (no USD caps).
+   */
+  hostModels?: HostModels;
 }
 
 /** Where the owner's model provider API keys live in the secret store. */
@@ -300,6 +310,8 @@ export class Platform {
   confirmWaitMs: number;
   logRetentionDays: () => number;
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Hosted: the host runs tools' model calls (PlatformOptions.hostModels). */
+  hostModels?: HostModels;
   private catalogIndex?: { fetchedAt: string; byId: Map<string, CatalogEntry> };
   private providerLists = new Map<string, { raw: string | undefined; list: ReturnType<Platform["providerList"]> }>();
   private brief: string;
@@ -354,6 +366,7 @@ export class Platform {
     this.confirmWaitMs = opts.confirmWaitMs ?? 60_000;
     this.logRetentionDays = opts.logRetentionDays ?? (() => LOG_RETENTION_DAYS);
     this.modelFetch = opts.modelFetch;
+    this.hostModels = opts.hostModels;
   }
 
   /**
@@ -1299,6 +1312,8 @@ export class Platform {
 
   /** Why a model requirement can't run right now, or undefined if it can. */
   modelProblem(r: ModelRequirement): string | undefined {
+    // Hosted: the host runs it, or says why not when it's called.
+    if (this.hostModels) return undefined;
     const resolved = resolveModel(r, this.modelSettings_());
     if ("problem" in resolved) return resolved.problem;
     const provider = providerOf(resolved.model);
@@ -1336,9 +1351,14 @@ export class Platform {
       pinned: active.filter((c) => c.model?.model).map((c) => ({ id: c.id, name: c.name, model: c.model!.model!, problem: this.modelProblem(c.model!) ?? null, retired: this.retiredModel(c.model!.model!) ?? null })),
       monthlyCapUsd: settings.monthlyCapUsd,
       capabilityCapsUsd: settings.capabilityCapsUsd,
+      capabilityCapsHost: settings.capabilityCapsHost,
+      // Hosted: each capped tool's use this month, in the cap's unit.
+      hostCapUse: this.hostModels ? Object.fromEntries(Object.keys(settings.capabilityCapsHost).map((id) => [id, this.hostCapUse(id)])) : {},
       prices: settings.prices,
       catalog: { fetchedAt: stored?.fetchedAt || null, error: stored?.error ?? null },
       spend: this.modelSpend(owner),
+      // Hosted: the host runs tools' model calls; what it charged this month, per unit, as given.
+      host: this.hostModels ? { charges: this.hostCharges(owner) } : null,
     };
   }
 
@@ -1346,7 +1366,7 @@ export class Platform {
    * Change model settings (owner only): the active provider (it must have a key; its tiers start
    * from the suggestion), a provider's tiers (ids within that provider; null clears one), caps, prices.
    */
-  setModelSettings(owner: Agent, change: { provider?: string; tiers?: Record<string, Record<string, string | null>>; monthlyCapUsd?: unknown; capabilityCapsUsd?: Record<string, unknown>; prices?: Record<string, unknown> }) {
+  setModelSettings(owner: Agent, change: { provider?: string; tiers?: Record<string, Record<string, string | null>>; monthlyCapUsd?: unknown; capabilityCapsUsd?: Record<string, unknown>; capabilityCapsHost?: Record<string, unknown>; prices?: Record<string, unknown> }) {
     requireOwner(owner);
     const next = this.modelSettings_();
     const usd = (v: unknown, what: string) => {
@@ -1377,6 +1397,13 @@ export class Platform {
       if (!Object.keys(next.tiers[pr] ?? {}).length) next.tiers[pr] = this.suggestedTiers(pr);
     }
     if (change.monthlyCapUsd !== undefined) next.monthlyCapUsd = usd(change.monthlyCapUsd, "the monthly cap");
+    if (change.capabilityCapsHost !== undefined)
+      next.capabilityCapsHost = Object.fromEntries(
+        Object.entries(change.capabilityCapsHost ?? {}).map(([id, v]) => {
+          if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1_000_000) throw new PlatformError("invalid_request", `${id}'s cap must be a number from 0 to 1000000`);
+          return [id, v];
+        }),
+      );
     if (change.capabilityCapsUsd !== undefined) next.capabilityCapsUsd = Object.fromEntries(Object.entries(change.capabilityCapsUsd ?? {}).map(([id, v]) => [id, usd(v, `${id}'s cap`)]));
     if (change.prices !== undefined) {
       next.prices = Object.fromEntries(
@@ -1598,6 +1625,30 @@ export class Platform {
     }
   }
 
+  /** What the host charged this month (builds, the intake, model calls), per unit: amounts as given, summed as decimals. */
+  hostCharges(owner: Agent, month = new Date().toISOString().slice(0, 7)) {
+    requireOwner(owner);
+    const rows = this.registry.hostCharges(month);
+    const units = [...new Set(rows.map((r) => r.unit))];
+    return { month, totals: units.map((unit) => ({ unit, amount: Math.round(rows.filter((r) => r.unit === unit).reduce((n, r) => n + r.amount, 0) * 100) / 100 })), rows, byCapability: this.registry.hostChargesByCapability(month) };
+  }
+
+  /**
+   * What a tool's model calls were charged this month, against its hosted cap: in the unit its latest
+   * charge used (a cap has no unit of its own; a host keeps one), rounded to the hundredth.
+   */
+  hostCapUse(capabilityId: string, month = new Date().toISOString().slice(0, 7)): { spent: number; unit: string } {
+    const used = this.registry.hostChargesByCapability(month).filter((x) => x.capabilityId === capabilityId);
+    const unit = this.registry.latestHostChargeUnit(capabilityId) ?? used[0]?.unit ?? "Credits";
+    return { spent: Math.round(used.filter((x) => x.unit === unit).reduce((n, x) => n + x.amount, 0) * 100) / 100, unit };
+  }
+
+  /** Record a charge the host made for something Hewn didn't run itself (an intake turn). */
+  recordHostCharge(owner: Agent, kind: "intake", c: unknown) {
+    requireOwner(owner);
+    if (saneCharge(c)) this.registry.addHostCharge(kind, c);
+  }
+
   /** This month's model spend (owner only). */
   modelSpend(owner: Agent, month = new Date().toISOString().slice(0, 7)) {
     requireOwner(owner);
@@ -1607,6 +1658,7 @@ export class Platform {
 
   /** ctx.model.generate for one call chain: checks, reserves budget, calls the provider, settles. */
   private modelHandler(capabilityId: string, requirement: ModelRequirement, deadline: Deadline, caller: string): ModelHandler {
+    if (this.hostModels) return this.hostModelHandler(this.hostModels, capabilityId, requirement, deadline, caller);
     return async (raw: GenerateRequest) => {
       const problem = this.modelProblem(requirement);
       if (problem) throw new PlatformError("not_ready", `${capabilityId} can't use a model: ${problem}`);
@@ -1627,7 +1679,7 @@ export class Platform {
       if (!held.ok) {
         throw new PlatformError(
           "operation_failed",
-          `model budget: this call could cost up to $${reserve.toFixed(4)}, and ${held.scope === "all" ? `all tools together have spent $${held.spent.toFixed(2)} of the $${held.cap.toFixed(2)} monthly budget` : `${capabilityId} has spent $${held.spent.toFixed(2)} of its $${held.cap.toFixed(2)} this month`} (the owner can raise it under Settings › AI › Models)`,
+          `model budget: this call could cost up to $${reserve.toFixed(4)}, and ${held.scope === "all" ? `all tools together have spent $${held.spent.toFixed(2)} of the $${held.cap.toFixed(2)} monthly budget` : `${capabilityId} has spent $${held.spent.toFixed(2)} of its $${held.cap.toFixed(2)} this month`} (raise it under Settings › AI › Models)`,
           { model: { budget: true } },
         );
       }
@@ -1658,10 +1710,59 @@ export class Platform {
         deadline.endWait();
       }
       const cost = reply.cost ?? costOf(price, reply.inputTokens, reply.outputTokens);
-      this.registry.settleModelSpend(id, { costUsd: cost, inputTokens: reply.inputTokens, outputTokens: reply.outputTokens });
+      // Billed all the same; half a reply is no reply.
+      this.registry.settleModelSpend(id, { costUsd: cost, inputTokens: reply.inputTokens, outputTokens: reply.outputTokens, ...(reply.cutOff ? { error: cutOffMessage(r.maxTokens) } : {}) });
       this.warnNearCap(capabilityId, month, settings);
+      if (reply.cutOff) throw new PlatformError("operation_failed", cutOffMessage(r.maxTokens), { model: { stop: "max_tokens" } });
       const json = r.schema ? structured(reply.text, r.schema) : undefined;
       return { text: reply.text, ...(json !== undefined ? { json } : {}), usage: { inputTokens: reply.inputTokens, outputTokens: reply.outputTokens }, cost, model };
+    };
+  }
+
+  /**
+   * Hosted: ctx.model.generate goes to the host. The request is checked here as for a provider; the
+   * host picks the model and charges in its own unit. The call is logged (Activity) at $0.
+   */
+  private hostModelHandler(host: HostModels, capabilityId: string, requirement: ModelRequirement, deadline: Deadline, caller: string): ModelHandler {
+    return async (raw: GenerateRequest) => {
+      const r = inspectRequest(raw, requirement.input?.includes("image") ?? false);
+      if (deadline.modelBudget() < 1000) throw new PlatformError("operation_failed", "no time left in this call chain for a model call (an async operation suits long work)");
+      // The tool's own cap, in the host's unit: checked before the call (a call's charge is known only
+      // after, so calls running at once may each pass it; the month's total is the host's to enforce).
+      const cap = this.modelSettings_().capabilityCapsHost[capabilityId];
+      if (cap !== undefined) {
+        const { spent, unit } = this.hostCapUse(capabilityId);
+        if (spent >= cap) throw new PlatformError("operation_failed", `model budget: ${capabilityId} has used ${spent} of its ${cap} ${unit} this month (raise it in the tool's model settings)`, { model: { budget: true } });
+      }
+      const id = `m-${randomToken().slice(0, 16)}`;
+      const asked = requirement.model ?? `tier:${requirement.tier ?? "standard"}`;
+      this.registry.reserveModelSpend({ id, capabilityId, model: asked, month: new Date().toISOString().slice(0, 7), usd: 0, caller }, { total: Infinity });
+      const recordCharge = (c: unknown) => saneCharge(c) && this.registry.addHostCharge("model", c, capabilityId);
+      const messages: ModelMessage[] = raw.messages ?? [{ role: "user", content: raw.prompt! }];
+      let reply: HostGenerateResult;
+      deadline.beginWait();
+      try {
+        reply = await host(
+          { capabilityId, ...(requirement.model ? { model: requirement.model } : { tier: requirement.tier ?? "standard" }), ...(raw.system !== undefined ? { system: raw.system } : {}), messages, ...(r.schema ? { schema: r.schema } : {}), maxTokens: r.maxTokens },
+          AbortSignal.timeout(Math.max(1000, deadline.modelBudget())),
+        );
+      } catch (e) {
+        recordCharge((e as { charge?: unknown }).charge);
+        const timedOut = (e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError";
+        const cutOff = (e as { stop?: string }).stop === "max_tokens";
+        // A refusal, or a reply cut off at the tool's limit, is worded for the owner: kept as is.
+        const message = timedOut ? "the model: no reply in time" : cutOff ? cutOffMessage(r.maxTokens) : (e as { refused?: boolean }).refused ? (e as Error).message : `the model: ${(e as Error).message}`;
+        this.registry.settleModelSpend(id, { costUsd: 0, inputTokens: 0, outputTokens: 0, error: message.slice(0, 300) });
+        throw new PlatformError("operation_failed", message, cutOff ? { model: { stop: "max_tokens" } } : undefined);
+      } finally {
+        deadline.endWait();
+      }
+      recordCharge(reply.charge);
+      const usage = { inputTokens: Number(reply.usage?.inputTokens) || 0, outputTokens: Number(reply.usage?.outputTokens) || 0 };
+      this.registry.settleModelSpend(id, { costUsd: 0, ...usage });
+      const text = String(reply.text ?? "");
+      const json = r.schema ? structured(text, r.schema) : undefined;
+      return { text, ...(json !== undefined ? { json } : {}), usage, cost: 0, model: String(reply.model ?? asked) };
     };
   }
 
@@ -2824,8 +2925,9 @@ export class Platform {
             onModel: (ran) => this.registry.setRanModel(buildId, ran),
             onCharge: (c) => {
               // The only check on a value from the builder's host: a sane amount and a short unit, else ignored.
-              if (!Number.isFinite(c.amount) || c.amount < 0 || c.amount > 1e6 || !/^[A-Za-z][A-Za-z ]{0,19}$/.test(c.unit)) return;
+              if (!saneCharge(c)) return;
               this.registry.addBuildCharge(buildId, c);
+              this.registry.addHostCharge("build", c, build.capabilityId);
             },
           },
         );
