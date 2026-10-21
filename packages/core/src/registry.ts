@@ -892,6 +892,8 @@ export class Registry {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
+      // Its failed calls (for "Ask builder to fix this") go with it: a new tool under the id starts clean.
+      this.db.prepare("DELETE FROM platform_kv WHERE key = ?").run(`failures:${id}`);
     });
   }
 

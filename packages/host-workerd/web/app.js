@@ -489,7 +489,8 @@ const openChange = (c, o) => go(changeHref(c, o));
  * reads it, can edit it, and sends it.
  */
 const fixText = (f) => {
-  const who = /^widget:/.test(f.caller ?? "") ? "A widget" : /^schedule:/.test(f.caller ?? "") ? "A schedule" : /^(user|web|ui:)/.test(f.caller ?? "user") ? "I" : actorLabel(f.caller);
+  const label = actorLabel(f.caller);
+  const who = /^widget:/.test(f.caller ?? "") ? "A widget" : /^schedule:/.test(f.caller ?? "") ? "A schedule" : /^(user|web|ui:)/.test(f.caller ?? "user") ? "I" : label && label !== f.caller ? label : "An agent";
   const input = f.input && f.input !== "{}" ? `\n\nInput: ${f.input}` : "";
   const logs = f.logs?.length ? `\n\nLast log lines:\n${f.logs.join("\n")}` : "";
   return `${who} ran ${f.operation} and it failed:\n${f.error}${input}${logs}\n\nFix it so this works.`;
@@ -1528,7 +1529,8 @@ async function appPage(id, q) {
   barEl.querySelector(".app-title")?.append(subtitle);
   const fixSlot = h("div", { class: "fix-slot" });
   const showFix = async () => {
-    const [f] = await api(`/capabilities/${enc(c.id)}/failures`).catch(() => []);
+    // This screen's own failure (its calls run as ui:<id>), not an agent's or a schedule's.
+    const f = (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find((x) => x.caller === `ui:${c.id}`);
     if (!f || Date.now() - Date.parse(f.at) > 60_000) return;
     put(fixSlot, h("div", { class: "notice danger fix-bar" }, h("span", { class: "grow" }, `${f.operation.split("@")[0]} failed: ${runFailure(f.error, f.operation)}`), fixButton(() => askFix(c, f)), h("button", { class: "ghost sm icon-only", "aria-label": "Dismiss", onclick: () => put(fixSlot) }, "×")));
   };
@@ -1757,7 +1759,7 @@ function runForm(id, cap, op) {
       localStorage.setItem(memoryKey, JSON.stringify(input));
       put(result, head(h("span", { class: "pill ok with-dot" }, `ok · ${Math.round(performance.now() - started)}ms`)), renderResult(r.result));
     } catch (e) {
-      put(result, head(h("span", { class: "pill danger with-dot" }, `failed · ${Math.round(performance.now() - started)}ms`)), errorBox(e), fixButton(() => askFix(cap, { caller: "user", operation: `${op.name}@${op.version}`, error: e.message, input: JSON.stringify(input) })), e.data?.details ? h("pre", { class: "code" }, JSON.stringify(e.data.details, null, 2)) : "");
+      put(result, head(h("span", { class: "pill danger with-dot" }, `failed · ${Math.round(performance.now() - started)}ms`)), errorBox(e), fixButton(() => askFix(cap, { caller: "user", operation: `${op.name}@${op.version}`, error: e.message, input: JSON.stringify(input).slice(0, 2000) })), e.data?.details ? h("pre", { class: "code" }, JSON.stringify(e.data.details, null, 2)) : "");
     } finally {
       runBtn.disabled = false;
     }
@@ -2711,6 +2713,14 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     e?.preventDefault();
     const text = input.value.trim();
     if (!text) return;
+    // Text put in from the address (m=, "Ask builder to fix this") is sent: a redraw mustn't put it back.
+    const [path, qs = ""] = location.hash.split("?");
+    const params = new URLSearchParams(qs);
+    if (params.has("m")) {
+      params.delete("m");
+      params.delete("send");
+      history.replaceState(null, "", `${path}${params.size ? `?${params}` : ""}`);
+    }
     if (focus === null && widgetParam && !widgetsMode && capId) focus = ((await api(`/capabilities/${enc(capId)}`).catch(() => null))?.widgets ?? []).find((w) => w.name === widgetParam) ?? false;
     messages.push({ role: "user", content: text });
     heading.hidden = embedded;

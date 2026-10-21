@@ -288,6 +288,16 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
 
+/**
+ * An operation's input as the failure record keeps it: values under names that look like
+ * credentials (password, token, secret, key …) are masked. Stored secrets are redacted separately.
+ */
+export const maskInput = (v: unknown, depth = 0): unknown => {
+  if (depth > 6 || v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.slice(0, 50).map((x) => maskInput(x, depth + 1));
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, /pass(word)?|token|secret|api[-_]?key|private|credential|auth/i.test(k) ? "[hidden]" : maskInput(x, depth + 1)]));
+};
+
 export class Platform {
   registry: Registry;
   blobs: Blobs;
@@ -2004,7 +2014,7 @@ export class Platform {
       } else if (isSignIn) this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: (sign-in failed; details aren't kept)`, []);
       else {
         this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: ${err.message}`, logs);
-        this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: err.message, input: redact(JSON.stringify(req.input ?? {}) ?? "{}"), logs });
+        this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: err.message, input: redact(JSON.stringify(maskInput(req.input ?? {})) ?? "{}"), logs });
       }
       if (err.details && typeof err.details === "object" && "logs" in err.details) {
         const { logs: _omit, ...rest } = err.details as Record<string, unknown>;
@@ -2026,6 +2036,8 @@ export class Platform {
     if (leaks(JSON.stringify(rest.result ?? null))) {
       const message = `${cap.id}/${rest.operation} returned one of its stored secrets; the result was withheld`;
       if (record) this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR forbidden: ${message}`, isSignIn ? [] : logs);
+      // A result carrying a stored secret is the tool's bug: worth asking the builder to fix.
+      if (record && !isSignIn) this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: message, input: redact(JSON.stringify(maskInput(req.input ?? {})) ?? "{}"), logs });
       this.logger(message);
       throw new PlatformError("forbidden", message);
     }
@@ -2240,7 +2252,10 @@ export class Platform {
     try {
       const key = `failures:${id}`;
       const entry = { at: new Date().toISOString(), caller: f.caller, operation: f.operation, error: f.error.slice(0, 1000), input: f.input.slice(0, 2000), logs: f.logs.slice(-10).map((l) => l.slice(0, 300)) };
-      this.registry.setKv(key, [entry, ...(this.registry.getKv<(typeof entry)[]>(key) ?? [])].slice(0, 10));
+      // Kept no longer than the call log (Settings › Data › Keep call logs; 0 = forever).
+      const days = this.logRetentionDays();
+      const since = days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : "";
+      this.registry.setKv(key, [entry, ...(this.registry.getKv<(typeof entry)[]>(key) ?? [])].filter((x) => x.at >= since).slice(0, 10));
     } catch {
       // never breaks a call
     }

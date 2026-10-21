@@ -310,6 +310,10 @@ The audit log need not record every harmless operation.
 
 The target is useful authority provenance, not exhaustive surveillance.
 
+### Failed calls (for "Ask builder to fix this")
+
+The call log never keeps an operation's input. One exception, kept to what's needed: each tool's last ten failed calls keep the caller, the operation, the error, the input and the last log lines, so the owner can ask the builder to fix the tool with the context in it. The input is reduced first: stored secrets are redacted as in the log, values under credential-like names (password, token, secret, key, auth …) are masked, and it's cut at 2 KB. The sign-in step's failures aren't kept at all. Only the owner can read them (`GET /api/capabilities/:id/failures`); they leave with the call log's retention and when the tool is purged.
+
 ## Future authorization engine
 
 A relationship-based authorization engine such as OpenFGA or Auth0 FGA may eventually be appropriate for representing relationships such as:
