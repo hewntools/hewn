@@ -771,9 +771,9 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     else if (capUsd > 0 && totalUsd >= 0.8 * capUsd) needs.push({ kind: "spend", id: "all", title: "Models", detail: `${Math.round((totalUsd / capUsd) * 100)}% of this month's ${usdText(capUsd)}`, severity: "warn", action: "Open" });
     // Hosted: a tool over its own cap (in the host's unit).
     for (const [id, cap] of Object.entries(m.host ? m.capabilityCapsHost : {})) {
-      const used = m.host!.charges.byCapability.filter((x) => x.capabilityId === id);
-      const spent = used.reduce((n, x) => n + x.amount, 0);
-      if (spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its cap of ${cap} ${used[0]?.unit ?? "Credits"}`, severity: "danger", action: "Raise cap…" });
+      const { spent, unit } = m.hostCapUse[id] ?? { spent: 0, unit: "Credits" };
+      // As for the USD caps: 0 is "none for this tool", not something to flag.
+      if (cap > 0 && spent >= cap && caps.some((c) => c.id === id)) needs.push({ kind: "spend", id, capabilityId: id, title: nameOf(id), detail: `calls refused: over its cap of ${cap} ${unit}`, severity: "danger", action: "Raise cap…" });
     }
     for (const [id, cap] of Object.entries(m.capabilityCapsUsd)) {
       const spent = rows.filter((r) => r.capabilityId === id).reduce((n, r) => n + r.costUsd, 0);

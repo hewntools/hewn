@@ -1423,9 +1423,11 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
       onPromoted: (b) => {
         const v = `v${b.resultVersion ?? ""}`;
         const notice = h("div", { class: "notice ok drawer-ready" });
-        const undo = h("button", { class: "sm ghost", onclick: () => undoChange(c, b).then(onReload, fail) }, "Undo");
+        const more = () => h("button", { class: "sm", onclick: showIntake }, "Change more");
+        // Undone: say so (the notice no longer names the version that's gone).
+        const undo = h("button", { class: "sm ghost", onclick: () => undoChange(c, b).then(() => (onReload(), put(notice, h("span", { class: "grow" }, h("b", {}, `Back to v${(b.resultVersion ?? 2) - 1}.`)), more())), fail) }, "Undo");
         // Once reloaded, it says so (no Reload to press again), and offers the next change.
-        const shown = () => put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is on screen.`)), h("button", { class: "sm", onclick: showIntake }, "Change more"), undo);
+        const shown = () => put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is on screen.`)), more(), undo);
         put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is ready.`), " Reload to see it."), h("button", { class: "sm primary", onclick: () => (onReload(), shown()) }, "Reload"), undo);
         return notice;
       },

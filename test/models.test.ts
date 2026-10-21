@@ -385,6 +385,7 @@ describe("model port: hosted (tools' model calls on the host)", () => {
     await assert.rejects(explain(), /word-explainer has used 0\.74 of its 0\.5 Credits this month/);
     assert.equal(asked.length, 2, "the refused call never reached the host");
     assert.deepEqual(t.platform.hostCharges(USER).byCapability, [{ capabilityId: "word-explainer", unit: "Credits", amount: 0.74, count: 2 }]);
+    assert.deepEqual(t.platform.models(USER).hostCapUse, { "word-explainer": { spent: 0.74, unit: "Credits" } }, "for the Inbox and the model sheet");
   });
 
   test("a refusal reaches the caller as the host words it; a failed call that was answered still counts", async () => {
