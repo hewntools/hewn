@@ -1667,7 +1667,7 @@ export class Platform {
       if (!held.ok) {
         throw new PlatformError(
           "operation_failed",
-          `model budget: this call could cost up to $${reserve.toFixed(4)}, and ${held.scope === "all" ? `all tools together have spent $${held.spent.toFixed(2)} of the $${held.cap.toFixed(2)} monthly budget` : `${capabilityId} has spent $${held.spent.toFixed(2)} of its $${held.cap.toFixed(2)} this month`} (the owner can raise it under Settings › AI › Models)`,
+          `model budget: this call could cost up to $${reserve.toFixed(4)}, and ${held.scope === "all" ? `all tools together have spent $${held.spent.toFixed(2)} of the $${held.cap.toFixed(2)} monthly budget` : `${capabilityId} has spent $${held.spent.toFixed(2)} of its $${held.cap.toFixed(2)} this month`} (raise it under Settings › AI › Models)`,
           { model: { budget: true } },
         );
       }
@@ -1720,7 +1720,7 @@ export class Platform {
       if (cap !== undefined) {
         const used = this.registry.hostChargesByCapability(new Date().toISOString().slice(0, 7)).filter((x) => x.capabilityId === capabilityId);
         const spent = used.reduce((n, x) => n + x.amount, 0);
-        if (spent >= cap) throw new PlatformError("operation_failed", `model budget: ${capabilityId} has used ${Math.round(spent * 100) / 100} of its ${cap} ${used[0]?.unit ?? "Credits"} this month (the owner can raise it in the tool's model settings)`, { model: { budget: true } });
+        if (spent >= cap) throw new PlatformError("operation_failed", `model budget: ${capabilityId} has used ${Math.round(spent * 100) / 100} of its ${cap} ${used[0]?.unit ?? "Credits"} this month (raise it in the tool's model settings)`, { model: { budget: true } });
       }
       const id = `m-${randomToken().slice(0, 16)}`;
       const asked = requirement.model ?? `tier:${requirement.tier ?? "standard"}`;
