@@ -196,6 +196,11 @@ describe("remote builder and intake", () => {
     await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { unavailable?: boolean }) => e.unavailable === true && /token/.test(e.message));
     handle = (_b, _r, res) => json(res, 502, { error: "cut off", stop: "max_tokens", charge: { amount: 3, unit: "Credits" } });
     await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { stop?: string }) => e.stop === "max_tokens");
+    // The same on a 200: half a reply is no reply, and its charge still counts.
+    handle = (_b, _r, res) => json(res, 200, { text: '{"half": ', stop: "max_tokens", charge: { amount: 3, unit: "Credits" } });
+    await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { stop?: string; charge?: { amount: number } }) => e.stop === "max_tokens" && e.charge?.amount === 3);
+    handle = (_b, _r, res) => json(res, 200, { error: "upstream failed", charge: { amount: 1, unit: "Credits" } });
+    await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { charge?: { amount: number } }) => /upstream failed/.test(e.message) && e.charge?.amount === 1);
     handle = (_b, _r, res) => json(res, 502, { error: "the model refused", charge: { amount: 0.12, unit: "Credits" } });
     await assert.rejects(remoteGenerate(remote)(req, signal), (e: Error & { charge?: unknown; refused?: boolean }) => !e.refused && /the model refused/.test(e.message) && (e.charge as { amount: number }).amount === 0.12);
     // An intake turn's charge goes to the caller as progress (recorded, not shown).

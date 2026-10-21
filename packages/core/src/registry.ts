@@ -610,6 +610,12 @@ export class Registry {
       .map((r) => ({ capabilityId: String(r.capability_id), unit: String(r.unit), amount: Number(r.amount), count: Number(r.n) }));
   }
 
+  /** The unit of a capability's latest model-call charge (the host's unit). */
+  latestHostChargeUnit(capabilityId: string): string | undefined {
+    const r = this.db.prepare("SELECT unit FROM host_charges WHERE kind = 'model' AND capability_id = ? ORDER BY at DESC LIMIT 1").get(capabilityId);
+    return r ? String(r.unit) : undefined;
+  }
+
   /** Add an attempt's charge to the build's (a different unit replaces it). */
   addBuildCharge(buildId: string, c: { amount: number; unit: string }) {
     const cur = this.buildCharge(buildId);

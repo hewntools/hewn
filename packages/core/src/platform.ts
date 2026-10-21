@@ -1352,6 +1352,8 @@ export class Platform {
       monthlyCapUsd: settings.monthlyCapUsd,
       capabilityCapsUsd: settings.capabilityCapsUsd,
       capabilityCapsHost: settings.capabilityCapsHost,
+      // Hosted: each capped tool's use this month, in the cap's unit.
+      hostCapUse: this.hostModels ? Object.fromEntries(Object.keys(settings.capabilityCapsHost).map((id) => [id, this.hostCapUse(id)])) : {},
       prices: settings.prices,
       catalog: { fetchedAt: stored?.fetchedAt || null, error: stored?.error ?? null },
       spend: this.modelSpend(owner),
@@ -1631,6 +1633,16 @@ export class Platform {
     return { month, totals: units.map((unit) => ({ unit, amount: Math.round(rows.filter((r) => r.unit === unit).reduce((n, r) => n + r.amount, 0) * 100) / 100 })), rows, byCapability: this.registry.hostChargesByCapability(month) };
   }
 
+  /**
+   * What a tool's model calls were charged this month, against its hosted cap: in the unit its latest
+   * charge used (a cap has no unit of its own; a host keeps one), rounded to the hundredth.
+   */
+  hostCapUse(capabilityId: string, month = new Date().toISOString().slice(0, 7)): { spent: number; unit: string } {
+    const used = this.registry.hostChargesByCapability(month).filter((x) => x.capabilityId === capabilityId);
+    const unit = this.registry.latestHostChargeUnit(capabilityId) ?? used[0]?.unit ?? "Credits";
+    return { spent: Math.round(used.filter((x) => x.unit === unit).reduce((n, x) => n + x.amount, 0) * 100) / 100, unit };
+  }
+
   /** Record a charge the host made for something Hewn didn't run itself (an intake turn). */
   recordHostCharge(owner: Agent, kind: "intake", c: unknown) {
     requireOwner(owner);
@@ -1715,17 +1727,17 @@ export class Platform {
     return async (raw: GenerateRequest) => {
       const r = inspectRequest(raw, requirement.input?.includes("image") ?? false);
       if (deadline.modelBudget() < 1000) throw new PlatformError("operation_failed", "no time left in this call chain for a model call (an async operation suits long work)");
-      // The tool's own cap, in the host's unit: checked before the call (a call's charge is known only after).
+      // The tool's own cap, in the host's unit: checked before the call (a call's charge is known only
+      // after, so calls running at once may each pass it; the month's total is the host's to enforce).
       const cap = this.modelSettings_().capabilityCapsHost[capabilityId];
       if (cap !== undefined) {
-        const used = this.registry.hostChargesByCapability(new Date().toISOString().slice(0, 7)).filter((x) => x.capabilityId === capabilityId);
-        const spent = used.reduce((n, x) => n + x.amount, 0);
-        if (spent >= cap) throw new PlatformError("operation_failed", `model budget: ${capabilityId} has used ${Math.round(spent * 100) / 100} of its ${cap} ${used[0]?.unit ?? "Credits"} this month (raise it in the tool's model settings)`, { model: { budget: true } });
+        const { spent, unit } = this.hostCapUse(capabilityId);
+        if (spent >= cap) throw new PlatformError("operation_failed", `model budget: ${capabilityId} has used ${spent} of its ${cap} ${unit} this month (raise it in the tool's model settings)`, { model: { budget: true } });
       }
       const id = `m-${randomToken().slice(0, 16)}`;
       const asked = requirement.model ?? `tier:${requirement.tier ?? "standard"}`;
       this.registry.reserveModelSpend({ id, capabilityId, model: asked, month: new Date().toISOString().slice(0, 7), usd: 0, caller }, { total: Infinity });
-      const charge = (c: unknown) => saneCharge(c) && this.registry.addHostCharge("model", c, capabilityId);
+      const recordCharge = (c: unknown) => saneCharge(c) && this.registry.addHostCharge("model", c, capabilityId);
       const messages: ModelMessage[] = raw.messages ?? [{ role: "user", content: raw.prompt! }];
       let reply: HostGenerateResult;
       deadline.beginWait();
@@ -1735,7 +1747,7 @@ export class Platform {
           AbortSignal.timeout(Math.max(1000, deadline.modelBudget())),
         );
       } catch (e) {
-        charge((e as { charge?: unknown }).charge);
+        recordCharge((e as { charge?: unknown }).charge);
         const timedOut = (e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError";
         const cutOff = (e as { stop?: string }).stop === "max_tokens";
         // A refusal, or a reply cut off at the tool's limit, is worded for the owner: kept as is.
@@ -1745,7 +1757,7 @@ export class Platform {
       } finally {
         deadline.endWait();
       }
-      charge(reply.charge);
+      recordCharge(reply.charge);
       const usage = { inputTokens: Number(reply.usage?.inputTokens) || 0, outputTokens: Number(reply.usage?.outputTokens) || 0 };
       this.registry.settleModelSpend(id, { costUsd: 0, ...usage });
       const text = String(reply.text ?? "");
