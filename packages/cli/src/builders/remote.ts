@@ -11,6 +11,7 @@ import { readTree, writeTree } from "../workbench.ts";
 import { intakePrompt, parseIntake, partialReply, SCHEMA } from "../intake.ts";
 import type { Intake } from "../intake.ts";
 import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
+import type { HostGenerateResult, HostModels } from "@hewntools/core/models.ts";
 
 export interface RemoteJobs {
   /** The service's base URL, e.g. https://builds.example.com/ (HEWN_BUILD_URL). */
@@ -177,6 +178,8 @@ export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
           onProgress?.(partialReply(text));
         }
         if (typeof e.activity === "string") onProgress?.({ activity: e.activity });
+        // What this turn cost, in the host's unit: recorded for "Credits used", never shown in the chat.
+        if (e.charge && typeof e.charge === "object") onProgress?.({ charge: e.charge });
         if (typeof e.result === "string") result = e.result;
         if (typeof e.refused === "string") error = { refused: e.refused };
         else if (typeof e.error === "string") error = e;
@@ -187,5 +190,37 @@ export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
     if (error) throw failure(`intake failed: ${error.error}`, error.unavailable ? "unavailable" : undefined);
     if (!result) throw new Error(`intake failed: ${r.label} returned no reply`);
     return parseIntake(result, req.mode, req.current);
+  };
+}
+
+/**
+ * Tools' model calls on the host's keys (hosted): one JSON request per `ctx.model.generate`, one
+ * JSON reply. A refusal (any status, `{ refused }`) is final and goes to the tool's caller as is;
+ * a failed call may still carry the charge for a model that answered.
+ */
+export function remoteGenerate(r: RemoteJobs): HostModels {
+  return async (req, signal) => {
+    let res: Response;
+    try {
+      res = await (r.fetch ?? fetch)(endpoint(r, "v1/generate"), { method: "POST", headers: { authorization: `Bearer ${r.token}`, "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(req), signal });
+    } catch (e) {
+      if (signal.aborted) throw e;
+      throw new Error(`${r.label} couldn't be reached: ${(e as Error).message}`);
+    }
+    const text = await res.text().catch(() => "");
+    let j: Record<string, any> = {};
+    try {
+      j = JSON.parse(text);
+    } catch {
+      // not JSON
+    }
+    if (typeof j.refused === "string") throw failure(j.refused, "refused");
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) throw failure(`${r.label} didn't accept this Hewn's token (HTTP ${res.status})`, "unavailable");
+      // `stop: "max_tokens"`: the reply was cut off at the tool's limit (the tool needs a fix).
+      throw Object.assign(new Error(typeof j.error === "string" ? j.error : `HTTP ${res.status}`), j.charge ? { charge: j.charge } : {}, typeof j.stop === "string" ? { stop: j.stop } : {});
+    }
+    if (typeof j.text !== "string") throw new Error(`${r.label} returned no reply`);
+    return j as HostGenerateResult;
   };
 }

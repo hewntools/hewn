@@ -81,7 +81,7 @@ If the public listener can be reached without going through your proxy (a host w
 
 If you run Hewn for its owner and they have no terminal on the machine (a hosting service), set `HEWN_HOSTED=1` in `hewn serve`'s environment, together with `HEWN_BUILD_URL` (your builder: there are no agents on the machine to build with). `HEWN_HOST_SIGNIN_URL`, an https link where you sign the owner in and send them back with a sign-in link, is optional.
 
-Then the web client and its pages never send the owner to a command: signed out, they get a **Sign in** button to `HEWN_HOST_SIGNIN_URL` (or passkey sign-in, once they've added one); an agent's sign-in page links to Hewn to approve it; the first run has no "who builds" step; and Settings hides what you manage (the address, the sandbox, the backup folder, upgrades, and which agent builds). Connecting agents is through the public address only. Unset (the default): nothing changes.
+Then the web client and its pages never send the owner to a command: signed out, they get a **Sign in** button to `HEWN_HOST_SIGNIN_URL` (or passkey sign-in, once they've added one); an agent's sign-in page links to Hewn to approve it; the first run has no "who builds" step; and Settings hides what you manage (the address, the sandbox, the backup folder, upgrades, and which agent builds). Connecting agents is through the public address only. Tools that think (`ctx.model`) run on your models, through your builder's service (`/v1/generate`), so the owner needs no API key; Settings › AI › Models shows what each tier runs on and what you charged this month. Unset (the default): nothing changes.
 
 ### Other reverse proxies
 

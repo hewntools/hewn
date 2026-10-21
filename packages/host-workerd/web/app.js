@@ -1849,7 +1849,8 @@ async function grantsSheet(capId) {
   const modelReq = cap.requires?.model;
   const m = modelReq ? await api("/models").catch(() => null) : null;
   // No usable provider: the key block, even when the grant itself is approved.
-  const needsKey = !!modelReq && !!m && (!m.provider || !m.providers.find((p) => p.id === m.provider)?.keySet);
+  // Hosted: the host runs tools' model calls; no key to give.
+  const needsKey = !!modelReq && !!m && !m.host && (!m.provider || !m.providers.find((p) => p.id === m.provider)?.keySet);
   const pending = items.filter((i) => !i.approved || (i.kind === "secret" && missingSecrets.has(i.grant.slice(7))) || (i.kind === "model" && needsKey));
   const thenSignIn = async (ready) => (signIn && !ready && (await api(`/capabilities/${id}`)).status.missingSecrets.length ? signInDialog(capId) : ready);
 
@@ -4259,7 +4260,8 @@ async function addSheet() {
           choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
           // Hosted: the host builds; there are no agents on the machine to work for Hewn.
           !settings?.hosted && choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
-          choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
+          // Hosted: tools that think run on the host's models.
+          !settings?.hosted && choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
       ];
@@ -4641,7 +4643,16 @@ async function aiSection() {
           "div",
           { class: "grow" },
           h("span", { class: "strong" }, "Thinks inside tools"),
-          h("span", { class: "sub row tight" }, prov ? [providerTile(prov.id, 20), `${PROVIDERS[prov.id].label} API · your key · ${usd(m.spend.totalUsd)} of ${usd(m.spend.capUsd)} this month`] : "No provider yet · your key, metered"),
+          h(
+            "span",
+            { class: "sub row tight" },
+            // Hosted: the host's models, counted with the builds.
+            m?.host
+              ? `Your host's models${m.host.charges.totals.length ? ` · ${m.host.charges.totals.map(creditWords).join(", ")} used this month` : ""}`
+              : prov
+                ? [providerTile(prov.id, 20), `${PROVIDERS[prov.id].label} API · your key · ${usd(m.spend.totalUsd)} of ${usd(m.spend.capUsd)} this month`]
+                : "No provider yet · your key, metered",
+          ),
         ),
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
@@ -5034,8 +5045,52 @@ const meter = (n, on, warn) => h("div", { class: `blocks ${warn ? "warn" : ""}`,
  * saved, no key), then the tiers. Pinned models only when a tool has one; caps per tool are on each
  * tool's model sheet (J3).
  */
+/** "12.37 Credits": a host's charge as given (2 decimals at most). */
+const creditWords = (t) => `${Math.round(t.amount * 100) / 100} ${t.unit}`;
+const CHARGE_KINDS = { build: "builds", intake: "talking requests through", model: "tools that think" };
+
+/**
+ * Hosted: tools' model calls run on the host's models and count in its unit (Credits). No
+ * providers, keys or USD caps: what each tier runs on, and what was used this month.
+ */
+async function hostedModelsPage(m, all) {
+  const catalog = await api(`/tools/remote/models`).catch(() => null);
+  const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
+  const { totals, rows } = m.host.charges;
+  const tierRow = (tier) => {
+    const users = m.usage[tier] ?? [];
+    return h(
+      "div",
+      { class: "setting tier-row" },
+      h("div", { class: "tier-name strong" }, titleCase(tier)),
+      h("div", { class: "grow" }, h("span", {}, catalog?.tiers?.[tier] ?? "Your host picks"), h("span", { class: "sub" }, [TIER_TEXT[tier], users.length ? `used by ${users.map((u) => u.name).join(", ")}` : null].filter(Boolean).join(" · "))),
+    );
+  };
+  settingsFrame(
+    "ai",
+    h("div", { class: "row tight baseline" }, back, h("h1", { class: "flush" }, "Models")),
+    h(
+      "div",
+      { class: "card stack-sm month-card" },
+      h("span", { class: "eyebrow" }, "This month"),
+      totals.length ? totals.map((t) => h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, creditWords(t)), h("span", { class: "muted" }, "used"))) : h("div", { class: "muted" }, "Nothing used yet"),
+      rows.length > 0 && h("div", { class: "small muted" }, rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")),
+    ),
+    h("div", { class: "card settings-card" }, h("div", { class: "eyebrow card-eyebrow" }, "Tiers"), m.tierNames.map(tierRow)),
+    m.pinned.length > 0 &&
+      h(
+        "div",
+        { class: "card settings-card" },
+        h("div", { class: "eyebrow card-eyebrow" }, "Pinned models"),
+        m.pinned.map((c) => h("div", { class: "setting" }, appIcon(all.get(c.id) ?? c, { size: 28 }), h("div", { class: "grow" }, h("span", {}, c.name), h("span", { class: "sub mono" }, c.model)))),
+      ),
+    h("div", { class: "small faint" }, "Tools that think run on your host's models. Your host counts them with your builds."),
+  );
+}
+
 async function modelsPage() {
   const [m, all] = await Promise.all([api("/models"), caps().catch(() => new Map())]);
+  if (m.host) return hostedModelsPage(m, all);
   const reload = (next) => next && route();
   const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
   const spend = m.spend;

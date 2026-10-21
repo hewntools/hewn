@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
+import type { HostModels } from "@hewntools/core/models.ts";
 import { Platform } from "@hewntools/core/platform.ts";
 import type { SecretStore } from "@hewntools/core/ports.ts";
 import type { Home } from "@hewntools/cli/home.ts";
@@ -32,6 +33,8 @@ export interface NodePlatformOptions {
   visualCheck?: VisualCheck;
   /** HTTP for model providers and the model catalog (Hewn passes fetch; tests pass a fake). */
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Hosted: tools' model calls go to the host. */
+  hostModels?: HostModels;
   /** Builds that may run at once (default 5). */
   maxRunningBuilds?: number;
   /** Each builder's model list, for the efforts agents may ask for (default: without asking a CLI). */
@@ -58,6 +61,7 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
     logRetentionDays: opts.logRetentionDays,
     timezone: () => readConfig(home).timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     modelFetch: opts.modelFetch,
+    hostModels: opts.hostModels,
     // The owner's model choices, from platform.json (Settings › AI writes them there on this host).
     buildModel: (builder) => jobModel(readConfig(home), "builder", builder),
     agentBuildModels: (builder) => agentModels(readConfig(home), builder),

@@ -189,9 +189,14 @@ API key: the owner's keys, model choice and monthly budget live in Hewn.
    - `prompt` is a string or parts: `[{ type: "text", text }, { type: "image", data: "<base64>", mediaType: "image/png" }]`
      (png, jpeg, webp, gif; at most 5 MB and 8000 px a side each, 20 per call). `messages`
      (`[{ role: "user" | "assistant", content }]`) replaces `prompt` for a conversation.
-   - With `schema` (type object), the reply is checked and returned parsed as `json`.
-   - `maxTokens` defaults to 1024 (at most 16000). Each call is checked against the owner's budget
-     before it's made; a refused call throws, so catch it.
+   - Whenever your code reads data from the reply, pass `schema` (type object): the reply is
+     checked and returned parsed as `json`. Don't parse JSON out of `r.text` yourself.
+   - Size `maxTokens` to the longest reply the operation can need, with room to spare: a label or
+     a sentence 200, a paragraph 1000, a recipe or a list of items 4000–8000. It defaults to 1024
+     (at most 16000). A reply that reaches the limit is cut off, and the call throws ("cut off at
+     this tool's limit") instead of returning half of it.
+   - Each call is checked against the owner's budget before it's made; a refused call throws, so
+     catch it.
 3. **Never block a write on the model.** Store the record first with the generated field empty,
    then fill gaps in a separate, best-effort operation (e.g. `enrich_missing@1`) that does as many
    items as fit and returns `{ "done": n, "remaining": m }`. If the model is down or over budget,

@@ -70,9 +70,11 @@ const run = (cmd: string, args: string[]) => new Promise<string>((resolve, rejec
 export async function remoteCatalog(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
   const res = await fetchImpl(new URL("v1/models", url.endsWith("/") ? url : `${url}/`), { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`models: HTTP ${res.status}`);
-  const body = (await res.json()) as { models?: ModelChoice[] };
+  const body = (await res.json()) as { models?: ModelChoice[]; tiers?: Record<string, unknown> };
   const models = (body.models ?? []).filter((m) => m && typeof m.id === "string" && typeof m.label === "string").map((m) => ({ ...m, efforts: Array.isArray(m.efforts) ? m.efforts : [] }));
-  return { agent: "remote", models: models.some((m) => m.id === "default") ? models : [defaultChoice([]), ...models] };
+  // What each tier runs on for tools' model calls (hosted), as the host labels it.
+  const tiers = Object.fromEntries(["light", "standard", "strong", "max"].flatMap((t) => (typeof body.tiers?.[t] === "string" ? [[t, (body.tiers[t] as string).slice(0, 60)]] : [])));
+  return { agent: "remote", models: models.some((m) => m.id === "default") ? models : [defaultChoice([]), ...models], ...(Object.keys(tiers).length ? { tiers } : {}) };
 }
 
 /**
