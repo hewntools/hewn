@@ -2260,10 +2260,13 @@ async function toolModelSheet(c, { replace = false } = {}) {
   const used = Math.round(hostUsed.reduce((n, x) => n + x.amount, 0) * 100) / 100;
   return modal(
     (close) => {
-      const ok = h("button", { class: "primary" }, "Use it");
+      const ok = h("button", { class: "primary" }, "Save");
       const pickLine = h("span", { class: "sub" });
+      const modelChanged = () => (pinned ? pinned !== req.model : tier !== req.tier);
+      const capChanged = () => capInput.value.trim() !== String(own ?? "");
+      // One Save for both: the cap (a setting) and the model (a quick change: a new version, no builder).
       const sync = () => {
-        ok.disabled = pinned ? pinned === req.model : tier === req.tier;
+        ok.disabled = !modelChanged() && !capChanged();
         pickLine.textContent = pinned ? `${pinned}${retired && pinned === req.model ? " · no longer available" : ""}` : "Pin one model";
       };
       const radio = (checked, onChange) => {
@@ -2292,21 +2295,20 @@ async function toolModelSheet(c, { replace = false } = {}) {
       const capsKey = m.host ? "capabilityCapsHost" : "capabilityCapsUsd";
       const own = m[capsKey][c.id];
       const capInput = h("input", { type: "number", min: 0, step: 1, value: own ?? "", placeholder: "No cap", class: "model-cap", "aria-label": m.host ? `Cap in ${unit} a month` : "Cap in USD a month" });
+      capInput.addEventListener("input", () => sync());
       const saveCap = async () => {
         const caps = { ...m[capsKey] };
         if (capInput.value.trim() === "") delete caps[c.id];
         else caps[c.id] = Number(capInput.value);
-        try {
-          await api("/models", { method: "PUT", body: { [capsKey]: caps } });
-          toast(capInput.value.trim() === "" ? `${c.name}: no cap of its own` : m.host ? `${c.name}: at most ${Number(capInput.value)} ${unit} a month` : `${c.name}: at most $${Number(capInput.value)} a month`);
-          pollInbox();
-        } catch (e) {
-          fail(e);
-        }
+        await api("/models", { method: "PUT", body: { [capsKey]: caps } });
+        toast(capInput.value.trim() === "" ? `${c.name}: no cap of its own` : m.host ? `${c.name}: at most ${Number(capInput.value)} ${unit} a month` : `${c.name}: at most $${Number(capInput.value)} a month`);
+        pollInbox();
       };
       ok.addEventListener("click", async () => {
         try {
           ok.disabled = true;
+          if (capChanged()) await saveCap();
+          if (!modelChanged()) return close(true);
           const b = await api(`/capabilities/${enc(c.id)}/model`, { method: "POST", body: pinned ? { model: pinned } : { tier } });
           close(true);
           go(`#/b/${enc(b.buildId)}`);
@@ -2325,7 +2327,7 @@ async function toolModelSheet(c, { replace = false } = {}) {
           "div",
           { class: "inset-block row between" },
           h("div", { class: "col" }, h("span", { class: "eyebrow" }, "This month"), h("span", {}, m.host ? `${used} ${unit} · ${calls ? `${calls} call${calls === 1 ? "" : "s"}` : "no calls yet"}` : `${usd(spent)} · ${calls ? `${calls} call${calls === 1 ? "" : "s"}` : "no calls yet"}`)),
-          h("span", { class: "row tight nowrap" }, h("span", { class: "small faint" }, m.host ? "Cap" : "Cap $"), capInput, m.host && h("span", { class: "small faint" }, unit), h("button", { class: "sm", onclick: saveCap }, "Save")),
+          h("span", { class: "row tight nowrap" }, h("span", { class: "small faint" }, m.host ? "Cap" : "Cap $"), capInput, m.host && h("span", { class: "small faint" }, unit)),
         ),
         sheetActions(h("button", { onclick: () => close(false) }, "Cancel"), ok),
       ];
@@ -2659,6 +2661,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   input.value = q?.get("m") || (widgetsMode ? "Suggest some widgets." : connection ? `A connection to ${connection}, so my tools can use it.` : "");
   const grow = () => ((input.style.height = "auto"), (input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`));
   input.addEventListener("input", grow);
+  // Text put in for you ("Ask builder to fix this"): tall enough to read it whole, once it's on screen.
+  if (input.value) requestAnimationFrame(grow);
   window.addEventListener("resize", grow);
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));

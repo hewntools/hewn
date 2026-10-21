@@ -270,7 +270,8 @@ fieldset.job legend .sub { color: var(--text-2); }
 .with-drawer { min-height: 0; }
 .drawer-main { display: flex; flex-direction: column; min-height: 0; }
 .drawer-main > .run { overflow: auto; }
-.drawer-intake { display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s3); min-height: 100%; }
+.drawer-intake { display: flex; flex-direction: column; gap: var(--s3); min-height: 100%; }
+.drawer-intake > :first-child { margin-top: auto; }
 .drawer-title { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
 .drawer .composer textarea { min-height: 72px; }
 .drawer .bubble { max-width: 90%; }
