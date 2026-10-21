@@ -2,7 +2,7 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
-## 0.4.5 (unreleased)
+## 0.4.5 (2026-10-21)
 
 - **For hosts: tools that think run on the host's models** (hosted mode, `HEWN_HOSTED`). A tool's `ctx.model` goes to the host's `/v1/generate` (through the supervisor, which holds the token), so the owner needs no API key. Settings › AI › Models shows what each tier runs on and what the host charged this month (builds, talking requests through, tools that think), with no providers, keys or USD caps. A refusal (over the month) reaches the tool's caller in the host's words. See the [remote builder protocol](docs/internal/remote-builder.md#tools-model-calls-post-v1generate-hosted).
 - **A tool's own monthly cap, when hosted:** in Credits, in the tool's model settings; over it, its calls are refused and the Inbox says so.
@@ -10,7 +10,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **After Reload, the change drawer says the new version is on screen** (with Change more and Undo) instead of offering Reload again, and the tool's bar shows the new version.
 - **Fixed:** the change drawer's conversation couldn't be scrolled up once it was longer than the drawer; text put in the message box for you shows whole.
 - **A model reply cut off at the tool's limit fails clearly** (Anthropic, OpenAI, OpenRouter and the host's models): "The model's reply was cut off at this tool's limit of N tokens (maxTokens). The tool needs a fix: ask the builder to raise its limit." instead of half a reply. It's still paid for.
-- **Builders size `maxTokens` to the reply and pass `schema`** whenever the code reads data from it (the builder brief).
+- **Builders size `maxTokens` to the reply and pass `schema`** whenever the code reads data from it (the builder brief; @hewntools/spec 2.3.2).
 - **Ask builder to fix this:** when an operation fails in a tool's own screen, a run from Info fails, a widget can't refresh or a schedule's run fails, Hewn offers to have the tool fixed. It opens a change with the operation, the error, its input and the last log lines written in, for you to read and send. Hewn keeps each tool's last ten failed calls for this, no longer than the call log (never a stored secret or a credential-like value, never the sign-in step).
 
 ## 0.4.4 (2026-10-20)
