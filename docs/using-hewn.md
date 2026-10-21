@@ -58,6 +58,8 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)).
 
+**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed already written in: the operation, the error, its input and the last log lines. Read it, add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
+
 ![Running Log's Info page: its status and version, the Change it box, and the Operations, Allowed to, Schedules, Widgets and Versions rows](images/tool-info.png)
 
 ### Schedules

@@ -1901,7 +1901,10 @@ export class Platform {
       if (!record) {
         // nothing kept
       } else if (isSignIn) this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: (sign-in failed; details aren't kept)`, []);
-      else this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: ${err.message}`, logs);
+      else {
+        this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: ${err.message}`, logs);
+        this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: err.message, input: redact(JSON.stringify(req.input ?? {}) ?? "{}"), logs });
+      }
       if (err.details && typeof err.details === "object" && "logs" in err.details) {
         const { logs: _omit, ...rest } = err.details as Record<string, unknown>;
         err.details = Object.keys(rest).length ? rest : undefined; // capability logs are for the user, not agents
@@ -2125,6 +2128,27 @@ export class Platform {
     } catch {
       // logging must never break a call
     }
+  }
+
+  /**
+   * The tool's last failed calls (newest first, at most 10), for "Ask builder to fix this": what ran,
+   * who started it, the error, the input and the last console lines. Owner only; never secrets (the
+   * sign-in step isn't kept, and stored secrets are redacted as in the log).
+   */
+  private noteFailure(id: string, f: { caller: string; operation: string; error: string; input: string; logs: string[] }) {
+    try {
+      const key = `failures:${id}`;
+      const entry = { at: new Date().toISOString(), caller: f.caller, operation: f.operation, error: f.error.slice(0, 1000), input: f.input.slice(0, 2000), logs: f.logs.slice(-10).map((l) => l.slice(0, 300)) };
+      this.registry.setKv(key, [entry, ...(this.registry.getKv<(typeof entry)[]>(key) ?? [])].slice(0, 10));
+    } catch {
+      // never breaks a call
+    }
+  }
+
+  recentFailures(owner: Agent, capabilityId: string) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    return this.registry.getKv<{ at: string; caller: string; operation: string; error: string; input: string; logs: string[] }[]>(`failures:${capabilityId}`) ?? [];
   }
 
   /** The last `n` lines of a capability's call log. */

@@ -55,15 +55,21 @@
     return undefined;
   };
   const nativeFetch = window.fetch.bind(window);
+  // Embedded: a failed operation is worth a word to the web client, which offers to have it fixed
+  // (it reads what failed from Hewn itself; nothing about the call crosses here).
+  const failed = (res, api) => {
+    if (!res.ok && window.top !== window.self && api.pathname.endsWith("/api/invoke")) window.parent.postMessage({ hewn: 1, type: "failed" }, "*");
+    return res;
+  };
   window.fetch = (input, init = {}) => {
     const api = apiUrl(new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url, location.href));
     if (api && memory) {
       const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
       headers.set("authorization", `Hewn ${memory}`);
       headers.set("x-hewn-ui", "1");
-      if (!(input instanceof Request)) return nativeFetch(api, { ...init, headers });
+      if (!(input instanceof Request)) return nativeFetch(api, { ...init, headers }).then((res) => failed(res, api));
       const r = new Request(input, init);
-      return (r.method === "GET" || r.method === "HEAD" ? Promise.resolve(undefined) : r.arrayBuffer()).then((body) => nativeFetch(api, { method: r.method, headers, body, signal: r.signal }));
+      return (r.method === "GET" || r.method === "HEAD" ? Promise.resolve(undefined) : r.arrayBuffer()).then((body) => nativeFetch(api, { method: r.method, headers, body, signal: r.signal })).then((res) => failed(res, api));
     }
     return nativeFetch(input, init);
   };

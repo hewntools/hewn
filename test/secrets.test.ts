@@ -30,6 +30,21 @@ describe("secrets and grants", () => {
     await assert.rejects(whoami(), code("not_ready"));
   });
 
+  test("a failed call is kept for 'Ask builder to fix this': operation, error, input, newest first; secrets redacted", async () => {
+    t.platform.setSecret(USER, "secret-echo", "API_TOKEN", "TOPSECRETVALUE");
+    t.platform.approveGrants(USER, "secret-echo");
+    await assert.rejects(whoami({ leak: "error" }));
+    await assert.rejects(whoami({ leak: "error" }, USER));
+    const [last, first] = t.platform.recentFailures(USER, "secret-echo");
+    assert.equal(last.caller, "user");
+    assert.equal(last.operation, "whoami");
+    assert.match(last.error, /upstream refused \[secret\]/);
+    assert.deepEqual(JSON.parse(last.input), { leak: "error" });
+    assert.equal(first.caller, "codex");
+    assert.ok(!JSON.stringify(t.platform.recentFailures(USER, "secret-echo")).includes("TOPSECRETVALUE"), "never a stored secret");
+    assert.throws(() => t.platform.recentFailures(t.codex, "secret-echo"), /owner/);
+  });
+
   test("secret alone is not enough: the grant must be approved too", async () => {
     t.platform.setSecret(USER, "secret-echo", "API_TOKEN", "real-token-123");
     await assert.rejects(whoami(), code("not_ready"));

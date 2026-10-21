@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.5 (unreleased)
+
+- **Ask builder to fix this:** when an operation fails in a tool's own screen, a run from Info fails, a widget can't refresh or a schedule's run fails, Hewn offers to have the tool fixed. It opens a change with the operation, the error, its input and the last log lines written in, for you to read and send. Hewn keeps each tool's last ten failed calls for this (never a stored secret, never the sign-in step).
+
 ## 0.4.4 (2026-10-20)
 
 - **For hosts: hosted mode** (`HEWN_HOSTED=1`, with `HEWN_BUILD_URL`; optional `HEWN_HOST_SIGNIN_URL`). For an owner who has no terminal: signed-out pages and agent approval send them to the host's sign-in instead of a command, the first run goes straight to making something (no "who builds" step), and Settings hides what the host manages. See [remote access](docs/remote-access.md#running-hewn-for-someone-else-hewn_hosted).

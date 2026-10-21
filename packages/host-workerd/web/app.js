@@ -483,6 +483,22 @@ function changeHref(c, { m, send, widget } = {}) {
 }
 const openChange = (c, o) => go(changeHref(c, o));
 
+/**
+ * "Ask builder to fix this": a Change to the tool, the message written for the builder from one
+ * failed call (what ran it, the operation, the error, its input and last log lines). The owner
+ * reads it, can edit it, and sends it.
+ */
+const fixText = (f) => {
+  const who = /^widget:/.test(f.caller ?? "") ? "A widget" : /^schedule:/.test(f.caller ?? "") ? "A schedule" : /^(user|web|ui:)/.test(f.caller ?? "user") ? "I" : actorLabel(f.caller);
+  const input = f.input && f.input !== "{}" ? `\n\nInput: ${f.input}` : "";
+  const logs = f.logs?.length ? `\n\nLast log lines:\n${f.logs.join("\n")}` : "";
+  return `${who} ran ${f.operation} and it failed:\n${f.error}${input}${logs}\n\nFix it so this works.`;
+};
+const askFix = (c, f) => openChange(c, { m: fixText(f) });
+/** The newest recorded failure that matches (Hewn keeps the last ten per tool), else what's known here. */
+const askFixLatest = async (c, match, fallback) => askFix(c, (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find(match) ?? fallback);
+const fixButton = (onclick, cls = "sm") => h("button", { class: cls, type: "button", onclick }, "Ask builder to fix this");
+
 /** The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools. */
 function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
   const id = enc(c.id);
@@ -996,6 +1012,8 @@ function widgetTile(e, c, { remove, options }) {
     !e.missing && ["Refresh", refresh],
     !e.missing && options && !el.closest(".editing") && ["Options…", options],
     !e.missing && ["Change…", () => openChange(c, { widget: e.widget })],
+    // It couldn't refresh: the error, its operation and input go to the builder.
+    !e.missing && e.error && ["Ask builder to fix this…", () => askFixLatest(c, (f) => f.caller === `widget:${c.id}/${e.widget}`, { caller: `widget:${c.id}/${e.widget}`, operation: e.widget, error: e.error, input: JSON.stringify(e.input ?? {}) }).catch(fail)],
     "-",
     ["Remove widget", remove, { danger: true }],
   ]);
@@ -1501,6 +1519,12 @@ async function appPage(id, q) {
   };
   const [barEl, layout] = withDrawer(c, q, frame, { reload });
   barEl.querySelector(".app-title")?.append(subtitle);
+  const fixSlot = h("div", { class: "fix-slot" });
+  const showFix = async () => {
+    const [f] = await api(`/capabilities/${enc(c.id)}/failures`).catch(() => []);
+    if (!f || Date.now() - Date.parse(f.at) > 60_000) return;
+    put(fixSlot, h("div", { class: "notice danger fix-bar" }, h("span", { class: "grow" }, `${f.operation.split("@")[0]} failed: ${runFailure(f.error, f.operation)}`), fixButton(() => askFix(c, f)), h("button", { class: "ghost sm icon-only", "aria-label": "Dismiss", onclick: () => put(fixSlot) }, "×")));
+  };
   const onMessage = (e) => {
     if (e.origin !== "null" || e.source !== frame.contentWindow || e.data?.hewn !== 1) return;
     const m = e.data;
@@ -1514,6 +1538,8 @@ async function appPage(id, q) {
       barEl.classList.toggle("themed", !!color);
     }
     if (m.type === "scroll") sessionStorage.setItem(scrollKey, String(Number(m.y) || 0));
+    // An operation failed in the tool's own screen: what failed comes from Hewn's record, not the page.
+    if (m.type === "failed") showFix();
     if (m.type === "ready") {
       frame.classList.remove("loading");
       const y = Number(sessionStorage.getItem(scrollKey) ?? 0);
@@ -1525,7 +1551,7 @@ async function appPage(id, q) {
   // Older apps (or a slow first paint): don't stay invisible.
   const reveal = setInterval(() => frame.classList.remove("loading"), 1500);
   onLeave(() => clearInterval(reveal));
-  view(barEl, layout);
+  view(barEl, fixSlot, layout);
 }
 
 const isFlat = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.values(o).every((v) => v === null || typeof v !== "object");
@@ -1724,7 +1750,7 @@ function runForm(id, cap, op) {
       localStorage.setItem(memoryKey, JSON.stringify(input));
       put(result, head(h("span", { class: "pill ok with-dot" }, `ok · ${Math.round(performance.now() - started)}ms`)), renderResult(r.result));
     } catch (e) {
-      put(result, head(h("span", { class: "pill danger with-dot" }, `failed · ${Math.round(performance.now() - started)}ms`)), errorBox(e), e.data?.details ? h("pre", { class: "code" }, JSON.stringify(e.data.details, null, 2)) : "");
+      put(result, head(h("span", { class: "pill danger with-dot" }, `failed · ${Math.round(performance.now() - started)}ms`)), errorBox(e), fixButton(() => askFix(cap, { caller: "user", operation: `${op.name}@${op.version}`, error: e.message, input: JSON.stringify(input) })), e.data?.details ? h("pre", { class: "code" }, JSON.stringify(e.data.details, null, 2)) : "");
     } finally {
       runBtn.disabled = false;
     }
@@ -2123,10 +2149,11 @@ async function schedulesSheet(c, ops) {
                       : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
                 // Why the last run failed, and when: the tool's own words, without the call's prefixes.
                 const why = failed && expandable(`Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`, "sub danger-text");
+                const fix = failed && h("button", { class: "link sm self-start", type: "button", onclick: () => (close?.(), askFixLatest(c, (f) => f.caller === `schedule:${x.id}`, { caller: `schedule:${x.id}`, operation: x.operation, error: runFailure(x.lastOutcome, x.operation), input: JSON.stringify(x.input ?? {}) }).catch(fail)) }, "Ask builder to fix this");
                 return h(
                   "li",
                   {},
-                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why),
+                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why, fix),
                   x.status === "proposed" ? h("button", { class: "sm primary", onclick: act(x.id, { status: "active" }, "Schedule enabled") }, "Enable") : x.status === "paused" && x.pausedReason ? h("button", { class: "sm", onclick: act(x.id, { status: "active" }, "Resumed") }, "Resume") : sw,
                   h("button", { class: "ghost sm icon-only", "aria-label": "Delete schedule", onclick: act(x.id, null, "Schedule deleted") }, "×"),
                 );
