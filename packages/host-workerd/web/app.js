@@ -2635,7 +2635,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const grow = () => ((input.style.height = "auto"), (input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`));
   input.addEventListener("input", grow);
   // Text put in for you ("Ask builder to fix this"): tall enough to read it whole, once it's on screen.
-  if (input.value) requestAnimationFrame(grow);
+  let tries = 0;
+  const growWhenShown = () => (input.offsetParent ? grow() : ++tries < 120 && requestAnimationFrame(growWhenShown));
+  if (input.value) requestAnimationFrame(growWhenShown);
   window.addEventListener("resize", grow);
   onLeave(() => window.removeEventListener("resize", grow));
   input.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), composer.requestSubmit()));
