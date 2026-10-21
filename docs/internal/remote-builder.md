@@ -80,7 +80,7 @@ Only with `HEWN_HOSTED=1`: then a tool's `ctx.model.generate` goes to the host i
 - `tier` (`light`, `standard`, `strong`, `max`) or `model` (a pinned name), from the tool's `requires.model`. `content` is a string or parts (`{ "type": "text", "text" }`, `{ "type": "image", "data": "<base64>", "mediaType" }`).
 - 200: `{ "text": "…", "usage": { "inputTokens": 900, "outputTokens": 80 }, "model": "<the model it ran on>", "charge": { "amount": 0.37, "unit": "Credits" } }`. Amounts may be fractions; Hewn sums them as decimals.
 - A refusal, any status with `{ "refused": "…" }` (over the month, a model it can't run, too many at once): the tool's call fails with that reason, not retried. `401`/`403` without `refused`: the token isn't accepted. Otherwise `{ "error": "…", "charge"? }`: an ordinary failed call, its charge still counted (the model answered).
-- Hewn calls it from the supervisor, which holds the token; a tool never sees it. Calls are logged for Activity at $0; the USD caps and per-tool caps don't apply.
+- Hewn calls it from the supervisor, which holds the token; a tool never sees it. Calls are logged for Activity at $0; the USD caps don't apply. A tool's own monthly cap, in the host's unit (`capabilityCapsHost`), is checked before each call against what the host charged its calls this month.
 
 ## Models: `GET /v1/models`
 

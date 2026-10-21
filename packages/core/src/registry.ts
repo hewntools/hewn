@@ -602,6 +602,14 @@ export class Registry {
       .map((r) => ({ unit: String(r.unit), kind: String(r.kind), amount: Number(r.amount), count: Number(r.n) }));
   }
 
+  /** A month's model-call charges per capability (hosted: per-tool caps and the model sheet). */
+  hostChargesByCapability(month: string): { capabilityId: string; unit: string; amount: number; count: number }[] {
+    return this.db
+      .prepare("SELECT capability_id, unit, SUM(amount) AS amount, COUNT(*) AS n FROM host_charges WHERE month = ? AND kind = 'model' AND capability_id IS NOT NULL GROUP BY capability_id, unit")
+      .all(month)
+      .map((r) => ({ capabilityId: String(r.capability_id), unit: String(r.unit), amount: Number(r.amount), count: Number(r.n) }));
+  }
+
   /** Add an attempt's charge to the build's (a different unit replaces it). */
   addBuildCharge(buildId: string, c: { amount: number; unit: string }) {
     const cur = this.buildCharge(buildId);

@@ -1351,6 +1351,7 @@ export class Platform {
       pinned: active.filter((c) => c.model?.model).map((c) => ({ id: c.id, name: c.name, model: c.model!.model!, problem: this.modelProblem(c.model!) ?? null, retired: this.retiredModel(c.model!.model!) ?? null })),
       monthlyCapUsd: settings.monthlyCapUsd,
       capabilityCapsUsd: settings.capabilityCapsUsd,
+      capabilityCapsHost: settings.capabilityCapsHost,
       prices: settings.prices,
       catalog: { fetchedAt: stored?.fetchedAt || null, error: stored?.error ?? null },
       spend: this.modelSpend(owner),
@@ -1363,7 +1364,7 @@ export class Platform {
    * Change model settings (owner only): the active provider (it must have a key; its tiers start
    * from the suggestion), a provider's tiers (ids within that provider; null clears one), caps, prices.
    */
-  setModelSettings(owner: Agent, change: { provider?: string; tiers?: Record<string, Record<string, string | null>>; monthlyCapUsd?: unknown; capabilityCapsUsd?: Record<string, unknown>; prices?: Record<string, unknown> }) {
+  setModelSettings(owner: Agent, change: { provider?: string; tiers?: Record<string, Record<string, string | null>>; monthlyCapUsd?: unknown; capabilityCapsUsd?: Record<string, unknown>; capabilityCapsHost?: Record<string, unknown>; prices?: Record<string, unknown> }) {
     requireOwner(owner);
     const next = this.modelSettings_();
     const usd = (v: unknown, what: string) => {
@@ -1394,6 +1395,13 @@ export class Platform {
       if (!Object.keys(next.tiers[pr] ?? {}).length) next.tiers[pr] = this.suggestedTiers(pr);
     }
     if (change.monthlyCapUsd !== undefined) next.monthlyCapUsd = usd(change.monthlyCapUsd, "the monthly cap");
+    if (change.capabilityCapsHost !== undefined)
+      next.capabilityCapsHost = Object.fromEntries(
+        Object.entries(change.capabilityCapsHost ?? {}).map(([id, v]) => {
+          if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1_000_000) throw new PlatformError("invalid_request", `${id}'s cap must be a number from 0 to 1000000`);
+          return [id, v];
+        }),
+      );
     if (change.capabilityCapsUsd !== undefined) next.capabilityCapsUsd = Object.fromEntries(Object.entries(change.capabilityCapsUsd ?? {}).map(([id, v]) => [id, usd(v, `${id}'s cap`)]));
     if (change.prices !== undefined) {
       next.prices = Object.fromEntries(
@@ -1620,7 +1628,7 @@ export class Platform {
     requireOwner(owner);
     const rows = this.registry.hostCharges(month);
     const units = [...new Set(rows.map((r) => r.unit))];
-    return { month, totals: units.map((unit) => ({ unit, amount: Math.round(rows.filter((r) => r.unit === unit).reduce((n, r) => n + r.amount, 0) * 100) / 100 })), rows };
+    return { month, totals: units.map((unit) => ({ unit, amount: Math.round(rows.filter((r) => r.unit === unit).reduce((n, r) => n + r.amount, 0) * 100) / 100 })), rows, byCapability: this.registry.hostChargesByCapability(month) };
   }
 
   /** Record a charge the host made for something Hewn didn't run itself (an intake turn). */
@@ -1707,6 +1715,13 @@ export class Platform {
     return async (raw: GenerateRequest) => {
       const r = inspectRequest(raw, requirement.input?.includes("image") ?? false);
       if (deadline.modelBudget() < 1000) throw new PlatformError("operation_failed", "no time left in this call chain for a model call (an async operation suits long work)");
+      // The tool's own cap, in the host's unit: checked before the call (a call's charge is known only after).
+      const cap = this.modelSettings_().capabilityCapsHost[capabilityId];
+      if (cap !== undefined) {
+        const used = this.registry.hostChargesByCapability(new Date().toISOString().slice(0, 7)).filter((x) => x.capabilityId === capabilityId);
+        const spent = used.reduce((n, x) => n + x.amount, 0);
+        if (spent >= cap) throw new PlatformError("operation_failed", `model budget: ${capabilityId} has used ${Math.round(spent * 100) / 100} of its ${cap} ${used[0]?.unit ?? "Credits"} this month (the owner can raise it in the tool's model settings)`, { model: { budget: true } });
+      }
       const id = `m-${randomToken().slice(0, 16)}`;
       const asked = requirement.model ?? `tier:${requirement.tier ?? "standard"}`;
       this.registry.reserveModelSpend({ id, capabilityId, model: asked, month: new Date().toISOString().slice(0, 7), usd: 0, caller }, { total: Infinity });
@@ -1724,7 +1739,7 @@ export class Platform {
         const timedOut = (e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError";
         const cutOff = (e as { stop?: string }).stop === "max_tokens";
         // A refusal, or a reply cut off at the tool's limit, is worded for the owner: kept as is.
-        const message = timedOut ? "the host's model: no reply in time" : cutOff ? cutOffMessage(r.maxTokens) : (e as { refused?: boolean }).refused ? (e as Error).message : `the host's model: ${(e as Error).message}`;
+        const message = timedOut ? "the model: no reply in time" : cutOff ? cutOffMessage(r.maxTokens) : (e as { refused?: boolean }).refused ? (e as Error).message : `the model: ${(e as Error).message}`;
         this.registry.settleModelSpend(id, { costUsd: 0, inputTokens: 0, outputTokens: 0, error: message.slice(0, 300) });
         throw new PlatformError("operation_failed", message, cutOff ? { model: { stop: "max_tokens" } } : undefined);
       } finally {
