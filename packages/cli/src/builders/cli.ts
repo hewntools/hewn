@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { EFFORT } from "@hewntools/core/build-models.ts";
-import { claudeActivity, codexActivity } from "./activity.ts";
+import { claudeActivity, codexActivity, USED_TOOL } from "./activity.ts";
 import { MODEL_REJECTED } from "./models.ts";
 import { wrapBuilder } from "./sandbox.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
@@ -67,9 +67,10 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
   let unavailable: string | undefined;
   // Errors only (stderr, error and failed-result events), never the builder's own words about models.
   let modelRejected: string | undefined;
-  // Only before the builder has done anything: a model that won't run fails at once.
-  let worked = false;
-  const checkModel = (text: string) => job.model && !worked && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
+  // Whether the builder got as far as using its tools. A model that won't run fails at once (before);
+  // a resume that fails before has nothing to lose by starting over, after it the workspace may be half-changed.
+  let usedTools = false;
+  const checkModel = (text: string) => job.model && !usedTools && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
   return new Promise((resolve, reject) => {
     const raw = createWriteStream(job.logPath.replace(/\.log$/, ".jsonl"), { flags: "a" });
     const child = spawn(command, args, { cwd: job.workspace, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -87,7 +88,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
         activity = line.trim() || null;
       }
       if (!activity) return;
-      if (/^→ /.test(activity)) worked = true;
+      if (USED_TOOL.test(activity)) usedTools = true;
       if (!unavailable && UNAVAILABLE.test(activity)) unavailable = activity.replace(/^\S+\s/, "");
       for (const l of activity.split("\n")) write(l);
       job.onActivity?.(activity.split("\n").at(-1)!);
@@ -110,8 +111,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
       if (code === 0) resolve();
       else if (modelRejected) reject(Object.assign(new Error(modelRejected), { modelRejected: true }));
       else if (unavailable) reject(Object.assign(new Error(`${unavailable} (log in to ${job.builderName ?? "the builder CLI"}, or switch "builder" in platform.json)`), { unavailable: true }));
-      // `worked`: whether it got as far as touching the workspace (a resume that failed before that starts over).
-      else reject(Object.assign(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`), { worked }));
+      else reject(Object.assign(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`), { usedTools }));
     });
   });
 }
@@ -144,14 +144,15 @@ export const codexModelArgs = (m: { model?: string; effort?: string }) => [...(m
 export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|401|usage limit|quota exceeded/i;
 
 /**
- * Codex runs with its own HOME and CODEX_HOME (<hewn home>/builder-home/codex) holding only your
- * auth.json: none of your skills (~/.agents/skills), global AGENTS.md or config reach a build.
- * auth.json is copied in before each run and copied back if Codex refreshed it, so your own Codex
- * login and the builder's stay one and the same.
+ * Codex runs with its own HOME and CODEX_HOME (`dir`, one per build or per intake) holding your
+ * auth.json for the run: none of your skills (~/.agents/skills), global AGENTS.md or config reach
+ * it. auth.json is copied in before each run and, when done, copied back if Codex refreshed it
+ * (your own Codex login and the builder's stay one and the same) and removed; what else Codex
+ * wrote there (a build's thread, for a later attempt to resume) stays until the dir goes.
  */
-export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; syncBack: () => void } {
+export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; done: () => void } {
   const codexDir = join(dir, ".codex");
-  mkdirSync(codexDir, { recursive: true });
+  mkdirSync(codexDir, { recursive: true, mode: 0o700 });
   const yours = join(homedir(), ".codex", "auth.json");
   const theirs = join(codexDir, "auth.json");
   if (existsSync(yours)) copyFileSync(yours, theirs);
@@ -159,8 +160,9 @@ export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; s
   return {
     dir,
     env: { ...builderEnv(), HOME: dir, CODEX_HOME: codexDir },
-    syncBack: () => {
+    done: () => {
       if (existsSync(theirs) && statSync(theirs).mtimeMs > copied && existsSync(dirname(yours))) copyFileSync(theirs, yours);
+      rmSync(theirs, { force: true });
     },
   };
 }
@@ -233,30 +235,13 @@ export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undef
   };
 }
 
-/** Where a build's Claude Code config directory lives (its sessions between attempts). */
-export const claudeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "claude", buildId);
-
 /**
- * Codex's sessions (kept so a later attempt can resume) pile up in its own home: drop the ones
- * older than `days` (every build's are over by then).
+ * Where a build's builder home lives: Claude Code's config directory, Codex's HOME. One per build,
+ * so a build's session (kept there between attempts) is its own: no other build's sandbox can read
+ * or edit it. The workbench removes it with the workspace.
  */
-export function pruneCodexSessions(platformHome: string, days = 2) {
-  const root = join(platformHome, "builder-home", "codex", ".codex", "sessions");
-  if (!existsSync(root)) return;
-  const cutoff = Date.now() - days * 86400_000;
-  const walk = (d: string) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (statSync(p).mtimeMs < cutoff) rmSync(p, { force: true });
-    }
-  };
-  try {
-    walk(root);
-  } catch {
-    // Housekeeping only.
-  }
-}
+export const claudeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "claude", buildId);
+export const codexBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "codex", buildId);
 
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
@@ -284,16 +269,17 @@ export function codexArgs(job: BuildJob, resume?: string): string[] {
 
 /**
  * Run an attempt: resuming the earlier session when there is one, else fresh. A resume that fails
- * before touching the workspace (the session gone, the CLI changed) starts over in the same attempt.
+ * before the builder used any tool (the session gone, the CLI changed) starts over in the same
+ * attempt; one that fails after is a failed attempt like any other (the workspace may be half-changed).
  */
-async function withResume(builder: "claude" | "codex", job: BuildJob, run: (resume: string | undefined) => Promise<void>) {
+export async function withResume(builder: keyof typeof sessions, job: BuildJob, run: (resume: string | undefined) => Promise<void>) {
   const earlier = sessionOf(builder, job);
   if (!earlier) return run(undefined);
   try {
     await run(earlier);
   } catch (e) {
-    const err = e as { worked?: boolean; cancelled?: boolean; unavailable?: boolean; modelRejected?: boolean };
-    if (err.worked !== false || err.cancelled || err.unavailable || err.modelRejected) throw e;
+    const err = e as { usedTools?: boolean; cancelled?: boolean; unavailable?: boolean; modelRejected?: boolean };
+    if (err.usedTools !== false || err.cancelled || err.unavailable || err.modelRejected) throw e;
     forgetSession(job.buildId);
     appendFileSync(job.logPath, `${stamp()} couldn't resume the earlier session; starting over\n`);
     job.onActivity?.("couldn't resume the earlier session; starting over");
@@ -302,10 +288,12 @@ async function withResume(builder: "claude" | "codex", job: BuildJob, run: (resu
 }
 
 async function codexRun(job: BuildJob) {
-  const isolated = codexHome(join(dirname(dirname(job.logPath)), "builder-home", "codex"));
-  try {
-    await withResume("codex", job, (resume) =>
-      runCli(
+  // Its own home per build (builds run side by side), kept between attempts for the thread; the login only for a run.
+  const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
+  await withResume("codex", job, async (resume) => {
+    const isolated = codexHome(home);
+    try {
+      await runCli(
         "codex",
         codexArgs(job, resume),
         job,
@@ -316,11 +304,11 @@ async function codexRun(job: BuildJob) {
         isolated.env,
         // Its thread, for the next attempt to resume.
         (e) => e?.type === "thread.started" && typeof e.thread_id === "string" && noteSession("codex", job.buildId, e.thread_id),
-      ),
-    );
-  } finally {
-    isolated.syncBack();
-  }
+      );
+    } finally {
+      isolated.done();
+    }
+  });
 }
 
 /** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */

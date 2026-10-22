@@ -392,7 +392,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
           const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
           await run(w.command, w.args, ws, isolated.env, 5 * 60_000, undefined, signal);
         } finally {
-          isolated.syncBack();
+          isolated.done();
         }
         return parseIntake(readFileSync(join(ws, "out.json"), "utf8"), req.mode, req.current);
       }
@@ -402,6 +402,8 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
         "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
+        // Web tools only: --restricted drops every code-running tool, also ones added later.
+        "--restricted",
         "--allowedTools", "WebFetch", "WebSearch",
         "--disallowedTools", "Bash", "Edit", "Write", "Task",
       ];
