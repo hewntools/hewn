@@ -97,6 +97,8 @@ request → build row ("waiting" while its `after` build hasn't promoted)
   → promoted, review, failed or cancelled
 ```
 
+What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and a short hash of the brief it ran on. When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
+
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
 `validateAndPromote` (`platform.ts`), in order:
@@ -200,8 +202,8 @@ The home is `~/.hewn` for an npm install and `data/` in a checkout run with `./i
 
 - `workerd/do/hewn-owner/`: the owner's database.
 - `workerd/do/hewn-capability/`: each capability's state, plus scratch states (tests, dry runs, the 3 newest backups taken before a promotion).
-- `workerd/blobs/`: version blobs, owner icons, build screenshots.
-- `builds/`: workspaces (deleted a day after the build ends) and transcripts (kept 30 days).
+- `workerd/blobs/`: version blobs, owner icons, build screenshots, build transcripts.
+- `builds/`: workspaces (deleted a day after the build ends) and transcripts (copied into blobs when the build ends; the copy here goes after 30 days).
 - `builder-home/`: the builders' and intake's own config directories.
 - `platform.json`: machine settings (backup folder, `publicListen`, sandbox). `supervisor.json`: the running supervisor's address and tokens. `format.json`: the data format version. `logs/hewn.log`: the service log.
 - Backups: nightly zip files of consistent SQLite snapshots plus blobs, never the secrets key (`backup.ts`, `zip.ts`), in `<home>-backups/` or the owner's backup folder; 7 daily and 4 weekly are kept.
@@ -209,7 +211,7 @@ The home is `~/.hewn` for an npm install and `data/` in a checkout run with `./i
 The owner's database:
 
 - **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL), `settings` (the owner's settings from the web client).
-- **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`).
+- **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief hash a build ran with).
 - **Agents and sessions:** `agents`, `oauth_clients`, `oauth_requests`, `oauth_tokens`, `web_sessions`, `ui_sessions`, `passkeys`.
 - **Authority:** `grants` (kinds `secret`, `host`, `capability`, `model`), `access_requests`, `confirmations`, `secrets_enc`.
 - **Trail:** `grant_events`, `lifecycle_events`, `authority_events`, `model_calls`. Activity merges them with builds and calls.

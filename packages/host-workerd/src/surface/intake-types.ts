@@ -20,6 +20,11 @@ export interface IntakeRequest {
   current?: CapabilityManifest;
   /** One id per conversation, so a host that runs the intake can keep one session for all its turns. */
   session?: string;
+  /**
+   * Continue from an earlier build's conversation ("Continue from here" on a version): the client
+   * names the build; the platform fills in the version it made and its turns.
+   */
+  earlier?: { buildId: string; version?: number; messages?: IntakeMessage[] };
 }
 
 /**

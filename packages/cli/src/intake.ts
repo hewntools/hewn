@@ -182,10 +182,18 @@ export function intakeManifest(m: CapabilityManifest): string {
   return brief.length <= 30_000 ? brief : JSON.stringify({ id, name, purpose, kind, requires, operations: operations.map(({ op, sideEffect, description }) => ({ op, sideEffect, description })), widgets });
 }
 
+/** How much of an earlier conversation the intake gets to continue from: the last turns, each cut short. */
+const EARLIER_TURNS = 30;
+const EARLIER_CHARS = 4000;
+
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): string {
   const rounds = req.messages.filter((m) => m.role === "intake").length;
   const mustDraft = rounds >= MAX_QUESTION_ROUNDS;
-  const convo = req.messages.map((m) => `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content}`).join("\n\n");
+  const turn = (m: { role: string; content: string }, max = Infinity) => `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content.length > max ? `${m.content.slice(0, max)}…` : m.content}`;
+  const convo = req.messages.map((m) => turn(m)).join("\n\n");
+  const earlier = req.earlier?.messages?.length
+    ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turn(m, EARLIER_CHARS)).join("\n\n")}\n\n`
+    : "";
   const focus = req.widget ? req.current?.widgets?.find((w) => w.name === req.widget) : undefined;
   return `You are the intake for Hewn, a personal capability platform. A human (the owner) describes something they want. Turn it into a precise ${req.mode === "create" ? "capability creation" : "modification"} request for a separate builder agent, who will implement it without asking anything.
 
@@ -207,7 +215,7 @@ ${WIDGETS_GUIDE}
 The owner's existing capabilities:
 ${(req.catalog ?? []).map((c) => `- ${c.name} (${c.id})${c.kind === "connection" ? " [connection]" : ""}: ${c.purpose} [${c.operations.join(", ")}]`).join("\n") || "(none)"}
 ${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
-Conversation so far:
+${earlier}Conversation so far:
 ${convo}
 
 Decide:

@@ -435,8 +435,9 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .meta-value .meter i { width: 3px; border-radius: 1px; background: var(--border-strong); }
 .meta-value .meter i:nth-child(1) { height: 4px; } .meta-value .meter i:nth-child(2) { height: 6px; } .meta-value .meter i:nth-child(3) { height: 8px; } .meta-value .meter i:nth-child(4) { height: 10px; } .meta-value .meter i:nth-child(5) { height: 12px; }
 .meta-value .meter i.on { background: var(--accent-ink); }
-/* "Spec agreed" opens to the spec. */
+/* "Spec agreed" opens to the spec; "Conversation" to the chat that led to the build (kept with it). */
 .spec-step > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.thread.kept { max-height: 50vh; overflow: auto; margin-top: 8px; }
 .spec-step > summary::-webkit-details-marker { display: none; }
 .spec-step > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .6; }
 .spec-step[open] > summary::after { transform: rotate(45deg); margin-top: -3px; }

@@ -253,6 +253,10 @@ describe("intake: a connection first", () => {
     const prompt = intakePrompt({ mode: "create", messages: [{ role: "user", content: "x" }], catalog: [{ id: "todoist", name: "Todoist", purpose: "p", operations: ["list_tasks@1"], kind: "connection" }] });
     assert.match(prompt, /Todoist \(todoist\) \[connection\]/);
     assert.match(prompt, /Only connections hold credentials/);
+    // "Continue from here": the earlier conversation comes first, as context, then the new one.
+    const again = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "now add y" }], earlier: { buildId: "b-1", version: 3, messages: [{ role: "user", content: "make x" }, { role: "intake", content: "DRAFT\nX" }] } });
+    assert.match(again, /An earlier conversation, which led to version 3[^]*USER: make x[^]*YOU \(intake\): DRAFT[^]*Conversation so far:[^]*USER: now add y/);
+    assert.doesNotMatch(prompt, /earlier conversation/);
   });
 
   test("creating: several ideas at once, each a full draft (incomplete ones dropped, at most five)", async () => {

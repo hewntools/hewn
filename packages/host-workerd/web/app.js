@@ -475,10 +475,11 @@ async function openCapability(c) {
 
 /**
  * Change… always opens the tool with the change drawer beside it (P1): its own UI, or the Run view
- * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once.
+ * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once; `from`: the
+ * build whose conversation the intake continues from.
  */
-function changeHref(c, { m, send, widget } = {}) {
-  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}) });
+function changeHref(c, { m, send, widget, from } = {}) {
+  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}) });
   return `#/${c.ui ? "app" : "run"}/${enc(c.id)}?${q}`;
 }
 const openChange = (c, o) => go(changeHref(c, o));
@@ -557,9 +558,14 @@ async function versionsDialog(c) {
             {},
             h("span", { class: "pill" }, `v${v.version}`),
             h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
-            v.version === active
-              ? h("span", { class: "pill ok with-dot" }, "active")
-              : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
+            h(
+              "span",
+              { class: "row tight" },
+              v.buildId && h("button", { class: "sm ghost", onclick: () => versionSheet(c, v).catch(fail) }, "Details"),
+              v.version === active
+                ? h("span", { class: "pill ok with-dot" }, "active")
+                : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
+            ),
           ),
         ),
       ),
@@ -567,6 +573,28 @@ async function versionsDialog(c) {
       sheetActions(h("button", { onclick: () => close() }, "Done")),
     ],
     { width: 520 },
+  );
+}
+
+/**
+ * What led to a version, kept for the tool's life: the conversation with the intake, the spec the
+ * builder worked from and the builder's log. "Continue from here" opens a change with that
+ * conversation as context.
+ */
+async function versionSheet(c, v) {
+  const [context, transcript] = await Promise.all([api(`/builds/${enc(v.buildId)}/context`).catch(() => ({})), api(`/builds/${enc(v.buildId)}/transcript`).catch(() => ({ text: null }))]);
+  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
+  const who = actorLabel(v.requestedBy);
+  const convo = context.conversation?.length ? context.conversation : null;
+  return modal(
+    (close) => [
+      sheetHead(appIcon(c, { size: 44 }), `v${v.version} · ${c.name}`, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`),
+      convo && h("details", { class: "spec-step", open: true }, h("summary", {}, "Conversation"), conversationThread(convo)),
+      spec && h("details", { class: "spec-step", open: !convo }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
+      transcript.text && h("details", { class: "spec-step" }, h("summary", {}, "Builder's log"), h("pre", { class: "log tail" }, transcript.text.split("\n").slice(-500).join("\n"))),
+      sheetActions(h("button", { onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here"), h("button", { onclick: () => close() }, "Done")),
+    ],
+    { width: 640 },
   );
 }
 
@@ -1479,7 +1507,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const setUrl = (open) => {
     const p = new URLSearchParams(q);
     if (open) p.set("change", "1");
-    else for (const k of ["change", "m", "send", "widget"]) p.delete(k);
+    else for (const k of ["change", "m", "send", "widget", "from"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
   const open = () => {
@@ -1494,7 +1522,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
       drawer.el.remove();
       drawer = null;
       change.setAttribute("aria-pressed", "false");
-      for (const k of ["m", "send", "widget"]) q.delete(k);
+      for (const k of ["m", "send", "widget", "from"]) q.delete(k);
       setUrl(false);
     } else drawer?.focus();
   };
@@ -2660,6 +2688,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   let focus = null;
   const messages = [];
   const thread = h("div", { class: "thread", "aria-live": "polite" });
+  // "Continue from here" on a version: the intake gets the conversation that made it as context.
+  const from = q?.get("from") || null;
+  if (from) api(`/builds/${enc(from)}`).then((b) => thread.prepend(h("div", { class: "small faint" }, `Continuing from the conversation that made v${b.resultVersion ?? "?"}.`))).catch(() => {});
   // Grows with the text; Enter sends, Shift+Enter for a new line.
   const input = h("textarea", {
     class: "composer-input",
@@ -2746,14 +2777,14 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     try {
       let reply = null;
       let failure = null;
-      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       typing.remove();
       live.remove();
       activity.remove();
       if (reply.message) say("them", reply.message);
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
-      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
+      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n") });
         reply.questions.forEach((x) => say("them", x));
@@ -2788,7 +2819,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       }
       thread.append(errorBox(err));
       // Widgets don't need the intake: the builder can still make what was asked (or pick itself).
-      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text).then(onBuilt, fail) }, "Build without suggestions")));
+      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, messages).then(onBuilt, fail) }, "Build without suggestions")));
     } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
@@ -2807,8 +2838,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   };
 }
 
-/** Start a widgets build (only widgets change). */
-const buildWidgets = (cap, request) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: request ? { request } : {} });
+/** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
+const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
 
 /**
  * In the intake's chat box: the model building runs on, and its menu, like a chat app's. It is the
@@ -2935,6 +2966,9 @@ function modelChip() {
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
+/** A kept conversation (what led to a build), as the chat looked: the owner's turns and the intake's. */
+const conversationThread = (turns) => h("div", { class: "thread kept" }, turns.map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
+
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
 const draftText = (d) =>
   [
@@ -2957,9 +2991,10 @@ function scheduleTicks(list = []) {
  * Start a draft's build: its connection first, then the draft waiting for it. `connections` spans a
  * batch, so drafts sharing a connection build it once (or change it one after another). `after`: a
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
- * set up once the draft's build promotes.
+ * set up once the draft's build promotes. `conversation`: the chat that led here, kept with each build.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [] } = {}) {
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation } = {}) {
+  const keep = conversation?.length ? { conversation } : {};
   const conn = d.connection;
   let first = null;
   if (conn) {
@@ -2968,12 +3003,12 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
     const wait = after ?? prev?.buildId;
     first =
       conn.mode === "create"
-        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}) } }))
-        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}) } });
+        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}), ...keep } }))
+        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}), ...keep } });
     connections.set(key, first);
   }
   const wait = first?.buildId ?? after;
-  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}) };
+  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...keep };
   return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w } });
 }
 
@@ -3008,7 +3043,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  * are several, icon, name, purpose, summary pills), ▸ opens its details (G2). Returns [card, summary].
  */
 function proposalCard(kind, list, ctx) {
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, done } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -3105,7 +3140,7 @@ function proposalCard(kind, list, ctx) {
       if (kind === "widgets") {
         const picked = chosen().map((r) => r.d);
         // A replacement keeps its widget's name, so it stays where it is on Home.
-        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`);
+        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`, messages);
         return onBuilt(b);
       }
       if (kind === "schedules") {
@@ -3126,12 +3161,12 @@ function proposalCard(kind, list, ctx) {
         // Only the connection: the intake may have drafted a tool around it.
         const d = list[0];
         const c = d.connection?.mode === "create" ? d.connection : d;
-        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection" } });
+        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection", ...(messages?.length ? { conversation: messages } : {}) } });
         invalidateCaps();
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen() });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages });
         invalidateCaps();
         return onBuilt(b);
       }
@@ -3149,7 +3184,7 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen() });
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {
@@ -3305,7 +3340,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
   };
 
   (async () => {
-    const [b0, all] = await Promise.all([api(`/builds/${enc(id)}`), caps(true).catch(() => new Map())]);
+    const [b0, all, context] = await Promise.all([api(`/builds/${enc(id)}`), caps(true).catch(() => new Map()), api(`/builds/${enc(id)}/context`).catch(() => ({}))]);
     let b = b0;
     const cap = () => all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.request?.name ?? b.capabilityId };
     if (!compact) setWallpaper(await hues([hueOf(cap()), 125]));
@@ -3317,6 +3352,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     // "Spec agreed" opens to the spec the builder works from (kept open across redraws).
     const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
     const specView = specText ? h("details", { class: "spec-step" }, h("summary", {}, "Spec agreed"), h("pre", { class: "spec-text" }, specText)) : null;
+    // The conversation that led to it (kept with the build); an agent's build has none.
+    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation)) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
     const live = () => {
@@ -3351,6 +3388,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         ),
         !waitingAgent && buildMeta(b),
         h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        convoView,
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
@@ -3417,6 +3455,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
         specView,
+        convoView,
         logBlock(false),
       );
     };
@@ -3448,6 +3487,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         specView,
+        convoView,
         h("div", { class: "row tight" }, fix, retry),
         logBlock(true),
       );
