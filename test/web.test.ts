@@ -320,6 +320,25 @@ describe("web client (owner surface)", () => {
       assert.match(r.body, /event: reply\ndata: \{"kind":"questions"/);
     });
 
+    test("a build from the chat keeps its conversation and its log; the intake can continue from it", async () => {
+      const turns = [
+        { role: "user", content: "a plant log" },
+        { role: "intake", content: "DRAFT\nPlant Log: when each plant was watered" },
+      ];
+      const b = await api("/capabilities", { method: "POST", body: { name: "Plant Log", purpose: "plants", requirements: "water dates", conversation: turns } });
+      assert.equal(b.status, 200, JSON.stringify(b.json));
+      assert.ok(!("conversation" in b.json.request));
+      await platform.settle(b.json.buildId);
+      assert.deepEqual((await api(`/builds/${b.json.buildId}/context`)).json.conversation, turns);
+      assert.match((await api(`/builds/${b.json.buildId}/transcript`)).json.text, /→ Write src\/index\.ts/);
+      // "Continue from here": the client names the build; the platform fills in its conversation.
+      const r = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "add fertilizer" }], earlier: { buildId: b.json.buildId } } });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.deepEqual(intakeCalls.at(-1)!.earlier, { buildId: b.json.buildId, messages: turns });
+      assert.equal((await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "x" }], earlier: { buildId: "nope" } } })).status, 404);
+      assert.equal((await api("/capabilities", { method: "POST", body: { name: "Bad", purpose: "p", requirements: "r", conversation: [{ role: "bot", content: "x" }] } })).status, 400);
+    });
+
     test("create from the web → live build over SSE until done", async () => {
       const b = await api("/capabilities", { method: "POST", body: { name: "Run Log Two", purpose: "p", requirements: "r" } });
       assert.equal(b.json.status, "building");

@@ -6,6 +6,8 @@ import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
 export interface IntakeMessage {
   role: "user" | "intake";
   content: string;
+  /** The intake's structured reply, which the web client keeps with the build; the intake reads only `content`. */
+  reply?: unknown;
 }
 
 export interface IntakeRequest {
@@ -20,6 +22,11 @@ export interface IntakeRequest {
   current?: CapabilityManifest;
   /** One id per conversation, so a host that runs the intake can keep one session for all its turns. */
   session?: string;
+  /**
+   * Continue from an earlier build's conversation ("Continue from here" on a version): the client
+   * names the build; the platform fills in the version it made and its turns.
+   */
+  earlier?: { buildId: string; version?: number; messages?: IntakeMessage[] };
 }
 
 /**
