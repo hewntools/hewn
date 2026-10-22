@@ -541,7 +541,7 @@ async function rollbackTo(c, version) {
   return r;
 }
 
-/** Versions and rollback: make an earlier version active again. */
+/** Versions and rollback: each version with what led to it (the conversation, the spec, the builder's log), and restoring an earlier one. */
 async function versionsDialog(c) {
   const id = enc(c.id);
   const detail = await api(`/capabilities/${id}`);
@@ -549,52 +549,64 @@ async function versionsDialog(c) {
   return modal(
     (close) => [
       sheetHead(appIcon(c, { size: 44 }), `Versions · ${c.name}`),
-      h(
-        "ul",
-        { class: "list" },
-        detail.versions.map((v) =>
-          h(
-            "li",
-            {},
-            h("span", { class: "pill" }, `v${v.version}`),
-            h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
-            h(
-              "span",
-              { class: "row tight" },
-              v.buildId && h("button", { class: "sm ghost", onclick: () => versionSheet(c, v).catch(fail) }, "Details"),
-              v.version === active
-                ? h("span", { class: "pill ok with-dot" }, "active")
-                : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
-            ),
-          ),
-        ),
-      ),
+      h("div", { class: "stack-sm version-panes" }, detail.versions.map((v) => versionPane(c, v, v.version === active, close))),
       h("div", { class: "small faint" }, "Restoring keeps the data. It's refused if a newer version changed the data in a way older code can't read."),
       sheetActions(h("button", { onclick: () => close() }, "Done")),
     ],
-    { width: 520 },
+    { width: 640 },
   );
 }
 
 /**
- * What led to a version, kept for the tool's life: the conversation with the intake, the spec the
- * builder worked from and the builder's log. "Continue from here" opens a change with that
- * conversation as context.
+ * One version: when and who asked, Restore (or active), and at the bottom what led to it, kept
+ * for the tool's life: the conversation with the intake, the spec the builder worked from, the
+ * builder's log (each loaded when opened). "Continue from here" opens a change picking up that
+ * conversation.
  */
-async function versionSheet(c, v) {
-  const [context, transcript] = await Promise.all([api(`/builds/${enc(v.buildId)}/context`).catch(() => ({})), api(`/builds/${enc(v.buildId)}/transcript`).catch(() => ({ text: null }))]);
-  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
+function versionPane(c, v, isActive, close) {
   const who = actorLabel(v.requestedBy);
-  const convo = context.conversation?.length ? context.conversation : null;
-  return modal(
-    (close) => [
-      sheetHead(appIcon(c, { size: 44 }), `v${v.version} · ${c.name}`, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`),
-      convo && h("details", { class: "spec-step", open: true }, h("summary", {}, "Conversation"), conversationThread(convo)),
-      spec && h("details", { class: "spec-step", open: !convo }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
-      transcript.text && h("details", { class: "spec-step" }, h("summary", {}, "Builder's log"), h("pre", { class: "log tail" }, transcript.text.split("\n").slice(-500).join("\n"))),
-      sheetActions(h("button", { onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here"), h("button", { onclick: () => close() }, "Done")),
-    ],
-    { width: 640 },
+  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
+  /** An expander whose content comes when it's first opened. */
+  const lazy = (summary, load) => {
+    const body = h("div", { class: "stack-sm" }, skeleton("60%", "40%"));
+    const d = h("details", { class: "spec-step" }, h("summary", {}, summary), body);
+    let loaded = false;
+    d.addEventListener("toggle", async () => {
+      if (!d.open || loaded) return;
+      loaded = true;
+      try {
+        put(body, await load());
+      } catch (e) {
+        put(body, h("div", { class: "small faint" }, e.message || String(e)));
+      }
+    });
+    return d;
+  };
+  const kept = v.buildId
+    ? [
+        lazy("Conversation", async () => {
+          const ctx = await api(`/builds/${enc(v.buildId)}/context`);
+          return ctx.conversation?.length ? conversationThread(ctx.conversation) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
+        }),
+        spec && h("details", { class: "spec-step" }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
+        lazy("Builder's log", async () => {
+          const t = await api(`/builds/${enc(v.buildId)}/transcript`);
+          return t.text ? h("pre", { class: "log tail" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "small faint" }, "No log was kept.");
+        }),
+        h("button", { class: "link sm self-start", onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here ›"),
+      ]
+    : [];
+  return h(
+    "div",
+    { class: "version-pane" },
+    h(
+      "div",
+      { class: "row tight" },
+      h("span", { class: "pill" }, `v${v.version}`),
+      h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
+      isActive ? h("span", { class: "pill ok with-dot" }, "active") : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
+    ),
+    kept.length ? h("div", { class: "stack-sm version-kept" }, kept) : null,
   );
 }
 
@@ -2688,9 +2700,36 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   let focus = null;
   const messages = [];
   const thread = h("div", { class: "thread", "aria-live": "polite" });
-  // "Continue from here" on a version: the intake gets the conversation that made it as context.
-  const from = q?.get("from") || null;
-  if (from) api(`/builds/${enc(from)}`).then((b) => thread.prepend(h("div", { class: "small faint" }, `Continuing from the conversation that made v${b.resultVersion ?? "?"}.`))).catch(() => {});
+  // Picking up an earlier conversation ("Continue from here" on a version, or the offer on a change):
+  // its turns show at the top, dimmed, and go to the intake as context.
+  let from = q?.get("from") || null;
+  const earlierEl = h("div", { class: "earlier", hidden: true });
+  thread.prepend(earlierEl);
+  const continueFrom = async (buildId) => {
+    from = buildId;
+    const [b, ctx] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`)]);
+    put(earlierEl, h("div", { class: "small faint" }, `The conversation that made v${b.resultVersion ?? "?"}`), (ctx.conversation ?? []).map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
+    earlierEl.hidden = false;
+  };
+  if (from) continueFrom(from).catch(fail);
+  // A change to a tool with a conversation behind it: offer to pick it up (a card on top of the box, × to decline).
+  const offer = h("div", { class: "notice info continue-offer", hidden: true });
+  if (mode === "modify" && capId && !from && !widgetsMode) {
+    api(`/capabilities/${enc(capId)}`)
+      .then(async (d) => {
+        const last = d.versions?.find((v) => v.buildId);
+        const ctx = last ? await api(`/builds/${enc(last.buildId)}/context`).catch(() => ({})) : {};
+        if (!ctx.conversation?.length) return;
+        put(
+          offer,
+          h("span", { class: "grow" }, `Continue from the last conversation (v${last.version})?`),
+          h("button", { type: "button", class: "sm", onclick: () => ((offer.hidden = true), continueFrom(last.buildId).catch(fail)) }, "Continue"),
+          h("button", { type: "button", class: "ghost sm icon-only", "aria-label": "No", title: "No", onclick: () => (offer.hidden = true) }, "×"),
+        );
+        offer.hidden = false;
+      })
+      .catch(() => {});
+  }
   // Grows with the text; Enter sends, Shift+Enter for a new line.
   const input = h("textarea", {
     class: "composer-input",
@@ -2713,6 +2752,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
+  composer.prepend(offer);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -3387,8 +3427,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           clockEl,
         ),
         !waitingAgent && buildMeta(b),
-        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         convoView,
+        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
@@ -3454,8 +3494,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
-        specView,
         convoView,
+        specView,
         logBlock(false),
       );
     };
@@ -3486,8 +3526,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         f.detail && h("div", { class: "notice danger" }, h("span", {}, f.detail)),
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
-        specView,
         convoView,
+        specView,
         h("div", { class: "row tight" }, fix, retry),
         logBlock(true),
       );

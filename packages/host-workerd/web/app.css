@@ -438,6 +438,13 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 /* "Spec agreed" opens to the spec; "Conversation" to the chat that led to the build (kept with it). */
 .spec-step > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
 .thread.kept { max-height: 50vh; overflow: auto; margin-top: 8px; }
+/* A version's pane in Versions: what led to it, at the bottom. */
+.version-pane { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.version-kept { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+/* An earlier conversation picked up in the box: at the top, dimmed; the offer sits on top of the box. */
+.thread .earlier { margin-bottom: 8px; }
+.thread .earlier .bubble { opacity: 0.65; }
+.composer .continue-offer { margin: 8px 8px 0; align-items: center; gap: 8px; }
 .spec-step > summary::-webkit-details-marker { display: none; }
 .spec-step > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .6; }
 .spec-step[open] > summary::after { transform: rotate(45deg); margin-top: -3px; }
