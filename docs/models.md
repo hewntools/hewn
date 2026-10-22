@@ -62,6 +62,10 @@ hewn models key <provider> [--from <path> | --remove]
 hewn models use <provider>
 hewn models tier <tier> <model-id> | --suggested
 hewn models cap [<tool>] <usd> | none
-hewn models set <tool> <tier>        what a tool uses
+hewn models set <tool> <tier> | <provider/model>
+                                     what a tool uses
+hewn models price <provider/model> <in> <out>
+                                     a model's price, USD per M tokens
+hewn models list [<provider>]        the provider's models
 hewn models check                    test the key
 ```
