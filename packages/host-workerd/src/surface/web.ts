@@ -254,6 +254,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       // Its last failed calls, for "Ask builder to fix this".
       case "GET failures":
         return platform.recentFailures(owner, id);
+      // The owner's standing rules for building this tool (one per line); the ones for every tool are /api/instructions.
+      case "GET instructions":
+        return { lines: platform.instructions(owner, id) };
+      case "PUT instructions":
+        return { lines: platform.setInstructions(owner, id, (await readJson(req)).text) };
       case "POST modify": {
         const body = await readJson(req);
         return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
@@ -362,6 +367,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "accounts") return platform.accounts(owner);
 
   if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");
+
+  // The owner's standing rules for building, for every tool (one per line; the intake adds to them, the builder reads them).
+  if (resource === "instructions" && !id) {
+    if (method === "PUT") return { lines: platform.setInstructions(owner, undefined, (await readJson(req)).text) };
+    return { lines: platform.instructions(owner) };
+  }
 
   if (resource === "builds") {
     // ?brief=1: without the logs (the Builds page lists up to 200).
@@ -560,13 +571,20 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       // The owner's intake conversations, for their own reference/debugging (never shown to agents).
       host.intakeLog?.({ at: new Date().toISOString(), mode: body.mode, capabilityId: body.capabilityId, messages: body.messages, reply, error }).catch(() => {});
     };
-    const request = { ...body, catalog, current: currentManifest, ...(earlier ? { earlier } : {}) } as IntakeRequest;
+    // The owner's standing rules, for the intake to follow (and add to: what it remembers is saved below, and shown as saved).
+    const instructions = { global: platform.instructions(owner), ...(currentManifest ? { tool: platform.instructions(owner, body.capabilityId!) } : {}) };
+    const request = { ...body, catalog, current: currentManifest, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
+    const kept = (reply: IntakeReply): IntakeReply => {
+      const { remember, forget, ...rest } = reply;
+      const saved = platform.applyIntakeMemory(owner, body.capabilityId, remember, forget);
+      return saved.remember.length || saved.forget.length ? { ...rest, saved } : rest;
+    };
     // With Accept: text/event-stream the answer streams as it is written: progress events, then reply (or error).
     if (!/text\/event-stream/.test(req.headers.get("accept") ?? "")) {
       try {
         const reply = await intake(request);
         finish(reply);
-        return reply;
+        return kept(reply);
       } catch (e) {
         finish(undefined, (e as Error).message);
         throw e;
@@ -578,7 +596,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       async (event, signal) => {
         try {
           const reply = await intake(request, (p) => ((p as IntakeProgress).charge !== undefined ? platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge) : event("progress", p)), signal);
-          event("reply", reply);
+          event("reply", kept(reply));
           finish(reply);
         } catch (e) {
           const message = signal.aborted ? "stopped" : (e as Error).message;

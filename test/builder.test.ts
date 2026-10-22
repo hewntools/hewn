@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { builderPrompt } from "@hewntools/cli/builders/cli.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
+import { decodeVersion } from "@hewntools/core/files.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { Home } from "@hewntools/cli/home.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
@@ -75,6 +76,26 @@ describe("platform-assigned builder", () => {
     const modified = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
     assert.equal(modified.status, "promoted", modified.log.join("\n"));
     assert.deepEqual(seen, [[], []], "the modify build's workspace starts without them");
+  });
+
+  test("the platform writes AGENTS.md into every workspace (where the brief is); it never reaches a version", async () => {
+    const agents: string[] = [];
+    useBuilder(
+      fakeBuilder("fake", (job) => {
+        agents.push(readFileSync(join(job.workspace, "AGENTS.md"), "utf8"));
+        cpSync(SEED, job.workspace, { recursive: true });
+      }),
+    );
+    const created = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
+    assert.equal(created.status, "promoted", created.log.join("\n"));
+    const modified = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
+    assert.equal(modified.status, "promoted", modified.log.join("\n"));
+    assert.equal(agents.length, 2);
+    for (const a of agents) assert.match(a, /Read `BUILDER.md` first/);
+    const v = platform.registry.getVersion("running-log", 2)!;
+    const files = Object.keys(decodeVersion((await platform.blobs.get(`versions/${v.contentHash}.json`))!).files);
+    assert.ok(files.includes("src/index.ts"));
+    assert.ok(!files.includes("AGENTS.md") && !files.includes("BUILDER.md"), `never part of a version: ${files.join(", ")}`);
   });
 
   test("a lost builder connection (Hewn restarting) waits before it counts as an attempt", async () => {

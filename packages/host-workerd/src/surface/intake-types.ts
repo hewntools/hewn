@@ -6,6 +6,8 @@ import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
 export interface IntakeMessage {
   role: "user" | "intake";
   content: string;
+  /** The intake's structured reply, which the web client keeps with the build; the intake reads only `content`. */
+  reply?: unknown;
 }
 
 export interface IntakeRequest {
@@ -25,6 +27,21 @@ export interface IntakeRequest {
    * names the build; the platform fills in the version it made and its turns.
    */
   earlier?: { buildId: string; version?: number; messages?: IntakeMessage[] };
+  /** The owner's standing rules for building (the platform fills these in): for every tool, and for this one when modifying. */
+  instructions?: { global: string[]; tool?: string[] };
+}
+
+/** A standing rule the intake remembers (or drops) for the owner: for every tool, or for this one. */
+export interface IntakeInstruction {
+  scope: "global" | "tool";
+  text: string;
+}
+
+/** What a reply asks to remember or drop, and, filled in by the platform once applied, what was saved (for the owner to see and undo). */
+export interface IntakeMemory {
+  remember?: IntakeInstruction[];
+  forget?: IntakeInstruction[];
+  saved?: { remember: IntakeInstruction[]; forget: IntakeInstruction[] };
 }
 
 /**
@@ -91,7 +108,7 @@ export interface CreateDraft {
 export const MAX_IDEAS = 5;
 
 /** `message`: what the intake wants to say first (findings, assumptions, caveats); may be empty. */
-export type IntakeReply =
+export type IntakeReply = (
   | { kind: "questions"; message: string; questions: string[] }
   | { kind: "widgets"; message: string; proposals: WidgetProposal[] }
   /** Creating: several separate new capabilities, each a full draft; the owner ticks which to build (in parallel). */
@@ -99,7 +116,9 @@ export type IntakeReply =
   /** Modifying: nothing to build, only existing operations to run on a timetable. */
   | { kind: "schedules"; message: string; schedules: ScheduleSuggestion[] }
   | { kind: "draft"; message: string; draft: CreateDraft }
-  | { kind: "draft"; message: string; draft: { request: string; spec?: DraftSpec; connection?: ConnectionStep; schedules?: ScheduleSuggestion[] } };
+  | { kind: "draft"; message: string; draft: { request: string; spec?: DraftSpec; connection?: ConnectionStep; schedules?: ScheduleSuggestion[] } }
+) &
+  IntakeMemory;
 
 /** What the intake has said so far while it is still answering (streamed to the owner). */
 export interface IntakeProgress {

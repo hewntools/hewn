@@ -440,12 +440,26 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .thread.kept { max-height: 50vh; overflow: auto; margin-top: 8px; }
 /* "Got what you asked for?": a toast when a tool is opened after a build went live. */
 .feedback-toast { flex-wrap: wrap; }
+/* A version's pane in Versions: what led to it, at the bottom. */
+.version-pane { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.version-kept { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+/* An earlier conversation picked up in the chat, as it was; the offer to pick it up is a card in the chat. */
+.thread .earlier { margin-bottom: 8px; }
+.earlier-label { align-self: center; }
+.continue-card { align-self: stretch; padding: 12px 14px; }
+.continue-title { font-weight: 600; color: var(--accent-ink); margin-bottom: 2px; }
+.continue-actions { margin-top: 10px; }
+.brand-link, .brand-link * { cursor: pointer; }
 .spec-step > summary::-webkit-details-marker { display: none; }
 .spec-step > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .6; }
 .spec-step[open] > summary::after { transform: rotate(45deg); margin-top: -3px; }
 .step:has(.spec-step[open]) { align-items: start; }
 .step:has(.spec-step[open])::before { align-self: start; margin-top: 7px; }
 .spec-step > .spec-text { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
+/* What the intake remembered for later builds, and the owner's instructions (one per line). */
+.memory-notice { align-items: flex-start; }
+.memory-notice .memory-text { font-size: var(--fs-sm); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 
 /* Two lines at most (the full text on hover). */
 .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

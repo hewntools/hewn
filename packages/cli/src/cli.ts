@@ -760,7 +760,7 @@ const perM = (p?: { input: number; output: number }) => (p ? `${usd(p.input * 1e
 
 /** hewn models: the owner's model provider, tiers, budget and spend (the same as Settings → Models). */
 async function models(c: PlatformClient, rl: ReturnType<typeof createInterface>) {
-  const [sub, a, b, x] = positional().slice(1);
+  const [sub, a, b, x] = positional();
   const PROVIDERS = ["anthropic", "openai", "openrouter"];
   if (sub === "key") {
     if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>|--remove]");

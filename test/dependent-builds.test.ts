@@ -256,7 +256,23 @@ describe("intake: a connection first", () => {
     // "Continue from here": the earlier conversation comes first, as context, then the new one.
     const again = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "now add y" }], earlier: { buildId: "b-1", version: 3, messages: [{ role: "user", content: "make x" }, { role: "intake", content: "DRAFT\nX" }] } });
     assert.match(again, /An earlier conversation, which led to version 3[^]*USER: make x[^]*YOU \(intake\): DRAFT[^]*Conversation so far:[^]*USER: now add y/);
-    assert.doesNotMatch(prompt, /earlier conversation/);
+    assert.doesNotMatch(prompt, /An earlier conversation, which led to/);
+    // The owner's standing rules, and how to remember new ones (creating: global only; modifying: this tool too).
+    assert.doesNotMatch(prompt, /standing rules for building \(/);
+    const ruled = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "x" }], instructions: { global: ["Swedish copy"], tool: ["One screen"] } });
+    assert.match(ruled, /The owner's standing rules for building[^]*For every tool:\n- Swedish copy\n[^]*For this tool:\n- One screen\n/);
+    assert.match(ruled, /Remember standing rules[^]*put its exact text in "forget"/);
+    assert.doesNotMatch(ruled, /there is no tool yet/);
+    assert.match(intakePrompt({ mode: "create", messages: [{ role: "user", content: "x" }], instructions: { global: ["Swedish copy"] } }), /For every tool:\n- Swedish copy\n[^]*there is no tool yet/);
+    // The reply's memory comes through on any kind of reply, well-formed entries only.
+    const remembered = parseIntake(JSON.stringify({ kind: "questions", message: "", questions: ["q?"], remember: [{ scope: "global", text: " Swedish copy " }, { scope: "nope", text: "x" }, { scope: "tool" }], forget: [] }), "modify") as any;
+    assert.deepEqual(remembered.remember, [{ scope: "global", text: "Swedish copy" }]);
+    assert.equal(remembered.forget, undefined);
+    // Asks until it's clear, per mode, with defaults; no cap on rounds (the owner's Draft now is the stop).
+    assert.match(prompt, /Ask until it's clear; then draft\. Before a draft you must be able to say, from the conversation: the moment[^]*each carrying the default you'd assume[^]*Just say ok if that looks good[^]*When the owner says to draft now/);
+    assert.doesNotMatch(prompt, /Round \d+ of at most|last round/);
+    assert.match(ruled, /what exactly changes and where[^]*A vague one \("improve the UX"/);
+    assert.doesNotMatch(ruled, /the moment \(when the owner opens/);
   });
 
   test("creating: several ideas at once, each a full draft (incomplete ones dropped, at most five)", async () => {
