@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.6 (unreleased)
+
+- **Fixed: `hewn models <subcommand>` from the terminal.** It skipped the word after `models`, so `hewn models key anthropic` (and `use`, `tier`, `cap`, `price`, `set`, `list`, `check`) failed with "unknown: hewn models anthropic". Settings › AI › Models was unaffected.
+
 ## 0.4.5 (2026-10-21)
 
 - **For hosts: tools that think run on the host's models** (hosted mode, `HEWN_HOSTED`). A tool's `ctx.model` goes to the host's `/v1/generate` (through the supervisor, which holds the token), so the owner needs no API key. Settings › AI › Models shows what each tier runs on and what the host charged this month (builds, talking requests through, tools that think), with no providers, keys or USD caps. A refusal (over the month) reaches the tool's caller in the host's words. See the [remote builder protocol](docs/internal/remote-builder.md#tools-model-calls-post-v1generate-hosted).
