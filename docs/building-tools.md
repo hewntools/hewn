@@ -12,7 +12,7 @@ Paste a screenshot (Ctrl+V / ⌘V), drop files on the box, or **Attach**: a scre
 
 The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI) first talks it through: it asks until the request is clear (when you'd use it, what it keeps, the main action), each question with the default it would assume, so "ok" answers them all; **Draft now** skips the rest and takes its assumptions, listed with the proposal. Then it makes a **spec proposal**: the tool, what it will do, what it needs (a site to reach, a key, another tool, a model: its [grants](concepts.md#grants)), and any widgets or [schedules](concepts.md#schedules). A big request can become a few small tools that work together; untick the ones you don't want. Reply to change it, or press **Build** (it says how many tools: "Build 1 tool").
 
-![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool](images/spec-proposal.png)
+![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool; the box below has Attach](images/spec-proposal.png)
 
 You can also ask an agent ("make me a reading list in Hewn"), if you allowed it to make tools ([scopes](agents.md#what-agents-can-do)). It shows up the same way.
 
@@ -59,7 +59,7 @@ The build says why: a failing test, an invalid manifest, an error on its screen.
 
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
-![A failed build: 1 of 3 tests didn't pass, the test that failed, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
+![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
 
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude` or `codex login`), then try again.
 

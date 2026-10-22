@@ -61,7 +61,7 @@ The **Change it** box asks for a change ([Building tools](building-tools.md#chan
 
 **When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed already written in: the operation, the error, its input and the last log lines. Read it, add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 
-![Running Log's Info page: its status and version, the Change it box, and the Operations, Allowed to, Schedules, Widgets and Versions rows](images/tool-info.png)
+![Running Log's Info page: its status and version, the Change it box, and the Operations, Allowed to, Schedules, Widgets, Instructions and Versions rows](images/tool-info.png)
 
 ### Schedules
 
@@ -92,7 +92,7 @@ Call logs are kept for two weeks by default (Settings › Data).
 - **Data:** backups and their folder, how long call logs are kept, and deleted tools ([Your data](data.md)).
 - **About:** the version, whether a newer one is out (with the command to upgrade), and shortcuts.
 
-![Settings › AI: Builds tools set to Claude Code on the default model, the models agents may ask for, and Thinks inside tools with no provider yet](images/settings-ai.png)
+![Settings › AI: Builds tools set to Claude Code on the default model, the models agents may ask for, Instructions for building (none yet), and Thinks inside tools with no provider yet](images/settings-ai.png)
 
 ## On a phone
 
