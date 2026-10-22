@@ -1476,7 +1476,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
         // Once reloaded, it says so (no Reload to press again), and offers the next change.
         const shown = () => put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is on screen.`)), more(), undo);
         put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is ready.`), " Reload to see it."), h("button", { class: "sm primary", onclick: () => (onReload(), shown()) }, "Reload"), undo);
-        return h("div", { class: "stack-sm" }, notice, feedbackAsk(b));
+        return notice;
       },
     });
     put(body, panel.el);
@@ -1553,8 +1553,10 @@ async function appPage(id, q) {
     const pill = barEl.querySelector(".app-title .pill");
     if (now?.version && pill) pill.textContent = `v${now.version}`;
   };
-  const [barEl, layout] = withDrawer(c, q, frame, { reload });
+  const drawerApi = {};
+  const [barEl, layout] = withDrawer(c, q, frame, { reload, api: drawerApi });
   barEl.querySelector(".app-title")?.append(subtitle);
+  askFeedbackOnOpen(c, drawerApi);
   const fixSlot = h("div", { class: "fix-slot" });
   const showFix = async () => {
     // This screen's own failure (its calls run as ui:<id>), not an agent's or a schedule's.
@@ -1749,6 +1751,7 @@ async function runPage(id, q) {
   const [barEl, layout] = withDrawer(c, q, main, { reload: () => route(), noUi: true, api: drawerApi });
   view(barEl, sandboxNotice(), layout);
   if (selected) select(selected);
+  askFeedbackOnOpen(c, drawerApi);
 }
 
 function runForm(id, cap, op) {
@@ -2970,40 +2973,32 @@ const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x
 const conversationThread = (turns) => h("div", { class: "thread kept" }, turns.map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
 
 /**
- * "Got what you asked for?" on a build that went live, asked once: Yes, Not quite (and a line on
- * what's off), or × to skip. The answer stays in your Hewn; nothing is sent anywhere.
+ * "Got what you asked for?", asked once as a toast when a tool is opened after a build went live
+ * (its newest version's build, within a week, no answer yet): Yes, Not quite (which opens the
+ * change drawer, so what's off becomes the next change), or × to skip. The answer stays in your
+ * Hewn; nothing is sent anywhere.
  */
-function feedbackAsk(b, existing) {
-  if (existing || b.status !== "promoted") return null;
-  const el = h("div", { class: "notice info feedback-ask" });
-  const send = (score, note) => api(`/builds/${enc(b.buildId)}/feedback`, { method: "POST", body: { score, ...(note ? { note } : {}) } });
-  const done = (text) => put(el, h("span", { class: "grow muted" }, text));
-  const notQuite = () => {
-    const input = h("input", { type: "text", placeholder: "What's off?", "aria-label": "What's off", maxLength: 1000 });
-    const ok = h("button", { type: "submit", class: "sm primary" }, "Send");
-    const form = h("form", { class: "row tight grow" }, input, ok);
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      ok.disabled = true;
-      try {
-        await send("no", input.value.trim());
-        done("Noted.");
-      } catch (err) {
-        ok.disabled = false;
-        fail(err);
-      }
-    });
-    put(el, form);
-    input.focus();
-  };
+async function askFeedbackOnOpen(c, drawerApi) {
+  const d = await api(`/capabilities/${enc(c.id)}`).catch(() => null);
+  const last = d?.versions?.find((v) => v.buildId);
+  if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
+  const ctx = await api(`/builds/${enc(last.buildId)}/context`).catch(() => null);
+  if (!ctx || ctx.feedback) return;
+  let region = document.querySelector(".toast-region");
+  if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
+  const send = (score) => api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } });
+  const el = h("div", { class: "toast feedback-toast" });
+  const gone = () => el.remove();
   put(
     el,
-    h("span", { class: "grow" }, "Got what you asked for?"),
-    h("button", { type: "button", class: "sm", onclick: () => send("yes").then(() => done("Noted."), fail) }, "Yes"),
-    h("button", { type: "button", class: "sm", onclick: () => send("no").then(notQuite, fail) }, "Not quite"),
-    h("button", { type: "button", class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(() => el.remove(), fail) }, "×"),
+    h("span", { class: "dot info" }),
+    h("span", {}, `v${last.version} · got what you asked for?`),
+    h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
+    h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.("")), fail) }, "Not quite"),
+    h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
   );
-  return el;
+  region.append(el);
+  onLeave(gone);
 }
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
@@ -3490,7 +3485,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         card,
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
         builtWith(b),
-        feedbackAsk(b, context.feedback),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
         specView,
         convoView,
