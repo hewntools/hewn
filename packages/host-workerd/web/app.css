@@ -443,10 +443,11 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .composer > .attachments { padding: 8px 8px 0; }
 .bubble .attachments { margin-top: 8px; }
 .attachment { position: relative; display: inline-flex; align-items: center; max-width: 100%; }
-.attachment img { display: block; height: 64px; max-width: 160px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
-.bubble .attachment img { height: auto; max-height: 220px; max-width: 100%; object-fit: contain; }
+.attachment img { display: block; height: 64px; width: auto; max-width: 200px; object-fit: contain; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); }
+.bubble .attachment img { height: auto; max-height: 220px; max-width: 100%; }
 .attachment .file-chip { font-size: var(--fs-sm); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachment .x { position: absolute; top: -7px; right: -7px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; min-height: 0; border-radius: 50%; border: 0; padding: 0; background: var(--text-2); color: var(--surface); font-size: 12px; line-height: 1; cursor: pointer; }
+.attachment > button.x { position: absolute; top: -7px; right: -7px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; min-height: 0; border-radius: 50%; border: 0; padding: 0; background: var(--text-2); color: var(--bg); font: 700 13px/1 var(--font); cursor: pointer; }
+.attachment > button.x:hover { background: var(--text); color: var(--bg); }
 .composer.drop { outline: 2px dashed var(--accent); outline-offset: 2px; }
 /* What the intake remembered for later builds, and the owner's instructions (one per line). */
 .memory-notice { align-items: flex-start; }
