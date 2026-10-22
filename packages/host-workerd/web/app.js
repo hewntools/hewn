@@ -586,7 +586,7 @@ function versionPane(c, v, isActive, close) {
     ? [
         lazy("Conversation", async () => {
           const ctx = await api(`/builds/${enc(v.buildId)}/context`);
-          return ctx.conversation?.length ? conversationThread(ctx.conversation, { mode: v.kind === "create" ? "create" : "modify", cap: c, all: await caps(true).catch(() => new Map()) }) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
+          return ctx.conversation?.length ? conversationThread(ctx.conversation, { mode: v.kind === "create" ? "create" : "modify", cap: c, all: await caps(true).catch(() => new Map()), version: v.version }) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
         }),
         spec && h("details", { class: "spec-step" }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
         lazy("Builder's log", async () => {
@@ -2711,7 +2711,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const continueFrom = async (buildId) => {
     from = buildId;
     const [b, ctx] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`)]);
-    put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode, cap, all }));
+    put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode, cap, all, version: b.resultVersion }));
     earlierEl.hidden = false;
   };
   if (from) continueFrom(from).catch(fail);
@@ -3018,10 +3018,11 @@ const conversationThread = (turns, ctx = {}) => h("div", { class: "thread kept" 
 const conversationNodes = (turns, ctx = {}) =>
   turns.map((t) => {
     const r = t.role === "intake" ? t.reply : null;
+    if (r?.kind === "questions") return h("div", { class: "bubble them" }, [r.message, ...(r.questions ?? []).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n"));
     const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
     if (list?.length && "cap" in ctx) {
       const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
-      const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, readOnly: true })[0];
+      const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, nextVersion: ctx.version, readOnly: true })[0];
       return [r.message && h("div", { class: "bubble them" }, r.message), card];
     }
     return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content);
@@ -3413,7 +3414,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
     const specView = specText ? h("details", { class: "spec-step" }, h("summary", {}, "Spec agreed"), h("pre", { class: "spec-text" }, specText)) : null;
     // The conversation that led to it (kept with the build); an agent's build has none.
-    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation, { mode: b.kind === "create" ? "create" : "modify", cap: cap(), all })) : null;
+    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation, { mode: b.kind === "create" ? "create" : "modify", cap: cap(), all, version: b.resultVersion })) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
     const live = () => {
