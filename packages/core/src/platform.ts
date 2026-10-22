@@ -2744,6 +2744,7 @@ export class Platform {
         "tests/cases.json": bytes("[]\n"),
       }),
       "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}`, this.registry.buildContext(buildId)?.instructions)),
+      ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
     });
     if (this.cancelledWhileOpening(buildId)) return;
@@ -2826,7 +2827,7 @@ export class Platform {
     const request = (b.request as { request?: string }).request ?? "";
     const ask = b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -3601,6 +3602,17 @@ export class Platform {
       return `### ${m.name} (\`${c.id}\`)\n${m.purpose}\n${ops.join("\n")}`;
     });
     return `\n## The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities"). You see only their public contracts, never their data or code.\n\n${lines.join("\n\n")}\n`;
+  }
+
+  /**
+   * AGENTS.md for a workspace, for builders that read it on their own (Codex, OpenCode): where the
+   * brief is, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
+   */
+  private agentsFile(buildId: string): Files {
+    const instructions = this.registry.buildContext(buildId)?.instructions;
+    return {
+      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first: the request, the implementation contract and the owner's other tools. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}` : ""}`),
+    };
   }
 
   /** PLATFORM_UI.css for a workspace: the design system to read (served to UIs as /_platform/ui.css). */
