@@ -2813,7 +2813,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
+  // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
+  const draftNow = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
+  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, draftNow, modelChip(), send));
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -2844,7 +2846,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const ask = async (e) => {
     e?.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    // One turn at a time: the box is disabled while the intake answers (Draft now submits through here too).
+    if (!text || input.disabled) return;
     // Text put in from the address (m=, "Ask builder to fix this") is sent: a redraw mustn't put it back.
     const [path, qs = ""] = location.hash.split("?");
     const params = new URLSearchParams(qs);
@@ -2867,6 +2870,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const live = h("div", { class: "thread" });
     thread.append(live, typing, activity);
     input.disabled = true;
+    draftNow.disabled = true;
     // While it answers, Send is Stop: the request closes and the intake stops.
     const stop = new AbortController();
     const stopBtn = h("button", { type: "button", class: `stop-btn ${embedded ? "" : "lg"}`, "aria-label": "Stop", title: "Stop", onclick: () => stop.abort() }, h("span", { class: "stop-square", "aria-hidden": "true" }));
@@ -2875,7 +2879,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (p.activity) activity.textContent = `${p.activity}…`;
       if (p.message === undefined && p.questions === undefined) return;
       activity.textContent = "";
-      put(live, p.message && h("div", { class: "bubble them" }, p.message), (p.questions ?? []).filter(Boolean).map((x) => h("div", { class: "bubble them" }, x)));
+      put(live, p.message || p.questions?.length ? h("div", { class: "bubble them" }, chatText(p.message, p.questions)) : null);
     };
     try {
       let reply = null;
@@ -2885,14 +2889,16 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       typing.remove();
       live.remove();
       activity.remove();
-      if (reply.message) say("them", reply.message);
+      // Questions come as one message, with the questions as a list; a proposal's message sits above its card.
+      if (reply.message && reply.kind !== "questions") say("them", reply.message);
+      draftNow.hidden = reply.kind !== "questions";
       // What it remembered (or dropped) for later builds: shown as saved, with Undo.
       for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
       const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
-        reply.questions.forEach((x) => say("them", x));
+        say("them", chatText(reply.message, reply.questions));
       } else if (reply.kind === "widgets") {
         // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
         messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
@@ -2928,6 +2934,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
+      draftNow.disabled = false;
       syncSend();
       grow();
       input.focus();
@@ -2942,6 +2949,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     setText: (t) => ((input.value = t), syncSend(), input.focus(), grow()),
   };
 }
+
+/** The intake's message and its questions as one chat message: paragraphs, the questions numbered. */
+const chatText = (message, questions) => [message, ...(questions ?? []).filter(Boolean).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n");
 
 /** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
 const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
