@@ -3019,6 +3019,9 @@ const conversationNodes = (turns, ctx = {}) =>
   turns.map((t) => {
     const r = t.role === "intake" ? t.reply : null;
     if (r?.kind === "questions") return h("div", { class: "bubble them" }, [r.message, ...(r.questions ?? []).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n"));
+    // A turn kept as text only (from before replies were kept): its proposal part folds away.
+    const legacy = t.role === "intake" && !r ? /^([^]*?)(?:^|\n)(DRAFT|IDEAS|SCHEDULES)\n([^]*)$/.exec(t.content) : null;
+    if (legacy) return [legacy[1].trim() && h("div", { class: "bubble them" }, legacy[1].trim()), h("details", { class: "spec-step kept-proposal" }, h("summary", {}, "Earlier proposal"), h("pre", { class: "spec-text" }, legacy[3]))];
     const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
     if (list?.length && "cap" in ctx) {
       const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
