@@ -381,6 +381,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     // What led to it (the conversation, the instructions, the brief) and the builder's log: kept for the tool's life.
     if (sub === "context") return platform.buildContext(owner, id);
     if (sub === "transcript") return { text: (await platform.buildTranscript(owner, id)) ?? null };
+    // "Got what you asked for?": yes, no (with a note), or skip. Stays here.
+    if (sub === "feedback" && method === "POST") return platform.setBuildFeedback(owner, id, pick(await readJson(req), ["score", "note"]));
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);

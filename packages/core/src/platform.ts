@@ -67,7 +67,7 @@ import {
 import { EFFORT, MODEL_NAME } from "./build-models.ts";
 import { migrationProblems, migrationsOf, rollbackProblems } from "./migrations.ts";
 import type { Blobs, CallHandler, CapabilityRuntime, CodeRef, ExecutionTarget, Files, SecretStore, Sql, StateRef, Workbench } from "./ports.ts";
-import { type BuildContext, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
+import { type BuildContext, type BuildFeedback, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
 import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
@@ -289,6 +289,34 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 /** The most turns a conversation kept with a build may have, and the longest turn. */
 const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
+/** The longest note with the owner's answer to "Got what you asked for?". */
+const MAX_FEEDBACK_NOTE = 1000;
+
+/** One build in the feedback report (`hewn feedback`): what it ran on, how it ended, what the owner said, and the signs in the record. */
+export interface BuildReportRow {
+  buildId: string;
+  capabilityId: string;
+  kind: BuildKind;
+  status: BuildRow["status"];
+  createdAt: string;
+  builder: string;
+  model?: string;
+  effort?: string;
+  ranModel?: string;
+  /** Which brief it ran on (the spec's version and a short hash). */
+  brief?: string;
+  attempts: number;
+  /** Why it failed, when it did. */
+  failure?: string;
+  feedback?: BuildFeedback;
+  /** What the record says: this build failed and a retry of it went live; another change to the tool within a day of this one going live; a restore to an earlier version within a week; the tool deleted within a day. */
+  signals: { fixed: boolean; changedSoon: boolean; restored: boolean; deletedSoon: boolean };
+}
+/** The feedback report: the window it covers (days, as clamped) and the builds in it, newest first. */
+export interface BuildReport {
+  days: number;
+  builds: BuildReportRow[];
+}
 /** The longest structured reply kept with an intake turn (as JSON). */
 const MAX_REPLY_CHARS = 100_000;
 
@@ -2911,11 +2939,73 @@ export class Platform {
     return this.buildView(this.visibleBuild(agent, buildId));
   }
 
-  /** What led to a build: the owner's conversation with the intake, the instructions, the brief. Owner only. */
-  buildContext(owner: Agent, buildId: string): BuildContext {
+  /** What led to a build (the owner's conversation with the intake, the instructions, the brief) and what the owner said of it once live. Owner only. */
+  buildContext(owner: Agent, buildId: string): BuildContext & { feedback?: BuildFeedback } {
     requireOwner(owner);
     this.mustBuild(buildId);
-    return this.registry.buildContext(buildId) ?? {};
+    const feedback = this.registry.buildFeedback(buildId);
+    return { ...(this.registry.buildContext(buildId) ?? {}), ...(feedback ? { feedback } : {}) };
+  }
+
+  /**
+   * "Got what you asked for?" on a build that went live: yes, no (with a note on what's off), or
+   * skip. Owner only. It stays in the owner's database; nothing leaves the machine.
+   */
+  setBuildFeedback(owner: Agent, buildId: string, f: { score?: unknown; note?: unknown }): BuildFeedback {
+    requireOwner(owner);
+    const b = this.mustBuild(buildId);
+    if (b.status !== "promoted") throw new PlatformError("conflict", `build ${buildId} isn't live (it is ${b.status}); the question is for builds that went live`);
+    if (f.score !== "yes" && f.score !== "no" && f.score !== "skip") throw new PlatformError("invalid_request", 'score must be "yes", "no" or "skip"');
+    if (f.note !== undefined && (typeof f.note !== "string" || f.note.length > MAX_FEEDBACK_NOTE)) throw new PlatformError("invalid_request", `note: text of at most ${MAX_FEEDBACK_NOTE} characters`);
+    const note = typeof f.note === "string" ? f.note.trim() : "";
+    this.registry.setBuildFeedback(buildId, { score: f.score, ...(note ? { note } : {}) });
+    this.logger(`build ${buildId}: the owner says ${f.score}`);
+    return this.registry.buildFeedback(buildId)!;
+  }
+
+  /**
+   * How recent builds worked out, newest first: what each ran on, how many attempts, how it ended,
+   * the owner's answer, and the signs in the record (a failed build whose retry went live, another
+   * change within a day of going live, a restore within a week, the tool deleted within a day). For
+   * the owner (`hewn feedback`); a host reads it the same way, in the machine. Nothing is sent anywhere.
+   */
+  buildReport(owner: Agent, opts: { days?: number } = {}): BuildReport {
+    requireOwner(owner);
+    const days = Math.min(365, Math.max(1, Number(opts.days) || 30));
+    const builds = this.registry.buildsSince(new Date(Date.now() - days * 86400_000).toISOString());
+    const rollbacks = this.registry.lifecycleEvents(2000).filter((e) => e.action === "rollback");
+    const within = (from: string, to: string, hours: number) => {
+      const d = Date.parse(to) - Date.parse(from);
+      return d >= 0 && d <= hours * 3600_000;
+    };
+    const rows = builds.map((b) => {
+      const attempts = Math.max(1, ...b.log.map((l) => Number(/^attempt (\d+): builder/.exec(l)?.[1] ?? 0)));
+      const later = builds.filter((x) => x.capabilityId === b.capabilityId && x.id !== b.id && x.createdAt > b.createdAt);
+      const retry = (x: BuildRow) => x.request.retryOf === b.id || x.request.autoRetryOf === b.id;
+      const live = b.status === "promoted";
+      return {
+        buildId: b.id,
+        capabilityId: b.capabilityId,
+        kind: b.kind,
+        status: b.status,
+        createdAt: b.createdAt,
+        builder: b.builder ?? "agent",
+        ...(b.model ? { model: b.model } : {}),
+        ...(b.effort ? { effort: b.effort } : {}),
+        ...(b.ranModel ? { ranModel: b.ranModel } : {}),
+        ...(b.brief ? { brief: b.brief } : {}),
+        attempts,
+        ...(b.status === "failed" ? { failure: explainFailure(b.log).title } : {}),
+        ...(b.feedback ? { feedback: b.feedback } : {}),
+        signals: {
+          fixed: later.some((x) => retry(x) && x.status === "promoted"),
+          changedSoon: live && later.some((x) => !retry(x) && !x.request.retryOf && !x.request.autoRetryOf && within(b.updatedAt, x.createdAt, 24)),
+          restored: live && b.resultVersion !== null && rollbacks.some((e) => e.capabilityId === b.capabilityId && e.detail.startsWith(`v${b.resultVersion} →`) && within(b.updatedAt, e.at, 7 * 24)),
+          deletedSoon: live && !!b.archivedAt && within(b.updatedAt, b.archivedAt, 24),
+        },
+      };
+    });
+    return { days, builds: rows };
   }
 
   /** The builder's transcript: kept with the build once it ended, the workbench's while it runs. Owner only (it shows source). */

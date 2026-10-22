@@ -1597,8 +1597,8 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     } else drawer?.focus();
   };
   if (q.get("change") === "1") open();
-  /** Open the drawer (if it isn't) with `text` in the composer. */
-  drawerApi.open = (text) => (toggle(true), drawer?.setText(text));
+  /** Open the drawer (if it isn't), with `text` in the composer when given; without, what's typed stays. */
+  drawerApi.open = (text) => (toggle(true), text === undefined ? drawer?.focus() : drawer?.setText(text));
   return [barEl, layout];
 }
 
@@ -1623,8 +1623,10 @@ async function appPage(id, q) {
     const pill = barEl.querySelector(".app-title .pill");
     if (now?.version && pill) pill.textContent = `v${now.version}`;
   };
-  const [barEl, layout] = withDrawer(c, q, frame, { reload });
+  const drawerApi = {};
+  const [barEl, layout] = withDrawer(c, q, frame, { reload, api: drawerApi });
   barEl.querySelector(".app-title")?.append(subtitle);
+  askFeedbackOnOpen(c, drawerApi);
   const fixSlot = h("div", { class: "fix-slot" });
   const showFix = async () => {
     // This screen's own failure (its calls run as ui:<id>), not an agent's or a schedule's.
@@ -1819,6 +1821,7 @@ async function runPage(id, q) {
   const [barEl, layout] = withDrawer(c, q, main, { reload: () => route(), noUi: true, api: drawerApi });
   view(barEl, sandboxNotice(), layout);
   if (selected) select(selected);
+  askFeedbackOnOpen(c, drawerApi);
 }
 
 function runForm(id, cap, op) {
@@ -3157,6 +3160,44 @@ const conversationNodes = (turns, ctx = {}) =>
     }
     return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content);
   });
+
+/**
+ * "Got what you asked for?", asked once as a toast when a tool is opened after a build went live
+ * (its newest version's build, within a week, no answer yet): Yes, Not quite (which opens the
+ * change drawer, so what's off becomes the next change), or × to skip. The answer stays in your
+ * Hewn; nothing is sent anywhere.
+ */
+async function askFeedbackOnOpen(c, drawerApi) {
+  const d = await api(`/capabilities/${enc(c.id)}`).catch(() => null);
+  const last = d?.versions?.find((v) => v.buildId);
+  if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
+  const ctx = await api(`/builds/${enc(last.buildId)}/context`).catch(() => null);
+  if (!ctx || ctx.feedback) return;
+  // Once per version in this browser: ignoring it is an answer too.
+  const askedKey = `hewn.asked.${c.id}`;
+  if (localStorage.getItem(askedKey) === String(last.version)) return;
+  localStorage.setItem(askedKey, String(last.version));
+  let region = document.querySelector(".toast-region");
+  if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
+  // An answer that didn't reach Hewn is asked for again next time.
+  const send = (score) =>
+    api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } }).catch((e) => {
+      localStorage.removeItem(askedKey);
+      throw e;
+    });
+  const el = h("div", { class: "toast feedback-toast" });
+  const gone = () => el.remove();
+  put(
+    el,
+    h("span", { class: "dot info" }),
+    h("span", {}, `v${last.version} · got what you asked for?`),
+    h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
+    h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.()), fail) }, "Not quite"),
+    h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
+  );
+  region.append(el);
+  onLeave(gone);
+}
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
 const draftText = (d) =>
