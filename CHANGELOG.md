@@ -5,6 +5,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.6 (unreleased)
 
 - **A build keeps what led to it,** for the tool's life: your conversation with the intake, the spec, and the builder's log (which used to go after 30 days). The build page has **Conversation** above **Spec agreed**; in **Versions**, each version shows its conversation, spec and log, and **Continue from here** starts a change with that conversation on top (opening **Change…** offers the last one too). Builds also record which brief they ran on.
+- **Fixed: `hewn models <subcommand>` from the terminal.** It skipped the word after `models`, so `hewn models key anthropic` (and `use`, `tier`, `cap`, `price`, `set`, `list`, `check`) failed with "unknown: hewn models anthropic". Settings › AI › Models was unaffected.
+- **The intake gets 15 minutes, not 5,** so a long brief on a slow, careful model (Opus at high effort) finishes. Past that it's stopped with "intake took longer than 15 minutes, so Hewn stopped it" instead of the last raw line of its output.
+- **Fixed: a tool's hidden message showed as an empty red box.** The UI kit's `.notice` (and any other class that sets `display`) no longer overrides `hidden`.
+- **The chat box's example goes after your first message** (no "Track my coffee beans…" under a conversation about something else).
 
 ## 0.4.5 (2026-10-21)
 

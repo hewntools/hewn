@@ -158,6 +158,9 @@ small, .muted { color: var(--text-2); }
 .wallpaper.dim i { opacity: calc(var(--wp-a) * 0.5); }
 [data-wallpaper="off"] .wallpaper { display: none; }
 
+/* hidden wins over a component's display (a .notice with hidden stays hidden). */
+[hidden] { display: none !important; }
+
 .notice { display: flex; gap: var(--s3); align-items: flex-start; background: var(--warn-soft); color: var(--text); border-radius: var(--radius); padding: var(--s3) var(--s4); }
 .notice::before { content: ""; flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: var(--radius-xs); background: var(--warn); }
 .notice.ok { background: var(--ok-soft); } .notice.ok::before { background: var(--ok); }
