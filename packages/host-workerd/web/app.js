@@ -2984,6 +2984,10 @@ async function askFeedbackOnOpen(c, drawerApi) {
   if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
   const ctx = await api(`/builds/${enc(last.buildId)}/context`).catch(() => null);
   if (!ctx || ctx.feedback) return;
+  // Once per version in this browser: ignoring it is an answer too.
+  const askedKey = `hewn.asked.${c.id}`;
+  if (localStorage.getItem(askedKey) === String(last.version)) return;
+  localStorage.setItem(askedKey, String(last.version));
   let region = document.querySelector(".toast-region");
   if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
   const send = (score) => api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } });
