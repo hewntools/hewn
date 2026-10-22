@@ -48,6 +48,9 @@ Ship `ui/icon.svg` as a **5×5 pixel glyph**, even if the capability has no othe
 - `viewBox="0 0 5 5"`, whole-unit `<rect>`s only (`width="1" height="1"`)
 - `fill="currentColor"` and `shape-rendering="crispEdges"` on the `<svg>`; no colours in the file
 - 7–17 lit cells, one simple idea, readable at 28px
+- centred in the grid: the lit cells' bounding box sits in the middle of the 5×5 (an empty column
+  on the left has one on the right, an empty row at the top one at the bottom; a 4-wide shape goes
+  in columns 0–3 or 1–4 only when it reads better that way, never by accident)
 - set `"hue"` in capability.json (above)
 
 Running Log (a rising slope):
