@@ -2711,7 +2711,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const continueFrom = async (buildId) => {
     from = buildId;
     const [b, ctx] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`)]);
-    put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode, cap, all, version: b.resultVersion }));
+    put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode: b.kind === "create" ? "create" : "modify", cap, all, version: b.resultVersion }));
     earlierEl.hidden = false;
   };
   if (from) continueFrom(from).catch(fail);
@@ -3011,17 +3011,66 @@ function modelChip() {
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
 /**
+ * The reply an intake turn kept as text only was (conversations from before replies were kept):
+ * the message, then the draft, ideas, schedules or widgets as `draftText` and friends wrote them.
+ * The summary pills (operations, widgets, model) weren't written down, so the card goes without.
+ */
+function legacyReply(content, mode) {
+  const m = /^([^]*?)(?:^|\n\n)(DRAFT|IDEAS|SCHEDULES)\n([^]*)$/.exec(content ?? "");
+  if (m) {
+    const message = m[1].trim();
+    if (m[2] === "SCHEDULES") return { kind: "schedules", message, schedules: parseSchedules(m[3]) };
+    if (m[2] === "DRAFT") return { kind: "draft", message, draft: parseDraft(m[3], mode) };
+    // Ideas are numbered, a blank line apart, each starting "Name: purpose"; a numbered list inside one stays with it.
+    const ideas = [];
+    for (const part of m[3].split(/\n\n(?=\d+\. [^\n:]{1,80}: )/)) {
+      if (part.startsWith(`${ideas.length + 1}. `) || !ideas.length) ideas.push(part.replace(/^\d+\. /, ""));
+      else ideas[ideas.length - 1] += `\n\n${part}`;
+    }
+    return { kind: "ideas", message, ideas: ideas.map((s) => parseDraft(s, "create")) };
+  }
+  // Widgets: "1. Title (template; sizes[; replaces name]): shows" lines after the message.
+  const lines = (content ?? "").split("\n");
+  const numbered = lines.filter((l) => /^\d+\. /.test(l));
+  const proposals = numbered.map((l) => /^\d+\. (.+?) \((\w+); ([a-z, ]+?)(?:; replaces (.+?))?\): ([^]*)$/.exec(l)).filter(Boolean);
+  if (!proposals.length || proposals.length !== numbered.length) return null;
+  return { kind: "widgets", message: lines.filter((l) => !/^\d+\. /.test(l)).join("\n").trim(), proposals: proposals.map(([, title, template, sizes, replaces, shows]) => ({ title, template, sizes: sizes.split(", "), ...(replaces ? { replaces } : {}), shows })) };
+}
+const parseSchedules = (text) =>
+  text
+    .split("\n")
+    .map((l) => /^- (\S+) (.*?)(?: \((.*)\))?$/.exec(l))
+    .filter(Boolean)
+    .map(([, operation, cadence, why]) => ({ operation, cadence, ...(why ? { why } : {}) }));
+/** `draftText` read back: name + purpose (a create), the spec, the connection step, the schedules. */
+function parseDraft(text, mode) {
+  const d = {};
+  let rest = text;
+  const sched = /\nSchedules:\n((?:- .*(?:\n|$))+)$/.exec(rest);
+  if (sched) ((d.schedules = parseSchedules(sched[1])), (rest = rest.slice(0, sched.index)));
+  const conn = /\nFirst (builds|changes) the connection ([^:\n]+): ([^]*)$/.exec(rest);
+  if (conn) {
+    const [head, ...body] = conn[3].split("\n");
+    d.connection = conn[1] === "builds" ? { mode: "create", name: conn[2], purpose: head, requirements: body.join("\n") } : { mode: "modify", capabilityId: conn[2], request: conn[3] };
+    rest = rest.slice(0, conn.index);
+  }
+  const named = mode !== "modify" && /^([^\n:]{1,80}): (.*)\n?/.exec(rest);
+  if (named) ((d.name = named[1]), (d.purpose = named[2]), (rest = rest.slice(named[0].length)));
+  if (mode === "modify") d.request = rest;
+  else d.requirements = rest;
+  return d;
+}
+
+/**
  * A kept conversation (what led to a build), as the chat looked: the owner's turns, the intake's
  * questions, and its proposals as the cards they were (read-only). `ctx`: { mode, cap, all } for the cards.
  */
 const conversationThread = (turns, ctx = {}) => h("div", { class: "thread kept" }, conversationNodes(turns, ctx));
 const conversationNodes = (turns, ctx = {}) =>
   turns.map((t) => {
-    const r = t.role === "intake" ? t.reply : null;
+    // A turn kept as text only (from before replies were kept) is read back into the reply it was.
+    const r = t.role === "intake" ? (t.reply ?? legacyReply(t.content, ctx.mode)) : null;
     if (r?.kind === "questions") return h("div", { class: "bubble them" }, [r.message, ...(r.questions ?? []).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n"));
-    // A turn kept as text only (from before replies were kept): its proposal part folds away.
-    const legacy = t.role === "intake" && !r ? /^([^]*?)(?:^|\n)(DRAFT|IDEAS|SCHEDULES)\n([^]*)$/.exec(t.content) : null;
-    if (legacy) return [legacy[1].trim() && h("div", { class: "bubble them" }, legacy[1].trim()), h("details", { class: "spec-step kept-proposal" }, h("summary", {}, "Earlier proposal"), h("pre", { class: "spec-text" }, legacy[3]))];
     const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
     if (list?.length && "cap" in ctx) {
       const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");

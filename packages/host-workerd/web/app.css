@@ -448,7 +448,6 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .continue-title { font-weight: 600; color: var(--accent-ink); margin-bottom: 2px; }
 .continue-actions { margin-top: 10px; }
 .brand-link, .brand-link * { cursor: pointer; }
-.kept-proposal { align-self: stretch; }
 .spec-step > summary::-webkit-details-marker { display: none; }
 .spec-step > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .6; }
 .spec-step[open] > summary::after { transform: rotate(45deg); margin-top: -3px; }
