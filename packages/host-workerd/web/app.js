@@ -593,7 +593,7 @@ function versionPane(c, v, isActive, close) {
           const t = await api(`/builds/${enc(v.buildId)}/transcript`);
           return t.text ? h("pre", { class: "log tail" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "small faint" }, "No log was kept.");
         }),
-        h("button", { class: "link sm self-start", onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here ›"),
+        v.conversation && h("button", { class: "link sm self-start", onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here ›"),
       ]
     : [];
   return h(
@@ -2710,7 +2710,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   thread.prepend(earlierEl);
   const continueFrom = async (buildId) => {
     from = buildId;
-    const [b, ctx] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`)]);
+    // The cards name the tools a draft uses, so the map comes first.
+    const [b, ctx, m] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`), caps().catch(() => all)]);
+    all = m;
     put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode: b.kind === "create" ? "create" : "modify", cap, all, version: b.resultVersion }));
     earlierEl.hidden = false;
   };
@@ -3047,7 +3049,10 @@ function parseDraft(text, mode) {
   const d = {};
   let rest = text;
   const sched = /\nSchedules:\n((?:- .*(?:\n|$))+)$/.exec(rest);
-  if (sched) ((d.schedules = parseSchedules(sched[1])), (rest = rest.slice(0, sched.index)));
+  if (sched) {
+    d.schedules = parseSchedules(sched[1]);
+    rest = rest.slice(0, sched.index);
+  }
   const conn = /\nFirst (builds|changes) the connection ([^:\n]+): ([^]*)$/.exec(rest);
   if (conn) {
     const [head, ...body] = conn[3].split("\n");
@@ -3055,7 +3060,11 @@ function parseDraft(text, mode) {
     rest = rest.slice(0, conn.index);
   }
   const named = mode !== "modify" && /^([^\n:]{1,80}): (.*)\n?/.exec(rest);
-  if (named) ((d.name = named[1]), (d.purpose = named[2]), (rest = rest.slice(named[0].length)));
+  if (named) {
+    d.name = named[1];
+    d.purpose = named[2];
+    rest = rest.slice(named[0].length);
+  }
   if (mode === "modify") d.request = rest;
   else d.requirements = rest;
   return d;

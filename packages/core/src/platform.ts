@@ -72,6 +72,7 @@ import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
 import type { TestCase } from "@hewntools/spec/cases.ts";
+import spec from "@hewntools/spec/package.json" with { type: "json" };
 
 export interface CapabilitySummary {
   id: string;
@@ -331,8 +332,8 @@ export class Platform {
   private catalogIndex?: { fetchedAt: string; byId: Map<string, CatalogEntry> };
   private providerLists = new Map<string, { raw: string | undefined; list: ReturnType<Platform["providerList"]> }>();
   private brief: string;
-  /** Which brief builds run on, recorded with each build (a short hash of the brief's text). */
-  private briefHash: string;
+  /** Which brief builds run on, recorded with each build: the spec's version and a short hash of the brief's text. */
+  private briefId: string;
   private designSystem?: () => Promise<string | undefined>;
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
@@ -366,7 +367,7 @@ export class Platform {
     this.agentStore = new AgentStore(opts.sql);
     this.agentStore.onChange = () => this.events.emit("changed");
     this.brief = opts.brief;
-    this.briefHash = sha256(opts.brief).slice(0, 12);
+    this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
     // Everything worth a log line may change what agents see (catalog, readiness): open MCP
     // sessions re-check their tool lists (debounced, and only notified when it differs).
@@ -2661,6 +2662,11 @@ export class Platform {
     return builder;
   }
 
+  /** What a build keeps from the start: the brief it runs on, and the owner's conversation when there is one. */
+  private keepContext(buildId: string, conversation?: BuildTurn[]) {
+    this.registry.setBuildContext(buildId, { brief: this.briefId, ...(conversation ? { conversation } : {}) });
+  }
+
   /** A create build for `id` (newly reserved, or retrying a create that never promoted). */
   private async openCreateBuild(agent: Agent, id: string, req: CreateRequest, reserve: boolean, builderOverride?: string, seed?: Files, dependsOn?: string, conversation?: BuildTurn[]): Promise<BuildView> {
     const builder = builderOverride ?? this.requireBuilder();
@@ -2670,7 +2676,7 @@ export class Platform {
       if (reserve) this.registry.insertCapability({ id, name: req.name, purpose: req.purpose, createdBy: agent.id });
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.registry.setBuildContext(buildId, { brief: this.briefHash, ...(conversation ? { conversation } : {}) });
+      this.keepContext(buildId, conversation);
     });
     if (dependsOn) this.waitFor(buildId, id, dependsOn, `build ${buildId} [create ${id} by ${agent.id}]`);
     else await this.startCreate(buildId, seed);
@@ -2734,7 +2740,7 @@ export class Platform {
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.registry.setBuildContext(buildId, { brief: this.briefHash, ...(conversation ? { conversation } : {}) });
+      this.keepContext(buildId, conversation);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
@@ -2763,7 +2769,7 @@ export class Platform {
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.registry.setBuildContext(buildId, { brief: this.briefHash, ...(conversation ? { conversation } : {}) });
+      this.keepContext(buildId, conversation);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);

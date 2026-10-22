@@ -35,11 +35,12 @@ describe("what a build keeps", () => {
       { role: "intake", content: "DRAFT\nX", reply: withReply[1].reply },
       { role: "intake", content: "big" },
     ]);
-    assert.match(ctx.brief!, /^[0-9a-f]{12}$/);
+    assert.match(ctx.brief!, /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/, "the brief id is the spec's version and a hash of the text");
 
     assert.ok(await t.platform.blobs.get(`transcripts/${b.buildId}.log`), "the transcript is kept in blobs");
     assert.match((await t.platform.buildTranscript(USER, b.buildId)) ?? "", /\[platform\]/);
     assert.equal(t.platform.registry.versions("running-log").at(-1)!.buildId, b.buildId, "v1 knows the build that made it");
+    assert.equal(t.platform.registry.versions("running-log").at(-1)!.conversation, true, "and that a conversation was kept");
   });
 
   test("only the owner attaches a conversation, and only a well-formed one; only the owner reads it", async () => {
@@ -53,6 +54,7 @@ describe("what a build keeps", () => {
     // A build without a conversation (an agent's, an install's) still records the brief.
     assert.equal(t.platform.buildContext(USER, b.buildId).conversation, undefined);
     assert.ok(t.platform.buildContext(USER, b.buildId).brief);
+    assert.equal(t.platform.registry.versions("running-log").at(-1)!.conversation, false, "a version without one says so");
   });
 
   test("a change and its widgets keep the conversation; a retry copies it; cleanup keeps the transcript", async () => {

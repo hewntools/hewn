@@ -6,6 +6,8 @@ import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
 export interface IntakeMessage {
   role: "user" | "intake";
   content: string;
+  /** The intake's structured reply, which the web client keeps with the build; the intake reads only `content`. */
+  reply?: unknown;
 }
 
 export interface IntakeRequest {
