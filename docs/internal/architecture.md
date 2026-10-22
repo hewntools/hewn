@@ -97,7 +97,9 @@ request → build row ("waiting" while its `after` build hasn't promoted)
   → promoted, review, failed or cancelled
 ```
 
-What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and a short hash of the brief it ran on. When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
+**Instructions** are the owner's standing rules for building: lines in `platform_kv` (`instructions:global`, `instructions:<capabilityId>`), owner-only (`instructions`, `setInstructions`; the web client edits them under Settings › AI and a tool's Info). The intake gets them in its prompt and may add to or drop them (`remember`, `forget` in its reply, applied by `applyIntakeMemory` as the surface hands the reply back; the client shows what was saved, with Undo). A build snapshots them when it's opened (`build_context.instructions`, as the "Owner's instructions" section of `BUILDER.md`, after the request and before the contract, so the contract has the last word), so the host's builder gets them too. Purging a tool drops its rules with it.
+
+What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and which brief it ran on (the spec's version and a short hash of its text, e.g. `2.3.2+a1b2c3d4e5f6`). When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
 
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
@@ -127,7 +129,7 @@ A refreshed login is copied back. Versions never keep builder configuration (dot
 
 ## Intake
 
-The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back, a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP (Claude Code with `--restricted` and the web tools only), returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
+The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back (until the request is clear: the prompt names what it must know before drafting, per mode, and each question carries a default; there is no cap on rounds, the owner's "Draft now" in the web client is the stop), a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP (Claude Code with `--restricted` and the web tools only), returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
 
 ## Models for building, and the cap
 
@@ -212,8 +214,8 @@ The home is `~/.hewn` for an npm install and `data/` in a checkout run with `./i
 
 The owner's database:
 
-- **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL), `settings` (the owner's settings from the web client).
-- **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief hash a build ran with).
+- **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL, the owner's instructions under `instructions:global` and `instructions:<id>`, failed calls under `failures:<id>`), `settings` (the owner's settings from the web client).
+- **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief id a build ran with).
 - **Agents and sessions:** `agents`, `oauth_clients`, `oauth_requests`, `oauth_tokens`, `web_sessions`, `ui_sessions`, `passkeys`.
 - **Authority:** `grants` (kinds `secret`, `host`, `capability`, `model`), `access_requests`, `confirmations`, `secrets_enc`.
 - **Trail:** `grant_events`, `lifecycle_events`, `authority_events`, `model_calls`. Activity merges them with builds and calls.

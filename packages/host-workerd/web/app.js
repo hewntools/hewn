@@ -541,7 +541,7 @@ async function rollbackTo(c, version) {
   return r;
 }
 
-/** Versions and rollback: make an earlier version active again. */
+/** Versions and rollback: each version with what led to it (the conversation, the spec, the builder's log), and restoring an earlier one. */
 async function versionsDialog(c) {
   const id = enc(c.id);
   const detail = await api(`/capabilities/${id}`);
@@ -549,53 +549,120 @@ async function versionsDialog(c) {
   return modal(
     (close) => [
       sheetHead(appIcon(c, { size: 44 }), `Versions · ${c.name}`),
-      h(
-        "ul",
-        { class: "list" },
-        detail.versions.map((v) =>
-          h(
-            "li",
-            {},
-            h("span", { class: "pill" }, `v${v.version}`),
-            h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
-            h(
-              "span",
-              { class: "row tight" },
-              v.buildId && h("button", { class: "sm ghost", onclick: () => versionSheet(c, v).catch(fail) }, "Details"),
-              v.version === active
-                ? h("span", { class: "pill ok with-dot" }, "active")
-                : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
-            ),
-          ),
-        ),
-      ),
+      h("div", { class: "stack-sm version-panes" }, detail.versions.map((v) => versionPane(c, v, v.version === active, close))),
       h("div", { class: "small faint" }, "Restoring keeps the data. It's refused if a newer version changed the data in a way older code can't read."),
       sheetActions(h("button", { onclick: () => close() }, "Done")),
     ],
-    { width: 520 },
+    { width: 640 },
   );
 }
 
 /**
- * What led to a version, kept for the tool's life: the conversation with the intake, the spec the
- * builder worked from and the builder's log. "Continue from here" opens a change with that
- * conversation as context.
+ * One version: when and who asked, Restore (or active), and at the bottom what led to it, kept
+ * for the tool's life: the conversation with the intake, the spec the builder worked from, the
+ * builder's log (each loaded when opened). "Continue from here" opens a change picking up that
+ * conversation.
  */
-async function versionSheet(c, v) {
-  const [context, transcript] = await Promise.all([api(`/builds/${enc(v.buildId)}/context`).catch(() => ({})), api(`/builds/${enc(v.buildId)}/transcript`).catch(() => ({ text: null }))]);
-  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
+function versionPane(c, v, isActive, close) {
   const who = actorLabel(v.requestedBy);
-  const convo = context.conversation?.length ? context.conversation : null;
-  return modal(
-    (close) => [
-      sheetHead(appIcon(c, { size: 44 }), `v${v.version} · ${c.name}`, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`),
-      convo && h("details", { class: "spec-step", open: true }, h("summary", {}, "Conversation"), conversationThread(convo)),
-      spec && h("details", { class: "spec-step", open: !convo }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
-      transcript.text && h("details", { class: "spec-step" }, h("summary", {}, "Builder's log"), h("pre", { class: "log tail" }, transcript.text.split("\n").slice(-500).join("\n"))),
-      sheetActions(h("button", { onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here"), h("button", { onclick: () => close() }, "Done")),
-    ],
-    { width: 640 },
+  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
+  /** An expander whose content comes when it's first opened. */
+  const lazy = (summary, load) => {
+    const body = h("div", { class: "stack-sm" }, skeleton("60%", "40%"));
+    const d = h("details", { class: "spec-step" }, h("summary", {}, summary), body);
+    let loaded = false;
+    d.addEventListener("toggle", async () => {
+      if (!d.open || loaded) return;
+      loaded = true;
+      try {
+        put(body, await load());
+      } catch (e) {
+        put(body, h("div", { class: "small faint" }, e.message || String(e)));
+      }
+    });
+    return d;
+  };
+  const kept = v.buildId
+    ? [
+        lazy("Conversation", async () => {
+          const ctx = await api(`/builds/${enc(v.buildId)}/context`);
+          return ctx.conversation?.length ? conversationThread(ctx.conversation, { mode: v.kind === "create" ? "create" : "modify", cap: c, all: await caps(true).catch(() => new Map()), version: v.version }) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
+        }),
+        spec && h("details", { class: "spec-step" }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
+        lazy("Builder's log", async () => {
+          const t = await api(`/builds/${enc(v.buildId)}/transcript`);
+          return t.text ? h("pre", { class: "log tail" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "small faint" }, "No log was kept.");
+        }),
+        v.conversation && h("button", { class: "link sm self-start", onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here ›"),
+      ]
+    : [];
+  return h(
+    "div",
+    { class: "version-pane" },
+    h(
+      "div",
+      { class: "row tight" },
+      h("span", { class: "pill" }, `v${v.version}`),
+      h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
+      isActive ? h("span", { class: "pill ok with-dot" }, "active") : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
+    ),
+    kept.length ? h("div", { class: "stack-sm version-kept" }, kept) : null,
   );
+}
+
+/**
+ * The owner's standing rules for building, one per line: for every tool (no `c`), or for one tool.
+ * The intake adds to them when the owner states a rule; the builder reads them on every build.
+ * Resolves true when saved.
+ */
+async function instructionsSheet(c) {
+  const path = c ? `/capabilities/${enc(c.id)}/instructions` : "/instructions";
+  const { lines } = await api(path);
+  return modal(
+    (close) => {
+      const text = h("textarea", { rows: 8, class: "instructions", "aria-label": "Instructions", placeholder: c ? "e.g. Keep it to one screen" : "e.g. Swedish copy in every screen" }, lines.join("\n"));
+      const save = h("button", { type: "button", class: "primary" }, "Save");
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await api(path, { method: "PUT", body: { text: text.value } });
+          toast("Instructions saved");
+          close(true);
+        } catch (e) {
+          save.disabled = false;
+          fail(e);
+        }
+      });
+      const hint = c
+        ? h("div", { class: "small faint" }, "One rule per line, for this tool only. Rules for every tool are under ", h("a", { href: "#/settings/ai", onclick: () => close(false) }, "Settings › AI"), ".")
+        : h("div", { class: "small faint" }, "One rule per line, for every tool you build. The intake adds to these when you tell it a rule; the builder reads them on every build.");
+      setTimeout(() => text.focus());
+      return [sheetHead(c ? appIcon(c, { size: 44 }) : null, c ? `Instructions · ${c.name}` : "Instructions for building"), h("div", { class: "stack-md" }, text, hint), sheetActions(h("button", { type: "button", onclick: () => close(false) }, "Cancel"), save)];
+    },
+    { width: 560 },
+  );
+}
+
+/** What the intake remembered (or dropped) for later builds, shown as saved, with Undo. */
+function memoryNotice(what, { scope, text }, cap) {
+  const tool = scope === "tool" ? cap : null;
+  const where = tool ? `${tool.name}'s builder instructions` : "global builder instructions";
+  const path = tool ? `/capabilities/${enc(tool.id)}/instructions` : "/instructions";
+  const undo = h("button", { type: "button", class: "link sm" }, "Undo");
+  const el = h("div", { class: "notice info memory-notice" }, h("div", { class: "grow col" }, h("span", { class: "strong" }, what === "remember" ? `Saved to ${where}` : `Removed from ${where}`), h("span", { class: "memory-text" }, text)), undo);
+  undo.addEventListener("click", async () => {
+    undo.disabled = true;
+    try {
+      const { lines } = await api(path);
+      const next = what === "remember" ? lines.filter((l) => l !== text) : lines.includes(text) ? lines : [...lines, text];
+      await api(path, { method: "PUT", body: { text: next.join("\n") } });
+      put(el, h("span", { class: "grow muted" }, what === "remember" ? `Not saved: ${text}` : `Kept: ${text}`));
+    } catch (e) {
+      undo.disabled = false;
+      fail(e);
+    }
+  });
+  return el;
 }
 
 /** Inline rename: the label becomes an input. Enter saves, Esc cancels. */
@@ -1510,17 +1577,20 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else for (const k of ["change", "m", "send", "widget", "from"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
+  // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
+  const shown = () => !!drawer && drawer.el.style.display !== "none";
   const open = () => {
-    drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
-    layout.append(drawer.el);
+    if (!drawer) {
+      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
+      layout.append(drawer.el);
+    } else drawer.el.style.display = "";
     change.setAttribute("aria-pressed", "true");
     setUrl(true);
   };
-  const toggle = (want = !drawer) => {
-    if (want && !drawer) open();
-    else if (!want && drawer) {
-      drawer.el.remove();
-      drawer = null;
+  const toggle = (want = !shown()) => {
+    if (want && !shown()) open();
+    else if (!want && shown()) {
+      drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
       for (const k of ["m", "send", "widget", "from"]) q.delete(k);
       setUrl(false);
@@ -2532,7 +2602,7 @@ async function infoPage(id) {
   const pendingN = items.filter((i) => !i.approved).length;
   const rows = h("ul", { class: "list" });
   const fill = async () => {
-    const [scheds, home, m] = await Promise.all([api("/schedules").catch(() => []), api("/home").catch(() => ({ layout: [], gallery: [] })), cap.requires?.model ? api("/models").catch(() => null) : null]);
+    const [scheds, home, m, instr] = await Promise.all([api("/schedules").catch(() => []), api("/home").catch(() => ({ layout: [], gallery: [] })), cap.requires?.model ? api("/models").catch(() => null) : null, api(`/capabilities/${enc(id)}/instructions`).catch(() => ({ lines: [] }))]);
     const mine = scheds.filter((x) => x.capabilityId === id);
     const paused = mine.filter((x) => x.status === "paused");
     const widgets = home.gallery.find((g) => g.capabilityId === id)?.widgets ?? [];
@@ -2547,6 +2617,7 @@ async function infoPage(id) {
       req && infoRow("Model", `${req.tier ? `${titleCase(req.tier)} tier` : req.model}${m ? ` · ${usd(spent)} this month` : ""}`, () => toolModelSheet(c).then((ok) => ok || route()), cap.status.retiredModel ? "danger" : cap.status.missingModel ? "warn" : null),
       infoRow("Schedules", mine.length ? [mine.filter((x) => x.status === "active").map((x) => cadenceText(x.cadence)).join(", "), paused.length ? `${paused.length} paused` : "", mine.some((x) => x.status === "proposed") ? "1 proposed" : ""].filter(Boolean).join(" · ") || "None" : "None", () => schedulesSheet(c, ops).then(() => route()), paused.some((x) => x.pausedReason) ? "danger" : mine.some((x) => x.status === "proposed") ? "warn" : null),
       infoRow("Widgets", widgets.length ? `${widgets.length} · ${placed} on Home` : "None", () => toolWidgetsSheet(c).then(() => route())),
+      infoRow("Instructions", instr.lines.length ? `${plural(instr.lines.length, "rule")} for this tool` : "None · rules for every tool are under Settings › AI", () => instructionsSheet(c).then(() => route())),
       latest && infoRow("Versions", `v${c.version ?? latest.version} · ${ago(latest.createdAt)}`, () => versionsDialog(c)),
     );
   };
@@ -2688,9 +2759,39 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   let focus = null;
   const messages = [];
   const thread = h("div", { class: "thread", "aria-live": "polite" });
-  // "Continue from here" on a version: the intake gets the conversation that made it as context.
-  const from = q?.get("from") || null;
-  if (from) api(`/builds/${enc(from)}`).then((b) => thread.prepend(h("div", { class: "small faint" }, `Continuing from the conversation that made v${b.resultVersion ?? "?"}.`))).catch(() => {});
+  // Picking up an earlier conversation ("Continue from here" on a version, or the card on a change):
+  // its turns show at the top as they were (proposals as cards), and go to the intake as context.
+  let from = q?.get("from") || null;
+  const earlierEl = h("div", { class: "thread earlier", hidden: true });
+  thread.prepend(earlierEl);
+  const continueFrom = async (buildId) => {
+    from = buildId;
+    // The cards name the tools a draft uses, so the map comes first.
+    const [b, ctx, m] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`), caps().catch(() => all)]);
+    all = m;
+    put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode: b.kind === "create" ? "create" : "modify", cap, all, version: b.resultVersion }));
+    earlierEl.hidden = false;
+  };
+  if (from) continueFrom(from).catch(fail);
+  // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
+  const offer = h("div", { class: "card continue-card", hidden: true });
+  thread.append(offer);
+  if (mode === "modify" && capId && !from && !widgetsMode) {
+    api(`/capabilities/${enc(capId)}`)
+      .then(async (d) => {
+        const last = d.versions?.find((v) => v.buildId);
+        const ctx = last ? await api(`/builds/${enc(last.buildId)}/context`).catch(() => ({})) : {};
+        if (!ctx.conversation?.length) return;
+        put(
+          offer,
+          h("div", { class: "continue-title" }, "Continue the last conversation?"),
+          h("div", { class: "small muted" }, `The chat that made v${last.version} comes along, so you don't explain the tool again.`),
+          h("div", { class: "row tight continue-actions" }, h("button", { type: "button", class: "sm primary", onclick: () => (offer.remove(), continueFrom(last.buildId).catch(fail)) }, "Continue"), h("button", { type: "button", class: "sm ghost", onclick: () => offer.remove() }, "Start fresh")),
+        );
+        offer.hidden = false;
+      })
+      .catch(() => {});
+  }
   // Grows with the text; Enter sends, Shift+Enter for a new line.
   const input = h("textarea", {
     class: "composer-input",
@@ -2712,7 +2813,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
+  // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
+  const draftNow = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
+  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, draftNow, modelChip(), send));
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -2743,7 +2846,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const ask = async (e) => {
     e?.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    // One turn at a time: the box is disabled while the intake answers (Draft now submits through here too).
+    if (!text || input.disabled) return;
     // Text put in from the address (m=, "Ask builder to fix this") is sent: a redraw mustn't put it back.
     const [path, qs = ""] = location.hash.split("?");
     const params = new URLSearchParams(qs);
@@ -2755,8 +2859,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     if (focus === null && widgetParam && !widgetsMode && capId) focus = ((await api(`/capabilities/${enc(capId)}`).catch(() => null))?.widgets ?? []).find((w) => w.name === widgetParam) ?? false;
     messages.push({ role: "user", content: text });
     heading.hidden = embedded;
+    offer.remove();
     say("me", text);
     input.value = "";
+    input.placeholder = ""; // the example is for an empty conversation
     grow();
     syncSend();
     const typing = h("div", { class: "bubble them typing", role: "status", "aria-label": "Thinking" }, h("i"), h("i"), h("i"));
@@ -2764,6 +2870,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const live = h("div", { class: "thread" });
     thread.append(live, typing, activity);
     input.disabled = true;
+    draftNow.disabled = true;
     // While it answers, Send is Stop: the request closes and the intake stops.
     const stop = new AbortController();
     const stopBtn = h("button", { type: "button", class: `stop-btn ${embedded ? "" : "lg"}`, "aria-label": "Stop", title: "Stop", onclick: () => stop.abort() }, h("span", { class: "stop-square", "aria-hidden": "true" }));
@@ -2772,7 +2879,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (p.activity) activity.textContent = `${p.activity}…`;
       if (p.message === undefined && p.questions === undefined) return;
       activity.textContent = "";
-      put(live, p.message && h("div", { class: "bubble them" }, p.message), (p.questions ?? []).filter(Boolean).map((x) => h("div", { class: "bubble them" }, x)));
+      put(live, p.message || p.questions?.length ? h("div", { class: "bubble them" }, chatText(p.message, p.questions)) : null);
     };
     try {
       let reply = null;
@@ -2782,27 +2889,31 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       typing.remove();
       live.remove();
       activity.remove();
-      if (reply.message) say("them", reply.message);
+      // Questions come as one message, with the questions as a list; a proposal's message sits above its card.
+      if (reply.message && reply.kind !== "questions") say("them", reply.message);
+      draftNow.hidden = reply.kind !== "questions";
+      // What it remembered (or dropped) for later builds: shown as saved, with Undo.
+      for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
       const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
-        messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n") });
-        reply.questions.forEach((x) => say("them", x));
+        messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
+        say("them", chatText(reply.message, reply.questions));
       } else if (reply.kind === "widgets") {
         // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
-        messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n") });
+        messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
         if (!reply.proposals.length) say("them", "No widgets to suggest for this. Say what you'd like to see.");
         else showProposal(...proposalCard("widgets", reply.proposals, ctx));
       } else if (reply.kind === "ideas") {
         // Remembered in full, so "build the first two" or "make #3 simpler" revises them rather than starting over.
-        messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n") });
+        messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n"), reply });
         showProposal(...proposalCard("ideas", reply.ideas, ctx));
       } else if (reply.kind === "schedules") {
-        messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n") });
+        messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n"), reply });
         showProposal(...proposalCard("schedules", reply.schedules, ctx));
       } else {
         // The whole draft, so "Keep talking" changes it instead of starting over.
-        messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n") });
+        messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"), reply });
         showProposal(...proposalCard("draft", [reply.draft], ctx));
       }
     } catch (err) {
@@ -2823,6 +2934,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
+      draftNow.disabled = false;
       syncSend();
       grow();
       input.focus();
@@ -2837,6 +2949,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     setText: (t) => ((input.value = t), syncSend(), input.focus(), grow()),
   };
 }
+
+/** The intake's message and its questions as one chat message: paragraphs, the questions numbered. */
+const chatText = (message, questions) => [message, ...(questions ?? []).filter(Boolean).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n");
 
 /** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
 const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
@@ -2966,8 +3081,82 @@ function modelChip() {
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
-/** A kept conversation (what led to a build), as the chat looked: the owner's turns and the intake's. */
-const conversationThread = (turns) => h("div", { class: "thread kept" }, turns.map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
+/**
+ * The reply an intake turn kept as text only was (conversations from before replies were kept):
+ * the message, then the draft, ideas, schedules or widgets as `draftText` and friends wrote them.
+ * The summary pills (operations, widgets, model) weren't written down, so the card goes without.
+ */
+function legacyReply(content, mode) {
+  const m = /^([^]*?)(?:^|\n\n)(DRAFT|IDEAS|SCHEDULES)\n([^]*)$/.exec(content ?? "");
+  if (m) {
+    const message = m[1].trim();
+    if (m[2] === "SCHEDULES") return { kind: "schedules", message, schedules: parseSchedules(m[3]) };
+    if (m[2] === "DRAFT") return { kind: "draft", message, draft: parseDraft(m[3], mode) };
+    // Ideas are numbered, a blank line apart, each starting "Name: purpose"; a numbered list inside one stays with it.
+    const ideas = [];
+    for (const part of m[3].split(/\n\n(?=\d+\. [^\n:]{1,80}: )/)) {
+      if (part.startsWith(`${ideas.length + 1}. `) || !ideas.length) ideas.push(part.replace(/^\d+\. /, ""));
+      else ideas[ideas.length - 1] += `\n\n${part}`;
+    }
+    return { kind: "ideas", message, ideas: ideas.map((s) => parseDraft(s, "create")) };
+  }
+  // Widgets: "1. Title (template; sizes[; replaces name]): shows" lines after the message.
+  const lines = (content ?? "").split("\n");
+  const numbered = lines.filter((l) => /^\d+\. /.test(l));
+  const proposals = numbered.map((l) => /^\d+\. (.+?) \((\w+); ([a-z, ]+?)(?:; replaces (.+?))?\): ([^]*)$/.exec(l)).filter(Boolean);
+  if (!proposals.length || proposals.length !== numbered.length) return null;
+  return { kind: "widgets", message: lines.filter((l) => !/^\d+\. /.test(l)).join("\n").trim(), proposals: proposals.map(([, title, template, sizes, replaces, shows]) => ({ title, template, sizes: sizes.split(", "), ...(replaces ? { replaces } : {}), shows })) };
+}
+const parseSchedules = (text) =>
+  text
+    .split("\n")
+    .map((l) => /^- (\S+) (.*?)(?: \((.*)\))?$/.exec(l))
+    .filter(Boolean)
+    .map(([, operation, cadence, why]) => ({ operation, cadence, ...(why ? { why } : {}) }));
+/** `draftText` read back: name + purpose (a create), the spec, the connection step, the schedules. */
+function parseDraft(text, mode) {
+  const d = {};
+  let rest = text;
+  const sched = /\nSchedules:\n((?:- .*(?:\n|$))+)$/.exec(rest);
+  if (sched) {
+    d.schedules = parseSchedules(sched[1]);
+    rest = rest.slice(0, sched.index);
+  }
+  const conn = /\nFirst (builds|changes) the connection ([^:\n]+): ([^]*)$/.exec(rest);
+  if (conn) {
+    const [head, ...body] = conn[3].split("\n");
+    d.connection = conn[1] === "builds" ? { mode: "create", name: conn[2], purpose: head, requirements: body.join("\n") } : { mode: "modify", capabilityId: conn[2], request: conn[3] };
+    rest = rest.slice(0, conn.index);
+  }
+  const named = mode !== "modify" && /^([^\n:]{1,80}): (.*)\n?/.exec(rest);
+  if (named) {
+    d.name = named[1];
+    d.purpose = named[2];
+    rest = rest.slice(named[0].length);
+  }
+  if (mode === "modify") d.request = rest;
+  else d.requirements = rest;
+  return d;
+}
+
+/**
+ * A kept conversation (what led to a build), as the chat looked: the owner's turns, the intake's
+ * questions, and its proposals as the cards they were (read-only). `ctx`: { mode, cap, all } for the cards.
+ */
+const conversationThread = (turns, ctx = {}) => h("div", { class: "thread kept" }, conversationNodes(turns, ctx));
+const conversationNodes = (turns, ctx = {}) =>
+  turns.map((t) => {
+    // A turn kept as text only (from before replies were kept) is read back into the reply it was.
+    const r = t.role === "intake" ? (t.reply ?? legacyReply(t.content, ctx.mode)) : null;
+    if (r?.kind === "questions") return h("div", { class: "bubble them" }, [r.message, ...(r.questions ?? []).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n"));
+    const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
+    if (list?.length && "cap" in ctx) {
+      const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
+      const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, nextVersion: ctx.version, readOnly: true })[0];
+      return [r.message && h("div", { class: "bubble them" }, r.message), card];
+    }
+    return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content);
+  });
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
 const draftText = (d) =>
@@ -3043,7 +3232,8 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  * are several, icon, name, purpose, summary pills), ▸ opens its details (G2). Returns [card, summary].
  */
 function proposalCard(kind, list, ctx) {
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done } = ctx;
+  // `readOnly`: a card from a kept conversation: as it was, nothing to tick or build.
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done, readOnly = false } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -3080,6 +3270,7 @@ function proposalCard(kind, list, ctx) {
     else rows.filter((x) => x.box.checked && plan.needs(x.d).includes(capabilityId(r.d.name))).forEach((x) => tick(x, false));
   };
   rows.forEach((r) => r.box.addEventListener("change", () => (tick(r, r.box.checked), count())));
+  if (readOnly) rows.forEach((r) => ((r.box.disabled = true), r.ticks.set(false)));
 
   const preview = (d) => (kind === "widgets" || kind === "schedules" || mode === "modify" ? cap : { id: slug(d.name ?? connection ?? "new"), name: d.name ?? connection });
   const toolPills = (d) => {
@@ -3212,8 +3403,8 @@ function proposalCard(kind, list, ctx) {
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
-    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
-    h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
+    kind !== "schedules" && !readOnly && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
+    !readOnly && h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
 }
@@ -3353,7 +3544,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
     const specView = specText ? h("details", { class: "spec-step" }, h("summary", {}, "Spec agreed"), h("pre", { class: "spec-text" }, specText)) : null;
     // The conversation that led to it (kept with the build); an agent's build has none.
-    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation)) : null;
+    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation, { mode: b.kind === "create" ? "create" : "modify", cap: cap(), all, version: b.resultVersion })) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
     const live = () => {
@@ -3387,8 +3578,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           clockEl,
         ),
         !waitingAgent && buildMeta(b),
-        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         convoView,
+        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
@@ -3454,8 +3645,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
-        specView,
         convoView,
+        specView,
         logBlock(false),
       );
     };
@@ -3486,8 +3677,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         f.detail && h("div", { class: "notice danger" }, h("span", {}, f.detail)),
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
-        specView,
         convoView,
+        specView,
         h("div", { class: "row tight" }, fix, retry),
         logBlock(true),
       );
@@ -4702,12 +4893,21 @@ async function aiSection() {
       h("button", { class: "sm", onclick: () => agentModelsSheet(builder).then((saved) => saved && route()) }, "Change…"),
     );
   const prov = m?.provider && m.providers.find((p) => p.id === m.provider);
+  // The owner's standing rules for building: the intake remembers them, the builder reads them on every build.
+  const rules = await api("/instructions").then((r) => r.lines).catch(() => []);
+  const instructions = h(
+    "div",
+    { class: "setting" },
+    h("div", { class: "grow" }, h("span", { class: "strong" }, "Instructions for building"), h("span", { class: "sub clip-1" }, rules.length ? `${plural(rules.length, "rule")} · ${rules.join(" · ")}` : "None yet · tell the intake a rule, or write one here")),
+    h("button", { class: "sm", onclick: () => instructionsSheet().then((saved) => saved && route()) }, "Edit…"),
+  );
   settingsFrame(
     "ai",
     h("div", { class: "row between" }, h("h1", { class: "flush" }, "AI"), h("button", { onclick: () => addSheet().then(() => !location.hash.startsWith("#/settings/ai/models") && route()) }, "Add…")),
     settingsCard(
       h("div", { class: "setting-with-extra" }, builds, h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
       asks,
+      instructions,
       h(
         "div",
         { class: "setting" },
