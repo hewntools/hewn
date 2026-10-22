@@ -29,6 +29,7 @@ Request:
 ```json
 {
   "buildId": "b-…",
+  "session": "b-…",
   "capabilityId": "reading-list",
   "kind": "create",
   "attempt": 1,
@@ -41,6 +42,7 @@ Request:
 ```
 
 - `kind`: `create`, `modify` or `widgets`. `feedback` is set from the second attempt on.
+- `session` is the same for every attempt of one build (the build id), so the service may resume its own model session on a later attempt instead of starting over; `prompt` and `files` are still whole each time, so a stateless service works.
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
 - `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract).
 

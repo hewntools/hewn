@@ -53,6 +53,8 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 The build says why: a failing test, an invalid manifest, an error on its screen. Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
 
+A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
+
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
 
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude` or `codex login`), then try again.
