@@ -2829,7 +2829,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (p.activity) activity.textContent = `${p.activity}…`;
       if (p.message === undefined && p.questions === undefined) return;
       activity.textContent = "";
-      put(live, p.message && h("div", { class: "bubble them" }, p.message), (p.questions ?? []).filter(Boolean).map((x) => h("div", { class: "bubble them" }, x)));
+      put(live, (p.message || p.questions?.length) && h("div", { class: "bubble them" }, chatText(p.message, p.questions)));
     };
     try {
       let reply = null;
@@ -2839,7 +2839,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       typing.remove();
       live.remove();
       activity.remove();
-      if (reply.message) say("them", reply.message);
+      // Questions come as one message, with the questions as a list; a proposal's message sits above its card.
+      if (reply.message && reply.kind !== "questions") say("them", reply.message);
       draftNow.hidden = reply.kind !== "questions";
       // What it remembered (or dropped) for later builds: shown as saved, with Undo.
       for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
@@ -2847,7 +2848,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n") });
-        reply.questions.forEach((x) => say("them", x));
+        say("them", chatText(reply.message, reply.questions));
       } else if (reply.kind === "widgets") {
         // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
         messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n") });
@@ -2897,6 +2898,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     setText: (t) => ((input.value = t), syncSend(), input.focus(), grow()),
   };
 }
+
+/** The intake's message and its questions as one chat message: paragraphs, the questions numbered. */
+const chatText = (message, questions) => [message, ...(questions ?? []).filter(Boolean).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n");
 
 /** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
 const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
