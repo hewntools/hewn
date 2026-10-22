@@ -183,12 +183,11 @@ export const OPENCODE_INTAKE_RULES: OpencodeRules = {
   tools: off(["edit", "write", "patch", "bash", "shell", "websearch", "task", "skill", "question"]),
 };
 
-/** Your own OpenCode directories (XDG), where its logins, config and caches live. */
-export const opencodeUserDirs = (home = homedir(), env: NodeJS.ProcessEnv = process.env) => ({
-  config: join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode"),
-  data: join(env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode"),
-  cache: join(env.XDG_CACHE_HOME || join(home, ".cache"), "opencode"),
-});
+/** Your own OpenCode directories (XDG, honoured for your own home only), where its logins, config and caches live. */
+export const opencodeUserDirs = (home = homedir(), env: NodeJS.ProcessEnv = process.env) => {
+  const xdg = (name: string, fallback: string) => join((home === homedir() && env[name]) || join(home, fallback), "opencode");
+  return { config: xdg("XDG_CONFIG_HOME", ".config"), data: xdg("XDG_DATA_HOME", ".local/share"), cache: xdg("XDG_CACHE_HOME", ".cache") };
+};
 
 /** Ports on this machine among a provider config's base URLs: a local model server (Ollama, LM Studio) the run must reach. */
 export function loopbackPorts(providers: Record<string, unknown> | undefined): number[] {

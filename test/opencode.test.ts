@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { opencodeActivity, USED_TOOL } from "@hewntools/cli/builders/activity.ts";
@@ -405,7 +405,8 @@ describe("OpenCode as an MCP client", () => {
     try {
       const dir = opencodeConfigDir(root, {});
       assert.equal(dir, join(root, ".config", "opencode"));
-      assert.equal(opencodeConfigDir(root, { XDG_CONFIG_HOME: "/x/cfg" }), "/x/cfg/opencode");
+      assert.equal(opencodeConfigDir(root, { XDG_CONFIG_HOME: "/x/cfg" }), join(root, ".config", "opencode"), "XDG applies to your own home only (CI sets it)");
+      assert.equal(opencodeConfigDir(homedir(), { XDG_CONFIG_HOME: "/x/cfg" }), "/x/cfg/opencode");
       mkdirSync(dir, { recursive: true });
       assert.equal(opencodeMcpUrl(root), undefined);
       writeFileSync(join(dir, "opencode.jsonc"), '{\n  // my config\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    "hewn": { "type": "remote", "url": "http://127.0.0.1:7717/mcp", },\n  },\n}\n');

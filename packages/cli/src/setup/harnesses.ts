@@ -192,8 +192,8 @@ export function harnesses(exec: Exec = realExec): Harness[] {
   ];
 }
 
-/** OpenCode's global config directory: `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. */
-export const opencodeConfigDir = (home: string, env: NodeJS.ProcessEnv = process.env) => join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode");
+/** OpenCode's global config directory: `$XDG_CONFIG_HOME/opencode` for your own home, else `<home>/.config/opencode`. */
+export const opencodeConfigDir = (home: string, env: NodeJS.ProcessEnv = process.env) => join((home === homedir() && env.XDG_CONFIG_HOME) || join(home, ".config"), "opencode");
 
 /** JSON with comments and trailing commas (OpenCode's `opencode.jsonc`), read leniently. */
 export function parseJsonc(text: string): unknown {
