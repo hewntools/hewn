@@ -54,6 +54,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 - **Model:** which tier it thinks with, and its own monthly cap ([Models](models.md))
 - **Schedules:** run an operation on a timetable
 - **Widgets:** the tool's widgets, and deleting one
+- **Instructions:** standing rules for this tool's builds ([Building tools](building-tools.md#instructions))
 - **Versions:** every version, and restoring an earlier one ([Building tools](building-tools.md#versions))
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)).
@@ -86,7 +87,7 @@ Call logs are kept for two weeks by default (Settings › Data).
 ## Settings
 
 - **General:** appearance (system, light or dark), your time zone, and whether the sandbox is on.
-- **AI:** who does [Hewn's two jobs](concepts.md#hewns-two-jobs) (builds tools, on which model, and thinks inside tools), which models agents may ask for, and the Models page ([Models](models.md)).
+- **AI:** who does [Hewn's two jobs](concepts.md#hewns-two-jobs) (builds tools, on which model, and thinks inside tools), which models agents may ask for, your [instructions for building](building-tools.md#instructions), and the Models page ([Models](models.md)).
 - **Remote access:** the public URL, your passkeys and signed-in browsers ([Using Hewn from anywhere](remote-access.md)).
 - **Data:** backups and their folder, how long call logs are kept, and deleted tools ([Your data](data.md)).
 - **About:** the version, whether a newer one is out (with the command to upgrade), and shortcuts.

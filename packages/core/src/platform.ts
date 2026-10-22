@@ -3,7 +3,7 @@ import { AgentStore, type AgentDetails, type PendingRequest } from "./agents.ts"
 import { type Agent, canSee, requireOwner, requireScope, type Scope, USER, WEB_USER } from "./auth.ts";
 import { PlatformError } from "./errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "./failure.ts";
-import { bytes, contentHash, decodeVersion, encodeVersion, text, versionFiles } from "./files.ts";
+import { bytes, contentHash, decodeVersion, encodeVersion, fromBase64, text, toBase64, versionFiles } from "./files.ts";
 import { type Cells, cellsFromSvg, glyphSvg } from "./glyph.ts";
 import { Deadline, deadlineOf } from "./deadline.ts";
 import {
@@ -44,6 +44,7 @@ import {
   type HostGenerateResult,
   type HostModels,
   inspectRequest,
+  checkImage,
   type ModelHandler,
   type ModelMessage,
   type ModelPrice,
@@ -67,11 +68,12 @@ import {
 import { EFFORT, MODEL_NAME } from "./build-models.ts";
 import { migrationProblems, migrationsOf, rollbackProblems } from "./migrations.ts";
 import type { Blobs, CallHandler, CapabilityRuntime, CodeRef, ExecutionTarget, Files, SecretStore, Sql, StateRef, Workbench } from "./ports.ts";
-import { type BuildKind, type BuildModel, type BuildReview, type BuildRow, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
+import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
 import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
 import type { TestCase } from "@hewntools/spec/cases.ts";
+import spec from "@hewntools/spec/package.json" with { type: "json" };
 
 export interface CapabilitySummary {
   id: string;
@@ -285,6 +287,107 @@ export type ModelAsk = {
 
 const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { model: o.model } : {}), ...(o.effort !== undefined ? { effort: o.effort } : {}) });
 
+/** The most turns a conversation kept with a build may have, and the longest turn. */
+const MAX_TURNS = 200;
+const MAX_TURN_CHARS = 50_000;
+/** The longest note with the owner's answer to "Got what you asked for?". */
+const MAX_FEEDBACK_NOTE = 1000;
+
+/** One build in the feedback report (`hewn feedback`): what it ran on, how it ended, what the owner said, and the signs in the record. */
+export interface BuildReportRow {
+  buildId: string;
+  capabilityId: string;
+  kind: BuildKind;
+  status: BuildRow["status"];
+  createdAt: string;
+  builder: string;
+  model?: string;
+  effort?: string;
+  ranModel?: string;
+  /** Which brief it ran on (a short hash). */
+  brief?: string;
+  attempts: number;
+  /** Why it failed, when it did. */
+  failure?: string;
+  feedback?: BuildFeedback;
+  /** What the record says: this build failed and a retry of it went live; another change to the tool within a day of this one going live; a restore to an earlier version within a week; the tool deleted within a day. */
+  signals: { fixed: boolean; changedSoon: boolean; restored: boolean; deletedSoon: boolean };
+}
+/** The feedback report: the window it covers (days, as clamped) and the builds in it, newest first. */
+export interface BuildReport {
+  days: number;
+  builds: BuildReportRow[];
+}
+
+/**
+ * What the owner may attach in the intake's box: images (resized by the web client first) and
+ * text files, per message and per conversation. The bytes are blobs; the builder gets copies.
+ */
+export const ATTACHMENT_LIMITS = {
+  image: { bytes: 2 * 1024 * 1024, perMessage: 5, perConversation: 10 },
+  file: { bytes: 256 * 1024, perMessage: 10, perConversation: 20 },
+} as const;
+const MAX_ATTACHMENT_NAME = 120;
+const SESSION_ID = /^[\w-]{1,80}$/;
+/** A text file: a known text type, or bytes that read as text (no NUL). */
+const TEXT_MEDIA = /^(text\/.*|application\/(json|xml|x-yaml|yaml|toml|javascript|typescript|sql|csv|x-sh|x-httpd-php))$/;
+
+/** The owner's attachment with its bytes, as the intake gets it (base64) or the owner's browser fetches it. */
+export interface AttachmentWithData extends AttachmentRef {
+  data: string;
+}
+
+/** The refs of everything a conversation attached, in order, each once. */
+export const attachmentRefs = (turns: BuildTurn[]): string[] => [...new Set(turns.flatMap((t) => (t.attachments ?? []).map((a) => a.ref)))];
+
+/** A file name the workspace can take: the base name, safe characters only, short. */
+const safeName = (name: string) => {
+  const base = name.split(/[\\/]/).pop() ?? "file";
+  const clean = base.replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "").slice(0, 80);
+  return clean || "file";
+};
+
+/** The owner's instructions for building: at most this many lines per scope, each this long. */
+const MAX_INSTRUCTION_LINES = 50;
+const MAX_INSTRUCTION_CHARS = 500;
+
+/** Where an instruction applies: every tool the owner builds, or one tool. */
+export type InstructionScope = "global" | "tool";
+export interface Instruction {
+  scope: InstructionScope;
+  text: string;
+}
+
+/** Instructions as the owner gives them: lines, or a text to split into lines; trimmed, bullets dropped, no repeats. */
+function cleanInstructions(lines: unknown): string[] {
+  const raw = typeof lines === "string" ? lines.split("\n") : Array.isArray(lines) ? lines : undefined;
+  if (!raw) throw new PlatformError("invalid_request", "instructions: a text, one rule per line");
+  const out: string[] = [];
+  for (const l of raw) {
+    if (typeof l !== "string") throw new PlatformError("invalid_request", "instructions: each line must be text");
+    const t = l.trim().replace(/^[-*•]\s+/, "");
+    if (!t) continue;
+    if (t.length > MAX_INSTRUCTION_CHARS) throw new PlatformError("invalid_request", `instructions: each line at most ${MAX_INSTRUCTION_CHARS} characters`);
+    if (!out.includes(t)) out.push(t);
+  }
+  if (out.length > MAX_INSTRUCTION_LINES) throw new PlatformError("invalid_request", `instructions: at most ${MAX_INSTRUCTION_LINES} lines`);
+  return out;
+}
+
+/** What the intake asks to remember or drop, for one scope: well-formed entries only (the model wrote them: the rest is ignored, never an error). */
+function instructionEntries(list: unknown, scope: InstructionScope): string[] {
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const x of list) {
+    if (!x || x.scope !== scope || typeof x.text !== "string") continue;
+    const t = x.text.trim().replace(/^[-*•]\s+/, "");
+    if (t && t.length <= MAX_INSTRUCTION_CHARS && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+/** The longest structured reply kept with an intake turn (as JSON). */
+const MAX_REPLY_CHARS = 100_000;
+
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
 
@@ -325,6 +428,8 @@ export class Platform {
   private catalogIndex?: { fetchedAt: string; byId: Map<string, CatalogEntry> };
   private providerLists = new Map<string, { raw: string | undefined; list: ReturnType<Platform["providerList"]> }>();
   private brief: string;
+  /** Which brief builds run on, recorded with each build: the spec's version and a short hash of the brief's text. */
+  private briefId: string;
   private designSystem?: () => Promise<string | undefined>;
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
@@ -358,6 +463,7 @@ export class Platform {
     this.agentStore = new AgentStore(opts.sql);
     this.agentStore.onChange = () => this.events.emit("changed");
     this.brief = opts.brief;
+    this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
     // Everything worth a log line may change what agents see (catalog, readiness): open MCP
     // sessions re-check their tool lists (debounced, and only notified when it differs).
@@ -688,9 +794,13 @@ export class Platform {
       for (const s of row.manifest.requires?.secrets ?? []) secrets.add(s.name);
     }
     for (const s of secrets) this.secrets.delete(capabilityId, s);
-    for (const b of this.registry.buildIdsFor(capabilityId)) {
+    const builds = this.registry.buildIdsFor(capabilityId);
+    // Its attachments go, unless a sibling build from the same conversation (an ideas draft that became several tools) still shows them.
+    for (const ref of this.registry.releaseAttachments(builds)) await this.blobs.delete(`attachments/${ref}`);
+    for (const b of builds) {
       await this.workbench.remove(b).catch(() => {});
       await this.workbench.removeTranscript(b).catch(() => {});
+      await this.blobs.delete(`transcripts/${b}.log`);
       await this.blobs.delete(`screenshots/${b}.png`);
       await this.blobs.delete(`screenshots/${b}-dark.png`);
     }
@@ -2290,7 +2400,16 @@ export class Platform {
       await this.workbench.remove(b.id).catch(() => {});
       workspaces++;
     }
+    // Attachments of conversations that never led to a build.
+    for (const ref of this.registry.staleAttachments(iso(1))) {
+      await this.blobs.delete(`attachments/${ref}`);
+      this.registry.deleteAttachment(ref);
+    }
     for (const b of this.registry.finishedBuildsBefore(iso(30))) {
+      // Kept with the build before the workbench's copy goes (builds from before 0.4.6 are kept now too).
+      const key = `transcripts/${b.id}.log`;
+      const left = await this.workbench.transcript(b.id).catch(() => undefined);
+      if (left && !(await this.blobs.get(key))) await this.blobs.put(key, left);
       await this.workbench.removeTranscript(b.id).catch(() => {});
       transcripts++;
     }
@@ -2302,6 +2421,7 @@ export class Platform {
       for (const b of builds) {
         await this.workbench.remove(b.id).catch(() => {});
         await this.workbench.removeTranscript(b.id).catch(() => {});
+        await this.blobs.delete(`transcripts/${b.id}.log`);
       }
       this.registry.purgeCapability(id);
       releasedIds.push(id);
@@ -2466,16 +2586,156 @@ export class Platform {
    * for, e.g. the connection this capability will call; it starts once that one promotes.
    * `schedules`: the owner's approved schedules, set up once the build promotes (owner only).
    */
-  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
+  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
     await this.checkEffort(agent, req);
-    const { widgets, ...rest } = req;
+    const { widgets, conversation: turns, ...rest } = req;
+    const conversation = this.checkConversation(agent, turns);
     this.checkApprovedSchedules(agent, req.schedules);
     if (widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
-    const b = await this.createBuild(agent, rest);
+    const b = await this.createBuild(agent, rest, conversation);
     if (!widgets) return b;
     // Widgets are their own build, chained after this one: a broken widget never blocks the capability.
-    const w = await this.addWidgets(agent, { capabilityId: b.capabilityId, after: b.buildId, ...pickAsk(req) });
+    const w = await this.addWidgets(agent, { capabilityId: b.capabilityId, after: b.buildId, ...pickAsk(req), ...(conversation ? { conversation } : {}) });
     return { ...b, widgetsBuildId: w.buildId };
+  }
+
+  /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
+  private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
+    const instructions = this.instructionsForBuild(capabilityId);
+    return { brief: this.briefId, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
+  }
+
+  /** Record what a new build ran with, and keep the attachments its conversation carried. */
+  private recordContext(buildId: string, capabilityId: string, conversation?: BuildTurn[]) {
+    this.registry.setBuildContext(buildId, this.contextFor(capabilityId, conversation));
+    if (conversation) this.registry.claimAttachments(attachmentRefs(conversation), buildId);
+  }
+
+  /**
+   * The conversation the owner had with the intake, kept with the build (the web client sends it):
+   * the owner's only; an agent's build carries its request instead. A turn's attachments are refs
+   * into the owner's attachments; what they are comes from the store, not the client.
+   */
+  private checkConversation(agent: Agent, c: unknown): BuildTurn[] | undefined {
+    if (c === undefined) return undefined;
+    requireOwner(agent);
+    if (!Array.isArray(c) || c.length > MAX_TURNS) throw new PlatformError("invalid_request", `conversation: a list of at most ${MAX_TURNS} turns`);
+    return c.map((t) => {
+      if (!t || (t.role !== "user" && t.role !== "intake") || typeof t.content !== "string" || t.content.length > MAX_TURN_CHARS) {
+        throw new PlatformError("invalid_request", `each turn of the conversation needs a role ("user" or "intake") and content of at most ${MAX_TURN_CHARS} characters`);
+      }
+      const attachments = t.attachments === undefined ? undefined : this.resolveAttachments(t.attachments);
+      // An intake turn may carry its structured reply, for showing the proposal as it was; kept as is, within reason.
+      const reply = t.role === "intake" && t.reply && typeof t.reply === "object" && JSON.stringify(t.reply).length <= MAX_REPLY_CHARS ? t.reply : undefined;
+      return { role: t.role, content: t.content, ...(attachments?.length ? { attachments } : {}), ...(reply ? { reply } : {}) };
+    });
+  }
+
+  // ---------- Attachments: images and files the owner attaches in the intake's box ----------
+
+  /**
+   * Keep an image or file the owner attached (the web client uploads each as it's added): checked
+   * (type, size, an image's pixels), stored as a blob, and remembered under the conversation. It
+   * goes to a build when the conversation leads to one; otherwise it's dropped after a day.
+   */
+  async addAttachment(owner: Agent, a: { session?: unknown; kind?: unknown; name?: unknown; mediaType?: unknown; data?: unknown }): Promise<AttachmentRef> {
+    requireOwner(owner);
+    if (typeof a.session !== "string" || !SESSION_ID.test(a.session)) throw new PlatformError("invalid_request", "session must be a short id");
+    if (a.kind !== "image" && a.kind !== "file") throw new PlatformError("invalid_request", 'kind must be "image" or "file"');
+    if (typeof a.name !== "string" || !a.name.trim() || a.name.length > MAX_ATTACHMENT_NAME) throw new PlatformError("invalid_request", `name: up to ${MAX_ATTACHMENT_NAME} characters`);
+    if (typeof a.mediaType !== "string" || !/^[\w.+-]+\/[\w.+-]+$/.test(a.mediaType)) throw new PlatformError("invalid_request", "mediaType must be a media type");
+    if (typeof a.data !== "string") throw new PlatformError("invalid_request", "data must be base64");
+    const limits = ATTACHMENT_LIMITS[a.kind];
+    const invalid = (message: string) => new PlatformError("invalid_request", message);
+    let bytes: Uint8Array;
+    let size: { width: number; height: number } | undefined;
+    if (a.kind === "image") {
+      // The same check a tool's model call gets: type, bytes, pixels (a 2 MB image can still be 20000 px wide).
+      ({ bytes, ...size } = checkImage(a.data, a.mediaType, limits.bytes, invalid));
+    } else {
+      try {
+        bytes = fromBase64(a.data);
+      } catch {
+        throw invalid("data must be base64");
+      }
+      if (!bytes.length) throw invalid("the attachment is empty");
+      if (bytes.length > limits.bytes) throw invalid(`a file may be at most ${Math.round(limits.bytes / 1024)} KB`);
+      if (!TEXT_MEDIA.test(a.mediaType) || bytes.subarray(0, 4096).includes(0)) throw invalid("files must be text (a script, notes, CSV, JSON…)");
+    }
+    const have = this.registry.attachmentsOf(a.session).filter((x) => x.kind === a.kind).length;
+    if (have >= limits.perConversation) throw invalid(`at most ${limits.perConversation} ${a.kind}s in one conversation`);
+    const ref = `at-${randomToken(9)}`;
+    await this.blobs.put(`attachments/${ref}`, bytes);
+    const row: AttachmentRef & { session: string } = { ref, session: a.session, kind: a.kind, name: safeName(a.name), mediaType: a.mediaType, bytes: bytes.length, ...(size ?? {}) };
+    this.registry.insertAttachment(row);
+    const { session: _s, ...meta } = row;
+    return meta;
+  }
+
+  /** An attachment's bytes, for the owner's browser (a thumbnail, a file) and the intake. */
+  async attachmentBytes(owner: Agent, ref: string): Promise<{ meta: AttachmentRef; bytes: Uint8Array }> {
+    requireOwner(owner);
+    const a = typeof ref === "string" ? this.registry.attachment(ref) : undefined;
+    const bytes = a ? await this.blobs.get(`attachments/${ref}`) : undefined;
+    if (!a || !bytes) throw new PlatformError("not_found", `no attachment ${ref}`);
+    const { session: _s, buildId: _b, createdAt: _c, ...meta } = a;
+    return { meta, bytes };
+  }
+
+  /** The owner's attachments behind one message's refs (what they are, from the store), in order, each once; within the per-message limits. */
+  private resolveAttachments(refs: unknown): AttachmentRef[] {
+    if (!Array.isArray(refs) || refs.length > ATTACHMENT_LIMITS.file.perMessage + ATTACHMENT_LIMITS.image.perMessage) throw new PlatformError("invalid_request", "attachments: a short list of refs");
+    const out: AttachmentRef[] = [];
+    for (const x of refs) {
+      const ref = typeof x === "string" ? x : x && typeof x.ref === "string" ? x.ref : undefined;
+      if (!ref) throw new PlatformError("invalid_request", "each attachment needs a ref");
+      const a = this.registry.attachment(ref);
+      if (!a) throw new PlatformError("not_found", `no attachment ${ref}`);
+      if (out.some((o) => o.ref === ref)) continue;
+      const { session: _s, buildId: _b, createdAt: _c, ...meta } = a;
+      out.push(meta);
+    }
+    for (const kind of ["image", "file"] as const) {
+      const max = ATTACHMENT_LIMITS[kind].perMessage;
+      if (out.filter((a) => a.kind === kind).length > max) throw new PlatformError("invalid_request", `at most ${max} ${kind}s in one message`);
+    }
+    return out;
+  }
+
+  /** Attachments with their bytes (base64), for the intake to read. Owner only. */
+  async attachmentsWithData(owner: Agent, refs: unknown): Promise<AttachmentWithData[]> {
+    requireOwner(owner);
+    const out: AttachmentWithData[] = [];
+    for (const meta of this.resolveAttachments(refs)) {
+      const bytes = await this.blobs.get(`attachments/${meta.ref}`);
+      if (bytes) out.push({ ...meta, data: toBase64(bytes) });
+    }
+    return out;
+  }
+
+  /**
+   * The owner's attachments for the builder: copied into the workspace under `attachments/`
+   * (never part of a version) and listed in the request, so the builder reads a screenshot of the
+   * screen to change, or a script to port, as part of what was asked.
+   */
+  private async attachmentsForBuild(buildId: string): Promise<{ files: Files; note: string }> {
+    const turns = this.registry.buildContext(buildId)?.conversation ?? [];
+    const files: Files = {};
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    for (const turn of turns) {
+      for (const a of turn.attachments ?? []) {
+        if (seen.has(a.ref)) continue;
+        seen.add(a.ref);
+        const bytes = await this.blobs.get(`attachments/${a.ref}`);
+        if (!bytes) continue;
+        const path = `attachments/${seen.size}-${safeName(a.name)}`;
+        files[path] = bytes;
+        lines.push(`- \`${path}\`: ${a.kind === "image" ? `an image, ${a.width}×${a.height}` : `a text file, ${Math.max(1, Math.round(a.bytes / 1024))} KB`}, attached with: "${turn.content.slice(0, 120).replace(/\s+/g, " ")}${turn.content.length > 120 ? "…" : ""}"`);
+      }
+    }
+    if (!lines.length) return { files, note: "" };
+    return { files, note: `\n\nThe owner attached these, in this workspace (read them as part of the request: a screenshot shows the screen or the look they mean, a file is reference material such as a script to port or data to import):\n${lines.join("\n")}` };
   }
 
   /**
@@ -2510,7 +2770,7 @@ export class Platform {
     }
   }
 
-  private async createBuild(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView> {
+  private async createBuild(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; schedules?: ApprovedSchedule[] } & ModelAsk, conversation?: BuildTurn[]): Promise<BuildView> {
     requireScope(agent, "create");
     const id = slugify(req.name);
     if (!id) throw new PlatformError("invalid_request", "name must contain letters or digits");
@@ -2521,7 +2781,7 @@ export class Platform {
     if (req.kind !== undefined && req.kind !== "capability" && req.kind !== "connection") throw new PlatformError("invalid_request", 'kind must be "capability" or "connection"');
     const dependsOn = this.dependency(agent, req.after);
     const { after: _after, ...request } = req;
-    return this.openCreateBuild(agent, id, { ...request, ...(dependsOn ? { after: dependsOn } : {}) }, true, undefined, undefined, dependsOn);
+    return this.openCreateBuild(agent, id, { ...request, ...(dependsOn ? { after: dependsOn } : {}) }, true, undefined, undefined, dependsOn, conversation);
   }
 
   /** The build a new one should wait for (`after`, following retries), or undefined to start now. */
@@ -2628,7 +2888,7 @@ export class Platform {
   }
 
   /** A create build for `id` (newly reserved, or retrying a create that never promoted). */
-  private async openCreateBuild(agent: Agent, id: string, req: CreateRequest, reserve: boolean, builderOverride?: string, seed?: Files, dependsOn?: string): Promise<BuildView> {
+  private async openCreateBuild(agent: Agent, id: string, req: CreateRequest, reserve: boolean, builderOverride?: string, seed?: Files, dependsOn?: string, conversation?: BuildTurn[]): Promise<BuildView> {
     const builder = builderOverride ?? this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const buildId = newBuildId();
@@ -2636,6 +2896,7 @@ export class Platform {
       if (reserve) this.registry.insertCapability({ id, name: req.name, purpose: req.purpose, createdBy: agent.id });
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
+      this.recordContext(buildId, id, conversation);
     });
     if (dependsOn) this.waitFor(buildId, id, dependsOn, `build ${buildId} [create ${id} by ${agent.id}]`);
     else await this.startCreate(buildId, seed);
@@ -2656,13 +2917,16 @@ export class Platform {
     const connection = req.kind === "connection";
     // kind is an ABI 2.1 field.
     const skeleton: CapabilityManifest = { id, name: req.name, purpose: req.purpose, abi: connection ? "2.1" : DEFAULT_ABI, ...(connection ? { kind: "connection" as const } : {}), operations: [] };
+    const attached = await this.attachmentsForBuild(buildId);
     await this.workbench.open(buildId, {
       ...(seed ? versionFiles(seed) : {
         "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}`)),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId)?.instructions)),
+      ...attached.files,
+      ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
     });
     if (this.cancelledWhileOpening(buildId)) return;
@@ -2684,20 +2948,22 @@ export class Platform {
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). */
-  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[] } & ModelAsk): Promise<BuildView> {
+  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
     this.checkApprovedSchedules(agent, req.schedules);
+    const conversation = this.checkConversation(agent, req.conversation);
     const cap = this.visibleActive(agent, req.capabilityId);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const dependsOn = this.dependency(agent, req.after);
-    const { after: _after, ...rest } = req;
+    const { after: _after, conversation: _turns, ...rest } = req;
     const request = { ...rest, ...(dependsOn ? { after: dependsOn } : {}) };
     const buildId = newBuildId();
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
+      this.recordContext(buildId, cap.id, conversation);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
@@ -2710,21 +2976,23 @@ export class Platform {
    * says what to show; without one the builder proposes 1–3 widgets from the capability's data.
    * `after`: the build to wait for (e.g. the create build of the capability itself).
    */
-  async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string } & ModelAsk): Promise<BuildView> {
+  async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
+    const conversation = this.checkConversation(agent, req.conversation);
     const dependsOn = this.dependency(agent, req.after);
     const cap = dependsOn ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
     if (cap.activeVersion && isConnection(this.activeManifest(cap.id))) throw new PlatformError("invalid_request", `${cap.id} is a connection; connections have no widgets`);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
-    const { after: _after, ...rest } = req;
+    const { after: _after, conversation: _turns, ...rest } = req;
     const request = { ...rest, capabilityId: cap.id, request: rest.request?.trim() ?? "", ...(dependsOn ? { after: dependsOn } : {}) };
     const buildId = newBuildId();
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
+      this.recordContext(buildId, cap.id, conversation);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
@@ -2739,9 +3007,10 @@ export class Platform {
     const base = await this.loadVersion(cap.id, cap.activeVersion);
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
-    const ask = b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`;
+    const attached = await this.attachmentsForBuild(buildId);
+    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask)), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -2778,16 +3047,22 @@ export class Platform {
       req[field] = `${String(req[field] ?? "").split(FIX_MARK)[0].trimEnd()}\n\n${context}`;
     }
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
-    if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string });
-    if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string });
-    const cap = this.registry.getCapability(old.capabilityId);
-    if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
-    // An install retries with the same copy builder.
-    const builder = old.builder?.startsWith("copy:") ? old.builder : undefined;
-    const dependsOn = this.dependency(agent, req.after);
-    if (!dependsOn) delete req.after;
-    else req.after = dependsOn;
-    return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn);
+    const next = await (async () => {
+      if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string });
+      if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string });
+      const cap = this.registry.getCapability(old.capabilityId);
+      if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
+      // An install retries with the same copy builder.
+      const builder = old.builder?.startsWith("copy:") ? old.builder : undefined;
+      const dependsOn = this.dependency(agent, req.after);
+      if (!dependsOn) delete req.after;
+      else req.after = dependsOn;
+      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn);
+    })();
+    // The conversation that led to the first try goes with the retry.
+    const conversation = this.registry.buildContext(old.id)?.conversation;
+    if (conversation) this.registry.setBuildContext(next.buildId, { conversation });
+    return next;
   }
 
   /**
@@ -2817,6 +3092,169 @@ export class Platform {
   getBuild(agent: Agent, buildId: string): BuildView {
     requireScope(agent, "create", "modify");
     return this.buildView(this.visibleBuild(agent, buildId));
+  }
+
+  /** What led to a build (the owner's conversation with the intake, the instructions, the brief) and what the owner said of it once live. Owner only. */
+  buildContext(owner: Agent, buildId: string): BuildContext & { feedback?: BuildFeedback } {
+    requireOwner(owner);
+    this.mustBuild(buildId);
+    const feedback = this.registry.buildFeedback(buildId);
+    return { ...(this.registry.buildContext(buildId) ?? {}), ...(feedback ? { feedback } : {}) };
+  }
+
+  /**
+   * "Got what you asked for?" on a build that went live: yes, no (with a note on what's off), or
+   * skip. Owner only. It stays in the owner's database; nothing leaves the machine.
+   */
+  setBuildFeedback(owner: Agent, buildId: string, f: { score?: unknown; note?: unknown }): BuildFeedback {
+    requireOwner(owner);
+    const b = this.mustBuild(buildId);
+    if (b.status !== "promoted") throw new PlatformError("conflict", `build ${buildId} isn't live (it is ${b.status}); the question is for builds that went live`);
+    if (f.score !== "yes" && f.score !== "no" && f.score !== "skip") throw new PlatformError("invalid_request", 'score must be "yes", "no" or "skip"');
+    if (f.note !== undefined && (typeof f.note !== "string" || f.note.length > MAX_FEEDBACK_NOTE)) throw new PlatformError("invalid_request", `note: text of at most ${MAX_FEEDBACK_NOTE} characters`);
+    const note = typeof f.note === "string" ? f.note.trim() : "";
+    this.registry.setBuildFeedback(buildId, { score: f.score, ...(note ? { note } : {}) });
+    this.logger(`build ${buildId}: the owner says ${f.score}`);
+    return this.registry.buildFeedback(buildId)!;
+  }
+
+  /**
+   * How recent builds worked out, newest first: what each ran on, how many attempts, how it ended,
+   * the owner's answer, and the signs in the record (a failed build whose retry went live, another
+   * change within a day of going live, a restore within a week, the tool deleted within a day). For
+   * the owner (`hewn feedback`); a host reads it the same way, in the machine. Nothing is sent anywhere.
+   */
+  buildReport(owner: Agent, opts: { days?: number } = {}): BuildReport {
+    requireOwner(owner);
+    const days = Math.min(365, Math.max(1, Number(opts.days) || 30));
+    const builds = this.registry.buildsSince(new Date(Date.now() - days * 86400_000).toISOString());
+    const rollbacks = this.registry.lifecycleEvents(2000).filter((e) => e.action === "rollback");
+    const within = (from: string, to: string, hours: number) => {
+      const d = Date.parse(to) - Date.parse(from);
+      return d >= 0 && d <= hours * 3600_000;
+    };
+    const rows = builds.map((b) => {
+      const attempts = Math.max(1, ...b.log.map((l) => Number(/^attempt (\d+): builder/.exec(l)?.[1] ?? 0)));
+      const later = builds.filter((x) => x.capabilityId === b.capabilityId && x.id !== b.id && x.createdAt > b.createdAt);
+      const retry = (x: BuildRow) => x.request.retryOf === b.id || x.request.autoRetryOf === b.id;
+      const live = b.status === "promoted";
+      return {
+        buildId: b.id,
+        capabilityId: b.capabilityId,
+        kind: b.kind,
+        status: b.status,
+        createdAt: b.createdAt,
+        builder: b.builder ?? "agent",
+        ...(b.model ? { model: b.model } : {}),
+        ...(b.effort ? { effort: b.effort } : {}),
+        ...(b.ranModel ? { ranModel: b.ranModel } : {}),
+        ...(b.brief ? { brief: b.brief } : {}),
+        attempts,
+        ...(b.status === "failed" ? { failure: explainFailure(b.log).title } : {}),
+        ...(b.feedback ? { feedback: b.feedback } : {}),
+        signals: {
+          fixed: later.some((x) => retry(x) && x.status === "promoted"),
+          changedSoon: live && later.some((x) => !retry(x) && !x.request.retryOf && !x.request.autoRetryOf && within(b.updatedAt, x.createdAt, 24)),
+          restored: live && b.resultVersion !== null && rollbacks.some((e) => e.capabilityId === b.capabilityId && e.detail.startsWith(`v${b.resultVersion} →`) && within(b.updatedAt, e.at, 7 * 24)),
+          deletedSoon: live && !!b.archivedAt && within(b.updatedAt, b.archivedAt, 24),
+        },
+      };
+    });
+    return { days, builds: rows };
+  }
+
+  /** The builder's transcript: kept with the build once it ended, the workbench's while it runs. Owner only (it shows source). */
+  async buildTranscript(owner: Agent, buildId: string): Promise<string | undefined> {
+    requireOwner(owner);
+    this.mustBuild(buildId);
+    const kept = await this.blobs.get(`transcripts/${buildId}.log`);
+    return kept ? text(kept) : await this.workbench.transcript(buildId);
+  }
+
+  // ---------- Instructions: the owner's standing rules for building, read by the intake and the builder ----------
+
+  private instructionsKey = (capabilityId?: string) => (capabilityId ? `instructions:${capabilityId}` : "instructions:global");
+
+  private instructionLines(capabilityId?: string): string[] {
+    return this.registry.getKv<string[]>(this.instructionsKey(capabilityId)) ?? [];
+  }
+
+  private mustCapabilityForInstructions(capabilityId: string) {
+    const cap = this.registry.getCapability(capabilityId);
+    if (!cap || cap.archivedAt) throw new PlatformError("not_found", `no capability ${capabilityId}`);
+  }
+
+  /** The owner's instructions, one per line: for every tool (no id), or for one tool. Owner only. */
+  instructions(owner: Agent, capabilityId?: string): string[] {
+    requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
+    return this.instructionLines(capabilityId);
+  }
+
+  /** Replace the owner's instructions for a scope with the list as edited (a text, one per line, or lines). */
+  setInstructions(owner: Agent, capabilityId: string | undefined, lines: unknown): string[] {
+    requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
+    const list = cleanInstructions(lines);
+    this.registry.setKv(this.instructionsKey(capabilityId), list);
+    this.logger(`instructions for ${capabilityId ?? "every tool"}: ${list.length} line(s), set by ${owner.id}`);
+    return list;
+  }
+
+  /**
+   * What the intake remembered or dropped in one turn, applied: a remembered rule goes at the end of
+   * its scope (never twice, never past the limit); a dropped one must match a line. Creating, there is
+   * no tool yet, so only rules for every tool are kept. Returns what changed, for the owner to see and undo.
+   */
+  applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } {
+    requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
+    const out: { remember: Instruction[]; forget: Instruction[] } = { remember: [], forget: [] };
+    for (const scope of ["global", "tool"] as const) {
+      const id = scope === "tool" ? capabilityId : undefined;
+      if (scope === "tool" && !id) continue;
+      const add = instructionEntries(remember, scope);
+      const drop = instructionEntries(forget, scope);
+      if (!add.length && !drop.length) continue;
+      let list = this.instructionLines(id);
+      const dropped: string[] = [];
+      const added: string[] = [];
+      for (const t of drop) {
+        if (!list.includes(t)) continue;
+        list = list.filter((x) => x !== t);
+        dropped.push(t);
+      }
+      for (const t of add) {
+        if (list.includes(t) || list.length >= MAX_INSTRUCTION_LINES) continue;
+        list.push(t);
+        added.push(t);
+      }
+      if (!added.length && !dropped.length) continue;
+      out.forget.push(...dropped.map((text) => ({ scope, text })));
+      out.remember.push(...added.map((text) => ({ scope, text })));
+      this.registry.setKv(this.instructionsKey(id), list);
+      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${added.length}, dropped ${dropped.length}`);
+    }
+    return out;
+  }
+
+  /** The "Owner's instructions" section of BUILDER.md: the rules for every tool, then this tool's. Empty when there are none. */
+  private instructionsForBuild(capabilityId: string): string {
+    const global = this.instructionLines();
+    const tool = this.instructionLines(capabilityId);
+    if (!global.length && !tool.length) return "";
+    const bullets = (l: string[]) => l.map((x) => `- ${x}`).join("\n");
+    return `## Owner's instructions\n\nThe owner's standing rules for how their tools are built. Follow them wherever they apply; the contract below still holds.\n${global.length ? `\nFor every tool:\n${bullets(global)}\n` : ""}${tool.length ? `\nFor this tool:\n${bullets(tool)}\n` : ""}`;
+  }
+
+  /** The transcript goes with the build for the capability's life (the workbench's copy goes with cleanup). Best-effort. */
+  private async keepTranscript(buildId: string) {
+    try {
+      const t = await this.workbench.transcript(buildId);
+      if (t) await this.blobs.put(`transcripts/${buildId}.log`, t);
+    } catch {
+      // A build is no less built without its transcript kept.
+    }
   }
 
   /** A build the agent may see: of a capability it can see, or one it requested. Else not found. */
@@ -2875,7 +3313,8 @@ export class Platform {
         const log = [...this.mustBuild(buildId).log, `FAILED: ${(e as Error).message}`];
         this.registry.updateBuild(buildId, { status: "failed", log });
       })
-      .finally(() => {
+      .finally(async () => {
+        await this.keepTranscript(buildId);
         release();
         this.running.delete(buildId);
         this.aborts.delete(buildId);
@@ -3266,6 +3705,7 @@ export class Platform {
       step(`FAILED: ${(e as Error).message}`);
       this.registry.updateBuild(buildId, { status: "failed", review: null, log });
     }
+    await this.keepTranscript(buildId);
     this.buildEnded(buildId);
     return this.buildView(this.mustBuild(buildId));
   }
@@ -3283,6 +3723,7 @@ export class Platform {
       this.loaded.delete(build.review.contentHash);
       await this.blobs.delete(`versions/${build.review.contentHash}.json`);
     }
+    await this.keepTranscript(buildId);
     this.buildEnded(buildId);
     return this.buildView(this.mustBuild(buildId));
   }
@@ -3408,16 +3849,27 @@ export class Platform {
     return `\n## The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities"). You see only their public contracts, never their data or code.\n\n${lines.join("\n\n")}\n`;
   }
 
+  /**
+   * AGENTS.md for a workspace, for builders that read it on their own (Codex, OpenCode): where the
+   * brief is, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
+   */
+  private agentsFile(buildId: string): Files {
+    const instructions = this.registry.buildContext(buildId)?.instructions;
+    return {
+      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first: the request, the implementation contract and the owner's other tools. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}` : ""}`),
+    };
+  }
+
   /** PLATFORM_UI.css for a workspace: the design system to read (served to UIs as /_platform/ui.css). */
   private async designSystemFile(): Promise<Files> {
     const css = await this.designSystem?.().catch(() => undefined);
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md for a workspace: the request, the implementation contract, the owner's catalog. */
-  private brief_(kind: BuildKind, id: string, request: string): string {
+  /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
+  private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
-    return `# Build: ${kind} \`${id}\`\n\n${request}\n\n${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
+    return `# Build: ${kind} \`${id}\`\n\n${request}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {

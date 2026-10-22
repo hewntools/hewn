@@ -77,6 +77,45 @@ export interface BuildModel {
   ran?: string;
 }
 
+/** An image or file the owner attached in the intake's box; the bytes are a blob (`attachments/<ref>`). */
+export interface AttachmentRef {
+  ref: string;
+  kind: "image" | "file";
+  name: string;
+  mediaType: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+}
+
+/** One turn of the owner's conversation with the intake that led to a build. */
+export interface BuildTurn {
+  role: "user" | "intake";
+  content: string;
+  /** What the owner attached with this turn (refs into `attachments`). */
+  attachments?: AttachmentRef[];
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform. */
+  reply?: unknown;
+}
+
+/** The owner's answer to "Got what you asked for?": yes, no (a note may say what's off), or skip. */
+export type BuildFeedbackScore = "yes" | "no" | "skip";
+export interface BuildFeedback {
+  score: BuildFeedbackScore;
+  note?: string;
+  at: string;
+}
+
+/** What led to a build, kept with it for the capability's life (`build_context`). */
+export interface BuildContext {
+  /** The web client's conversation; an agent's build has none (its request is on the build). */
+  conversation?: BuildTurn[];
+  /** The owner's instructions the build ran with. */
+  instructions?: string;
+  /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
+  brief?: string;
+}
+
 export interface BuildRow {
   id: string;
   capabilityId: string;
@@ -256,12 +295,45 @@ CREATE TABLE IF NOT EXISTS build_models (
   effort         TEXT,
   ran_model      TEXT
 );
+-- What the owner thought of a promoted build ("Got what you asked for?"): yes, no (with a note on
+-- what's off), or skip. Stays in this database: nothing leaves the machine.
+CREATE TABLE IF NOT EXISTS build_feedback (
+  build_id       TEXT PRIMARY KEY,
+  score          TEXT NOT NULL,
+  note           TEXT,
+  at             TEXT NOT NULL
+);
 -- What the builder's host charged (all attempts), in its own unit.
 CREATE TABLE IF NOT EXISTS build_charges (
   build_id       TEXT PRIMARY KEY,
   amount         REAL NOT NULL,
   unit           TEXT NOT NULL
 );
+-- What led to a build, kept for the capability's life: the owner's conversation with the intake
+-- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (the
+-- spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
+CREATE TABLE IF NOT EXISTS build_context (
+  build_id       TEXT PRIMARY KEY,
+  conversation   TEXT,
+  instructions   TEXT,
+  brief          TEXT
+);
+-- Images and files the owner attached in the intake's box: the bytes are blobs (attachments/<ref>);
+-- these rows say what they are, which conversation (session) they came with, and which build they
+-- ended up with (none until then: those are dropped after a day).
+CREATE TABLE IF NOT EXISTS attachments (
+  ref            TEXT PRIMARY KEY,
+  session        TEXT NOT NULL,
+  build_id       TEXT,
+  kind           TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  media_type     TEXT NOT NULL,
+  bytes          INTEGER NOT NULL,
+  width          INTEGER,
+  height         INTEGER,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attachments_by_session ON attachments (session);
 -- Everything the host charged, one row per charge (a build attempt, an intake turn, a model call),
 -- in its own unit: "Credits used this month" when it runs them.
 CREATE TABLE IF NOT EXISTS host_charges (
@@ -322,6 +394,19 @@ const toVersion = (r: Row): VersionRow => ({
   manifest: JSON.parse(r.manifest),
   contentHash: r.content_hash,
   buildId: r.build_id,
+  createdAt: r.created_at,
+});
+
+const toAttachment = (r: Row): AttachmentRef & { session: string; buildId: string | null; createdAt: string } => ({
+  ref: r.ref,
+  session: r.session,
+  buildId: r.build_id ?? null,
+  kind: r.kind,
+  name: r.name,
+  mediaType: r.media_type,
+  bytes: r.bytes,
+  ...(r.width ? { width: r.width } : {}),
+  ...(r.height ? { height: r.height } : {}),
   createdAt: r.created_at,
 });
 
@@ -588,6 +673,112 @@ export class Registry {
     this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(model, buildId);
   }
 
+  /** What led to a build; a later call adds to (or replaces) only the parts it gives. */
+  setBuildContext(buildId: string, c: BuildContext) {
+    const next = { ...this.buildContext(buildId), ...c };
+    this.db
+      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, instructions, brief) VALUES (?, ?, ?, ?)")
+      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.instructions ?? null, next.brief ?? null);
+  }
+
+  buildContext(buildId: string): BuildContext | undefined {
+    const r = this.db.prepare("SELECT conversation, instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
+    if (!r) return undefined;
+    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.instructions ? { instructions: r.instructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
+  }
+
+  insertAttachment(a: AttachmentRef & { session: string }) {
+    this.db
+      .prepare("INSERT INTO attachments (ref, session, kind, name, media_type, bytes, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(a.ref, a.session, a.kind, a.name, a.mediaType, a.bytes, a.width ?? null, a.height ?? null, now());
+  }
+
+  attachment(ref: string): (AttachmentRef & { session: string; buildId: string | null; createdAt: string }) | undefined {
+    const r = this.db.prepare("SELECT * FROM attachments WHERE ref = ?").get(ref) as Row | undefined;
+    return r ? toAttachment(r) : undefined;
+  }
+
+  /** What a conversation has attached so far (for the limits). */
+  attachmentsOf(session: string) {
+    return this.db.prepare("SELECT * FROM attachments WHERE session = ? ORDER BY created_at").all(session).map((r) => toAttachment(r as Row));
+  }
+
+  /** The attachments a build keeps: claimed when the build is recorded, so they outlive the day. */
+  claimAttachments(refs: string[], buildId: string) {
+    for (const ref of refs) this.db.prepare("UPDATE attachments SET build_id = ? WHERE ref = ? AND build_id IS NULL").run(buildId, ref);
+  }
+
+  attachmentsOfBuild(buildId: string): string[] {
+    return this.db.prepare("SELECT ref FROM attachments WHERE build_id = ?").all(buildId).map((r) => (r as Row).ref as string);
+  }
+
+  /**
+   * Let go of what these builds (a capability's, being purged) claimed: a ref another build's
+   * conversation still shows (several tools from one ideas draft share theirs) moves to that build;
+   * the rest are dropped and returned, for their blobs to go.
+   */
+  releaseAttachments(buildIds: string[]): string[] {
+    const dropped: string[] = [];
+    if (!buildIds.length) return dropped;
+    const keeperOf = this.db.prepare(`SELECT build_id FROM build_context WHERE build_id NOT IN (${buildIds.map(() => "?").join(", ")}) AND conversation LIKE ? LIMIT 1`);
+    this.transaction(() => {
+      for (const b of buildIds) {
+        for (const ref of this.attachmentsOfBuild(b)) {
+          const keeper = keeperOf.get(...buildIds, `%"ref":${JSON.stringify(ref)}%`) as Row | undefined;
+          if (keeper) this.db.prepare("UPDATE attachments SET build_id = ? WHERE ref = ?").run(keeper.build_id, ref);
+          else (this.deleteAttachment(ref), dropped.push(ref));
+        }
+      }
+    });
+    return dropped;
+  }
+
+  /** Attachments no build took, older than `before`: a conversation that never led to one. */
+  staleAttachments(before: string): string[] {
+    return this.db.prepare("SELECT ref FROM attachments WHERE build_id IS NULL AND created_at < ?").all(before).map((r) => (r as Row).ref as string);
+  }
+
+  deleteAttachment(ref: string) {
+    this.db.prepare("DELETE FROM attachments WHERE ref = ?").run(ref);
+  }
+
+  /** The owner's answer to "Got what you asked for?" on a build; a later answer replaces it. */
+  setBuildFeedback(buildId: string, f: { score: BuildFeedbackScore; note?: string }) {
+    this.db.prepare("INSERT OR REPLACE INTO build_feedback (build_id, score, note, at) VALUES (?, ?, ?, ?)").run(buildId, f.score, f.note ?? null, now());
+  }
+
+  buildFeedback(buildId: string): BuildFeedback | undefined {
+    const r = this.db.prepare("SELECT score, note, at FROM build_feedback WHERE build_id = ?").get(buildId) as Row | undefined;
+    return r ? { score: r.score, ...(r.note ? { note: r.note } : {}), at: r.at } : undefined;
+  }
+
+  /** Builds since `since` (ISO), newest first, with what they ran on and what the owner said: the raw rows of the feedback report. */
+  buildsSince(since: string): (BuildRow & { model?: string; effort?: string; ranModel?: string; brief?: string; feedback?: BuildFeedback; archivedAt?: string })[] {
+    return this.db
+      .prepare(
+        `SELECT b.*, m.model AS m_model, m.effort AS m_effort, m.ran_model AS m_ran, x.brief AS x_brief, f.score AS f_score, f.note AS f_note, f.at AS f_at, c.archived_at AS c_archived
+         FROM builds b
+         LEFT JOIN build_models m ON m.build_id = b.id
+         LEFT JOIN build_context x ON x.build_id = b.id
+         LEFT JOIN build_feedback f ON f.build_id = b.id
+         LEFT JOIN capabilities c ON c.id = b.capability_id
+         WHERE b.created_at >= ? ORDER BY b.created_at DESC`,
+      )
+      .all(since)
+      .map((r) => {
+        const x = r as Row;
+        return {
+          ...toBuild(x),
+          ...(x.m_model ? { model: x.m_model } : {}),
+          ...(x.m_effort ? { effort: x.m_effort } : {}),
+          ...(x.m_ran ? { ranModel: x.m_ran } : {}),
+          ...(x.x_brief ? { brief: x.x_brief } : {}),
+          ...(x.f_score ? { feedback: { score: x.f_score, ...(x.f_note ? { note: x.f_note } : {}), at: x.f_at } } : {}),
+          ...(x.c_archived ? { archivedAt: x.c_archived } : {}),
+        };
+      });
+  }
+
   /** One charge from the host, for the month's total. */
   addHostCharge(kind: "build" | "intake" | "model", c: { amount: number; unit: string }, capabilityId?: string) {
     const at = now();
@@ -766,18 +957,18 @@ export class Registry {
     this.db.prepare("DELETE FROM passkeys WHERE credential_id = ?").run(credentialId);
   }
 
-  /** Implementation history with the build that produced each version. */
+  /** Implementation history with the build that produced each version, and whether it kept a conversation. */
   versions(capabilityId: string) {
     return this.db
       .prepare(
-        `SELECT v.version, v.created_at, b.kind, b.requested_by, b.builder, b.request
-         FROM capability_versions v LEFT JOIN builds b ON b.id = v.build_id
+        `SELECT v.version, v.created_at, v.build_id, b.kind, b.requested_by, b.builder, b.request, c.conversation IS NOT NULL AS conversation
+         FROM capability_versions v LEFT JOIN builds b ON b.id = v.build_id LEFT JOIN build_context c ON c.build_id = v.build_id
          WHERE v.capability_id = ? ORDER BY v.version DESC`,
       )
       .all(capabilityId)
       .map((r) => {
         const x = r as Row;
-        return { version: x.version, createdAt: x.created_at, kind: x.kind, requestedBy: x.requested_by, builder: x.builder ?? "agent", request: x.request ? JSON.parse(x.request) : null };
+        return { version: x.version, createdAt: x.created_at, buildId: x.build_id, kind: x.kind, requestedBy: x.requested_by, builder: x.builder ?? "agent", request: x.request ? JSON.parse(x.request) : null, conversation: x.conversation === 1 };
       });
   }
 
@@ -888,12 +1079,14 @@ export class Registry {
   /** Remove every row about a capability (permanent delete). */
   purgeCapability(id: string) {
     this.transaction(() => {
+      // Attachments go first (`releaseAttachments`): shared ones move to a sibling build, the rest with their blobs.
+      for (const table of ["build_context", "build_feedback"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
       for (const table of ["grants", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
-      // Its failed calls (for "Ask builder to fix this") go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key = ?").run(`failures:${id}`);
+      // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?)").run(`failures:${id}`, `instructions:${id}`);
     });
   }
 

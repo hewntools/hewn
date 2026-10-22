@@ -78,10 +78,17 @@ describe("web client (owner surface)", () => {
       intake: async (req, onProgress) => {
         intakeCalls.push(req);
         onProgress?.({ activity: "Thinking" });
-        if (req.mode === "modify") return { kind: "widgets", message: "", proposals: [{ title: "Runs this week", shows: "How far you ran.", template: "stat", sizes: ["small"] }] };
-        return req.messages.length === 1
-          ? { kind: "questions", message: "", questions: ["Track grind size too?"] }
-          : { kind: "draft", message: "", draft: { name: "Coffee Log", purpose: "Track beans and brews.", requirements: "ops: add_bean, rate_brew" } };
+        // A rule stated in passing is remembered (global, or for the tool when modifying); "forget" drops one.
+        const last = req.messages.at(-1)?.content ?? "";
+        const memory = /always Swedish/.test(last) ? { remember: [{ scope: "global" as const, text: "Swedish copy in every screen" }, { scope: "tool" as const, text: "One screen only" }] } : /drop the Swedish rule/.test(last) ? { forget: [{ scope: "global" as const, text: "Swedish copy in every screen" }] } : {};
+        if (req.mode === "modify") return { kind: "widgets", message: "", proposals: [{ title: "Runs this week", shows: "How far you ran.", template: "stat", sizes: ["small"] }], ...memory };
+        if (memory.remember) return { kind: "questions", message: "", questions: ["Noted. Anything else?"], ...memory };
+        return {
+          ...(req.messages.length === 1
+            ? { kind: "questions" as const, message: "", questions: ["Track grind size too?"] }
+            : { kind: "draft" as const, message: "", draft: { name: "Coffee Log", purpose: "Track beans and brews.", requirements: "ops: add_bean, rate_brew" } }),
+          ...memory,
+        };
       },
       setup: {
         appInstalled: (name: string) => name === "Claude",
@@ -290,6 +297,32 @@ describe("web client (owner surface)", () => {
       assert.ok((await api("/capabilities")).json.some((c: any) => c.id === "secret-echo"));
     });
 
+    test("attachments: uploaded as added, served back sandboxed, handed to the intake with their bytes, kept with the build", async () => {
+      const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+9AAAADklEQVQIW2P4z8DwHwAFAAH/yQ0wtQAAAABJRU5ErkJggg==";
+      const up = await api("/attachments", { method: "POST", body: { session: "s-web", kind: "image", name: "screen.png", mediaType: "image/png", data: PNG } });
+      assert.equal(up.status, 200, JSON.stringify(up.json));
+      assert.deepEqual({ ...up.json, ref: "" }, { ref: "", kind: "image", name: "screen.png", mediaType: "image/png", bytes: 70, width: 2, height: 1 });
+      const got = await http(`/api/attachments/${up.json.ref}`);
+      assert.equal(got.status, 200);
+      assert.equal(got.headers["content-type"], "image/png");
+      assert.match(String(got.headers["content-security-policy"]), /sandbox/);
+      assert.equal((await api("/attachments/at-nope")).status, 404);
+      assert.equal((await api("/attachments", { method: "POST", body: { session: "s-web", kind: "file", name: "x.bin", mediaType: "application/octet-stream", data: "AAAA" } })).status, 400);
+      // The intake gets the bytes; the client only sent the ref.
+      const turn = { role: "user", content: "make it look like this", attachments: [{ ref: up.json.ref, kind: "image", name: "screen.png", mediaType: "image/png" }] };
+      const r = await api("/intake", { method: "POST", body: { mode: "create", messages: [turn] } });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.equal(intakeCalls.at(-1)!.messages[0].attachments![0].data, PNG);
+      assert.equal(intakeCalls.at(-1)!.messages[0].attachments![0].width, 2);
+      assert.equal((await api("/intake", { method: "POST", body: { mode: "create", messages: [{ ...turn, attachments: [{ ref: "at-nope" }] }] } })).status, 404);
+      // With the build: refs resolved to what they are, kept in the conversation.
+      const b = await api("/capabilities", { method: "POST", body: { name: "Shown Log", purpose: "p", requirements: "r", conversation: [turn, { role: "intake", content: "DRAFT\nShown Log" }] } });
+      assert.equal(b.status, 200, JSON.stringify(b.json));
+      await platform.settle(b.json.buildId);
+      const ctx = (await api(`/builds/${b.json.buildId}/context`)).json;
+      assert.deepEqual(ctx.conversation[0].attachments, [{ ref: up.json.ref, kind: "image", name: "screen.png", mediaType: "image/png", bytes: 70, width: 2, height: 1 }]);
+    });
+
     test("intake: questions, then a draft; the platform supplies the catalog", async () => {
       const q = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "coffee beans" }] } });
       assert.equal(q.json.kind, "questions");
@@ -299,6 +332,30 @@ describe("web client (owner surface)", () => {
         body: { mode: "create", messages: [{ role: "user", content: "coffee beans" }, { role: "intake", content: "Track grind size too?" }, { role: "user", content: "yes" }] },
       });
       assert.equal(d.json.draft.name, "Coffee Log");
+    });
+
+    test("instructions: the intake remembers a rule (the owner sees what was saved), reads them next time; the owner edits them", async () => {
+      // Creating: only the rule for every tool is kept (there is no tool yet).
+      const r = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "a coffee log; always Swedish copy please" }] } });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.deepEqual(r.json.saved, { remember: [{ scope: "global", text: "Swedish copy in every screen" }], forget: [] });
+      assert.ok(!("remember" in r.json), "the raw ask isn't sent back, only what was saved");
+      assert.deepEqual((await api("/instructions")).json, { lines: ["Swedish copy in every screen"] });
+      // Modifying: the tool's rule is kept too, and the intake sees both scopes.
+      const m = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "always Swedish" }] } });
+      assert.deepEqual(m.json.saved.remember, [{ scope: "tool", text: "One screen only" }]);
+      assert.deepEqual(intakeCalls.at(-1)!.instructions, { global: ["Swedish copy in every screen"], tool: [] });
+      assert.deepEqual((await api("/capabilities/running-log/instructions")).json, { lines: ["One screen only"] });
+      // A build records them in BUILDER.md's "Owner's instructions".
+      const b = await api("/capabilities/running-log/modify", { method: "POST", body: { request: "add a note field" } });
+      await platform.settle(b.json.buildId);
+      assert.match((await api(`/builds/${b.json.buildId}/context`)).json.instructions, /## Owner's instructions[^]*For every tool:\n- Swedish copy in every screen[^]*For this tool:\n- One screen only/);
+      // Dropping one, and editing by hand (a text, one per line; blanks and bullets cleaned up).
+      const f = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "drop the Swedish rule" }] } });
+      assert.deepEqual(f.json.saved, { remember: [], forget: [{ scope: "global", text: "Swedish copy in every screen" }] });
+      assert.deepEqual((await api("/instructions", { method: "PUT", body: { text: "- Dates as 2026-10-22\n\n  Metric units  \n" } })).json, { lines: ["Dates as 2026-10-22", "Metric units"] });
+      assert.equal((await api("/instructions", { method: "PUT", body: { text: 42 } })).status, 400);
+      assert.equal((await api("/capabilities/nope/instructions")).status, 404);
     });
 
     test("a change can come back as widget proposals; the intake sees the current manifest", async () => {
@@ -318,6 +375,38 @@ describe("web client (owner surface)", () => {
       assert.equal(r.headers["content-type"], "text/event-stream");
       assert.match(r.body, /event: progress\ndata: \{"activity":"Thinking"\}/);
       assert.match(r.body, /event: reply\ndata: \{"kind":"questions"/);
+    });
+
+    test("Got what you asked for?: the answer is kept with the build's context, once it's live; nothing leaves", async () => {
+      const b = await api("/capabilities/running-log/modify", { method: "POST", body: { request: "add a note field" } });
+      await platform.settle(b.json.buildId);
+      assert.equal((await api(`/builds/${b.json.buildId}`)).json.status, "promoted");
+      assert.equal((await api(`/builds/${b.json.buildId}/context`)).json.feedback, undefined);
+      const no = await api(`/builds/${b.json.buildId}/feedback`, { method: "POST", body: { score: "no", note: "the field is hidden" } });
+      assert.equal(no.status, 200, JSON.stringify(no.json));
+      assert.equal(no.json.note, "the field is hidden");
+      assert.deepEqual((await api(`/builds/${b.json.buildId}/context`)).json.feedback, no.json);
+      assert.equal((await api(`/builds/${b.json.buildId}/feedback`, { method: "POST", body: { score: "great" } })).status, 400);
+      assert.equal((await api("/builds/b-nope/feedback", { method: "POST", body: { score: "yes" } })).status, 404);
+    });
+
+    test("a build from the chat keeps its conversation and its log; the intake can continue from it", async () => {
+      const turns = [
+        { role: "user", content: "a plant log" },
+        { role: "intake", content: "DRAFT\nPlant Log: when each plant was watered" },
+      ];
+      const b = await api("/capabilities", { method: "POST", body: { name: "Plant Log", purpose: "plants", requirements: "water dates", conversation: turns } });
+      assert.equal(b.status, 200, JSON.stringify(b.json));
+      assert.ok(!("conversation" in b.json.request));
+      await platform.settle(b.json.buildId);
+      assert.deepEqual((await api(`/builds/${b.json.buildId}/context`)).json.conversation, turns);
+      assert.match((await api(`/builds/${b.json.buildId}/transcript`)).json.text, /→ Write src\/index\.ts/);
+      // "Continue from here": the client names the build; the platform fills in its conversation.
+      const r = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "add fertilizer" }], earlier: { buildId: b.json.buildId } } });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.deepEqual(intakeCalls.at(-1)!.earlier, { buildId: b.json.buildId, messages: turns });
+      assert.equal((await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "x" }], earlier: { buildId: "nope" } } })).status, 404);
+      assert.equal((await api("/capabilities", { method: "POST", body: { name: "Bad", purpose: "p", requirements: "r", conversation: [{ role: "bot", content: "x" }] } })).status, 400);
     });
 
     test("create from the web → live build over SSE until done", async () => {

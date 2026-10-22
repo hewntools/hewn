@@ -16,8 +16,8 @@ import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
  * themselves. It runs headless, sandboxed, with no tools that matter and no MCP.
  */
 
-export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
-import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { MAX_IDEAS } from "@hewntools/host-workerd/surface/intake-types.ts";
 
 /**
@@ -73,9 +73,6 @@ export function partialReply(text: string): Pick<IntakeProgress, "message" | "qu
   }
   return out;
 }
-
-/** After this many question rounds the intake must draft. */
-export const MAX_QUESTION_ROUNDS = 3;
 
 const TEMPLATES = ["stat", "list", "chart", "progress", "text"] as const;
 const SIZES = ["small", "medium", "large"] as const;
@@ -142,11 +139,17 @@ const IDEAS = {
   },
 };
 
+/** Standing rules to remember or drop for the owner (see "Remember standing rules" in the prompt). */
+const MEMORY = {
+  type: "array",
+  items: { type: "object", additionalProperties: false, required: ["scope", "text"], properties: { scope: { type: "string", enum: ["global", "tool"] }, text: { type: "string" } } },
+};
+
 /** One reply shape for both modes ("widgets" and "schedules" only when modifying, "ideas" only when creating). */
 export const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["kind", "message", "questions", "name", "purpose", "requirements", "request", "operations", "widgets", "model", "uses", "hosts", "secrets", "connection", "proposals", "ideas", "schedules"],
+  required: ["kind", "message", "questions", "name", "purpose", "requirements", "request", "operations", "widgets", "model", "uses", "hosts", "secrets", "connection", "proposals", "ideas", "schedules", "remember", "forget"],
   properties: {
     kind: { type: "string", enum: ["questions", "draft", "widgets", "ideas", "schedules"] },
     message: { type: "string" },
@@ -165,6 +168,8 @@ export const SCHEMA = {
     proposals: PROPOSALS,
     ideas: IDEAS,
     schedules: SCHEDULES,
+    remember: MEMORY,
+    forget: MEMORY,
   },
 };
 
@@ -182,11 +187,47 @@ export function intakeManifest(m: CapabilityManifest): string {
   return brief.length <= 30_000 ? brief : JSON.stringify({ id, name, purpose, kind, requires, operations: operations.map(({ op, sideEffect, description }) => ({ op, sideEffect, description })), widgets });
 }
 
+/** How much of an earlier conversation the intake gets to continue from: the last turns, each cut short. */
+const EARLIER_TURNS = 30;
+const EARLIER_CHARS = 4000;
+
+/** The images attached across the conversation (with their bytes), newest last, for the intake to look at. */
+export const intakeImages = (req: IntakeRequest): IntakeAttachment[] => req.messages.flatMap((m) => (m.attachments ?? []).filter((a) => a.kind === "image" && !!a.data)).slice(-10);
+
+/** How much of an attached text file goes into the prompt. */
+const FILE_CHARS = 100_000;
+
+/**
+ * One turn as the prompt shows it. What the owner attached is listed under the message; a text
+ * file's content follows (images are given to the model apart from the text).
+ */
+function turnText(m: { role: string; content: string; attachments?: IntakeAttachment[] }, max = Infinity): string {
+  const head = `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content.length > max ? `${m.content.slice(0, max)}…` : m.content}`;
+  const atts = m.attachments ?? [];
+  if (!atts.length) return head;
+  const list = atts.map((a) => `${a.name} (${a.kind === "image" ? `image${a.width && a.height ? ` ${a.width}×${a.height}` : ""}` : "file"})`).join(", ");
+  const files = atts
+    .filter((a) => a.kind === "file" && a.data)
+    .map((a) => {
+      const text = Buffer.from(a.data!, "base64").toString("utf8");
+      return `--- attached file ${a.name} ---\n${text.length > FILE_CHARS ? `${text.slice(0, FILE_CHARS)}\n… (cut at ${FILE_CHARS} characters)` : text}\n--- end of ${a.name} ---`;
+    })
+    .join("\n");
+  return `${head}\n[attached: ${list}]${files ? `\n${files}` : ""}`;
+}
+
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): string {
-  const rounds = req.messages.filter((m) => m.role === "intake").length;
-  const mustDraft = rounds >= MAX_QUESTION_ROUNDS;
-  const convo = req.messages.map((m) => `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content}`).join("\n\n");
+  const convo = req.messages.map((m) => turnText(m)).join("\n\n");
+  const earlier = req.earlier?.messages?.length
+    ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turnText(m, EARLIER_CHARS)).join("\n\n")}\n\n`
+    : "";
   const focus = req.widget ? req.current?.widgets?.find((w) => w.name === req.widget) : undefined;
+  const rules = req.instructions;
+  const bullets = (l: string[]) => l.map((x) => `- ${x}`).join("\n");
+  const instructions =
+    rules && (rules.global.length || rules.tool?.length)
+      ? `\nThe owner's standing rules for building (follow them, build on them, don't repeat them back; they're listed so you don't remember one twice):\n${rules.global.length ? `For every tool:\n${bullets(rules.global)}\n` : ""}${rules.tool?.length ? `For this tool:\n${bullets(rules.tool)}\n` : ""}`
+      : "";
   return `You are the intake for Hewn, a personal capability platform. A human (the owner) describes something they want. Turn it into a precise ${req.mode === "create" ? "capability creation" : "modification"} request for a separate builder agent, who will implement it without asking anything.
 
 How capabilities work (constraints the request must respect):
@@ -206,17 +247,20 @@ ${WIDGETS_GUIDE}
 
 The owner's existing capabilities:
 ${(req.catalog ?? []).map((c) => `- ${c.name} (${c.id})${c.kind === "connection" ? " [connection]" : ""}: ${c.purpose} [${c.operations.join(", ")}]`).join("\n") || "(none)"}
-${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
-Conversation so far:
+${instructions}${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
+${earlier}Conversation so far:
 ${convo}
 
 Decide:
 - When you talk to the owner ("message", "questions"), call capabilities "tools": that is the owner's word for them (capability is Hewn's technical term). The builder-facing fields keep "capability".
+- Write for a chat: short and clear. Say only what the owner needs to know or decide; never restate their request, and never list what the tool won't need (no network, no model, no key…). Put a blank line between paragraphs; when there are several things, a list (one per line, starting with "- ") instead of a long sentence. "message" is at most three short paragraphs: the proposal card carries the details. Each question is one line with its default in it.
 - Engage with what the owner actually said in their latest message. If they point you at something (a service, API, link), address it explicitly in "message".
+- Attachments: the owner may attach screenshots and files ("[attached: …]" under a message; a text file's content follows it; images are shown to you). A screenshot shows the screen or the look they mean, a sketch what they want; a file is reference material (a script to port, data to import, notes). Read them as part of the request: say in "message" what you took from them, and carry what matters into the requirements or the request in words (the builder gets copies of the attachments in its workspace, listed in the request, so name them when it should look at one).
+- Remember standing rules. When the owner states a preference or a rule meant to hold beyond this request ("always Swedish copy", "never delete buttons", "keep this one to a single screen"), put it in "remember": scope "global" for every tool they build, "tool" for this one only${req.mode === "create" ? ' (creating, there is no tool yet: a rule for this tool goes into the requirements instead, and "remember" takes global ones only)' : ""}. One short rule each, in the owner's terms (not their sentence verbatim); never a rule they didn't state, never a secret, never a one-off detail of this request, never one already listed above. When they withdraw or contradict a listed rule, put its exact text in "forget". The owner sees what was saved and can undo it. Otherwise leave both empty.
 ${opts.web ? "- You can look things up (WebFetch/WebSearch) to check services or APIs the owner mentions: whether they exist, are maintained, legitimate, and what they offer. Only fetch what's needed." : "- You cannot open links or browse. If the owner sends one, say so in \"message\" and work from what you know."}
 - Never design around piracy, credential sharing, or scraping that violates a service's terms. If a suggested source looks like that, say so plainly in "message" and propose a legitimate alternative.
 - The conversation may hold your earlier draft or ideas (after "DRAFT" or "IDEAS"). If the owner keeps talking after one, revise it: change what they asked for and keep everything else as it was (names, operations, details, schedules), unless they ask for something new.
-- If something essential is genuinely ambiguous (would change what gets built), reply kind "questions" with at most 3 short, concrete questions. Round ${rounds + 1} of at most ${MAX_QUESTION_ROUNDS}.${mustDraft ? " This is the last round: do NOT ask more questions; produce the draft now, making sensible assumptions and listing them in \"message\"." : " If the owner's last answer raised a new essential ambiguity, you may ask again."}
+- Ask until it's clear; then draft. ${req.mode === "create" ? `Before a draft you must be able to say, from the conversation: the moment (when the owner opens or uses it, and the first thing they want to see or do there), what it keeps (the things and their fields), the main action, and what's out of scope. On the first turn, draft only when the request already says those; a one-line idea usually doesn't.` : `Before a draft you must be able to say what exactly changes and where (which screen, widget or operation) and how it should behave afterwards. A specific ask ("show pace per km in the table", "the bedtime column is always empty") is clear: draft. A vague one ("improve the UX", "make it nicer") isn't: ask what bothers them or what they want to do more easily, with your best guesses as the defaults.`} When it isn't clear, reply kind "questions": at most 3 short, concrete questions, each carrying the default you'd assume ("I'd assume one entry per day; right?"), and the last one ending with "Just say ok if that looks good.", so one word answers them all (an "ok" means every default). Once the owner has answered, draft, unless the answer raised something that would change what gets built. Never ask what's already answered, what their standing rules say, or what the earlier conversation above settled. When the owner says to draft now (or to just build it), draft at once with sensible assumptions, listed in "message".
 ${req.mode === "modify" ? `- If all the owner needs is to run operations the capability already has on a timetable (nothing to change or add), reply kind "schedules" with just "schedules": nothing gets built.
 - If the owner wants widgets that the capability can already feed, reply kind "widgets" with "proposals": a quick widgets-only build. That build writes each widget's own read operation (widget_<name>, computing the view from the data already stored), so a missing read operation is not a reason to change the capability; it can't change existing operations, state, hosts or config, or add writes, so its buttons only call operations the capability already has. If they said what they want, propose exactly that one widget (or the few they named); offer 2–4 alternatives only when they ask for suggestions or leave it open. Never refuse a widget: if it needs something the capability lacks (data it doesn't store, a fetch, a write operation for a button), reply kind "draft" instead, a change to the capability that includes the widget, and say in "message" what must change in the capability first and why.
 ` : `- If the owner asks for suggestions or ideas, wants several tools at once, or asks to build several of the ones you suggested, reply kind "ideas" with 2–${MAX_IDEAS} "ideas" (exactly the ones they named, if they named them): separate new capabilities the owner ticks to build. Each idea is a complete draft with the same fields and rules as a draft below (name, purpose, requirements, operations, widgets, model, uses, hosts, secrets, connection, schedules). An idea may call the owner's existing capabilities, or build on another idea: then put that idea's id (its name in lowercase, every run of other characters than a-z and 0-9 replaced by "-") in "uses" and name the operations it calls in "requirements"; Hewn builds that one first. Never a cycle. Ideas that don't build on each other are built at the same time. If several ideas need the same new connection, give each the identical connection (same name); it is built once. Suggest what fits the owner and doesn't duplicate what they already have. Leave the top-level draft fields empty.
@@ -237,6 +281,18 @@ export function parseIntake(raw: string, mode: IntakeRequest["mode"], current?: 
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error(`intake returned no JSON: ${text.slice(0, 200)}`);
   const j = JSON.parse(text.slice(start, end + 1));
+  return { ...replyOf(j, mode, current), ...memoryOf(j) };
+}
+
+/** What the reply asks to remember or drop: well-formed entries only (the platform checks again as it saves). */
+function memoryOf(j: Record<string, unknown>): IntakeMemory {
+  const list = (v: unknown): IntakeInstruction[] => (Array.isArray(v) ? v.filter((x) => x && (x.scope === "global" || x.scope === "tool") && typeof x.text === "string" && x.text.trim()).map((x) => ({ scope: x.scope, text: String(x.text).trim() })) : []);
+  const remember = list(j.remember);
+  const forget = list(j.forget);
+  return { ...(remember.length ? { remember } : {}), ...(forget.length ? { forget } : {}) };
+}
+
+function replyOf(j: any, mode: IntakeRequest["mode"], current?: CapabilityManifest): IntakeReply {
   const message = typeof j.message === "string" ? j.message : "";
   if (mode === "modify" && j.kind === "widgets") return { kind: "widgets", message, proposals: proposals(j.proposals, current) };
   if (mode === "modify" && j.kind === "schedules") {
@@ -315,15 +371,27 @@ function draftSpec(j: Record<string, unknown>): DraftSpec | undefined {
   return operations.length || spec.widgets.length || model || spec.uses.length || spec.hosts.length || spec.secrets.length ? spec : undefined;
 }
 
-function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal): Promise<string> {
+/** Claude Code's stream-json input: the prompt and the attached images as one user message (how images reach it headless). */
+export function claudeIntakeInput(prompt: string, images: { mediaType: string; data: string }[]): string {
+  const content = [{ type: "text", text: prompt }, ...images.map((i) => ({ type: "image", source: { type: "base64", media_type: i.mediaType, data: i.data } }))];
+  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
+}
+
+const IMAGE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+/** A failsafe for a run that hangs (you can stop one yourself): long enough for a big brief on a slow, careful model. */
+export const INTAKE_TIMEOUT_MS = 15 * 60_000;
+
+export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("stopped"));
-    const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, env, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    if (stdin !== undefined) child.stdin!.end(stdin);
     signal?.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
     let out = "";
     let err = "";
     let pending = "";
-    child.stdout.on("data", (d) => {
+    child.stdout!.on("data", (d) => {
       out += d;
       if (!onLine) return;
       pending += d;
@@ -331,12 +399,14 @@ function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEn
       pending = lines.pop()!;
       for (const l of lines) if (l.trim()) onLine(l);
     });
-    child.stderr.on("data", (d) => (err += d));
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+    child.stderr!.on("data", (d) => (err += d));
+    let timedOut = false;
+    const timer = setTimeout(() => ((timedOut = true), child.kill("SIGTERM")), timeoutMs);
     child.once("error", (e) => (clearTimeout(timer), reject(e)));
     child.once("close", (code) => {
       clearTimeout(timer);
       if (signal?.aborted) return reject(new Error("stopped"));
+      if (timedOut) return reject(new Error(`intake took longer than ${Math.round(timeoutMs / 60_000)} minutes, so Hewn stopped it`));
       code === 0 ? resolve(out) : reject(new Error(`intake ${command} exited ${code}: ${(err.trim() || out.trim().split("\n").at(-1) || "no output").slice(-500)}`));
     });
   });
@@ -369,11 +439,19 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
       // Claude gets web lookup (WebFetch/WebSearch) to check services the owner mentions;
       // the owner reviews every draft before anything is built.
       const prompt = intakePrompt(req, { web: which === "claude" });
+      const images = intakeImages(req);
       const h = homedir();
       if (which === "codex") {
         writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
+        // Attached images go in as files next to the prompt (-i); text files are in the prompt already.
+        const imageArgs = images.flatMap((img, i) => {
+          const p = join(ws, `attachment-${i + 1}.${IMAGE_EXT[img.mediaType] ?? "png"}`);
+          writeFileSync(p, Buffer.from(img.data!, "base64"));
+          return ["-i", p];
+        });
+        // `-i` takes several files: it goes before another flag, never right before the prompt (it would take it).
         const args = [
-          "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
+          "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", ...imageArgs,
           ...codexModelArgs(model),
           "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
           "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), prompt,
@@ -382,18 +460,23 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         const isolated = codexHome(join(platformRoot, "builder-home", "intake-codex"));
         try {
           const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
-          await run(w.command, w.args, ws, isolated.env, 5 * 60_000, undefined, signal);
+          await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, undefined, signal);
         } finally {
-          isolated.syncBack();
+          isolated.done();
         }
         return parseIntake(readFileSync(join(ws, "out.json"), "utf8"), req.mode, req.current);
       }
+      // With images, the prompt goes in on stdin as one user message with image blocks (stream-json input).
+      const stdin = images.length ? claudeIntakeInput(prompt, images.map((i) => ({ mediaType: i.mediaType, data: i.data! }))) : undefined;
       const args = [
-        "-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
+        ...(stdin === undefined ? ["-p", prompt] : ["-p", "--input-format", "stream-json"]),
+        "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
         ...claudeModelArgs(model),
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
         "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
+        // Web tools only: --restricted drops every code-running tool, also ones added later.
+        "--restricted",
         "--allowedTools", "WebFetch", "WebSearch",
         "--disallowedTools", "Bash", "Edit", "Write", "Task",
       ];
@@ -429,7 +512,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         }
       };
       try {
-        await run(w.command, w.args, ws, isolated.env, 5 * 60_000, onLine, signal);
+        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal, stdin);
       } catch (e) {
         // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
         if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);

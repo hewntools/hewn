@@ -14,6 +14,9 @@ const rel = (p: string, cwd: string) => {
   return p;
 };
 
+/** An activity line that means the builder used a tool: a Claude Code tool call, a Codex command or file change. */
+export const USED_TOOL = /^(→|\$|✎) /;
+
 /** `codex exec --json` events. */
 export function codexActivity(e: any, cwd: string): string | null {
   const item = e?.item;

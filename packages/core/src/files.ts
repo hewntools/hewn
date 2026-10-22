@@ -11,6 +11,9 @@ export const bytes = (s: string) => utf8(s);
 export const ARTEFACTS = new Set([".venv", "__pycache__", "node_modules", ".DS_Store", ".pytest_cache"]);
 /** Workspace-only files (the build brief) that never become part of a version. */
 export const WORKSPACE_ONLY = new Set(["BUILDER.md", "PLATFORM_UI.css"]);
+/** Workspace-only directories: what the owner attached for the builder to look at. */
+export const WORKSPACE_ONLY_DIRS = ["attachments"];
+export const isWorkspaceOnly = (path: string) => WORKSPACE_ONLY.has(path) || WORKSPACE_ONLY_DIRS.some((d) => path === d || path.startsWith(`${d}/`));
 
 export const isArtefact = (path: string) => path.split("/").some((part) => ARTEFACTS.has(part));
 
@@ -24,7 +27,7 @@ export const isBuilderConfig = (path: string) => path.split("/").some((part) => 
 /** The files that make up a version: no artefacts, no workspace-only files, no builder configuration. */
 export function versionFiles(files: Files): Files {
   const out: Files = {};
-  for (const [p, b] of Object.entries(files)) if (!isArtefact(p) && !WORKSPACE_ONLY.has(p) && !isBuilderConfig(p)) out[p] = b;
+  for (const [p, b] of Object.entries(files)) if (!isArtefact(p) && !isWorkspaceOnly(p) && !isBuilderConfig(p)) out[p] = b;
   return out;
 }
 

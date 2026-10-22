@@ -107,27 +107,36 @@ export function inspectRequest(req: GenerateRequest, allowImages: boolean): Insp
       } else if (p?.type === "image") {
         if (!allowImages) throw bad('images need "input": ["image"] in requires.model');
         if (m.role !== "user") throw bad("images go in user messages only");
-        if (!(IMAGE_MEDIA_TYPES as readonly string[]).includes(p.mediaType)) throw bad(`image mediaType must be one of ${IMAGE_MEDIA_TYPES.join(", ")}`);
-        if (typeof p.data !== "string" || !p.data) throw bad("image data must be a base64 string");
         if (images.length >= MAX_IMAGES) throw bad(`at most ${MAX_IMAGES} images per call`);
-        let bytes: Uint8Array;
-        try {
-          bytes = fromBase64(p.data);
-        } catch {
-          throw bad("image data is not valid base64");
-        }
-        if (bytes.length > MAX_IMAGE_BYTES) throw bad(`an image is ${(bytes.length / 1024 / 1024).toFixed(1)} MB; the limit is 5 MB (shrink it first)`);
-        const size = imageSize(bytes, p.mediaType);
-        if (!size) throw bad(`image data isn't a readable ${p.mediaType}`);
-        if (size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE) throw bad(`an image is ${size.width}×${size.height}; the limit is ${MAX_IMAGE_SIDE} px per side`);
-        images.push(size);
-        parts.push({ type: "image", data: p.data, mediaType: p.mediaType, ...size });
+        const { width, height } = checkImage(p.data, p.mediaType, MAX_IMAGE_BYTES, bad);
+        images.push({ width, height });
+        parts.push({ type: "image", data: p.data, mediaType: p.mediaType, width, height });
       } else throw bad(`messages[${i}] has a part that isn't { type: "text", text } or { type: "image", data, mediaType }`);
     }
     return { role: m.role, parts };
   });
   if (textChars > MAX_PROMPT_CHARS) throw bad(`the prompt is ${textChars} characters; the limit is ${MAX_PROMPT_CHARS}`);
   return { system: req.system, messages, schema: req.schema, maxTokens, textChars, images };
+}
+
+/**
+ * An image handed over as base64 (a tool's model call, the owner's attachment): its type, bytes
+ * and pixels within the limits, decoded and measured. `fail` makes the error for the caller's context.
+ */
+export function checkImage(data: unknown, mediaType: unknown, maxBytes: number, fail: (message: string) => Error): { bytes: Uint8Array; width: number; height: number } {
+  if (!(IMAGE_MEDIA_TYPES as readonly string[]).includes(mediaType as string)) throw fail(`image mediaType must be one of ${IMAGE_MEDIA_TYPES.join(", ")}`);
+  if (typeof data !== "string" || !data) throw fail("image data must be a base64 string");
+  let bytes: Uint8Array;
+  try {
+    bytes = fromBase64(data);
+  } catch {
+    throw fail("image data is not valid base64");
+  }
+  if (bytes.length > maxBytes) throw fail(`an image is ${(bytes.length / 1024 / 1024).toFixed(1)} MB; the limit is ${Math.round(maxBytes / 1024 / 1024)} MB (shrink it first)`);
+  const size = imageSize(bytes, mediaType as string);
+  if (!size) throw fail(`image data isn't a readable ${mediaType}`);
+  if (size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE) throw fail(`an image is ${size.width}×${size.height}; the limit is ${MAX_IMAGE_SIDE} px per side`);
+  return { bytes, ...size };
 }
 
 function fromBase64(s: string): Uint8Array {

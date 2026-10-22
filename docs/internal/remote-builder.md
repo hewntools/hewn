@@ -29,6 +29,7 @@ Request:
 ```json
 {
   "buildId": "b-…",
+  "session": "b-…",
   "capabilityId": "reading-list",
   "kind": "create",
   "attempt": 1,
@@ -41,8 +42,9 @@ Request:
 ```
 
 - `kind`: `create`, `modify` or `widgets`. `feedback` is set from the second attempt on.
+- `session` is the same for every attempt of one build (the build id), so the service may resume its own model session on a later attempt instead of starting over; `prompt` and `files` are still whole each time, so a stateless service works.
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
-- `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract).
+- `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
 
 Events:
 
@@ -62,10 +64,11 @@ Events:
 One request per turn of the conversation; `session` is the same for every turn of one conversation, so the service can keep one model session (and its cache) for it. Hewn still sends the whole prompt each turn, so a service may ignore `session`.
 
 ```json
-{ "session": "6f1c…", "mode": "create", "prompt": "…", "schema": { … }, "model": "sonnet", "effort": "low" }
+{ "session": "6f1c…", "mode": "create", "prompt": "…", "schema": { … }, "model": "sonnet", "effort": "low", "attachments": [{ "kind": "image", "name": "screen.png", "mediaType": "image/png", "data": "<base64>" }] }
 ```
 
 - `prompt` is Hewn's intake prompt with the conversation in it; `schema` is the JSON Schema the reply must follow. The service may give the model web search and fetching (the owner reviews every draft before anything is built).
+- `attachments` (only when there are any): the images the owner attached in the conversation so far (at most 10, each at most 2 MB; `image/png`, `image/jpeg`, `image/webp` or `image/gif`), for the model to look at next to the prompt, which names each under the message it came with (`[attached: screen.png (image 1200×800)]`). Attached text files are already in the prompt, each cut at 100,000 characters.
 
 Events: `{ "text": "<delta>" }` as the reply is written (Hewn shows its message and questions as they arrive), `{ "activity": "Searching the web" }` (and `{ "activity": "Thinking" }` while the model thinks before it writes, so the owner sees more than the typing dots), then `{ "result": "<the reply: JSON text following the schema>" }`. Or `refused` / `error` (`unavailable` as above). A `{ "charge": { "amount": 4, "unit": "Credits" } }` event, as for builds, counts the turn in "used this month" (not shown in the chat).
 
