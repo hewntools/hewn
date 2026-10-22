@@ -54,7 +54,7 @@ Use it (as the owner; talks to the running Hewn)
   status              tools and recent builds
   feedback [--days N] [--json]
                       how recent builds worked out: your answers to "Got what you asked for?", attempts,
-                      what they ran on, and the signs in the record (a fix, a change soon after, a restore)
+                      what they ran on, and the signs in the record (a fix, a change soon after, a restore, a delete)
   install <dir>       install a tool from a source dir
   connect <id>        give a tool what it needs: config, secrets (hidden prompt or --from <path>) + approval;
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
@@ -517,10 +517,11 @@ async function main() {
       // How recent builds worked out: the owner's answer to "Got what you asked for?" and the signs in
       // the record. Stays here; a host reads it the same way, in the machine.
       await owner(async (c) => {
-        const days = Number(args[args.indexOf("--days") + 1]) || 30;
-        const rows = await c.call("buildReport", { days });
-        if (flag("json")) return void console.log(JSON.stringify(rows, null, 2));
-        if (!rows.length) return void console.log(`No builds in the last ${days} days.`);
+        const days = Number(option("days"));
+        const report = await c.call("buildReport", days ? { days } : {});
+        if (flag("json")) return void console.log(JSON.stringify(report, null, 2));
+        const rows = report.builds;
+        if (!rows.length) return void console.log(`No builds in the last ${report.days} days.`);
         console.table(
           rows.map((r: any) => ({
             build: r.buildId,

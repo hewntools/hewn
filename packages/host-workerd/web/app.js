@@ -1527,8 +1527,8 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     } else drawer?.focus();
   };
   if (q.get("change") === "1") open();
-  /** Open the drawer (if it isn't) with `text` in the composer. */
-  drawerApi.open = (text) => (toggle(true), drawer?.setText(text));
+  /** Open the drawer (if it isn't), with `text` in the composer when given; without, what's typed stays. */
+  drawerApi.open = (text) => (toggle(true), text === undefined ? drawer?.focus() : drawer?.setText(text));
   return [barEl, layout];
 }
 
@@ -2990,7 +2990,12 @@ async function askFeedbackOnOpen(c, drawerApi) {
   localStorage.setItem(askedKey, String(last.version));
   let region = document.querySelector(".toast-region");
   if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
-  const send = (score) => api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } });
+  // An answer that didn't reach Hewn is asked for again next time.
+  const send = (score) =>
+    api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } }).catch((e) => {
+      localStorage.removeItem(askedKey);
+      throw e;
+    });
   const el = h("div", { class: "toast feedback-toast" });
   const gone = () => el.remove();
   put(
@@ -2998,7 +3003,7 @@ async function askFeedbackOnOpen(c, drawerApi) {
     h("span", { class: "dot info" }),
     h("span", {}, `v${last.version} · got what you asked for?`),
     h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
-    h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.("")), fail) }, "Not quite"),
+    h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.()), fail) }, "Not quite"),
     h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
   );
   region.append(el);

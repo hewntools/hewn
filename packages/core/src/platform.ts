@@ -308,8 +308,13 @@ export interface BuildReportRow {
   /** Why it failed, when it did. */
   failure?: string;
   feedback?: BuildFeedback;
-  /** What the record says: a retry or fix of this build; another change to the tool within a day of this one going live; a restore to an earlier version within a week; the tool deleted within a day. */
+  /** What the record says: this build failed and a retry of it went live; another change to the tool within a day of this one going live; a restore to an earlier version within a week; the tool deleted within a day. */
   signals: { fixed: boolean; changedSoon: boolean; restored: boolean; deletedSoon: boolean };
+}
+/** The feedback report: the window it covers (days, as clamped) and the builds in it, newest first. */
+export interface BuildReport {
+  days: number;
+  builds: BuildReportRow[];
 }
 
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
@@ -2903,17 +2908,17 @@ export class Platform {
     if (f.note !== undefined && (typeof f.note !== "string" || f.note.length > MAX_FEEDBACK_NOTE)) throw new PlatformError("invalid_request", `note: text of at most ${MAX_FEEDBACK_NOTE} characters`);
     const note = typeof f.note === "string" ? f.note.trim() : "";
     this.registry.setBuildFeedback(buildId, { score: f.score, ...(note ? { note } : {}) });
-    this.logger(`build ${buildId}: the owner says ${f.score}${note ? ` (${note.slice(0, 80)})` : ""}`);
+    this.logger(`build ${buildId}: the owner says ${f.score}`);
     return this.registry.buildFeedback(buildId)!;
   }
 
   /**
    * How recent builds worked out, newest first: what each ran on, how many attempts, how it ended,
-   * the owner's answer, and the signs in the record (a retry or fix, another change within a day of
-   * going live, a restore within a week, the tool deleted within a day). For the owner (`hewn
-   * feedback`); a host reads it the same way, in the machine. Nothing is sent anywhere.
+   * the owner's answer, and the signs in the record (a failed build whose retry went live, another
+   * change within a day of going live, a restore within a week, the tool deleted within a day). For
+   * the owner (`hewn feedback`); a host reads it the same way, in the machine. Nothing is sent anywhere.
    */
-  buildReport(owner: Agent, opts: { days?: number } = {}): BuildReportRow[] {
+  buildReport(owner: Agent, opts: { days?: number } = {}): BuildReport {
     requireOwner(owner);
     const days = Math.min(365, Math.max(1, Number(opts.days) || 30));
     const builds = this.registry.buildsSince(new Date(Date.now() - days * 86400_000).toISOString());
@@ -2922,7 +2927,7 @@ export class Platform {
       const d = Date.parse(to) - Date.parse(from);
       return d >= 0 && d <= hours * 3600_000;
     };
-    return builds.map((b) => {
+    const rows = builds.map((b) => {
       const attempts = Math.max(1, ...b.log.map((l) => Number(/^attempt (\d+): builder/.exec(l)?.[1] ?? 0)));
       const later = builds.filter((x) => x.capabilityId === b.capabilityId && x.id !== b.id && x.createdAt > b.createdAt);
       const retry = (x: BuildRow) => x.request.retryOf === b.id || x.request.autoRetryOf === b.id;
@@ -2942,13 +2947,14 @@ export class Platform {
         ...(b.status === "failed" ? { failure: explainFailure(b.log).title } : {}),
         ...(b.feedback ? { feedback: b.feedback } : {}),
         signals: {
-          fixed: later.some(retry),
+          fixed: later.some((x) => retry(x) && x.status === "promoted"),
           changedSoon: live && later.some((x) => !retry(x) && !x.request.retryOf && !x.request.autoRetryOf && within(b.updatedAt, x.createdAt, 24)),
           restored: live && b.resultVersion !== null && rollbacks.some((e) => e.capabilityId === b.capabilityId && e.detail.startsWith(`v${b.resultVersion} →`) && within(b.updatedAt, e.at, 7 * 24)),
           deletedSoon: live && !!b.archivedAt && within(b.updatedAt, b.archivedAt, 24),
         },
       };
     });
+    return { days, builds: rows };
   }
 
   /** The builder's transcript: kept with the build once it ended, the workbench's while it runs. Owner only (it shows source). */

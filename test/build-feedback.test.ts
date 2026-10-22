@@ -50,7 +50,9 @@ describe("build feedback: Got what you asked for?", () => {
     assert.equal(third.status, "promoted");
     await t.platform.rollback(USER, "running-log", 1);
 
-    const rows = t.platform.buildReport(USER);
+    const report = t.platform.buildReport(USER);
+    assert.equal(report.days, 30);
+    const rows = report.builds;
     assert.deepEqual(
       rows.map((r) => r.buildId),
       [third.buildId, fixed.buildId, broken.buildId, first.buildId],
@@ -70,8 +72,16 @@ describe("build feedback: Got what you asked for?", () => {
     assert.equal(by[fixed.buildId].signals.changedSoon, true);
     assert.equal(by[third.buildId].signals.restored, true, "v3 was rolled back to v1 within a week");
     assert.equal(by[third.buildId].signals.changedSoon, false);
-    // Owner only; the window is the owner's.
+    // Owner only; the window is the owner's, within a day and a year, and the report says which it used.
     assert.throws(() => t.platform.buildReport(t.claude), /owner actions/);
-    assert.equal(t.platform.buildReport(USER, { days: 0.0001 }).length, 4, "the window is at least a day");
+    const narrow = t.platform.buildReport(USER, { days: 0.0001 });
+    assert.equal(narrow.days, 1, "the window is at least a day");
+    assert.equal(narrow.builds.length, 4);
+    assert.equal(t.platform.buildReport(USER, { days: 1000 }).days, 365);
+    // Deleting the tool within a day of a build going live is a sign on that build.
+    t.platform.archive(USER, "running-log");
+    const gone = Object.fromEntries(t.platform.buildReport(USER).builds.map((r) => [r.buildId, r.signals.deletedSoon]));
+    assert.equal(gone[third.buildId], true);
+    assert.equal(gone[broken.buildId], false, "a failed build didn't go live, so it wasn't deleted soon after");
   });
 });

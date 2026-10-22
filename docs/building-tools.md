@@ -27,7 +27,7 @@ What you ask for goes live right after the checks. A change an agent asks for th
 
 Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes.
 
-When you next open the tool, a note at the bottom asks once: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a retry or fix, another change soon after, a restore, a delete), so you can see which builds work out and which don't.
+When you next open the tool, a note at the bottom asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
 
 The build page keeps what led to the build: **Spec agreed** opens the spec the builder works from, and **Conversation** what you and the intake said. Both stay with the version it made, along with the builder's log, for the tool's life.
 
