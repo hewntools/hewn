@@ -115,7 +115,8 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
       await stream(
         r,
         "v1/builds",
-        { buildId: job.buildId, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), prompt: builderPrompt(job), files },
+        // `session`: one per build, so the service may resume its own session on a later attempt (the prompt stays whole).
+        { buildId: job.buildId, session: job.buildId, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), prompt: builderPrompt(job), files },
         (e) => {
           if (typeof e.activity === "string") {
             write(e.activity);

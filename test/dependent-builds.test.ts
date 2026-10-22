@@ -280,7 +280,7 @@ describe("intake: a connection first", () => {
     assert.deepEqual(remembered.remember, [{ scope: "global", text: "Swedish copy" }]);
     assert.equal(remembered.forget, undefined);
     // Asks until it's clear, per mode, with defaults; no cap on rounds (the owner's Draft now is the stop).
-    assert.match(prompt, /Ask until it's clear; then draft\. Before a draft you must be able to say, from the conversation: the moment[^]*each carrying the default you'd assume[^]*When the owner says to draft now/);
+    assert.match(prompt, /Ask until it's clear; then draft\. Before a draft you must be able to say, from the conversation: the moment[^]*each carrying the default you'd assume[^]*Just say ok if that looks good[^]*When the owner says to draft now/);
     assert.doesNotMatch(prompt, /Round \d+ of at most|last round/);
     assert.match(ruled, /what exactly changes and where[^]*A vague one \("improve the UX"/);
     assert.doesNotMatch(ruled, /the moment \(when the owner opens/);

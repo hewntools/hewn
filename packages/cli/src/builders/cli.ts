@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { EFFORT } from "@hewntools/core/build-models.ts";
-import { claudeActivity, codexActivity } from "./activity.ts";
+import { claudeActivity, codexActivity, USED_TOOL } from "./activity.ts";
 import { MODEL_REJECTED } from "./models.ts";
 import { wrapBuilder } from "./sandbox.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
@@ -24,6 +25,22 @@ export function builderPrompt(job: BuildJob): string {
   return lines.join("\n");
 }
 
+/** A later attempt in the resumed session: the builder has read the brief and written the candidate; only the failure is new. */
+export function resumePrompt(job: BuildJob): string {
+  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, and BUILDER.md still holds the request and the contract. Only change files inside this directory. When it's complete, stop.`;
+}
+
+/**
+ * The sessions of builds this process ran, per builder: a later attempt resumes the first one's
+ * (brief read, candidate written) with the failure, instead of starting over. In memory only: after
+ * a restart the next attempt starts fresh.
+ */
+const sessions = { claude: new Map<string, string>(), codex: new Map<string, string>() };
+export const noteSession = (builder: keyof typeof sessions, buildId: string, id: string) => void sessions[builder].set(buildId, id);
+/** The session a later attempt can resume, when this process ran an earlier one. */
+export const sessionOf = (builder: keyof typeof sessions, job: Pick<BuildJob, "buildId" | "attempt">): string | undefined => (job.attempt > 1 ? sessions[builder].get(job.buildId) : undefined);
+export const forgetSession = (buildId: string) => (sessions.claude.delete(buildId), sessions.codex.delete(buildId));
+
 type Formatter = (event: any, cwd: string) => string | null;
 
 const stamp = () => new Date().toTimeString().slice(0, 8);
@@ -41,7 +58,7 @@ interface Confine {
 const BUILDER_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TZ|TMPDIR|LC_\w+|(ANTHROPIC|CLAUDE|OPENAI|CODEX)_\w+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_(FILE|DIR))$/;
 export const builderEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(env).filter(([k]) => BUILDER_ENV.test(k)));
 
-function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv()): Promise<void> {
+function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void): Promise<void> {
   const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
   write(`===== attempt ${job.attempt}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
   if (job.platformRoot) {
@@ -50,9 +67,10 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
   let unavailable: string | undefined;
   // Errors only (stderr, error and failed-result events), never the builder's own words about models.
   let modelRejected: string | undefined;
-  // Only before the builder has done anything: a model that won't run fails at once.
-  let worked = false;
-  const checkModel = (text: string) => job.model && !worked && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
+  // Whether the builder got as far as using its tools. A model that won't run fails at once (before);
+  // a resume that fails before has nothing to lose by starting over, after it the workspace may be half-changed.
+  let usedTools = false;
+  const checkModel = (text: string) => job.model && !usedTools && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
   return new Promise((resolve, reject) => {
     const raw = createWriteStream(job.logPath.replace(/\.log$/, ".jsonl"), { flags: "a" });
     const child = spawn(command, args, { cwd: job.workspace, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -64,12 +82,13 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
         // Claude Code names the model it runs on first (a family resolves to a full name).
         if (event?.type === "system" && event.subtype === "init" && typeof event.model === "string") job.onModel?.(event.model);
         if (event?.type === "error" || event?.type === "turn.failed" || (event?.type === "result" && event.is_error)) checkModel(JSON.stringify(event));
+        onEvent?.(event);
         activity = format(event, job.workspace);
       } catch {
         activity = line.trim() || null;
       }
       if (!activity) return;
-      if (/^→ /.test(activity)) worked = true;
+      if (USED_TOOL.test(activity)) usedTools = true;
       if (!unavailable && UNAVAILABLE.test(activity)) unavailable = activity.replace(/^\S+\s/, "");
       for (const l of activity.split("\n")) write(l);
       job.onActivity?.(activity.split("\n").at(-1)!);
@@ -92,7 +111,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
       if (code === 0) resolve();
       else if (modelRejected) reject(Object.assign(new Error(modelRejected), { modelRejected: true }));
       else if (unavailable) reject(Object.assign(new Error(`${unavailable} (log in to ${job.builderName ?? "the builder CLI"}, or switch "builder" in platform.json)`), { unavailable: true }));
-      else reject(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`));
+      else reject(Object.assign(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`), { usedTools }));
     });
   });
 }
@@ -125,14 +144,15 @@ export const codexModelArgs = (m: { model?: string; effort?: string }) => [...(m
 export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|401|usage limit|quota exceeded/i;
 
 /**
- * Codex runs with its own HOME and CODEX_HOME (<hewn home>/builder-home/codex) holding only your
- * auth.json: none of your skills (~/.agents/skills), global AGENTS.md or config reach a build.
- * auth.json is copied in before each run and copied back if Codex refreshed it, so your own Codex
- * login and the builder's stay one and the same.
+ * Codex runs with its own HOME and CODEX_HOME (`dir`, one per build or per intake) holding your
+ * auth.json for the run: none of your skills (~/.agents/skills), global AGENTS.md or config reach
+ * it. auth.json is copied in before each run and, when done, copied back if Codex refreshed it
+ * (your own Codex login and the builder's stay one and the same) and removed; what else Codex
+ * wrote there (a build's thread, for a later attempt to resume) stays until the dir goes.
  */
-export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; syncBack: () => void } {
+export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; done: () => void } {
   const codexDir = join(dir, ".codex");
-  mkdirSync(codexDir, { recursive: true });
+  mkdirSync(codexDir, { recursive: true, mode: 0o700 });
   const yours = join(homedir(), ".codex", "auth.json");
   const theirs = join(codexDir, "auth.json");
   if (existsSync(yours)) copyFileSync(yours, theirs);
@@ -140,8 +160,9 @@ export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; s
   return {
     dir,
     env: { ...builderEnv(), HOME: dir, CODEX_HOME: codexDir },
-    syncBack: () => {
+    done: () => {
       if (existsSync(theirs) && statSync(theirs).mtimeMs > copied && existsSync(dirname(yours))) copyFileSync(theirs, yours);
+      rmSync(theirs, { force: true });
     },
   };
 }
@@ -185,9 +206,11 @@ function writeClaudeLogin(login: ClaudeLogin, blob: ClaudeLogin["blob"]) {
  * your settings, sessions, history or MCP tokens, and nothing it writes reaches your own
  * ~/.claude. It gets your model login only (claudeAiOauth, as a file), never the MCP tokens kept
  * next to it; if Claude refreshed the login, the new one is copied back (unless yours changed
- * meanwhile). The dir, login included, is deleted after the run.
+ * meanwhile). The dir, login included, is deleted after the run; with `keepSessions` only the login
+ * goes, so a build's later attempt can resume the session (the workbench removes the dir with the
+ * workspace).
  */
-export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undefined; write: (login: ClaudeLogin, blob: ClaudeLogin["blob"]) => void } = { read: readClaudeLogin, write: writeClaudeLogin }): { env: NodeJS.ProcessEnv; dir: string; done: () => void } {
+export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undefined; write: (login: ClaudeLogin, blob: ClaudeLogin["blob"]) => void } = { read: readClaudeLogin, write: writeClaudeLogin }, opts: { keepSessions?: boolean } = {}): { env: NodeJS.ProcessEnv; dir: string; done: () => void } {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, ".credentials.json");
   const login = store.read();
@@ -205,11 +228,20 @@ export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undef
       } catch {
         // Copying back is a courtesy: your own Claude Code can sign in again.
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        if (opts.keepSessions) rmSync(file, { force: true });
+        else rmSync(dir, { recursive: true, force: true });
       }
     },
   };
 }
+
+/**
+ * Where a build's builder home lives: Claude Code's config directory, Codex's HOME. One per build,
+ * so a build's session (kept there between attempts) is its own: no other build's sandbox can read
+ * or edit it. The workbench removes it with the workspace.
+ */
+export const claudeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "claude", buildId);
+export const codexBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "codex", buildId);
 
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
@@ -217,36 +249,66 @@ export const codexBuilder: CapabilityBuilder = {
   build: (job) => withModelCheck(job, codexRun),
 };
 
-async function codexRun(job: BuildJob) {
-  const isolated = codexHome(join(dirname(dirname(job.logPath)), "builder-home", "codex"));
+/**
+ * Codex's arguments for an attempt: fresh, or resuming the build's earlier thread with the failure.
+ * Sessions stay on disk in its own home (no --ephemeral), so a thread can be resumed. `exec`'s own
+ * options (the sandbox, the project root, the directory) go before `resume`, the shared ones after.
+ */
+export function codexArgs(job: BuildJob, resume?: string): string[] {
+  const shared = ["--ignore-user-config", "--skip-git-repo-check", "--json", ...codexModelArgs(job)];
+  const where = [
+    // Codex's own sandbox cannot nest inside ours. When the platform confines the
+    // builder, ours is the boundary and Codex's commands inherit it.
+    "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
+    // The workspace is the project root: never walk up looking for other AGENTS.md files.
+    "-c", 'project_root_markers=["BUILDER.md"]',
+    "-C", job.workspace,
+  ];
+  return resume ? ["exec", ...where, "resume", ...shared, resume, resumePrompt(job)] : ["exec", ...shared, ...where, builderPrompt(job)];
+}
+
+/**
+ * Run an attempt: resuming the earlier session when there is one, else fresh. A resume that fails
+ * before the builder used any tool (the session gone, the CLI changed) starts over in the same
+ * attempt; one that fails after is a failed attempt like any other (the workspace may be half-changed).
+ */
+export async function withResume(builder: keyof typeof sessions, job: BuildJob, run: (resume: string | undefined) => Promise<void>) {
+  const earlier = sessionOf(builder, job);
+  if (!earlier) return run(undefined);
   try {
-    await runCli(
-      "codex",
-      [
-        "exec",
-        "--ignore-user-config",
-        "--ephemeral",
-        "--skip-git-repo-check",
-        "--json",
-        ...codexModelArgs(job),
-        // Codex's own sandbox cannot nest inside ours. When the platform confines the
-        // builder, ours is the boundary and Codex's commands inherit it.
-        "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
-        // The workspace is the project root: never walk up looking for other AGENTS.md files.
-        "-c", 'project_root_markers=["BUILDER.md"]',
-        "-C", job.workspace,
-        builderPrompt(job),
-      ],
-      job,
-      codexActivity,
-      TIMEOUT_MS,
-      // Codex has a shell: no Keychain. Its auth lives in its own home.
-      { ownState: [isolated.dir], denyKeychain: true },
-      isolated.env,
-    );
-  } finally {
-    isolated.syncBack();
+    await run(earlier);
+  } catch (e) {
+    const err = e as { usedTools?: boolean; cancelled?: boolean; unavailable?: boolean; modelRejected?: boolean };
+    if (err.usedTools !== false || err.cancelled || err.unavailable || err.modelRejected) throw e;
+    forgetSession(job.buildId);
+    appendFileSync(job.logPath, `${stamp()} couldn't resume the earlier session; starting over\n`);
+    job.onActivity?.("couldn't resume the earlier session; starting over");
+    await run(undefined);
   }
+}
+
+async function codexRun(job: BuildJob) {
+  // Its own home per build (builds run side by side), kept between attempts for the thread; the login only for a run.
+  const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
+  await withResume("codex", job, async (resume) => {
+    const isolated = codexHome(home);
+    try {
+      await runCli(
+        "codex",
+        codexArgs(job, resume),
+        job,
+        codexActivity,
+        TIMEOUT_MS,
+        // Codex has a shell: no Keychain. Its auth lives in its own home.
+        { ownState: [isolated.dir], denyKeychain: true },
+        isolated.env,
+        // Its thread, for the next attempt to resume.
+        (e) => e?.type === "thread.started" && typeof e.thread_id === "string" && noteSession("codex", job.buildId, e.thread_id),
+      );
+    } finally {
+      isolated.done();
+    }
+  });
 }
 
 /** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
@@ -255,35 +317,49 @@ export const claudeBuilder: CapabilityBuilder = {
   build: (job) => withModelCheck(job, claudeRun),
 };
 
+/** Claude Code's arguments for an attempt: fresh with a session id of its own, or resuming the build's earlier session with the failure. */
+export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean }): string[] {
+  return [
+    "-p", session.resume ? resumePrompt(job) : builderPrompt(job),
+    ...(session.resume ? ["--resume", session.id] : ["--session-id", session.id]),
+    "--output-format", "stream-json", "--verbose",
+    ...claudeModelArgs(job),
+    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
+    // No project settings either: the workspace is the builder's to write, and settings there
+    // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
+    "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
+    "--permission-mode", "acceptEdits",
+    // File tools only: no shell now, and --restricted drops every code-running tool, also ones added later.
+    "--restricted",
+    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep",
+    "--disallowedTools", "Bash",
+  ];
+}
+
 async function claudeRun(job: BuildJob) {
-  // Its own dir per build: builds run side by side.
-  const isolated = claudeHome(join(dirname(dirname(job.logPath)), "builder-home", "claude", job.buildId));
-  try {
-    await runCli(
-      "claude",
-      [
-        "-p", builderPrompt(job),
-        "--output-format", "stream-json", "--verbose",
-        ...claudeModelArgs(job),
-        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-        // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
-        // No project settings either: the workspace is the builder's to write, and settings there
-        // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
-        "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
-        "--permission-mode", "acceptEdits",
-        "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep",
-        "--disallowedTools", "Bash",
-      ],
-      job,
-      claudeActivity,
-      TIMEOUT_MS,
-      // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
-      { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
-      isolated.env,
-    );
-  } finally {
-    isolated.done();
-  }
+  // Its own dir per build (builds run side by side), kept between attempts for the session; the login only for a run.
+  const home = claudeBuildHome(dirname(dirname(job.logPath)), job.buildId);
+  await withResume("claude", job, async (resume) => {
+    const session = { id: resume ?? randomUUID(), resume: !!resume };
+    const isolated = claudeHome(home, undefined, { keepSessions: true });
+    try {
+      await runCli(
+        "claude",
+        claudeArgs(job, session),
+        job,
+        claudeActivity,
+        TIMEOUT_MS,
+        // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
+        { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
+        isolated.env,
+        // The session it ran as (the one asked for), for the next attempt to resume.
+        (e) => e?.type === "system" && e.subtype === "init" && typeof e.session_id === "string" && noteSession("claude", job.buildId, e.session_id),
+      );
+    } finally {
+      isolated.done();
+    }
+  });
 }
 
 export const BUILDERS: Record<string, CapabilityBuilder> = { codex: codexBuilder, claude: claudeBuilder };

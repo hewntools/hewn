@@ -68,11 +68,12 @@ import {
 import { EFFORT, MODEL_NAME } from "./build-models.ts";
 import { migrationProblems, migrationsOf, rollbackProblems } from "./migrations.ts";
 import type { Blobs, CallHandler, CapabilityRuntime, CodeRef, ExecutionTarget, Files, SecretStore, Sql, StateRef, Workbench } from "./ports.ts";
-import { type AttachmentRef, type BuildContext, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
+import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
 import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
 import type { TestCase } from "@hewntools/spec/cases.ts";
+import spec from "@hewntools/spec/package.json" with { type: "json" };
 
 export interface CapabilitySummary {
   id: string;
@@ -289,6 +290,34 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 /** The most turns a conversation kept with a build may have, and the longest turn. */
 const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
+/** The longest note with the owner's answer to "Got what you asked for?". */
+const MAX_FEEDBACK_NOTE = 1000;
+
+/** One build in the feedback report (`hewn feedback`): what it ran on, how it ended, what the owner said, and the signs in the record. */
+export interface BuildReportRow {
+  buildId: string;
+  capabilityId: string;
+  kind: BuildKind;
+  status: BuildRow["status"];
+  createdAt: string;
+  builder: string;
+  model?: string;
+  effort?: string;
+  ranModel?: string;
+  /** Which brief it ran on (a short hash). */
+  brief?: string;
+  attempts: number;
+  /** Why it failed, when it did. */
+  failure?: string;
+  feedback?: BuildFeedback;
+  /** What the record says: this build failed and a retry of it went live; another change to the tool within a day of this one going live; a restore to an earlier version within a week; the tool deleted within a day. */
+  signals: { fixed: boolean; changedSoon: boolean; restored: boolean; deletedSoon: boolean };
+}
+/** The feedback report: the window it covers (days, as clamped) and the builds in it, newest first. */
+export interface BuildReport {
+  days: number;
+  builds: BuildReportRow[];
+}
 
 /**
  * What the owner may attach in the intake's box: images (resized by the web client first) and
@@ -356,6 +385,8 @@ function instructionEntries(list: unknown, scope: InstructionScope): string[] {
   }
   return out;
 }
+/** The longest structured reply kept with an intake turn (as JSON). */
+const MAX_REPLY_CHARS = 100_000;
 
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
@@ -397,8 +428,8 @@ export class Platform {
   private catalogIndex?: { fetchedAt: string; byId: Map<string, CatalogEntry> };
   private providerLists = new Map<string, { raw: string | undefined; list: ReturnType<Platform["providerList"]> }>();
   private brief: string;
-  /** Which brief builds run on, recorded with each build (a short hash of the brief's text). */
-  private briefHash: string;
+  /** Which brief builds run on, recorded with each build: the spec's version and a short hash of the brief's text. */
+  private briefId: string;
   private designSystem?: () => Promise<string | undefined>;
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
@@ -432,7 +463,7 @@ export class Platform {
     this.agentStore = new AgentStore(opts.sql);
     this.agentStore.onChange = () => this.events.emit("changed");
     this.brief = opts.brief;
-    this.briefHash = sha256(opts.brief).slice(0, 12);
+    this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
     // Everything worth a log line may change what agents see (catalog, readiness): open MCP
     // sessions re-check their tool lists (debounced, and only notified when it differs).
@@ -2571,7 +2602,7 @@ export class Platform {
   /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
   private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
     const instructions = this.instructionsForBuild(capabilityId);
-    return { brief: this.briefHash, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
+    return { brief: this.briefId, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
   }
 
   /** Record what a new build ran with, and keep the attachments its conversation carried. */
@@ -2594,7 +2625,9 @@ export class Platform {
         throw new PlatformError("invalid_request", `each turn of the conversation needs a role ("user" or "intake") and content of at most ${MAX_TURN_CHARS} characters`);
       }
       const attachments = t.attachments === undefined ? undefined : this.resolveAttachments(t.attachments);
-      return { role: t.role, content: t.content, ...(attachments?.length ? { attachments } : {}) };
+      // An intake turn may carry its structured reply, for showing the proposal as it was; kept as is, within reason.
+      const reply = t.role === "intake" && t.reply && typeof t.reply === "object" && JSON.stringify(t.reply).length <= MAX_REPLY_CHARS ? t.reply : undefined;
+      return { role: t.role, content: t.content, ...(attachments?.length ? { attachments } : {}), ...(reply ? { reply } : {}) };
     });
   }
 
@@ -2893,6 +2926,7 @@ export class Platform {
       }),
       "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId)?.instructions)),
       ...attached.files,
+      ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
     });
     if (this.cancelledWhileOpening(buildId)) return;
@@ -2976,7 +3010,7 @@ export class Platform {
     const attached = await this.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...attached.files, ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -3060,11 +3094,73 @@ export class Platform {
     return this.buildView(this.visibleBuild(agent, buildId));
   }
 
-  /** What led to a build: the owner's conversation with the intake, the instructions, the brief. Owner only. */
-  buildContext(owner: Agent, buildId: string): BuildContext {
+  /** What led to a build (the owner's conversation with the intake, the instructions, the brief) and what the owner said of it once live. Owner only. */
+  buildContext(owner: Agent, buildId: string): BuildContext & { feedback?: BuildFeedback } {
     requireOwner(owner);
     this.mustBuild(buildId);
-    return this.registry.buildContext(buildId) ?? {};
+    const feedback = this.registry.buildFeedback(buildId);
+    return { ...(this.registry.buildContext(buildId) ?? {}), ...(feedback ? { feedback } : {}) };
+  }
+
+  /**
+   * "Got what you asked for?" on a build that went live: yes, no (with a note on what's off), or
+   * skip. Owner only. It stays in the owner's database; nothing leaves the machine.
+   */
+  setBuildFeedback(owner: Agent, buildId: string, f: { score?: unknown; note?: unknown }): BuildFeedback {
+    requireOwner(owner);
+    const b = this.mustBuild(buildId);
+    if (b.status !== "promoted") throw new PlatformError("conflict", `build ${buildId} isn't live (it is ${b.status}); the question is for builds that went live`);
+    if (f.score !== "yes" && f.score !== "no" && f.score !== "skip") throw new PlatformError("invalid_request", 'score must be "yes", "no" or "skip"');
+    if (f.note !== undefined && (typeof f.note !== "string" || f.note.length > MAX_FEEDBACK_NOTE)) throw new PlatformError("invalid_request", `note: text of at most ${MAX_FEEDBACK_NOTE} characters`);
+    const note = typeof f.note === "string" ? f.note.trim() : "";
+    this.registry.setBuildFeedback(buildId, { score: f.score, ...(note ? { note } : {}) });
+    this.logger(`build ${buildId}: the owner says ${f.score}`);
+    return this.registry.buildFeedback(buildId)!;
+  }
+
+  /**
+   * How recent builds worked out, newest first: what each ran on, how many attempts, how it ended,
+   * the owner's answer, and the signs in the record (a failed build whose retry went live, another
+   * change within a day of going live, a restore within a week, the tool deleted within a day). For
+   * the owner (`hewn feedback`); a host reads it the same way, in the machine. Nothing is sent anywhere.
+   */
+  buildReport(owner: Agent, opts: { days?: number } = {}): BuildReport {
+    requireOwner(owner);
+    const days = Math.min(365, Math.max(1, Number(opts.days) || 30));
+    const builds = this.registry.buildsSince(new Date(Date.now() - days * 86400_000).toISOString());
+    const rollbacks = this.registry.lifecycleEvents(2000).filter((e) => e.action === "rollback");
+    const within = (from: string, to: string, hours: number) => {
+      const d = Date.parse(to) - Date.parse(from);
+      return d >= 0 && d <= hours * 3600_000;
+    };
+    const rows = builds.map((b) => {
+      const attempts = Math.max(1, ...b.log.map((l) => Number(/^attempt (\d+): builder/.exec(l)?.[1] ?? 0)));
+      const later = builds.filter((x) => x.capabilityId === b.capabilityId && x.id !== b.id && x.createdAt > b.createdAt);
+      const retry = (x: BuildRow) => x.request.retryOf === b.id || x.request.autoRetryOf === b.id;
+      const live = b.status === "promoted";
+      return {
+        buildId: b.id,
+        capabilityId: b.capabilityId,
+        kind: b.kind,
+        status: b.status,
+        createdAt: b.createdAt,
+        builder: b.builder ?? "agent",
+        ...(b.model ? { model: b.model } : {}),
+        ...(b.effort ? { effort: b.effort } : {}),
+        ...(b.ranModel ? { ranModel: b.ranModel } : {}),
+        ...(b.brief ? { brief: b.brief } : {}),
+        attempts,
+        ...(b.status === "failed" ? { failure: explainFailure(b.log).title } : {}),
+        ...(b.feedback ? { feedback: b.feedback } : {}),
+        signals: {
+          fixed: later.some((x) => retry(x) && x.status === "promoted"),
+          changedSoon: live && later.some((x) => !retry(x) && !x.request.retryOf && !x.request.autoRetryOf && within(b.updatedAt, x.createdAt, 24)),
+          restored: live && b.resultVersion !== null && rollbacks.some((e) => e.capabilityId === b.capabilityId && e.detail.startsWith(`v${b.resultVersion} →`) && within(b.updatedAt, e.at, 7 * 24)),
+          deletedSoon: live && !!b.archivedAt && within(b.updatedAt, b.archivedAt, 24),
+        },
+      };
+    });
+    return { days, builds: rows };
   }
 
   /** The builder's transcript: kept with the build once it ended, the workbench's while it runs. Owner only (it shows source). */
@@ -3112,32 +3208,38 @@ export class Platform {
    */
   applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } {
     requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
     const out: { remember: Instruction[]; forget: Instruction[] } = { remember: [], forget: [] };
     for (const scope of ["global", "tool"] as const) {
       const id = scope === "tool" ? capabilityId : undefined;
-      if (scope === "tool" && (!id || !this.registry.getCapability(id))) continue;
+      if (scope === "tool" && !id) continue;
       const add = instructionEntries(remember, scope);
       const drop = instructionEntries(forget, scope);
       if (!add.length && !drop.length) continue;
       let list = this.instructionLines(id);
+      const dropped: string[] = [];
+      const added: string[] = [];
       for (const t of drop) {
         if (!list.includes(t)) continue;
         list = list.filter((x) => x !== t);
-        out.forget.push({ scope, text: t });
+        dropped.push(t);
       }
       for (const t of add) {
         if (list.includes(t) || list.length >= MAX_INSTRUCTION_LINES) continue;
         list.push(t);
-        out.remember.push({ scope, text: t });
+        added.push(t);
       }
+      if (!added.length && !dropped.length) continue;
+      out.forget.push(...dropped.map((text) => ({ scope, text })));
+      out.remember.push(...added.map((text) => ({ scope, text })));
       this.registry.setKv(this.instructionsKey(id), list);
-      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${add.length}, dropped ${drop.length}`);
+      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${added.length}, dropped ${dropped.length}`);
     }
     return out;
   }
 
   /** The "Owner's instructions" section of BUILDER.md: the rules for every tool, then this tool's. Empty when there are none. */
-  instructionsForBuild(capabilityId: string): string {
+  private instructionsForBuild(capabilityId: string): string {
     const global = this.instructionLines();
     const tool = this.instructionLines(capabilityId);
     if (!global.length && !tool.length) return "";
@@ -3747,13 +3849,23 @@ export class Platform {
     return `\n## The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities"). You see only their public contracts, never their data or code.\n\n${lines.join("\n\n")}\n`;
   }
 
+  /**
+   * AGENTS.md for a workspace, for builders that read it on their own (Codex, OpenCode): where the
+   * brief is, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
+   */
+  private agentsFile(buildId: string): Files {
+    const instructions = this.registry.buildContext(buildId)?.instructions;
+    return {
+      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first: the request, the implementation contract and the owner's other tools. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}` : ""}`),
+    };
+  }
+
   /** PLATFORM_UI.css for a workspace: the design system to read (served to UIs as /_platform/ui.css). */
   private async designSystemFile(): Promise<Files> {
     const css = await this.designSystem?.().catch(() => undefined);
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md for a workspace: the request, the implementation contract, the owner's catalog. */
   /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
   private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";

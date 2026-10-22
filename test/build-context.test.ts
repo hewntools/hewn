@@ -23,11 +23,24 @@ describe("what a build keeps", () => {
 
     const ctx = t.platform.buildContext(USER, b.buildId);
     assert.deepEqual(ctx.conversation, turns);
-    assert.match(ctx.brief!, /^[0-9a-f]{12}$/);
+    // An intake turn keeps its structured reply (the card as it was); an oversized one is dropped, a user's ignored.
+    const withReply = [
+      { role: "user" as const, content: "x", reply: { kind: "nope" } },
+      { role: "intake" as const, content: "DRAFT\nX", reply: { kind: "draft", message: "", draft: { name: "X", purpose: "x", requirements: "r" } } },
+      { role: "intake" as const, content: "big", reply: { kind: "draft", pad: "x".repeat(100_001) } },
+    ];
+    const m = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add notes", conversation: withReply as any }), () => {});
+    assert.deepEqual(t.platform.buildContext(USER, m.buildId).conversation, [
+      { role: "user", content: "x" },
+      { role: "intake", content: "DRAFT\nX", reply: withReply[1].reply },
+      { role: "intake", content: "big" },
+    ]);
+    assert.match(ctx.brief!, /^\d+\.\d+\.\d+\+[0-9a-f]{12}$/, "the brief id is the spec's version and a hash of the text");
 
     assert.ok(await t.platform.blobs.get(`transcripts/${b.buildId}.log`), "the transcript is kept in blobs");
     assert.match((await t.platform.buildTranscript(USER, b.buildId)) ?? "", /\[platform\]/);
-    assert.equal(t.platform.registry.versions("running-log")[0].buildId, b.buildId);
+    assert.equal(t.platform.registry.versions("running-log").at(-1)!.buildId, b.buildId, "v1 knows the build that made it");
+    assert.equal(t.platform.registry.versions("running-log").at(-1)!.conversation, true, "and that a conversation was kept");
   });
 
   test("only the owner attaches a conversation, and only a well-formed one; only the owner reads it", async () => {
@@ -41,6 +54,7 @@ describe("what a build keeps", () => {
     // A build without a conversation (an agent's, an install's) still records the brief.
     assert.equal(t.platform.buildContext(USER, b.buildId).conversation, undefined);
     assert.ok(t.platform.buildContext(USER, b.buildId).brief);
+    assert.equal(t.platform.registry.versions("running-log").at(-1)!.conversation, false, "a version without one says so");
   });
 
   test("a change and its widgets keep the conversation; a retry copies it; cleanup keeps the transcript", async () => {

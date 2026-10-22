@@ -43,6 +43,13 @@ describe("instructions: the owner's standing rules for building", () => {
     assert.deepEqual(t.platform.instructions(USER), ["Metric units"]);
     assert.deepEqual(t.platform.instructions(USER, "running-log"), ["One screen"]);
     assert.throws(() => t.platform.applyIntakeMemory(t.claude, undefined, [], []), /owner actions/);
+    // An archived tool takes no rules; purging it drops the ones it had, so a new tool under the id starts clean.
+    t.platform.archive(USER, "running-log");
+    assert.throws(() => t.platform.applyIntakeMemory(USER, "running-log", [{ scope: "tool", text: "Dark only" }], []), /no capability/);
+    await t.platform.purge(USER, "running-log", "running-log");
+    await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }), seed);
+    assert.deepEqual(t.platform.instructions(USER, "running-log"), []);
+    assert.deepEqual(t.platform.instructions(USER), ["Metric units"], "the rules for every tool stay");
   });
 
   test("a build runs with the instructions as they are when it opens: in BUILDER.md, recorded with the build", async () => {

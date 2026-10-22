@@ -22,6 +22,8 @@ export interface IntakeMessage {
   role: "user" | "intake";
   content: string;
   attachments?: IntakeAttachment[];
+  /** The intake's structured reply, which the web client keeps with the build; the intake reads only `content`. */
+  reply?: unknown;
 }
 
 export interface IntakeRequest {

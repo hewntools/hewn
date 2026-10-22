@@ -146,6 +146,20 @@ describe("the Claude builder's own config dir", () => {
     assert.deepEqual(f.writes, [], "nothing refreshed: nothing written back");
   });
 
+  test("keepSessions (a build between attempts): the login goes after the run, the dir and its sessions stay", () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "cc-home-")), "b-4");
+    const f = fake(structuredClone(yours));
+    const home = claudeHome(dir, f.store, { keepSessions: true });
+    mkdirSync(join(dir, "projects", "ws"), { recursive: true });
+    writeFileSync(join(dir, "projects", "ws", "s1.jsonl"), "{}");
+    home.done();
+    assert.ok(!existsSync(join(dir, ".credentials.json")), "login copy deleted");
+    assert.ok(existsSync(join(dir, "projects", "ws", "s1.jsonl")), "the session stays for the next attempt");
+    // The next attempt gets the login again, in the same dir.
+    claudeHome(dir, f.store, { keepSessions: true });
+    assert.ok(existsSync(join(dir, ".credentials.json")));
+  });
+
   test("a refreshed login is copied back, keeping your MCP tokens; unless yours changed meanwhile", () => {
     const refresh = (dir: string) => writeFileSync(join(dir, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "a2", refreshToken: "r2" } }));
     const f = fake(structuredClone(yours));

@@ -253,13 +253,14 @@ ${convo}
 
 Decide:
 - When you talk to the owner ("message", "questions"), call capabilities "tools": that is the owner's word for them (capability is Hewn's technical term). The builder-facing fields keep "capability".
+- Write for a chat: short and clear. Say only what the owner needs to know or decide; never restate their request, and never list what the tool won't need (no network, no model, no key…). Put a blank line between paragraphs; when there are several things, a list (one per line, starting with "- ") instead of a long sentence. "message" is at most three short paragraphs: the proposal card carries the details. Each question is one line with its default in it.
 - Engage with what the owner actually said in their latest message. If they point you at something (a service, API, link), address it explicitly in "message".
 - Attachments: the owner may attach screenshots and files ("[attached: …]" under a message; a text file's content follows it; images are shown to you). A screenshot shows the screen or the look they mean, a sketch what they want; a file is reference material (a script to port, data to import, notes). Read them as part of the request: say in "message" what you took from them, and carry what matters into the requirements or the request in words (the builder gets copies of the attachments in its workspace, listed in the request, so name them when it should look at one).
 - Remember standing rules. When the owner states a preference or a rule meant to hold beyond this request ("always Swedish copy", "never delete buttons", "keep this one to a single screen"), put it in "remember": scope "global" for every tool they build, "tool" for this one only${req.mode === "create" ? ' (creating, there is no tool yet: a rule for this tool goes into the requirements instead, and "remember" takes global ones only)' : ""}. One short rule each, in the owner's terms (not their sentence verbatim); never a rule they didn't state, never a secret, never a one-off detail of this request, never one already listed above. When they withdraw or contradict a listed rule, put its exact text in "forget". The owner sees what was saved and can undo it. Otherwise leave both empty.
 ${opts.web ? "- You can look things up (WebFetch/WebSearch) to check services or APIs the owner mentions: whether they exist, are maintained, legitimate, and what they offer. Only fetch what's needed." : "- You cannot open links or browse. If the owner sends one, say so in \"message\" and work from what you know."}
 - Never design around piracy, credential sharing, or scraping that violates a service's terms. If a suggested source looks like that, say so plainly in "message" and propose a legitimate alternative.
 - The conversation may hold your earlier draft or ideas (after "DRAFT" or "IDEAS"). If the owner keeps talking after one, revise it: change what they asked for and keep everything else as it was (names, operations, details, schedules), unless they ask for something new.
-- Ask until it's clear; then draft. ${req.mode === "create" ? `Before a draft you must be able to say, from the conversation: the moment (when the owner opens or uses it, and the first thing they want to see or do there), what it keeps (the things and their fields), the main action, and what's out of scope. On the first turn, draft only when the request already says those; a one-line idea usually doesn't.` : `Before a draft you must be able to say what exactly changes and where (which screen, widget or operation) and how it should behave afterwards. A specific ask ("show pace per km in the table", "the bedtime column is always empty") is clear: draft. A vague one ("improve the UX", "make it nicer") isn't: ask what bothers them or what they want to do more easily, with your best guesses as the defaults.`} When it isn't clear, reply kind "questions": at most 3 short, concrete questions, each carrying the default you'd assume ("I'd assume one entry per day; right?"), so "defaults" or "go ahead" answers them all. Once the owner has answered, draft, unless the answer raised something that would change what gets built. Never ask what's already answered, what their standing rules say, or what the earlier conversation above settled. When the owner says to draft now (or to just build it), draft at once with sensible assumptions, listed in "message".
+- Ask until it's clear; then draft. ${req.mode === "create" ? `Before a draft you must be able to say, from the conversation: the moment (when the owner opens or uses it, and the first thing they want to see or do there), what it keeps (the things and their fields), the main action, and what's out of scope. On the first turn, draft only when the request already says those; a one-line idea usually doesn't.` : `Before a draft you must be able to say what exactly changes and where (which screen, widget or operation) and how it should behave afterwards. A specific ask ("show pace per km in the table", "the bedtime column is always empty") is clear: draft. A vague one ("improve the UX", "make it nicer") isn't: ask what bothers them or what they want to do more easily, with your best guesses as the defaults.`} When it isn't clear, reply kind "questions": at most 3 short, concrete questions, each carrying the default you'd assume ("I'd assume one entry per day; right?"), and the last one ending with "Just say ok if that looks good.", so one word answers them all (an "ok" means every default). Once the owner has answered, draft, unless the answer raised something that would change what gets built. Never ask what's already answered, what their standing rules say, or what the earlier conversation above settled. When the owner says to draft now (or to just build it), draft at once with sensible assumptions, listed in "message".
 ${req.mode === "modify" ? `- If all the owner needs is to run operations the capability already has on a timetable (nothing to change or add), reply kind "schedules" with just "schedules": nothing gets built.
 - If the owner wants widgets that the capability can already feed, reply kind "widgets" with "proposals": a quick widgets-only build. That build writes each widget's own read operation (widget_<name>, computing the view from the data already stored), so a missing read operation is not a reason to change the capability; it can't change existing operations, state, hosts or config, or add writes, so its buttons only call operations the capability already has. If they said what they want, propose exactly that one widget (or the few they named); offer 2–4 alternatives only when they ask for suggestions or leave it open. Never refuse a widget: if it needs something the capability lacks (data it doesn't store, a fetch, a write operation for a button), reply kind "draft" instead, a change to the capability that includes the widget, and say in "message" what must change in the capability first and why.
 ` : `- If the owner asks for suggestions or ideas, wants several tools at once, or asks to build several of the ones you suggested, reply kind "ideas" with 2–${MAX_IDEAS} "ideas" (exactly the ones they named, if they named them): separate new capabilities the owner ticks to build. Each idea is a complete draft with the same fields and rules as a draft below (name, purpose, requirements, operations, widgets, model, uses, hosts, secrets, connection, schedules). An idea may call the owner's existing capabilities, or build on another idea: then put that idea's id (its name in lowercase, every run of other characters than a-z and 0-9 replaced by "-") in "uses" and name the operations it calls in "requirements"; Hewn builds that one first. Never a cycle. Ideas that don't build on each other are built at the same time. If several ideas need the same new connection, give each the identical connection (same name); it is built once. Suggest what fits the owner and doesn't duplicate what they already have. Leave the top-level draft fields empty.
@@ -378,7 +379,10 @@ export function claudeIntakeInput(prompt: string, images: { mediaType: string; d
 
 const IMAGE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
-function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal, stdin?: string): Promise<string> {
+/** A failsafe for a run that hangs (you can stop one yourself): long enough for a big brief on a slow, careful model. */
+export const INTAKE_TIMEOUT_MS = 15 * 60_000;
+
+export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("stopped"));
     const child = spawn(command, args, { cwd, env, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
@@ -396,11 +400,13 @@ function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEn
       for (const l of lines) if (l.trim()) onLine(l);
     });
     child.stderr!.on("data", (d) => (err += d));
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => ((timedOut = true), child.kill("SIGTERM")), timeoutMs);
     child.once("error", (e) => (clearTimeout(timer), reject(e)));
     child.once("close", (code) => {
       clearTimeout(timer);
       if (signal?.aborted) return reject(new Error("stopped"));
+      if (timedOut) return reject(new Error(`intake took longer than ${Math.round(timeoutMs / 60_000)} minutes, so Hewn stopped it`));
       code === 0 ? resolve(out) : reject(new Error(`intake ${command} exited ${code}: ${(err.trim() || out.trim().split("\n").at(-1) || "no output").slice(-500)}`));
     });
   });
@@ -454,9 +460,9 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         const isolated = codexHome(join(platformRoot, "builder-home", "intake-codex"));
         try {
           const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
-          await run(w.command, w.args, ws, isolated.env, 5 * 60_000, undefined, signal);
+          await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, undefined, signal);
         } finally {
-          isolated.syncBack();
+          isolated.done();
         }
         return parseIntake(readFileSync(join(ws, "out.json"), "utf8"), req.mode, req.current);
       }
@@ -469,6 +475,8 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
         "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
+        // Web tools only: --restricted drops every code-running tool, also ones added later.
+        "--restricted",
         "--allowedTools", "WebFetch", "WebSearch",
         "--disallowedTools", "Bash", "Edit", "Write", "Task",
       ];
@@ -504,7 +512,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         }
       };
       try {
-        await run(w.command, w.args, ws, isolated.env, 5 * 60_000, onLine, signal, stdin);
+        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal, stdin);
       } catch (e) {
         // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
         if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);

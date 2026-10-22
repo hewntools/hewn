@@ -94,6 +94,16 @@ export interface BuildTurn {
   content: string;
   /** What the owner attached with this turn (refs into `attachments`). */
   attachments?: AttachmentRef[];
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform. */
+  reply?: unknown;
+}
+
+/** The owner's answer to "Got what you asked for?": yes, no (a note may say what's off), or skip. */
+export type BuildFeedbackScore = "yes" | "no" | "skip";
+export interface BuildFeedback {
+  score: BuildFeedbackScore;
+  note?: string;
+  at: string;
 }
 
 /** What led to a build, kept with it for the capability's life (`build_context`). */
@@ -102,7 +112,7 @@ export interface BuildContext {
   conversation?: BuildTurn[];
   /** The owner's instructions the build ran with. */
   instructions?: string;
-  /** Which brief it ran on: a short hash of spec/builder-brief.md. */
+  /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
   brief?: string;
 }
 
@@ -285,6 +295,14 @@ CREATE TABLE IF NOT EXISTS build_models (
   effort         TEXT,
   ran_model      TEXT
 );
+-- What the owner thought of a promoted build ("Got what you asked for?"): yes, no (with a note on
+-- what's off), or skip. Stays in this database: nothing leaves the machine.
+CREATE TABLE IF NOT EXISTS build_feedback (
+  build_id       TEXT PRIMARY KEY,
+  score          TEXT NOT NULL,
+  note           TEXT,
+  at             TEXT NOT NULL
+);
 -- What the builder's host charged (all attempts), in its own unit.
 CREATE TABLE IF NOT EXISTS build_charges (
   build_id       TEXT PRIMARY KEY,
@@ -292,8 +310,8 @@ CREATE TABLE IF NOT EXISTS build_charges (
   unit           TEXT NOT NULL
 );
 -- What led to a build, kept for the capability's life: the owner's conversation with the intake
--- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (a
--- short hash of spec/builder-brief.md as this Hewn had it).
+-- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (the
+-- spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
 CREATE TABLE IF NOT EXISTS build_context (
   build_id       TEXT PRIMARY KEY,
   conversation   TEXT,
@@ -724,6 +742,43 @@ export class Registry {
     this.db.prepare("DELETE FROM attachments WHERE ref = ?").run(ref);
   }
 
+  /** The owner's answer to "Got what you asked for?" on a build; a later answer replaces it. */
+  setBuildFeedback(buildId: string, f: { score: BuildFeedbackScore; note?: string }) {
+    this.db.prepare("INSERT OR REPLACE INTO build_feedback (build_id, score, note, at) VALUES (?, ?, ?, ?)").run(buildId, f.score, f.note ?? null, now());
+  }
+
+  buildFeedback(buildId: string): BuildFeedback | undefined {
+    const r = this.db.prepare("SELECT score, note, at FROM build_feedback WHERE build_id = ?").get(buildId) as Row | undefined;
+    return r ? { score: r.score, ...(r.note ? { note: r.note } : {}), at: r.at } : undefined;
+  }
+
+  /** Builds since `since` (ISO), newest first, with what they ran on and what the owner said: the raw rows of the feedback report. */
+  buildsSince(since: string): (BuildRow & { model?: string; effort?: string; ranModel?: string; brief?: string; feedback?: BuildFeedback; archivedAt?: string })[] {
+    return this.db
+      .prepare(
+        `SELECT b.*, m.model AS m_model, m.effort AS m_effort, m.ran_model AS m_ran, x.brief AS x_brief, f.score AS f_score, f.note AS f_note, f.at AS f_at, c.archived_at AS c_archived
+         FROM builds b
+         LEFT JOIN build_models m ON m.build_id = b.id
+         LEFT JOIN build_context x ON x.build_id = b.id
+         LEFT JOIN build_feedback f ON f.build_id = b.id
+         LEFT JOIN capabilities c ON c.id = b.capability_id
+         WHERE b.created_at >= ? ORDER BY b.created_at DESC`,
+      )
+      .all(since)
+      .map((r) => {
+        const x = r as Row;
+        return {
+          ...toBuild(x),
+          ...(x.m_model ? { model: x.m_model } : {}),
+          ...(x.m_effort ? { effort: x.m_effort } : {}),
+          ...(x.m_ran ? { ranModel: x.m_ran } : {}),
+          ...(x.x_brief ? { brief: x.x_brief } : {}),
+          ...(x.f_score ? { feedback: { score: x.f_score, ...(x.f_note ? { note: x.f_note } : {}), at: x.f_at } } : {}),
+          ...(x.c_archived ? { archivedAt: x.c_archived } : {}),
+        };
+      });
+  }
+
   /** One charge from the host, for the month's total. */
   addHostCharge(kind: "build" | "intake" | "model", c: { amount: number; unit: string }, capabilityId?: string) {
     const at = now();
@@ -902,18 +957,18 @@ export class Registry {
     this.db.prepare("DELETE FROM passkeys WHERE credential_id = ?").run(credentialId);
   }
 
-  /** Implementation history with the build that produced each version. */
+  /** Implementation history with the build that produced each version, and whether it kept a conversation. */
   versions(capabilityId: string) {
     return this.db
       .prepare(
-        `SELECT v.version, v.created_at, v.build_id, b.kind, b.requested_by, b.builder, b.request
-         FROM capability_versions v LEFT JOIN builds b ON b.id = v.build_id
+        `SELECT v.version, v.created_at, v.build_id, b.kind, b.requested_by, b.builder, b.request, c.conversation IS NOT NULL AS conversation
+         FROM capability_versions v LEFT JOIN builds b ON b.id = v.build_id LEFT JOIN build_context c ON c.build_id = v.build_id
          WHERE v.capability_id = ? ORDER BY v.version DESC`,
       )
       .all(capabilityId)
       .map((r) => {
         const x = r as Row;
-        return { version: x.version, createdAt: x.created_at, buildId: x.build_id, kind: x.kind, requestedBy: x.requested_by, builder: x.builder ?? "agent", request: x.request ? JSON.parse(x.request) : null };
+        return { version: x.version, createdAt: x.created_at, buildId: x.build_id, kind: x.kind, requestedBy: x.requested_by, builder: x.builder ?? "agent", request: x.request ? JSON.parse(x.request) : null, conversation: x.conversation === 1 };
       });
   }
 
@@ -1025,13 +1080,13 @@ export class Registry {
   purgeCapability(id: string) {
     this.transaction(() => {
       // Attachments go first (`releaseAttachments`): shared ones move to a sibling build, the rest with their blobs.
-      this.db.prepare("DELETE FROM build_context WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)").run(id);
+      for (const table of ["build_context", "build_feedback"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
       for (const table of ["grants", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
-      // Its failed calls (for "Ask builder to fix this") go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key = ?").run(`failures:${id}`);
+      // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?)").run(`failures:${id}`, `instructions:${id}`);
     });
   }
 
