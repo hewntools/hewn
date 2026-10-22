@@ -2767,7 +2767,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
+  // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
+  const draftNow = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
+  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, draftNow, modelChip(), send));
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -2838,6 +2840,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       live.remove();
       activity.remove();
       if (reply.message) say("them", reply.message);
+      draftNow.hidden = reply.kind !== "questions";
       // What it remembered (or dropped) for later builds: shown as saved, with Undo.
       for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;

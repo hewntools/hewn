@@ -127,7 +127,7 @@ A refreshed login is copied back. Versions never keep builder configuration (dot
 
 ## Intake
 
-The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back, a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP, returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
+The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back (until the request is clear: the prompt names what it must know before drafting, per mode, and each question carries a default; there is no cap on rounds, the owner's "Draft now" in the web client is the stop), a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP, returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
 
 ## Models for building, and the cap
 
