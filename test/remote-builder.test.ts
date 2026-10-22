@@ -169,6 +169,12 @@ describe("remote builder and intake", () => {
     assert.match(sent.body.prompt, /track my coffee/);
     assert.deepEqual(progress[0], { activity: "Searching the web" });
     assert.ok(progress.some((p) => (p as { message?: string }).message === "A few things first."), "the message shows while it's written");
+    assert.equal(sent.body.attachments, undefined, "no attachments: none sent");
+    // The images the owner attached go with the request (text files are in the prompt).
+    handle = (_b, _r, res) => ndjson(res, [{ result: text }]);
+    await remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "like this", attachments: [{ ref: "at-1", kind: "image", name: "screen.png", mediaType: "image/png", width: 2, height: 1, data: "aW1n" }, { ref: "at-2", kind: "file", name: "n.txt", mediaType: "text/plain", data: "aGk=" }] }] });
+    assert.deepEqual(seen.at(-1)!.body.attachments, [{ kind: "image", name: "screen.png", mediaType: "image/png", data: "aW1n" }]);
+    assert.match(seen.at(-1)!.body.prompt, /\[attached: screen\.png \(image 2×1\), n\.txt \(file\)\]\n--- attached file n\.txt ---\nhi\n/);
     handle = (_b, _r, res) => ndjson(res, [{ refused: "The intake is paused for this account." }]);
     await assert.rejects(remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "x" }] }), (e: Error & { refused?: boolean }) => e.refused === true);
     handle = (_b, _r, res) => ndjson(res, [{ error: "no model key for this account", unavailable: true }]);

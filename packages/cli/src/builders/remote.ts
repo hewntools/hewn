@@ -8,7 +8,7 @@ import { fromBase64, isArtefact, toBase64 } from "@hewntools/core/files.ts";
 import { builderPrompt } from "./cli.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 import { readTree, writeTree } from "../workbench.ts";
-import { intakePrompt, parseIntake, partialReply, SCHEMA } from "../intake.ts";
+import { intakeImages, intakePrompt, parseIntake, partialReply, SCHEMA } from "../intake.ts";
 import type { Intake } from "../intake.ts";
 import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
 import type { HostGenerateResult, HostModels } from "@hewntools/core/models.ts";
@@ -171,7 +171,8 @@ export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
     await stream(
       r,
       "v1/intake",
-      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}) },
+      // `attachments`: the images the owner attached (text files are in the prompt), for the service to show the model.
+      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(intakeImages(req).length ? { attachments: intakeImages(req).map(({ kind, name, mediaType, data }) => ({ kind, name, mediaType, data })) } : {}) },
       (e) => {
         if (typeof e.text === "string") {
           text += e.text;

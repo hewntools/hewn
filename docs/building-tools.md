@@ -8,6 +8,8 @@ In the web client: the **New** tile on Home, or press `n`. Describe it in plain 
 
 > A habit tracker. Ask me each evening which habits I did, and show the streak.
 
+Paste a screenshot (Ctrl+V / ⌘V), drop files on the box, or **Attach**: a screenshot of the screen to change or the look you mean, a sketch, a script to port, data to import. Images (up to 5 per message, resized before they go up) and text files (up to 256 KB each) go with your message to the intake and, when you build, to the builder, in its workspace. They stay with the build, like the conversation.
+
 The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI) first talks it through: it asks until the request is clear (when you'd use it, what it keeps, the main action), each question with the default it would assume, so "go ahead" answers them all; **Draft now** skips the rest and takes its assumptions, listed with the proposal. Then it makes a **spec proposal**: the tool, what it will do, what it needs (a site to reach, a key, another tool, a model: its [grants](concepts.md#grants)), and any widgets or [schedules](concepts.md#schedules). A big request can become a few small tools that work together; untick the ones you don't want. Reply to change it, or press **Build** (it says how many tools: "Build 1 tool").
 
 ![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool](images/spec-proposal.png)

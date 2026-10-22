@@ -77,10 +77,23 @@ export interface BuildModel {
   ran?: string;
 }
 
+/** An image or file the owner attached in the intake's box; the bytes are a blob (`attachments/<ref>`). */
+export interface AttachmentRef {
+  ref: string;
+  kind: "image" | "file";
+  name: string;
+  mediaType: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+}
+
 /** One turn of the owner's conversation with the intake that led to a build. */
 export interface BuildTurn {
   role: "user" | "intake";
   content: string;
+  /** What the owner attached with this turn (refs into `attachments`). */
+  attachments?: AttachmentRef[];
 }
 
 /** What led to a build, kept with it for the capability's life (`build_context`). */
@@ -287,6 +300,22 @@ CREATE TABLE IF NOT EXISTS build_context (
   instructions   TEXT,
   brief          TEXT
 );
+-- Images and files the owner attached in the intake's box: the bytes are blobs (attachments/<ref>);
+-- these rows say what they are, which conversation (session) they came with, and which build they
+-- ended up with (none until then: those are dropped after a day).
+CREATE TABLE IF NOT EXISTS attachments (
+  ref            TEXT PRIMARY KEY,
+  session        TEXT NOT NULL,
+  build_id       TEXT,
+  kind           TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  media_type     TEXT NOT NULL,
+  bytes          INTEGER NOT NULL,
+  width          INTEGER,
+  height         INTEGER,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attachments_by_session ON attachments (session);
 -- Everything the host charged, one row per charge (a build attempt, an intake turn, a model call),
 -- in its own unit: "Credits used this month" when it runs them.
 CREATE TABLE IF NOT EXISTS host_charges (
@@ -347,6 +376,19 @@ const toVersion = (r: Row): VersionRow => ({
   manifest: JSON.parse(r.manifest),
   contentHash: r.content_hash,
   buildId: r.build_id,
+  createdAt: r.created_at,
+});
+
+const toAttachment = (r: Row): AttachmentRef & { session: string; buildId: string | null; createdAt: string } => ({
+  ref: r.ref,
+  session: r.session,
+  buildId: r.build_id ?? null,
+  kind: r.kind,
+  name: r.name,
+  mediaType: r.media_type,
+  bytes: r.bytes,
+  ...(r.width ? { width: r.width } : {}),
+  ...(r.height ? { height: r.height } : {}),
   createdAt: r.created_at,
 });
 
@@ -625,6 +667,40 @@ export class Registry {
     const r = this.db.prepare("SELECT conversation, instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
     if (!r) return undefined;
     return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.instructions ? { instructions: r.instructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
+  }
+
+  insertAttachment(a: AttachmentRef & { session: string }) {
+    this.db
+      .prepare("INSERT INTO attachments (ref, session, kind, name, media_type, bytes, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(a.ref, a.session, a.kind, a.name, a.mediaType, a.bytes, a.width ?? null, a.height ?? null, now());
+  }
+
+  attachment(ref: string): (AttachmentRef & { session: string; buildId: string | null; createdAt: string }) | undefined {
+    const r = this.db.prepare("SELECT * FROM attachments WHERE ref = ?").get(ref) as Row | undefined;
+    return r ? toAttachment(r) : undefined;
+  }
+
+  /** What a conversation has attached so far (for the limits). */
+  attachmentsOf(session: string) {
+    return this.db.prepare("SELECT * FROM attachments WHERE session = ? ORDER BY created_at").all(session).map((r) => toAttachment(r as Row));
+  }
+
+  /** The attachments a build keeps: claimed when the build is recorded, so they outlive the day. */
+  claimAttachments(refs: string[], buildId: string) {
+    for (const ref of refs) this.db.prepare("UPDATE attachments SET build_id = ? WHERE ref = ? AND build_id IS NULL").run(buildId, ref);
+  }
+
+  attachmentsOfBuild(buildId: string): string[] {
+    return this.db.prepare("SELECT ref FROM attachments WHERE build_id = ?").all(buildId).map((r) => (r as Row).ref as string);
+  }
+
+  /** Attachments no build took, older than `before`: a conversation that never led to one. */
+  staleAttachments(before: string): string[] {
+    return this.db.prepare("SELECT ref FROM attachments WHERE build_id IS NULL AND created_at < ?").all(before).map((r) => (r as Row).ref as string);
+  }
+
+  deleteAttachment(ref: string) {
+    this.db.prepare("DELETE FROM attachments WHERE ref = ?").run(ref);
   }
 
   /** One charge from the host, for the month's total. */
@@ -927,7 +1003,7 @@ export class Registry {
   /** Remove every row about a capability (permanent delete). */
   purgeCapability(id: string) {
     this.transaction(() => {
-      this.db.prepare("DELETE FROM build_context WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)").run(id);
+      for (const table of ["build_context", "attachments"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
       for (const table of ["grants", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }

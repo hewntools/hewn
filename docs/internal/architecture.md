@@ -101,6 +101,8 @@ request → build row ("waiting" while its `after` build hasn't promoted)
 
 What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and a short hash of the brief it ran on. When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
 
+**Attachments.** Images and text files the owner puts in the intake's box (paste, drop, Attach) are uploaded as they're added (`POST /api/attachments`: checked for type, size and an image's pixels; the bytes a blob under `attachments/<ref>`, the row in `attachments` with its conversation's session). A message carries refs; the platform resolves them (what they are comes from the store, never the client) when it hands the conversation to the intake (with the bytes: `messages[].attachments[].data`) and when it keeps it with a build (`checkConversation`). A build claims its conversation's attachments (`build_id`), copies them into the workspace under `attachments/` and lists them in `BUILDER.md`'s request; `versionFiles` never takes that directory. Unclaimed attachments go after a day (`cleanup`); a purge removes a build's. Agents never see them.
+
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
 `validateAndPromote` (`platform.ts`), in order:
@@ -127,7 +129,7 @@ A refreshed login is copied back. Versions never keep builder configuration (dot
 
 ## Intake
 
-The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back (until the request is clear: the prompt names what it must know before drafting, per mode, and each question carries a default; there is no cap on rounds, the owner's "Draft now" in the web client is the stop), a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP, returning strict JSON. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
+The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back (until the request is clear: the prompt names what it must know before drafting, per mode, and each question carries a default; there is no cap on rounds, the owner's "Draft now" in the web client is the stop), a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code or Codex, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP, returning strict JSON. Attached images reach Claude Code as image blocks in a stream-json user message on stdin, Codex as `-i` files next to the prompt, and the host's intake as `attachments`; attached text files are in the prompt itself, under the message they came with. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
 
 ## Models for building, and the cap
 
@@ -204,7 +206,7 @@ The home is `~/.hewn` for an npm install and `data/` in a checkout run with `./i
 
 - `workerd/do/hewn-owner/`: the owner's database.
 - `workerd/do/hewn-capability/`: each capability's state, plus scratch states (tests, dry runs, the 3 newest backups taken before a promotion).
-- `workerd/blobs/`: version blobs, owner icons, build screenshots, build transcripts.
+- `workerd/blobs/`: version blobs, owner icons, build screenshots, build transcripts, the owner's attachments.
 - `builds/`: workspaces (deleted a day after the build ends) and transcripts (copied into blobs when the build ends; the copy here goes after 30 days).
 - `builder-home/`: the builders' and intake's own config directories.
 - `platform.json`: machine settings (backup folder, `publicListen`, sandbox). `supervisor.json`: the running supervisor's address and tokens. `format.json`: the data format version. `logs/hewn.log`: the service log.
