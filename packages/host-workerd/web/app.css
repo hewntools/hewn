@@ -454,6 +454,10 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .step:has(.spec-step[open]) { align-items: start; }
 .step:has(.spec-step[open])::before { align-self: start; margin-top: 7px; }
 .spec-step > .spec-text { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
+/* What the intake remembered for later builds, and the owner's instructions (one per line). */
+.memory-notice { align-items: flex-start; }
+.memory-notice .memory-text { font-size: var(--fs-sm); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 
 /* Two lines at most (the full text on hover). */
 .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
