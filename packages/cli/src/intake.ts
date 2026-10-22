@@ -346,7 +346,10 @@ function draftSpec(j: Record<string, unknown>): DraftSpec | undefined {
   return operations.length || spec.widgets.length || model || spec.uses.length || spec.hosts.length || spec.secrets.length ? spec : undefined;
 }
 
-function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal): Promise<string> {
+/** A failsafe for a run that hangs (you can stop one yourself): long enough for a big brief on a slow, careful model. */
+export const INTAKE_TIMEOUT_MS = 15 * 60_000;
+
+export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("stopped"));
     const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -363,11 +366,13 @@ function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEn
       for (const l of lines) if (l.trim()) onLine(l);
     });
     child.stderr.on("data", (d) => (err += d));
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
+    let timedOut = false;
+    const timer = setTimeout(() => ((timedOut = true), child.kill("SIGTERM")), timeoutMs);
     child.once("error", (e) => (clearTimeout(timer), reject(e)));
     child.once("close", (code) => {
       clearTimeout(timer);
       if (signal?.aborted) return reject(new Error("stopped"));
+      if (timedOut) return reject(new Error(`intake took longer than ${Math.round(timeoutMs / 60_000)} minutes, so Hewn stopped it`));
       code === 0 ? resolve(out) : reject(new Error(`intake ${command} exited ${code}: ${(err.trim() || out.trim().split("\n").at(-1) || "no output").slice(-500)}`));
     });
   });
@@ -413,7 +418,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         const isolated = codexHome(join(platformRoot, "builder-home", "intake-codex"));
         try {
           const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
-          await run(w.command, w.args, ws, isolated.env, 5 * 60_000, undefined, signal);
+          await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, undefined, signal);
         } finally {
           isolated.syncBack();
         }
@@ -460,7 +465,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         }
       };
       try {
-        await run(w.command, w.args, ws, isolated.env, 5 * 60_000, onLine, signal);
+        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal);
       } catch (e) {
         // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
         if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);
