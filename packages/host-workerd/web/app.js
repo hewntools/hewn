@@ -1476,7 +1476,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
         // Once reloaded, it says so (no Reload to press again), and offers the next change.
         const shown = () => put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is on screen.`)), more(), undo);
         put(notice, h("span", { class: "grow" }, h("b", {}, `${v} is ready.`), " Reload to see it."), h("button", { class: "sm primary", onclick: () => (onReload(), shown()) }, "Reload"), undo);
-        return notice;
+        return h("div", { class: "stack-sm" }, notice, feedbackAsk(b));
       },
     });
     put(body, panel.el);
@@ -2969,6 +2969,43 @@ const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x
 /** A kept conversation (what led to a build), as the chat looked: the owner's turns and the intake's. */
 const conversationThread = (turns) => h("div", { class: "thread kept" }, turns.map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
 
+/**
+ * "Got what you asked for?" on a build that went live, asked once: Yes, Not quite (and a line on
+ * what's off), or × to skip. The answer stays in your Hewn; nothing is sent anywhere.
+ */
+function feedbackAsk(b, existing) {
+  if (existing || b.status !== "promoted") return null;
+  const el = h("div", { class: "notice info feedback-ask" });
+  const send = (score, note) => api(`/builds/${enc(b.buildId)}/feedback`, { method: "POST", body: { score, ...(note ? { note } : {}) } });
+  const done = (text) => put(el, h("span", { class: "grow muted" }, text));
+  const notQuite = () => {
+    const input = h("input", { type: "text", placeholder: "What's off?", "aria-label": "What's off", maxLength: 1000 });
+    const ok = h("button", { type: "submit", class: "sm primary" }, "Send");
+    const form = h("form", { class: "row tight grow" }, input, ok);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      ok.disabled = true;
+      try {
+        await send("no", input.value.trim());
+        done("Noted.");
+      } catch (err) {
+        ok.disabled = false;
+        fail(err);
+      }
+    });
+    put(el, form);
+    input.focus();
+  };
+  put(
+    el,
+    h("span", { class: "grow" }, "Got what you asked for?"),
+    h("button", { type: "button", class: "sm", onclick: () => send("yes").then(() => done("Noted."), fail) }, "Yes"),
+    h("button", { type: "button", class: "sm", onclick: () => send("no").then(notQuite, fail) }, "Not quite"),
+    h("button", { type: "button", class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(() => el.remove(), fail) }, "×"),
+  );
+  return el;
+}
+
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
 const draftText = (d) =>
   [
@@ -3453,6 +3490,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         card,
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
         builtWith(b),
+        feedbackAsk(b, context.feedback),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
         specView,
         convoView,

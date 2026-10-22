@@ -52,6 +52,9 @@ Use it (as the owner; talks to the running Hewn)
   url [<https://…> | --clear] [--listen <address> | --listen off]
                       the public URL: use Hewn from your phone or anywhere (prints the DNS records and proxy setup)
   status              tools and recent builds
+  feedback [--days N] [--json]
+                      how recent builds worked out: your answers to "Got what you asked for?", attempts,
+                      what they ran on, and the signs in the record (a fix, a change soon after, a restore)
   install <dir>       install a tool from a source dir
   connect <id>        give a tool what it needs: config, secrets (hidden prompt or --from <path>) + approval;
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
@@ -91,7 +94,7 @@ const option = (name: string) => {
   const i = args.indexOf(`--${name}`);
   return i !== -1 ? args[i + 1] : undefined;
 };
-const positional = () => args.filter((x, i) => !x.startsWith("-") && !["--from", "--out", "-n", "--scopes", "--name", "--only", "--cloudflared", "--hostname", "--agents", "--listen"].includes(args[i - 1] ?? ""));
+const positional = () => args.filter((x, i) => !x.startsWith("-") && !["--from", "--out", "-n", "--scopes", "--name", "--only", "--cloudflared", "--hostname", "--agents", "--listen", "--days"].includes(args[i - 1] ?? ""));
 
 /** The client for owner commands; prints a clear error and exits on failure. */
 async function owner<T>(fn: (c: PlatformClient) => Promise<T>): Promise<T | undefined> {
@@ -506,6 +509,34 @@ async function main() {
           for (const l of now.slice(from)) console.log(l);
           if (now.length) seen = now;
         }
+      });
+      return;
+    }
+
+    case "feedback": {
+      // How recent builds worked out: the owner's answer to "Got what you asked for?" and the signs in
+      // the record. Stays here; a host reads it the same way, in the machine.
+      await owner(async (c) => {
+        const days = Number(args[args.indexOf("--days") + 1]) || 30;
+        const rows = await c.call("buildReport", { days });
+        if (flag("json")) return void console.log(JSON.stringify(rows, null, 2));
+        if (!rows.length) return void console.log(`No builds in the last ${days} days.`);
+        console.table(
+          rows.map((r: any) => ({
+            build: r.buildId,
+            tool: r.capabilityId,
+            kind: r.kind,
+            status: r.status,
+            attempts: r.attempts,
+            model: r.ranModel ?? r.model ?? "default",
+            brief: r.brief ?? "",
+            answer: r.feedback?.score ?? "",
+            note: r.feedback?.note ?? "",
+            signs: Object.entries(r.signals).filter(([, v]) => v).map(([k]) => k).join(" "),
+          })),
+        );
+        const asked = rows.filter((r: any) => r.feedback && r.feedback.score !== "skip");
+        if (asked.length) console.log(`${asked.filter((r: any) => r.feedback.score === "yes").length} of ${asked.length} answered builds got what was asked for.`);
       });
       return;
     }

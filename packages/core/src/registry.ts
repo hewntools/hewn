@@ -83,6 +83,14 @@ export interface BuildTurn {
   content: string;
 }
 
+/** The owner's answer to "Got what you asked for?": yes, no (a note may say what's off), or skip. */
+export type BuildFeedbackScore = "yes" | "no" | "skip";
+export interface BuildFeedback {
+  score: BuildFeedbackScore;
+  note?: string;
+  at: string;
+}
+
 /** What led to a build, kept with it for the capability's life (`build_context`). */
 export interface BuildContext {
   /** The web client's conversation; an agent's build has none (its request is on the build). */
@@ -271,6 +279,14 @@ CREATE TABLE IF NOT EXISTS build_models (
   model          TEXT,
   effort         TEXT,
   ran_model      TEXT
+);
+-- What the owner thought of a promoted build ("Got what you asked for?"): yes, no (with a note on
+-- what's off), or skip. Stays in this database: nothing leaves the machine.
+CREATE TABLE IF NOT EXISTS build_feedback (
+  build_id       TEXT PRIMARY KEY,
+  score          TEXT NOT NULL,
+  note           TEXT,
+  at             TEXT NOT NULL
 );
 -- What the builder's host charged (all attempts), in its own unit.
 CREATE TABLE IF NOT EXISTS build_charges (
@@ -627,6 +643,43 @@ export class Registry {
     return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.instructions ? { instructions: r.instructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
   }
 
+  /** The owner's answer to "Got what you asked for?" on a build; a later answer replaces it. */
+  setBuildFeedback(buildId: string, f: { score: BuildFeedbackScore; note?: string }) {
+    this.db.prepare("INSERT OR REPLACE INTO build_feedback (build_id, score, note, at) VALUES (?, ?, ?, ?)").run(buildId, f.score, f.note ?? null, now());
+  }
+
+  buildFeedback(buildId: string): BuildFeedback | undefined {
+    const r = this.db.prepare("SELECT score, note, at FROM build_feedback WHERE build_id = ?").get(buildId) as Row | undefined;
+    return r ? { score: r.score, ...(r.note ? { note: r.note } : {}), at: r.at } : undefined;
+  }
+
+  /** Builds since `since` (ISO), newest first, with what they ran on and what the owner said: the raw rows of the feedback report. */
+  buildsSince(since: string): (BuildRow & { model?: string; effort?: string; ranModel?: string; brief?: string; feedback?: BuildFeedback; archivedAt?: string })[] {
+    return this.db
+      .prepare(
+        `SELECT b.*, m.model AS m_model, m.effort AS m_effort, m.ran_model AS m_ran, x.brief AS x_brief, f.score AS f_score, f.note AS f_note, f.at AS f_at, c.archived_at AS c_archived
+         FROM builds b
+         LEFT JOIN build_models m ON m.build_id = b.id
+         LEFT JOIN build_context x ON x.build_id = b.id
+         LEFT JOIN build_feedback f ON f.build_id = b.id
+         LEFT JOIN capabilities c ON c.id = b.capability_id
+         WHERE b.created_at >= ? ORDER BY b.created_at DESC`,
+      )
+      .all(since)
+      .map((r) => {
+        const x = r as Row;
+        return {
+          ...toBuild(x),
+          ...(x.m_model ? { model: x.m_model } : {}),
+          ...(x.m_effort ? { effort: x.m_effort } : {}),
+          ...(x.m_ran ? { ranModel: x.m_ran } : {}),
+          ...(x.x_brief ? { brief: x.x_brief } : {}),
+          ...(x.f_score ? { feedback: { score: x.f_score, ...(x.f_note ? { note: x.f_note } : {}), at: x.f_at } } : {}),
+          ...(x.c_archived ? { archivedAt: x.c_archived } : {}),
+        };
+      });
+  }
+
   /** One charge from the host, for the month's total. */
   addHostCharge(kind: "build" | "intake" | "model", c: { amount: number; unit: string }, capabilityId?: string) {
     const at = now();
@@ -927,7 +980,7 @@ export class Registry {
   /** Remove every row about a capability (permanent delete). */
   purgeCapability(id: string) {
     this.transaction(() => {
-      this.db.prepare("DELETE FROM build_context WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)").run(id);
+      for (const table of ["build_context", "build_feedback"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
       for (const table of ["grants", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }

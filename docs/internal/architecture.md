@@ -99,6 +99,8 @@ request → build row ("waiting" while its `after` build hasn't promoted)
 
 What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and a short hash of the brief it ran on. When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
 
+**Build feedback.** Once a build is live, the web client asks once "Got what you asked for?" (`build_feedback`: yes, no with a note, or skip; `setBuildFeedback`, shown with `buildContext`). `buildReport` (`hewn feedback`, an admin call) lists recent builds with what they ran on (builder, model, brief hash), attempts, how they ended, the answer, and the signs in the record: a retry or fix, another change to the tool within a day of going live, a restore within a week, the tool deleted within a day. All of it stays in the owner's database; Hewn never sends it anywhere. A host that wants it reads it as it reads anything else in the machine.
+
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
 `validateAndPromote` (`platform.ts`), in order:
@@ -211,7 +213,7 @@ The home is `~/.hewn` for an npm install and `data/` in a checkout run with `./i
 The owner's database:
 
 - **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL), `settings` (the owner's settings from the web client).
-- **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief hash a build ran with).
+- **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief hash a build ran with), `build_feedback` (the owner's answer to "Got what you asked for?").
 - **Agents and sessions:** `agents`, `oauth_clients`, `oauth_requests`, `oauth_tokens`, `web_sessions`, `ui_sessions`, `passkeys`.
 - **Authority:** `grants` (kinds `secret`, `host`, `capability`, `model`), `access_requests`, `confirmations`, `secrets_enc`.
 - **Trail:** `grant_events`, `lifecycle_events`, `authority_events`, `model_calls`. Activity merges them with builds and calls.

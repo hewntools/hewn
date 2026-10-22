@@ -27,6 +27,8 @@ What you ask for goes live right after the checks. A change an agent asks for th
 
 Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes.
 
+When it's live, the build page asks once: **Got what you asked for?** Yes, Not quite (say what's off), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a retry or fix, another change soon after, a restore, a delete), so you can see which builds work out and which don't.
+
 The build page keeps what led to the build: **Spec agreed** opens the spec the builder works from, and **Conversation** what you and the intake said. Both stay with the version it made, along with the builder's log, for the tool's life.
 
 ![Activity › Builds: a change to Reading List in progress (spec done, code being written, tests and you still to come), a failed change to Plant Care with Retry, and earlier builds with their versions](images/build-in-progress.png)
@@ -68,6 +70,7 @@ Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@
 ```
 hewn status                    tools and recent builds
 hewn watch [buildId]           follow a build live
+hewn feedback [--days N]       how recent builds worked out (--json for the data)
 hewn review                    agents' changes waiting for you
 hewn rollback <id> [version]   an earlier version, active again
 hewn restore <id>              bring back a deleted tool

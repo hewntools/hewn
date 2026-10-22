@@ -5,6 +5,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.6 (unreleased)
 
 - **A build keeps what led to it,** for the tool's life: your conversation with the intake, the spec, and the builder's log (which used to go after 30 days). The build page has **Conversation** next to **Spec agreed**; in **Versions**, each version's **Details** opens its conversation, spec and log, and **Continue from here** starts a change with that conversation as context. Builds also record which brief they ran on.
+- **Got what you asked for?** Once a build is live, its page (and the change drawer) asks once: Yes, Not quite (say what's off), or skip. The answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with what they ran on, attempts, your answers and what the record shows (a retry or fix, another change soon after, a restore, a delete).
 
 ## 0.4.5 (2026-10-21)
 
