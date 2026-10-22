@@ -232,7 +232,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   const n = Number(url.searchParams.get("n") ?? 100);
 
   if (resource === "capabilities" && !id) {
-    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort"]) as any);
+    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
     return capabilityList(platform, owner);
   }
@@ -256,13 +256,13 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         return platform.recentFailures(owner, id);
       case "POST modify": {
         const body = await readJson(req);
-        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort"]) });
+        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
       case "DELETE widgets":
         return platform.removeWidget(owner, id, arg);
       case "POST widgets": {
         const body = await readJson(req);
-        return platform.addWidgets(owner, { capabilityId: id, ...(body.request ? { request: String(body.request) } : {}), ...(body.after ? { after: String(body.after) } : {}), ...pick(body, ["model", "effort"]) });
+        return platform.addWidgets(owner, { capabilityId: id, ...(body.request ? { request: String(body.request) } : {}), ...(body.after ? { after: String(body.after) } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
       case "POST open": {
         platform.get(owner, id); // visibility
@@ -367,6 +367,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     // ?brief=1: without the logs (the Builds page lists up to 200).
     if (!id) return platform.registry.recentBuilds(Math.min(n, 200)).map((b) => platform.getBuild(owner, b)).map((v) => (url.searchParams.get("brief") === "1" ? { ...v, log: [] } : v));
     if (sub === "events") return streamBuild(platform, owner, id, req.signal);
+    // What led to it (the conversation, the instructions, the brief) and the builder's log: kept for the tool's life.
+    if (sub === "context") return platform.buildContext(owner, id);
+    if (sub === "transcript") return { text: (await platform.buildTranscript(owner, id)) ?? null };
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
@@ -542,6 +545,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const catalog = platform.list(owner).map((c) => ({ id: c.id, name: c.name, purpose: c.purpose, operations: c.operations, ...(c.kind ? { kind: c.kind } : {}) }));
     if (body.mode === "modify" && !body.capabilityId) throw new PlatformError("invalid_request", "a change needs a capabilityId");
     if (body.session !== undefined && (typeof body.session !== "string" || !/^[\w-]{1,80}$/.test(body.session))) throw new PlatformError("invalid_request", "session must be a short id");
+    // "Continue from here" on a version: that build's conversation, from the platform (the client only names the build).
+    const earlier = body.earlier !== undefined ? earlierConversation(platform, owner, body.earlier?.buildId) : undefined;
     const currentManifest = body.mode !== "create" && body.capabilityId ? platform.get(owner, body.capabilityId) : undefined;
     const started = Date.now();
     const finish = (reply?: IntakeReply, error?: string) => {
@@ -553,7 +558,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       // The owner's intake conversations, for their own reference/debugging (never shown to agents).
       host.intakeLog?.({ at: new Date().toISOString(), mode: body.mode, capabilityId: body.capabilityId, messages: body.messages, reply, error }).catch(() => {});
     };
-    const request = { ...body, catalog, current: currentManifest } as IntakeRequest;
+    const request = { ...body, catalog, current: currentManifest, ...(earlier ? { earlier } : {}) } as IntakeRequest;
     // With Accept: text/event-stream the answer streams as it is written: progress events, then reply (or error).
     if (!/text\/event-stream/.test(req.headers.get("accept") ?? "")) {
       try {
@@ -586,13 +591,20 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   throw new PlatformError("not_found", `no route ${method} ${url.pathname}`);
 }
 
+/** The conversation that led to a build (and the version it made), for the intake to continue from. */
+function earlierConversation(platform: Platform, owner: Agent, buildId: unknown): NonNullable<IntakeRequest["earlier"]> {
+  if (typeof buildId !== "string") throw new PlatformError("invalid_request", "earlier.buildId must be a build id");
+  const b = platform.getBuild(owner, buildId);
+  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages: platform.buildContext(owner, buildId).conversation ?? [] };
+}
+
 /** Server-sent events: replay the build transcript, then follow live until promoted/failed. */
 function streamBuild(platform: Platform, owner: Agent, buildId: string, clientSignal: AbortSignal): Response {
   platform.getBuild(owner, buildId); // exists
   return sse(
     { "content-security-policy": WEB_CSP },
     async (event, signal) => {
-      const transcript = (await platform.workbench.transcript(buildId).catch(() => undefined)) ?? "";
+      const transcript = (await platform.buildTranscript(owner, buildId).catch(() => undefined)) ?? "";
       for (const line of transcript.split("\n").filter(Boolean).slice(-500)) event("line", line);
       const stamp = () => new Date().toTimeString().slice(0, 8);
       const now = platform.stepState(buildId);
