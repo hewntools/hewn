@@ -61,7 +61,7 @@ describe("build feedback: Got what you asked for?", () => {
     const by = Object.fromEntries(rows.map((r) => [r.buildId, r]));
     assert.equal(by[first.buildId].kind, "create");
     assert.equal(by[first.buildId].builder, "script");
-    assert.match(by[first.buildId].brief!, /^[0-9a-f]{12}$/);
+    assert.match(by[first.buildId].brief!, /^(\d+\.\d+\.\d+\+)?[0-9a-f]{12}$/);
     assert.equal(by[first.buildId].attempts, 1);
     assert.equal(by[first.buildId].feedback?.score, "yes");
     assert.deepEqual(by[first.buildId].signals, { fixed: false, changedSoon: true, restored: false, deletedSoon: false }, "the next change came within a day");
