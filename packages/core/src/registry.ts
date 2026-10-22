@@ -694,6 +694,27 @@ export class Registry {
     return this.db.prepare("SELECT ref FROM attachments WHERE build_id = ?").all(buildId).map((r) => (r as Row).ref as string);
   }
 
+  /**
+   * Let go of what these builds (a capability's, being purged) claimed: a ref another build's
+   * conversation still shows (several tools from one ideas draft share theirs) moves to that build;
+   * the rest are dropped and returned, for their blobs to go.
+   */
+  releaseAttachments(buildIds: string[]): string[] {
+    const dropped: string[] = [];
+    if (!buildIds.length) return dropped;
+    const keeperOf = this.db.prepare(`SELECT build_id FROM build_context WHERE build_id NOT IN (${buildIds.map(() => "?").join(", ")}) AND conversation LIKE ? LIMIT 1`);
+    this.transaction(() => {
+      for (const b of buildIds) {
+        for (const ref of this.attachmentsOfBuild(b)) {
+          const keeper = keeperOf.get(...buildIds, `%"ref":${JSON.stringify(ref)}%`) as Row | undefined;
+          if (keeper) this.db.prepare("UPDATE attachments SET build_id = ? WHERE ref = ?").run(keeper.build_id, ref);
+          else (this.deleteAttachment(ref), dropped.push(ref));
+        }
+      }
+    });
+    return dropped;
+  }
+
   /** Attachments no build took, older than `before`: a conversation that never led to one. */
   staleAttachments(before: string): string[] {
     return this.db.prepare("SELECT ref FROM attachments WHERE build_id IS NULL AND created_at < ?").all(before).map((r) => (r as Row).ref as string);
@@ -1003,7 +1024,8 @@ export class Registry {
   /** Remove every row about a capability (permanent delete). */
   purgeCapability(id: string) {
     this.transaction(() => {
-      for (const table of ["build_context", "attachments"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
+      // Attachments go first (`releaseAttachments`): shared ones move to a sibling build, the rest with their blobs.
+      this.db.prepare("DELETE FROM build_context WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)").run(id);
       for (const table of ["grants", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }

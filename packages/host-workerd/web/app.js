@@ -2775,8 +2775,15 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const picker = h("input", { type: "file", multiple: true, accept: "image/*,text/*,.csv,.json,.md,.txt,.yaml,.yml,.toml,.sql,.js,.ts,.py,.sh,.html,.css", hidden: true, "aria-label": "Files to attach" });
   const attach = h("button", { type: "button", class: "ghost sm", onclick: () => picker.click() }, "Attach");
   const syncChips = () => ((chips.hidden = !pending.length), put(chips, pending.map((a) => attachmentChip(a, () => (pending.splice(pending.indexOf(a), 1), syncChips())))), syncSend());
+  // Per message: up to 5 images and 10 files (Hewn checks the same as the message is sent).
+  const perMessage = { image: 5, file: 10 };
   const addFiles = async (files) => {
     for (const f of files) {
+      const kind = /^image\//.test(f.type) ? "image" : "file";
+      if (pending.filter((a) => a.kind === kind).length >= perMessage[kind]) {
+        fail(new Error(`Up to ${perMessage[kind]} ${kind}s per message`));
+        continue;
+      }
       try {
         pending.push(await uploadAttachment(f, session));
         syncChips();
@@ -2824,7 +2831,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const ask = async (e) => {
     e?.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    // A message may be attachments alone ("like this", with a screenshot).
+    if (!text && !pending.length) return;
     // Text put in from the address (m=, "Ask builder to fix this") is sent: a redraw mustn't put it back.
     const [path, qs = ""] = location.hash.split("?");
     const params = new URLSearchParams(qs);
@@ -3087,12 +3095,16 @@ async function uploadAttachment(file, session) {
   return api("/attachments", { method: "POST", body: { session, kind: image ? "image" : "file", name: file.name || (image ? "pasted.png" : "pasted.txt"), mediaType: image ? blob.type : file.type || "text/plain", data } });
 }
 
-/** A pasted or dropped image no bigger than the models read well: PNG (JPEG stays JPEG), long side at most 1568 px. */
+/**
+ * A pasted or dropped image no bigger than the models read well: long side at most 1568 px. One
+ * already within that (and a type Hewn takes) goes as it is, a GIF's animation included; one that
+ * needs shrinking, or another type, is redrawn as PNG (JPEG stays JPEG).
+ */
 async function resizeImage(file) {
   const bitmap = await createImageBitmap(file).catch(() => null);
   if (!bitmap) throw new Error(`${file.name || "The image"} can't be read`);
   const scale = Math.min(1, 1568 / Math.max(bitmap.width, bitmap.height));
-  if (scale === 1 && (file.type === "image/png" || file.type === "image/jpeg") && file.size <= 2 * 1024 * 1024) return file;
+  if (scale === 1 && ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) && file.size <= 2 * 1024 * 1024) return (bitmap.close?.(), file);
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);

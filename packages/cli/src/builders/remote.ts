@@ -168,11 +168,12 @@ export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
     let text = "";
     let result: string | undefined;
     let error: Record<string, any> | undefined;
+    // `attachments`: the images the owner attached (text files are in the prompt), for the service to show the model.
+    const images = intakeImages(req).map(({ kind, name, mediaType, data }) => ({ kind, name, mediaType, data }));
     await stream(
       r,
       "v1/intake",
-      // `attachments`: the images the owner attached (text files are in the prompt), for the service to show the model.
-      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(intakeImages(req).length ? { attachments: intakeImages(req).map(({ kind, name, mediaType, data }) => ({ kind, name, mediaType, data })) } : {}) },
+      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(images.length ? { attachments: images } : {}) },
       (e) => {
         if (typeof e.text === "string") {
           text += e.text;

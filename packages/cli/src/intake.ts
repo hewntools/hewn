@@ -217,10 +217,9 @@ function turnText(m: { role: string; content: string; attachments?: IntakeAttach
 }
 
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): string {
-  const turn = turnText;
-  const convo = req.messages.map((m) => turn(m)).join("\n\n");
+  const convo = req.messages.map((m) => turnText(m)).join("\n\n");
   const earlier = req.earlier?.messages?.length
-    ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turn(m, EARLIER_CHARS)).join("\n\n")}\n\n`
+    ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turnText(m, EARLIER_CHARS)).join("\n\n")}\n\n`
     : "";
   const focus = req.widget ? req.current?.widgets?.find((w) => w.name === req.widget) : undefined;
   const rules = req.instructions;

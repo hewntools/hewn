@@ -44,8 +44,7 @@ import {
   type HostGenerateResult,
   type HostModels,
   inspectRequest,
-  IMAGE_MEDIA_TYPES,
-  imageSize,
+  checkImage,
   type ModelHandler,
   type ModelMessage,
   type ModelPrice,
@@ -764,10 +763,12 @@ export class Platform {
       for (const s of row.manifest.requires?.secrets ?? []) secrets.add(s.name);
     }
     for (const s of secrets) this.secrets.delete(capabilityId, s);
-    for (const b of this.registry.buildIdsFor(capabilityId)) {
+    const builds = this.registry.buildIdsFor(capabilityId);
+    // Its attachments go, unless a sibling build from the same conversation (an ideas draft that became several tools) still shows them.
+    for (const ref of this.registry.releaseAttachments(builds)) await this.blobs.delete(`attachments/${ref}`);
+    for (const b of builds) {
       await this.workbench.remove(b).catch(() => {});
       await this.workbench.removeTranscript(b).catch(() => {});
-      for (const ref of this.registry.attachmentsOfBuild(b)) await this.blobs.delete(`attachments/${ref}`);
       await this.blobs.delete(`transcripts/${b}.log`);
       await this.blobs.delete(`screenshots/${b}.png`);
       await this.blobs.delete(`screenshots/${b}-dark.png`);
@@ -2612,24 +2613,24 @@ export class Platform {
     if (typeof a.mediaType !== "string" || !/^[\w.+-]+\/[\w.+-]+$/.test(a.mediaType)) throw new PlatformError("invalid_request", "mediaType must be a media type");
     if (typeof a.data !== "string") throw new PlatformError("invalid_request", "data must be base64");
     const limits = ATTACHMENT_LIMITS[a.kind];
+    const invalid = (message: string) => new PlatformError("invalid_request", message);
     let bytes: Uint8Array;
-    try {
-      bytes = fromBase64(a.data);
-    } catch {
-      throw new PlatformError("invalid_request", "data must be base64");
-    }
-    if (!bytes.length) throw new PlatformError("invalid_request", "the attachment is empty");
-    if (bytes.length > limits.bytes) throw new PlatformError("invalid_request", `${a.kind === "image" ? "an image" : "a file"} may be at most ${Math.round(limits.bytes / 1024)} KB`);
-    const have = this.registry.attachmentsOf(a.session).filter((x) => x.kind === a.kind).length;
-    if (have >= limits.perConversation) throw new PlatformError("invalid_request", `at most ${limits.perConversation} ${a.kind}s in one conversation`);
     let size: { width: number; height: number } | undefined;
     if (a.kind === "image") {
-      if (!(IMAGE_MEDIA_TYPES as readonly string[]).includes(a.mediaType)) throw new PlatformError("invalid_request", `images must be one of ${IMAGE_MEDIA_TYPES.join(", ")}`);
-      size = imageSize(bytes, a.mediaType);
-      if (!size) throw new PlatformError("invalid_request", "the image can't be read");
-    } else if (!TEXT_MEDIA.test(a.mediaType) || bytes.subarray(0, 4096).includes(0)) {
-      throw new PlatformError("invalid_request", "files must be text (a script, notes, CSV, JSON…)");
+      // The same check a tool's model call gets: type, bytes, pixels (a 2 MB image can still be 20000 px wide).
+      ({ bytes, ...size } = checkImage(a.data, a.mediaType, limits.bytes, invalid));
+    } else {
+      try {
+        bytes = fromBase64(a.data);
+      } catch {
+        throw invalid("data must be base64");
+      }
+      if (!bytes.length) throw invalid("the attachment is empty");
+      if (bytes.length > limits.bytes) throw invalid(`a file may be at most ${Math.round(limits.bytes / 1024)} KB`);
+      if (!TEXT_MEDIA.test(a.mediaType) || bytes.subarray(0, 4096).includes(0)) throw invalid("files must be text (a script, notes, CSV, JSON…)");
     }
+    const have = this.registry.attachmentsOf(a.session).filter((x) => x.kind === a.kind).length;
+    if (have >= limits.perConversation) throw invalid(`at most ${limits.perConversation} ${a.kind}s in one conversation`);
     const ref = `at-${randomToken(9)}`;
     await this.blobs.put(`attachments/${ref}`, bytes);
     const row: AttachmentRef & { session: string } = { ref, session: a.session, kind: a.kind, name: safeName(a.name), mediaType: a.mediaType, bytes: bytes.length, ...(size ?? {}) };
@@ -2648,8 +2649,8 @@ export class Platform {
     return { meta, bytes };
   }
 
-  /** The owner's attachments behind a list of refs (what they are, from the store), in order, each once. */
-  resolveAttachments(refs: unknown): AttachmentRef[] {
+  /** The owner's attachments behind one message's refs (what they are, from the store), in order, each once; within the per-message limits. */
+  private resolveAttachments(refs: unknown): AttachmentRef[] {
     if (!Array.isArray(refs) || refs.length > ATTACHMENT_LIMITS.file.perMessage + ATTACHMENT_LIMITS.image.perMessage) throw new PlatformError("invalid_request", "attachments: a short list of refs");
     const out: AttachmentRef[] = [];
     for (const x of refs) {
@@ -2660,6 +2661,10 @@ export class Platform {
       if (out.some((o) => o.ref === ref)) continue;
       const { session: _s, buildId: _b, createdAt: _c, ...meta } = a;
       out.push(meta);
+    }
+    for (const kind of ["image", "file"] as const) {
+      const max = ATTACHMENT_LIMITS[kind].perMessage;
+      if (out.filter((a) => a.kind === kind).length > max) throw new PlatformError("invalid_request", `at most ${max} ${kind}s in one message`);
     }
     return out;
   }

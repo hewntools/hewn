@@ -5,12 +5,20 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { decodeVersion, toBase64 } from "@hewntools/core/files.ts";
-import { SEED, setup } from "./helpers.ts";
+import { editJson, SEED, setup } from "./helpers.ts";
 
 const seed = (ws: string) => cpSync(SEED, ws, { recursive: true });
 /** A 2×1 PNG. */
 export const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+9AAAADklEQVQIW2P4z8DwHwAFAAH/yQ0wtQAAAABJRU5ErkJggg==";
 const b64 = (s: string) => toBase64(new TextEncoder().encode(s));
+/** Just a PNG's header (signature + IHDR), declaring a size: enough for the size check, not a picture. */
+const pngHeader = (width: number, height: number) => {
+  const b = new Uint8Array(24);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  new DataView(b.buffer).setUint32(16, width);
+  new DataView(b.buffer).setUint32(20, height);
+  return toBase64(b);
+};
 
 describe("attachments: images and files the owner attaches in the intake's box", () => {
   let t: ReturnType<typeof setup>;
@@ -27,8 +35,10 @@ describe("attachments: images and files the owner attaches in the intake's box",
     const got = await t.platform.attachmentBytes(USER, img.ref);
     assert.equal(got.bytes.length, 70);
     assert.equal(got.meta.name, "screen-one.png");
-    await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "image", name: "x.png", mediaType: "image/png", data: b64("not a png") }), /can't be read/);
-    await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "image", name: "x.bmp", mediaType: "image/bmp", data: PNG }), /images must be one of/);
+    await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "image", name: "x.png", mediaType: "image/png", data: b64("not a png") }), /isn't a readable image\/png/);
+    await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "image", name: "x.bmp", mediaType: "image/bmp", data: PNG }), /mediaType must be one of/);
+    // The same pixel cap as a tool's model call: a small file can still declare a huge picture.
+    await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "image", name: "wide.png", mediaType: "image/png", data: pngHeader(9000, 10) }), /9000×10; the limit is 8000 px per side/);
     await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "file", name: "x.bin", mediaType: "application/octet-stream", data: b64("ab\0cd") }), /files must be text/);
     await assert.rejects(t.platform.addAttachment(USER, { session: "s-1", kind: "file", name: "big.txt", mediaType: "text/plain", data: b64("x".repeat(256 * 1024 + 1)) }), /at most 256 KB/);
     await assert.rejects(t.platform.addAttachment(USER, { session: "bad session!", kind: "file", name: "x.txt", mediaType: "text/plain", data: b64("x") }), /session/);
@@ -77,6 +87,39 @@ describe("attachments: images and files the owner attaches in the intake's box",
     t.platform.archive(USER, "running-log");
     await t.platform.purge(USER, "running-log", "running-log");
     assert.equal(await t.platform.blobs.get(`attachments/${img.ref}`), undefined);
+    assert.equal(t.platform.registry.attachment(img.ref), undefined);
+  });
+
+  test("a message carries at most 5 images and 10 files", async () => {
+    const refs = [];
+    for (let i = 0; i < 6; i++) refs.push((await t.platform.addAttachment(USER, { session: "s-5", kind: "image", name: `${i}.png`, mediaType: "image/png", data: PNG })).ref);
+    await assert.rejects(t.platform.attachmentsWithData(USER, refs), /at most 5 images in one message/);
+    assert.equal((await t.platform.attachmentsWithData(USER, [...refs.slice(0, 5), refs[0]])).length, 5, "five, a repeat not counted");
+    const files = [];
+    for (let i = 0; i < 11; i++) files.push((await t.platform.addAttachment(USER, { session: "s-5", kind: "file", name: `${i}.txt`, mediaType: "text/plain", data: b64("x") })).ref);
+    await assert.rejects(t.platform.create(USER, { name: "X", purpose: "x", requirements: "x", conversation: [{ role: "user", content: "x", attachments: files.map((ref) => ({ ref })) }] as any }), /at most 10 files in one message/);
+    await assert.rejects(t.platform.attachmentsWithData(USER, [...refs, ...files]), /a short list of refs/);
+  });
+
+  test("several tools from one conversation share its attachments; purging one leaves them for the other", async () => {
+    const img = await t.platform.addAttachment(USER, { session: "s-6", kind: "image", name: "both.png", mediaType: "image/png", data: PNG });
+    const conversation = [{ role: "user" as const, content: "two tools from this", attachments: [{ ref: img.ref }] }] as any;
+    const a = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r", conversation }), seed);
+    const b = await t.build(() => t.platform.create(USER, { name: "Walking Log", purpose: "walks", requirements: "w", conversation }), (ws) => {
+      seed(ws);
+      editJson(join(ws, "capability.json"), (m) => ((m.id = "walking-log"), (m.name = "Walking Log")));
+    });
+    assert.equal(a.status, "promoted", a.log.join("\n"));
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+    assert.equal(t.platform.registry.attachment(img.ref)!.buildId, a.buildId, "the first build claimed it");
+    t.platform.archive(USER, "running-log");
+    await t.platform.purge(USER, "running-log", "running-log");
+    assert.ok(await t.platform.blobs.get(`attachments/${img.ref}`), "the blob stays for the other tool");
+    assert.equal(t.platform.registry.attachment(img.ref)!.buildId, b.buildId, "now the other build's");
+    assert.equal((await t.platform.attachmentsWithData(USER, t.platform.buildContext(USER, b.buildId).conversation![0].attachments!)).length, 1);
+    t.platform.archive(USER, "walking-log");
+    await t.platform.purge(USER, "walking-log", "walking-log");
+    assert.equal(await t.platform.blobs.get(`attachments/${img.ref}`), undefined, "gone with the last one");
     assert.equal(t.platform.registry.attachment(img.ref), undefined);
   });
 
