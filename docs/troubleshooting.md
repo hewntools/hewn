@@ -89,6 +89,9 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 
 **"Builder isn't logged in"**: run `claude` once and sign in, or `codex login`. Then check Settings › AI, or run `hewn doctor`.
 
+**"intake took longer than 15 minutes, so Hewn stopped it"**
+The talk before a build had no answer after 15 minutes, which usually means it hung (a dropped connection, a stuck sign-in). Send your message again. If it keeps happening with a long brief, pick a faster model or a lower effort in the chat box's model menu.
+
 **A build fails**
 The build says why (the failing test, the invalid manifest, the error on its screen), with its log, and offers **Ask builder to fix**. When the builder itself is unavailable (signed out, out of usage), Hewn stops instead of retrying.
 
