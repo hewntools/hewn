@@ -633,8 +633,9 @@ async function instructionsSheet(c) {
 
 /** What the intake remembered (or dropped) for later builds, shown as saved, with Undo. */
 function memoryNotice(what, { scope, text }, cap) {
-  const where = scope === "tool" && cap ? `${cap.name}'s builder instructions` : "global builder instructions";
-  const path = scope === "tool" && cap ? `/capabilities/${enc(cap.id)}/instructions` : "/instructions";
+  const tool = scope === "tool" ? cap : null;
+  const where = tool ? `${tool.name}'s builder instructions` : "global builder instructions";
+  const path = tool ? `/capabilities/${enc(tool.id)}/instructions` : "/instructions";
   const undo = h("button", { type: "button", class: "link sm" }, "Undo");
   const el = h("div", { class: "notice info memory-notice" }, h("div", { class: "grow col" }, h("span", { class: "strong" }, what === "remember" ? `Saved to ${where}` : `Removed from ${where}`), h("span", { class: "memory-text" }, text)), undo);
   undo.addEventListener("click", async () => {

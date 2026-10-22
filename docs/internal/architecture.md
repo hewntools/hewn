@@ -97,7 +97,7 @@ request → build row ("waiting" while its `after` build hasn't promoted)
   → promoted, review, failed or cancelled
 ```
 
-**Instructions** are the owner's standing rules for building: lines in `platform_kv` (`instructions:global`, `instructions:<capabilityId>`), owner-only (`instructions`, `setInstructions`; the web client edits them under Settings › AI and a tool's Info). The intake gets them in its prompt and may add to or drop them (`remember`, `forget` in its reply, applied by `applyIntakeMemory` as the surface hands the reply back; the client shows what was saved, with Undo). A build snapshots them when it's opened (`build_context.instructions`, as the "Owner's instructions" section of `BUILDER.md`, after the request and before the contract), so the host's builder gets them too.
+**Instructions** are the owner's standing rules for building: lines in `platform_kv` (`instructions:global`, `instructions:<capabilityId>`), owner-only (`instructions`, `setInstructions`; the web client edits them under Settings › AI and a tool's Info). The intake gets them in its prompt and may add to or drop them (`remember`, `forget` in its reply, applied by `applyIntakeMemory` as the surface hands the reply back; the client shows what was saved, with Undo). A build snapshots them when it's opened (`build_context.instructions`, as the "Owner's instructions" section of `BUILDER.md`, after the request and before the contract, so the contract has the last word), so the host's builder gets them too. Purging a tool drops its rules with it.
 
 What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and a short hash of the brief it ran on. When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
 
@@ -212,7 +212,7 @@ The home is `~/.hewn` for an npm install and `data/` in a checkout run with `./i
 
 The owner's database:
 
-- **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL), `settings` (the owner's settings from the web client).
+- **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL, the owner's instructions under `instructions:global` and `instructions:<id>`, failed calls under `failures:<id>`), `settings` (the owner's settings from the web client).
 - **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief hash a build ran with).
 - **Agents and sessions:** `agents`, `oauth_clients`, `oauth_requests`, `oauth_tokens`, `web_sessions`, `ui_sessions`, `passkeys`.
 - **Authority:** `grants` (kinds `secret`, `host`, `capability`, `model`), `access_requests`, `confirmations`, `secrets_enc`.

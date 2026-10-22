@@ -2957,32 +2957,38 @@ export class Platform {
    */
   applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } {
     requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
     const out: { remember: Instruction[]; forget: Instruction[] } = { remember: [], forget: [] };
     for (const scope of ["global", "tool"] as const) {
       const id = scope === "tool" ? capabilityId : undefined;
-      if (scope === "tool" && (!id || !this.registry.getCapability(id))) continue;
+      if (scope === "tool" && !id) continue;
       const add = instructionEntries(remember, scope);
       const drop = instructionEntries(forget, scope);
       if (!add.length && !drop.length) continue;
       let list = this.instructionLines(id);
+      const dropped: string[] = [];
+      const added: string[] = [];
       for (const t of drop) {
         if (!list.includes(t)) continue;
         list = list.filter((x) => x !== t);
-        out.forget.push({ scope, text: t });
+        dropped.push(t);
       }
       for (const t of add) {
         if (list.includes(t) || list.length >= MAX_INSTRUCTION_LINES) continue;
         list.push(t);
-        out.remember.push({ scope, text: t });
+        added.push(t);
       }
+      if (!added.length && !dropped.length) continue;
+      out.forget.push(...dropped.map((text) => ({ scope, text })));
+      out.remember.push(...added.map((text) => ({ scope, text })));
       this.registry.setKv(this.instructionsKey(id), list);
-      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${add.length}, dropped ${drop.length}`);
+      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${added.length}, dropped ${dropped.length}`);
     }
     return out;
   }
 
   /** The "Owner's instructions" section of BUILDER.md: the rules for every tool, then this tool's. Empty when there are none. */
-  instructionsForBuild(capabilityId: string): string {
+  private instructionsForBuild(capabilityId: string): string {
     const global = this.instructionLines();
     const tool = this.instructionLines(capabilityId);
     if (!global.length && !tool.length) return "";
@@ -3598,7 +3604,6 @@ export class Platform {
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md for a workspace: the request, the implementation contract, the owner's catalog. */
   /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
   private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
