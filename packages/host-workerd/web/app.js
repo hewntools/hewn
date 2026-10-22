@@ -2800,7 +2800,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const ask = async (e) => {
     e?.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    // One turn at a time: the box is disabled while the intake answers (Draft now submits through here too).
+    if (!text || input.disabled) return;
     // Text put in from the address (m=, "Ask builder to fix this") is sent: a redraw mustn't put it back.
     const [path, qs = ""] = location.hash.split("?");
     const params = new URLSearchParams(qs);
@@ -2821,6 +2822,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const live = h("div", { class: "thread" });
     thread.append(live, typing, activity);
     input.disabled = true;
+    draftNow.disabled = true;
     // While it answers, Send is Stop: the request closes and the intake stops.
     const stop = new AbortController();
     const stopBtn = h("button", { type: "button", class: `stop-btn ${embedded ? "" : "lg"}`, "aria-label": "Stop", title: "Stop", onclick: () => stop.abort() }, h("span", { class: "stop-square", "aria-hidden": "true" }));
@@ -2829,7 +2831,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (p.activity) activity.textContent = `${p.activity}…`;
       if (p.message === undefined && p.questions === undefined) return;
       activity.textContent = "";
-      put(live, (p.message || p.questions?.length) && h("div", { class: "bubble them" }, chatText(p.message, p.questions)));
+      put(live, p.message || p.questions?.length ? h("div", { class: "bubble them" }, chatText(p.message, p.questions)) : null);
     };
     try {
       let reply = null;
@@ -2884,6 +2886,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
+      draftNow.disabled = false;
       syncSend();
       grow();
       input.focus();

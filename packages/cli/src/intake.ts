@@ -192,7 +192,7 @@ const EARLIER_TURNS = 30;
 const EARLIER_CHARS = 4000;
 
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): string {
-  const turn =(m: { role: string; content: string }, max = Infinity) => `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content.length > max ? `${m.content.slice(0, max)}…` : m.content}`;
+  const turn = (m: { role: string; content: string }, max = Infinity) => `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content.length > max ? `${m.content.slice(0, max)}…` : m.content}`;
   const convo = req.messages.map((m) => turn(m)).join("\n\n");
   const earlier = req.earlier?.messages?.length
     ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turn(m, EARLIER_CHARS)).join("\n\n")}\n\n`
