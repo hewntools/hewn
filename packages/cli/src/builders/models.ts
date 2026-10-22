@@ -152,7 +152,8 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; code
 }
 
 /**
- * Output meaning the CLI won't run the model it was given (retired, misspelled, or not on this
- * account): the build stops, saying so (never a quiet switch to the default).
+ * Output meaning the CLI won't run the model it was given (retired, misspelled, not on this
+ * account, or gone upstream: OpenCode's free tier says "Model is unavailable" for one it still
+ * lists): the build stops, saying so (never a quiet switch to the default).
  */
-export const MODEL_REJECTED = /issue with the selected model|selected model .{0,80}(not exist|access)|model[^\n]{0,60}\b(not found|does not exist|doesn't exist|is not available|isn't available|not supported|is not supported)|unknown model|invalid model|not_found_error[^\n]*model|(Provider)?ModelNotFound|provider[^\n]{0,40}\bnot found/i;
+export const MODEL_REJECTED = /issue with the selected model|selected model .{0,80}(not exist|access)|model[^\n]{0,60}\b(not found|does not exist|doesn't exist|is not available|isn't available|is unavailable|not supported|is not supported)|unknown model|invalid model|not_found_error[^\n]*model|(Provider)?ModelNotFound|provider[^\n]{0,40}\bnot found/i;

@@ -64,6 +64,8 @@ describe("OpenCode's events become activity lines", () => {
     assert.ok(!USED_TOOL.test(opencodeActivity({ type: "text", part: { type: "text", text: "hi" } }, ws)!));
     assert.match('{"type":"error","error":{"name":"ProviderModelNotFoundError","data":{"message":"Model not found"}}}', MODEL_REJECTED);
     assert.match("model not found: anthropic/claude-x (not in opencode models)", MODEL_REJECTED);
+    // The free tier, for a model it still lists (seen in the 0.4.7 smoke test): the owner is told to pick another, not shown the raw text.
+    assert.match('{"type":"error","error":{"name":"APIError","data":{"message":"Upstream request failed: Model is unavailable.","statusCode":400}}}', MODEL_REJECTED);
     assert.match('{"type":"error","error":{"name":"ProviderAuthError","data":{"message":"no credentials"}}}', UNAVAILABLE);
     assert.doesNotMatch("→ write src/models.ts", MODEL_REJECTED);
   });
