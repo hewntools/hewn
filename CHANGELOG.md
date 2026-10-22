@@ -2,6 +2,12 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.6 (unreleased)
+
+- **The intake gets 15 minutes, not 5,** so a long brief on a slow, careful model (Opus at high effort) finishes. Past that it's stopped with "intake took longer than 15 minutes, so Hewn stopped it" instead of the last raw line of its output.
+- **Fixed: a tool's hidden message showed as an empty red box.** The UI kit's `.notice` (and any other class that sets `display`) no longer overrides `hidden`.
+- **The chat box's example goes after your first message** (no "Track my coffee beans…" under a conversation about something else).
+
 ## 0.4.5 (2026-10-21)
 
 - **For hosts: tools that think run on the host's models** (hosted mode, `HEWN_HOSTED`). A tool's `ctx.model` goes to the host's `/v1/generate` (through the supervisor, which holds the token), so the owner needs no API key. Settings › AI › Models shows what each tier runs on and what the host charged this month (builds, talking requests through, tools that think), with no providers, keys or USD caps. A refusal (over the month) reaches the tool's caller in the host's words. See the [remote builder protocol](docs/internal/remote-builder.md#tools-model-calls-post-v1generate-hosted).

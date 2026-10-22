@@ -2726,6 +2726,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     heading.hidden = embedded;
     say("me", text);
     input.value = "";
+    input.placeholder = ""; // the example is for an empty conversation
     grow();
     syncSend();
     const typing = h("div", { class: "bubble them typing", role: "status", "aria-label": "Thinking" }, h("i"), h("i"), h("i"));
