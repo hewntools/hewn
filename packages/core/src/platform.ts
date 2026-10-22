@@ -72,6 +72,7 @@ import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
 import type { TestCase } from "@hewntools/spec/cases.ts";
+import spec from "@hewntools/spec/package.json" with { type: "json" };
 
 export interface CapabilitySummary {
   id: string;
@@ -288,6 +289,8 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 /** The most turns a conversation kept with a build may have, and the longest turn. */
 const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
+/** The longest structured reply kept with an intake turn (as JSON). */
+const MAX_REPLY_CHARS = 100_000;
 
 /** The owner's instructions for building: at most this many lines per scope, each this long. */
 const MAX_INSTRUCTION_LINES = 50;
@@ -368,8 +371,8 @@ export class Platform {
   private catalogIndex?: { fetchedAt: string; byId: Map<string, CatalogEntry> };
   private providerLists = new Map<string, { raw: string | undefined; list: ReturnType<Platform["providerList"]> }>();
   private brief: string;
-  /** Which brief builds run on, recorded with each build (a short hash of the brief's text). */
-  private briefHash: string;
+  /** Which brief builds run on, recorded with each build: the spec's version and a short hash of the brief's text. */
+  private briefId: string;
   private designSystem?: () => Promise<string | undefined>;
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
@@ -403,7 +406,7 @@ export class Platform {
     this.agentStore = new AgentStore(opts.sql);
     this.agentStore.onChange = () => this.events.emit("changed");
     this.brief = opts.brief;
-    this.briefHash = sha256(opts.brief).slice(0, 12);
+    this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
     // Everything worth a log line may change what agents see (catalog, readiness): open MCP
     // sessions re-check their tool lists (debounced, and only notified when it differs).
@@ -2534,7 +2537,7 @@ export class Platform {
   /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
   private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
     const instructions = this.instructionsForBuild(capabilityId);
-    return { brief: this.briefHash, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
+    return { brief: this.briefId, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
   }
 
   /**
@@ -2549,7 +2552,9 @@ export class Platform {
       if (!t || (t.role !== "user" && t.role !== "intake") || typeof t.content !== "string" || t.content.length > MAX_TURN_CHARS) {
         throw new PlatformError("invalid_request", `each turn of the conversation needs a role ("user" or "intake") and content of at most ${MAX_TURN_CHARS} characters`);
       }
-      return { role: t.role, content: t.content };
+      // An intake turn may carry its structured reply, for showing the proposal as it was; kept as is, within reason.
+      const reply = t.role === "intake" && t.reply && typeof t.reply === "object" && JSON.stringify(t.reply).length <= MAX_REPLY_CHARS ? t.reply : undefined;
+      return { role: t.role, content: t.content, ...(reply ? { reply } : {}) };
     });
   }
 
