@@ -19,10 +19,11 @@ export const isArtefact = (path: string) => path.split("/").some((part) => ARTEF
 
 /**
  * Files a builder agent reads as its own configuration or instructions: dotfiles and dot-dirs
- * (`.claude/settings.json` hooks run shell commands), CLAUDE.md, AGENTS.md. Kept in a version, they
- * would steer (or run code in) the next build of it, so they never become part of one.
+ * (`.claude/settings.json` hooks run shell commands), CLAUDE.md, AGENTS.md, OpenCode's project
+ * config. Kept in a version, they would steer (or run code in) the next build of it, so they never
+ * become part of one.
  */
-export const isBuilderConfig = (path: string) => path.split("/").some((part) => part.startsWith(".") || /^(CLAUDE|CLAUDE\.local|AGENTS)\.md$/i.test(part));
+export const isBuilderConfig = (path: string) => path.split("/").some((part) => part.startsWith(".") || /^(CLAUDE|CLAUDE\.local|AGENTS)\.md$/i.test(part) || /^opencode\.jsonc?$/i.test(part));
 
 /** The files that make up a version: no artefacts, no workspace-only files, no builder configuration. */
 export function versionFiles(files: Files): Files {

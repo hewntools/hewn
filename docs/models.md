@@ -4,10 +4,10 @@ Some tools think: they suggest tags, explain a word, summarise your week. Those 
 
 | Hewn's job | Who does it | Paid by |
 | --- | --- | --- |
-| Builds tools (talks it through, then builds) | Claude Code or Codex on your machine | however it's signed in |
+| Builds tools (talks it through, then builds) | Claude Code, Codex or OpenCode on your machine | however it's signed in |
 | Thinks inside tools | a model provider's API | your API key, metered |
 
-Tools call models directly, not through an agent, so your Claude Code or Codex login doesn't cover them, nor does a Claude or ChatGPT subscription. Settings › AI shows both jobs and who does each.
+Tools call models directly, not through an agent, so your Claude Code, Codex or OpenCode login doesn't cover them, nor does a Claude or ChatGPT subscription. Settings › AI shows both jobs and who does each.
 
 ## Building tools
 
@@ -15,7 +15,9 @@ Building uses the model you pick for it in Settings › AI (**Builds tools › M
 
 - **Default:** Hewn passes no model; the agent uses its own default, and follows it when that changes.
 - **A family** (Claude Code's Fable, Opus, Sonnet, Haiku): the newest of it. Picked on Fable 5.1, the next build after Fable 5.5 ships uses Fable 5.5.
-- **A pinned model** (a full name such as `claude-fable-5-1`, or any Codex model, whose names carry a version): stays on that one. When it's gone, or the agent won't run it, nothing is built: the build (or the chat) stops at once with "… isn't available. Pick another model", and you pick another.
+- **A pinned model** (a full name such as `claude-fable-5-1`, any Codex model, whose names carry a version, or an OpenCode `provider/model`): stays on that one. When it's gone, or the agent won't run it, nothing is built: the build (or the chat) stops at once with "… isn't available. Pick another model", and you pick another.
+
+**OpenCode** lists whatever it's signed in to (`opencode auth login`), the providers in your `~/.config/opencode/opencode.json` and its free tier, as `provider/model`; its efforts are the model's own reasoning levels (`--variant`). A local model server you configured there (Ollama, LM Studio) works for building too: Hewn lets the builder reach that server's port and nothing else on your machine.
 
 Switching agent means choosing its model; Hewn remembers your last choice for each agent. You can also change it in the box where you describe a tool: the model it shows (e.g. **Fable High ⌄**) opens a menu with the current model, an effort slider, and the other models (and a full name). It's the same setting as in Settings › AI, so it stays for what you build next.
 

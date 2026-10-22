@@ -39,10 +39,10 @@ export const JOBS = ["builder", "intake"] as const;
 export type Job = (typeof JOBS)[number];
 
 /** The agents that can do Hewn's jobs: the CLIs on this machine, and the host's builder when it offers one. */
-export const jobAgents = (remote: boolean) => ["claude", "codex", ...(remote ? ["remote"] : [])];
+export const jobAgents = (remote: boolean) => ["claude", "codex", "opencode", ...(remote ? ["remote"] : [])];
 
 /** Models agents may ask for until the owner changes it: the default and Claude Code's families (they follow the newest). */
-export const DEFAULT_AGENT_MODELS: Record<string, string[]> = { claude: ["default", "fable", "opus", "sonnet", "haiku"], codex: ["default"], remote: ["default"] };
+export const DEFAULT_AGENT_MODELS: Record<string, string[]> = { claude: ["default", "fable", "opus", "sonnet", "haiku"], codex: ["default"], opencode: ["default"], remote: ["default"] };
 
 /** The owner's model and effort for `job` on `agent`. */
 export const jobModel = (s: Pick<Settings, "jobModels">, job: Job, agent: string): JobModel => s.jobModels?.[job]?.[agent] ?? {};

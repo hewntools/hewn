@@ -2,6 +2,11 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.7 (unreleased)
+
+- **OpenCode builds tools, talks them through, and uses them.** Pick it under Settings › AI › Builds tools (or on the first run), on any provider it's signed in to (`opencode auth login`), on its free tier, or on a local model server from your `~/.config/opencode/opencode.json` (Ollama, LM Studio): Hewn lets the build reach that server's port and nothing else on your machine. Its models are listed as `provider/model`, with the model's own reasoning levels as efforts. It builds like the others: in a sandbox, in a home of its own (your provider logins for the run, never your config, plugins, sessions or MCP tokens), with file tools only, and a failed validation resumes its session. Connect it as an agent from Agents › Add… or `hewn setup --agents opencode`: Hewn registers itself in OpenCode's global config and `AGENTS.md`, then `opencode mcp auth hewn` signs it in. `hewn doctor` checks it. If it had no `~/.config/opencode/AGENTS.md`, it now reads that instead of `~/.claude/CLAUDE.md`.
+- A build on a model OpenCode doesn't list stops at once ("… isn't available"), and a run that never says anything is stopped after three minutes instead of the full fifteen: OpenCode 1.18.18 hangs rather than fails on a model it can't resolve.
+
 ## 0.4.6 (2026-10-22)
 
 - **A build keeps what led to it,** for the tool's life: your conversation with the intake, the spec, and the builder's log (which used to go after 30 days). The build page has **Conversation** next to **Spec agreed**; in **Versions**, each version's **Details** opens its conversation, spec and log, and **Continue from here** starts a change with that conversation as context. Builds also record which brief they ran on.

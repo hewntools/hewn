@@ -2,12 +2,12 @@
 
 Hewn runs on your own machine: macOS, Linux, or Windows through WSL.
 
-Install it where the agent that [builds your tools](concepts.md#hewns-two-jobs) (Claude Code or Codex) is signed in, usually the computer you work on. Want Hewn on your phone too? Put it on a machine that's always on and follow [Using Hewn from anywhere](remote-access.md) after this.
+Install it where the agent that [builds your tools](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode) is signed in, usually the computer you work on. Want Hewn on your phone too? Put it on a machine that's always on and follow [Using Hewn from anywhere](remote-access.md) after this.
 
 ## Before you start
 
 - **Node.js 24 or newer.** `node --version`. If it's older: Use [nvm](https://github.com/nvm-sh/nvm), then `nvm install 24`.
-- **A builder:** Claude Code (`claude`) or Codex (`codex`), installed and signed in: with a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI. It writes and tests your tools.
+- **A builder:** Claude Code (`claude`), Codex (`codex`) or OpenCode (`opencode`), installed and signed in: with a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI (OpenCode: any provider it supports, a local model server too). It writes and tests your tools.
 - **Linux:** Ubuntu 22.04 or newer, or another distribution with glibc 2.28 or newer.
 
 The install script takes care of the rest on Linux and WSL: it installs bubblewrap (the sandbox) if it's missing, and on WSL tells you how to turn on systemd if it's off.
@@ -45,13 +45,14 @@ On a healthy install, `hewn doctor` says:
 ✔ Visual check  chrome-headless-shell
 ✔ Claude Code   Hewn registered (if it asks to sign in: hewn setup --agents claude-code)
 ✔ Codex         Hewn registered (if it asks to sign in: hewn setup --agents codex)
+✔ OpenCode      not installed on this machine (skipped)
 ✔ Backups       last 2026-10-19 · ~/.hewn-backups
 
 No problems.
 ```
 
 The first run has three steps:
-1. Connect the agents on this machine that will use your tools (Claude Code, Codex).
+1. Connect the agents on this machine that will use your tools (Claude Code, Codex, OpenCode).
 2. Choose who [builds your tools](concepts.md#hewns-two-jobs): the agent on this machine that talks each request through with you and builds it.
 3. Describe your first tool.
 
@@ -69,15 +70,15 @@ It installs the newest release in your minor line (e.g. 0.4.x) with npm, into th
 
 ```sh
 hewn uninstall          # lists what it would remove
-hewn uninstall --yes    # the service, Hewn in Claude Code / Codex, their pointer blocks, the hewn command
+hewn uninstall --yes    # the service, Hewn in Claude Code / Codex, the pointer blocks, the hewn command
 ```
 
-Your data, backups, Hewn itself (`npm uninstall -g @hewntools/cli`) and the secrets key stay. It prints how to remove each of them.
+Your data, backups, Hewn itself (`npm uninstall -g @hewntools/cli`), the secrets key and Hewn's entry in OpenCode's config stay. It prints how to remove each of them.
 
 ## Next
 
 - [Concepts](concepts.md): tools, agents, Hewn's two jobs, grants.
 - [The web client](using-hewn.md) and [Building tools](building-tools.md).
-- [Connecting agents](agents.md): Claude Code, Codex, claude.ai, ChatGPT.
+- [Connecting agents](agents.md): Claude Code, Codex, OpenCode, claude.ai, ChatGPT.
 - [Using Hewn from anywhere](remote-access.md): your phone and other computers, on an always-on machine.
 - [All the docs](README.md).

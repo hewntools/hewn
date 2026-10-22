@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from "node:
 import { join } from "node:path";
 import type { KeySource } from "./supervisor/master-key.ts";
 import { MARKDOWN, removeBlock } from "./setup/blocks.ts";
-import type { Exec, Harness } from "./setup/harnesses.ts";
+import { type Exec, type Harness, opencodeConfigDir } from "./setup/harnesses.ts";
 
 /**
  * `hewn uninstall`: what Hewn put outside its own folders, undone. The service, the agents'
@@ -35,12 +35,14 @@ export function uninstallPlan(o: {
   const steps: UninstallStep[] = [];
   if (o.service.installed) steps.push({ describe: "stop and remove the background service", run: o.service.uninstall });
 
+  // OpenCode has no `mcp remove`: its entry is listed below for the owner to take out.
+  const forget: Record<string, string[]> = { "claude-code": ["claude", "mcp", "remove", "--scope", "user", "hewn"], codex: ["codex", "mcp", "remove", "hewn"] };
   for (const h of o.harnesses) {
-    if (!h.registered(o.userHome)) continue;
-    const argv = h.agentId === "claude-code" ? ["claude", "mcp", "remove", "--scope", "user", "hewn"] : ["codex", "mcp", "remove", "hewn"];
+    const argv = forget[h.agentId];
+    if (!argv || !h.registered(o.userHome)) continue;
     steps.push({ describe: `remove Hewn from ${h.label} (${argv.join(" ")})`, run: () => o.exec(argv[0], argv.slice(1)) });
   }
-  for (const file of [join(o.userHome, ".claude", "CLAUDE.md"), join(o.userHome, ".codex", "AGENTS.md")]) {
+  for (const file of [join(o.userHome, ".claude", "CLAUDE.md"), join(o.userHome, ".codex", "AGENTS.md"), join(opencodeConfigDir(o.userHome), "AGENTS.md")]) {
     if (existsSync(file) && readFileSync(file, "utf8").includes(MARKDOWN.begin)) {
       steps.push({ describe: `remove the Hewn pointer block from ${file}`, run: () => void removeBlock(file, MARKDOWN) });
     }
@@ -65,8 +67,10 @@ export function uninstallPlan(o: {
     }
   })();
   const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+  const opencode = o.harnesses.find((h) => h.agentId === "opencode");
   const leftovers = [
     `your data: rm -rf ${q(o.homeRoot)}`,
+    ...(opencode?.registered(o.userHome) ? [`Hewn in OpenCode: take "hewn" out of "mcp" in ${join(opencodeConfigDir(o.userHome), "opencode.json")} (or .jsonc)`] : []),
     ...(existsSync(o.backupDir) ? [`backups: rm -rf ${q(o.backupDir)}`] : []),
     o.bundled ? `Hewn itself: npm uninstall -g${o.npmPrefix ? ` --prefix ${q(o.npmPrefix)}` : ""} @hewntools/cli` : `Hewn itself (this checkout): rm -rf ${q(o.appDir)}`,
     o.keySource === "keychain"

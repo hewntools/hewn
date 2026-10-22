@@ -7,7 +7,7 @@ import type { Home } from "./home.ts";
 
 /** User-owned platform settings. Agents have no API to change them. */
 export interface PlatformConfig {
-  /** Who builds candidates: Claude Code or Codex on this machine, or "remote" (the host's, HEWN_BUILD_URL). */
+  /** Who builds candidates: Claude Code, Codex or OpenCode on this machine, or "remote" (the host's, HEWN_BUILD_URL). */
   builder: string;
   maxBuildAttempts: number;
   /** Confine capability code (Seatbelt + egress proxy). Turn off only to debug. */

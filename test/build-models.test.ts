@@ -267,7 +267,7 @@ describe("model lists and flags", () => {
 describe("settings for models", () => {
   const base = { builder: "claude", intake: "claude", maxBuildAttempts: 3, sandbox: true, logRetentionDays: 14 };
   test("remote is a choice only where the host offers it; a saved one doesn't block other changes", () => {
-    assert.deepEqual(settingsProblems({ ...base, builder: "remote" }), ["builder must be claude, codex"]);
+    assert.deepEqual(settingsProblems({ ...base, builder: "remote" }), ["builder must be claude, codex, opencode"]);
     assert.deepEqual(settingsProblems({ ...base, builder: "remote" }, { changed: ["timeZone"] }), []);
     assert.deepEqual(settingsProblems({ ...base, builder: "remote", intake: "remote" }, { remote: true }), []);
   });

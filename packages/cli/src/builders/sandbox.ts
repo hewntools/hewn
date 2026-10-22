@@ -17,6 +17,8 @@ export interface BuilderSandboxOptions {
   ownState: string[];
   /** For builders with a shell: block the `security` CLI and Keychain files (their auth must not need them). */
   denyKeychain: boolean;
+  /** Ports on this machine the builder may reach (macOS; a local model server's). Everything else local stays closed. */
+  allowLoopback?: number[];
   home?: string;
 }
 
@@ -31,12 +33,13 @@ const real = (p: string) => {
 
 /**
  * Locations under $HOME that hold the user's work and credentials. The builders' own logins are
- * here too (.claude, .codex): each builder re-opens only its own (`ownState`).
+ * here too (.claude, .codex, .config/opencode and .local/share/opencode): each builder re-opens only
+ * its own (`ownState`).
  */
 export const PRIVATE_HOME_DIRS = [
   "github", "Documents", "Desktop", "Downloads",
   ".ssh", ".aws", ".azure", ".gnupg", ".config", ".docker", ".kube", ".gem", ".cargo", ".password-store", ".local/share/keyrings", ".mozilla",
-  ".claude", ".codex",
+  ".claude", ".codex", ".local/share/opencode", ".local/state/opencode", ".agents",
   "Library/Keychains", "Library/Application Support", "Library/Cookies", "Library/Mail", "Library/Messages", "Library/Safari",
 ];
 /** Files directly under $HOME with credentials or history. */
@@ -59,6 +62,8 @@ export function builderProfile(o: BuilderSandboxOptions): string {
     `(deny file-read* ${sub([o.platformRoot, ...privateDirs])})`,
     // Not Hewn's own ports (or anything else on this machine): builders only need their model API.
     '(deny network-outbound (remote ip "localhost:*"))',
+    // Except a local model server's port (the owner's OpenCode provider config names it).
+    ...(o.allowLoopback ?? []).filter((p) => Number.isInteger(p) && p > 0 && p < 65536).map((p) => `(allow network-outbound (remote ip "localhost:${p}"))`),
     "(allow file-read-metadata)",
     `(allow file-read* ${sub([o.workspace, ...o.ownState])})`,
     '(deny file-write* (subpath "/"))',

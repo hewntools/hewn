@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, cpSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { homedir, platform } from "node:os";
+import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EFFORT } from "@hewntools/core/build-models.ts";
-import { claudeActivity, codexActivity, USED_TOOL } from "./activity.ts";
+import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./activity.ts";
 import { MODEL_REJECTED } from "./models.ts";
 import { wrapBuilder } from "./sandbox.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
@@ -35,11 +35,11 @@ export function resumePrompt(job: BuildJob): string {
  * (brief read, candidate written) with the failure, instead of starting over. In memory only: after
  * a restart the next attempt starts fresh.
  */
-const sessions = { claude: new Map<string, string>(), codex: new Map<string, string>() };
+const sessions = { claude: new Map<string, string>(), codex: new Map<string, string>(), opencode: new Map<string, string>() };
 export const noteSession = (builder: keyof typeof sessions, buildId: string, id: string) => void sessions[builder].set(buildId, id);
 /** The session a later attempt can resume, when this process ran an earlier one. */
 export const sessionOf = (builder: keyof typeof sessions, job: Pick<BuildJob, "buildId" | "attempt">): string | undefined => (job.attempt > 1 ? sessions[builder].get(job.buildId) : undefined);
-export const forgetSession = (buildId: string) => (sessions.claude.delete(buildId), sessions.codex.delete(buildId));
+export const forgetSession = (buildId: string) => Object.values(sessions).forEach((m) => m.delete(buildId));
 
 type Formatter = (event: any, cwd: string) => string | null;
 
@@ -52,13 +52,19 @@ const stamp = () => new Date().toTimeString().slice(0, 8);
 interface Confine {
   ownState: string[];
   denyKeychain: boolean;
+  /** Ports on this machine the builder may reach (a local model server's). */
+  allowLoopback?: number[];
 }
 
-/** What a builder's environment keeps: the basics, its own model and login settings, proxies and CAs. Not the rest of yours (tokens). */
-const BUILDER_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TZ|TMPDIR|LC_\w+|(ANTHROPIC|CLAUDE|OPENAI|CODEX)_\w+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_(FILE|DIR))$/;
+/**
+ * What a builder's environment keeps: the basics, its own model and login settings (the providers'
+ * API keys OpenCode reads from the environment among them), proxies and CAs. Not the rest of yours
+ * (tokens), and not OpenCode's own config variables: the run gets its own.
+ */
+const BUILDER_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TZ|TMPDIR|LC_\w+|(ANTHROPIC|CLAUDE|OPENAI|CODEX|OPENROUTER|GEMINI|GOOGLE|XAI|GROQ|MISTRAL|DEEPSEEK|OLLAMA)_\w+|OPENCODE_API_KEY|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_(FILE|DIR))$/;
 export const builderEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(env).filter(([k]) => BUILDER_ENV.test(k)));
 
-function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void): Promise<void> {
+function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
   const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
   write(`===== attempt ${job.attempt}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
   if (job.platformRoot) {
@@ -74,7 +80,12 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
   return new Promise((resolve, reject) => {
     const raw = createWriteStream(job.logPath.replace(/\.log$/, ".jsonl"), { flags: "a" });
     const child = spawn(command, args, { cwd: job.workspace, env, stdio: ["ignore", "pipe", "pipe"] });
+    // A CLI that never says anything (OpenCode has been seen stuck before its first event): stop it early, with a reason.
+    let stalled = false;
+    let quiet = quietStartMs ? setTimeout(() => ((stalled = true), child.kill("SIGTERM")), quietStartMs) : undefined;
+    const spoke = () => (clearTimeout(quiet), (quiet = undefined));
     createInterface({ input: child.stdout }).on("line", (line) => {
+      spoke();
       raw.write(line + "\n");
       let activity: string | null;
       try {
@@ -95,6 +106,7 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
     });
     createInterface({ input: child.stderr }).on("line", (line) => {
       if (!line.trim()) return;
+      spoke();
       if (!unavailable && UNAVAILABLE.test(line)) unavailable = line.trim();
       checkModel(line);
       write(`! ${line}`);
@@ -105,10 +117,12 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
     child.once("error", (e) => (clearTimeout(timer), reject(e)));
     child.once("close", (code, signal) => {
       clearTimeout(timer);
+      spoke();
       job.signal?.removeEventListener("abort", cancel);
       if (job.signal?.aborted) return reject(Object.assign(new Error("cancelled"), { cancelled: true }));
       raw.end();
       if (code === 0) resolve();
+      else if (stalled) reject(Object.assign(new Error(`${command} said nothing for ${Math.round(quietStartMs! / 60_000)} minutes, so Hewn stopped it (it never started); try again`), { usedTools }));
       else if (modelRejected) reject(Object.assign(new Error(modelRejected), { modelRejected: true }));
       else if (unavailable) reject(Object.assign(new Error(`${unavailable} (log in to ${job.builderName ?? "the builder CLI"}, or switch "builder" in platform.json)`), { unavailable: true }));
       else reject(Object.assign(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`), { usedTools }));
@@ -117,6 +131,8 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
 }
 
 const TIMEOUT_MS = 15 * 60_000;
+/** How long OpenCode gets to say its first word (its model list, then a step): a run stuck before that is stopped. */
+export const OPENCODE_QUIET_START_MS = 3 * 60_000;
 
 /**
  * Run with the asked-for model. If the CLI won't run it (retired, misspelled, not on this account),
@@ -139,9 +155,152 @@ export const modelUnavailableText = (model: string) => `${model} isn't available
 export const claudeModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["--model", m.model] : []), ...(m.effort ? ["--effort", m.effort] : [])];
 /** `-m` / reasoning effort for Codex. */
 export const codexModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["-m", m.model] : []), ...(m.effort && EFFORT.test(m.effort) ? ["-c", `model_reasoning_effort="${m.effort}"`] : [])];
+/** `-m provider/model` / `--variant` (the model's named reasoning levels) for OpenCode. */
+export const opencodeModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["-m", m.model] : []), ...(m.effort && EFFORT.test(m.effort) ? ["--variant", m.effort] : [])];
 
-/** Builder output meaning "retrying won't help": not logged in, revoked token, no quota. */
-export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|401|usage limit|quota exceeded/i;
+/** Builder output meaning "retrying won't help": not logged in, revoked token, no quota, no key for the provider. */
+export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|401|usage limit|quota exceeded|ProviderAuthError|no (api key|credentials?) (found|configured|set)|not authenticated/i;
+
+/**
+ * What an OpenCode run may do, set above anything in the workspace (`OPENCODE_CONFIG_CONTENT` wins
+ * over a project `opencode.json`, which the builder could write). The builder: read and write the
+ * workspace, nothing else (no shell, no web, no subagents, no skills, no questions: the run can't
+ * answer them). The intake: read, and fetch web pages to check what the owner mentions, nothing else.
+ * Both names of the shell permission, for OpenCode versions on either side of its rename.
+ */
+export interface OpencodeRules {
+  permission: Record<string, string>;
+  tools: Record<string, boolean>;
+}
+const deny = (names: string[]): Record<string, string> => Object.fromEntries(names.map((n) => [n, "deny"]));
+const off = (names: string[]): Record<string, boolean> => Object.fromEntries(names.map((n) => [n, false]));
+export const OPENCODE_BUILDER_RULES: OpencodeRules = {
+  permission: { read: "allow", edit: "allow", glob: "allow", grep: "allow", doom_loop: "allow", ...deny(["bash", "shell", "webfetch", "websearch", "task", "skill", "lsp", "question", "external_directory"]) },
+  tools: off(["bash", "shell", "webfetch", "websearch", "task", "skill", "question"]),
+};
+export const OPENCODE_INTAKE_RULES: OpencodeRules = {
+  permission: { read: "allow", glob: "allow", grep: "allow", webfetch: "allow", doom_loop: "allow", ...deny(["edit", "bash", "shell", "websearch", "task", "skill", "lsp", "question", "external_directory"]) },
+  tools: off(["edit", "write", "patch", "bash", "shell", "websearch", "task", "skill", "question"]),
+};
+
+/** Your own OpenCode directories (XDG), where its logins, config and caches live. */
+export const opencodeUserDirs = (home = homedir(), env: NodeJS.ProcessEnv = process.env) => ({
+  config: join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode"),
+  data: join(env.XDG_DATA_HOME || join(home, ".local", "share"), "opencode"),
+  cache: join(env.XDG_CACHE_HOME || join(home, ".cache"), "opencode"),
+});
+
+/** Ports on this machine among a provider config's base URLs: a local model server (Ollama, LM Studio) the run must reach. */
+export function loopbackPorts(providers: Record<string, unknown> | undefined): number[] {
+  const ports = new Set<number>();
+  for (const p of Object.values(providers ?? {})) {
+    const url = (p as { options?: { baseURL?: unknown } })?.options?.baseURL;
+    if (typeof url !== "string") continue;
+    try {
+      const u = new URL(url);
+      if (["localhost", "127.0.0.1", "[::1]", "0.0.0.0"].includes(u.hostname)) ports.add(Number(u.port) || (u.protocol === "https:" ? 443 : 80));
+    } catch {
+      // not a URL: nothing to allow
+    }
+  }
+  return [...ports].sort((a, b) => a - b);
+}
+
+/**
+ * Your OpenCode's resolved config (`opencode debug config`), read with plugins off and nothing
+ * written: its `provider` section is what a run needs to see your custom providers (a local model
+ * server, a provider with options). Kept for 10 minutes. Nothing when OpenCode can't say.
+ */
+let providerCache: { at: number; providers?: Record<string, unknown> } | undefined;
+export function opencodeProviders(read: () => string = () => execFileSync("opencode", ["debug", "config", "--pure"], { cwd: tmpdir(), encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, OPENCODE_CONFIG_CONTENT: '{"autoupdate":false}' } })): Record<string, unknown> | undefined {
+  if (providerCache && Date.now() - providerCache.at < 10 * 60_000) return providerCache.providers;
+  let providers: Record<string, unknown> | undefined;
+  try {
+    const cfg = JSON.parse(read());
+    if (cfg && typeof cfg.provider === "object" && cfg.provider && Object.keys(cfg.provider).length) providers = cfg.provider;
+  } catch {
+    // no OpenCode, or no config: the run sees the providers it's logged in to, and the free ones
+  }
+  providerCache = { at: Date.now(), providers };
+  return providers;
+}
+
+/**
+ * Whether OpenCode, in the run's own home, lists the model (`opencode models`: its logins, its
+ * providers, the free tier). Asked before a run with a chosen model: a model it can't resolve (a
+ * misspelling, a provider it isn't signed in to) doesn't fail an `opencode run`, it hangs it (seen
+ * on 1.18.18), and the build would wait its whole timeout to say nothing. Can't tell (the command
+ * fails): run anyway.
+ */
+export function opencodeHasModel(model: string, env: NodeJS.ProcessEnv, cwd: string, list: () => string = () => execFileSync("opencode", ["models", "--pure"], { cwd, env, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] })): boolean {
+  try {
+    return list().split("\n").map((l) => l.trim()).includes(model);
+  } catch {
+    return true;
+  }
+}
+
+/** The error a run with a model OpenCode doesn't list stops with (`withModelCheck` words it for the owner). */
+export const opencodeModelRejected = (model: string) => Object.assign(new Error(`model not found: ${model} (not in opencode models)`), { modelRejected: true });
+
+export interface OpencodeHomeOptions {
+  /** What the run may do (OPENCODE_BUILDER_RULES or OPENCODE_INTAKE_RULES). */
+  rules: OpencodeRules;
+  /** Your OpenCode directories (defaults: XDG under your home). */
+  yours?: { config: string; data: string; cache: string };
+  /** Your custom providers (`provider` in your config), carried over. Default: read from OpenCode. */
+  providers?: () => Record<string, unknown> | undefined;
+}
+
+/**
+ * OpenCode runs with a HOME of its own (`dir`, one per build or for the intake) and its config, data,
+ * cache and state directories under it: none of your config, plugins, skills (~/.agents/skills,
+ * ~/.claude/skills), sessions or MCP logins reach it, and nothing it writes reaches yours. It gets
+ * your provider logins (auth.json) for the run, copied back if it refreshed them and removed after;
+ * your custom providers (a local model server among them) are written into its config, with updates
+ * and session sharing off, and the permissions on top as `OPENCODE_CONFIG_CONTENT` (above a project
+ * config the builder could write). Its plugin SDK install is copied from yours when it's there (else
+ * OpenCode installs it from npm, once per home), with your model list cache. The run can't read
+ * ~/.claude's instructions or a project config (`OPENCODE_DISABLE_*`). What else it writes (a
+ * build's session, for a later attempt to resume) stays until the dir goes.
+ */
+export function opencodeHome(dir: string, o: OpencodeHomeOptions): { env: NodeJS.ProcessEnv; dir: string; loopback: number[]; done: () => void } {
+  const yours = o.yours ?? opencodeUserDirs();
+  const config = join(dir, "config", "opencode");
+  const data = join(dir, "data", "opencode");
+  const cache = join(dir, "cache", "opencode");
+  for (const d of [dir, config, data, cache, join(dir, "state")]) mkdirSync(d, { recursive: true, mode: 0o700 });
+  // The plugin SDK OpenCode installs into its config dir on every start when missing (from npm, minutes on a slow registry): yours instead.
+  if (!existsSync(join(config, "node_modules")) && existsSync(join(yours.config, "node_modules", "@opencode-ai", "plugin"))) {
+    for (const f of ["package.json", "package-lock.json", "node_modules"]) if (existsSync(join(yours.config, f))) cpSync(join(yours.config, f), join(config, f), { recursive: true });
+  }
+  for (const f of ["models.json", "bin"]) if (!existsSync(join(cache, f)) && existsSync(join(yours.cache, f))) cpSync(join(yours.cache, f), join(cache, f), { recursive: true });
+  const providers = (o.providers ?? opencodeProviders)();
+  writeFileSync(join(config, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json", autoupdate: false, share: "disabled", ...(providers ? { provider: providers } : {}), ...o.rules }, null, 2));
+  const mine = join(yours.data, "auth.json");
+  const theirs = join(data, "auth.json");
+  if (existsSync(mine)) copyFileSync(mine, theirs);
+  const copied = existsSync(theirs) ? statSync(theirs).mtimeMs : 0;
+  return {
+    dir,
+    loopback: loopbackPorts(providers),
+    env: {
+      ...builderEnv(),
+      HOME: dir,
+      XDG_CONFIG_HOME: join(dir, "config"),
+      XDG_DATA_HOME: join(dir, "data"),
+      XDG_CACHE_HOME: join(dir, "cache"),
+      XDG_STATE_HOME: join(dir, "state"),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: "disabled", ...o.rules }),
+      OPENCODE_DISABLE_CLAUDE_CODE: "1",
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+    },
+    done: () => {
+      if (existsSync(theirs) && statSync(theirs).mtimeMs > copied && existsSync(dirname(mine))) copyFileSync(theirs, mine);
+      rmSync(theirs, { force: true });
+    },
+  };
+}
 
 /**
  * Codex runs with its own HOME and CODEX_HOME (`dir`, one per build or per intake) holding your
@@ -242,6 +401,7 @@ export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undef
  */
 export const claudeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "claude", buildId);
 export const codexBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "codex", buildId);
+export const opencodeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "opencode", buildId);
 
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
@@ -311,6 +471,47 @@ async function codexRun(job: BuildJob) {
   });
 }
 
+/** OpenCode, headless, in a home of its own. File tools only (no shell, no web, no subagents); OS sandbox limits writes to the workspace. */
+export const opencodeBuilder: CapabilityBuilder = {
+  name: "opencode",
+  build: (job) => withModelCheck(job, opencodeRun),
+};
+
+/**
+ * OpenCode's arguments for an attempt: fresh, or resuming the build's earlier session (`-s`, kept in
+ * its own home's database) with the failure. `--pure`: none of its plugins. `--auto`: approve what the
+ * rules don't deny (the run can't ask); the rules are in the environment (see `opencodeHome`).
+ */
+export function opencodeArgs(job: BuildJob, resume?: string): string[] {
+  return ["run", "--format", "json", "--pure", "--auto", ...opencodeModelArgs(job), ...(resume ? ["-s", resume, resumePrompt(job)] : [builderPrompt(job)])];
+}
+
+async function opencodeRun(job: BuildJob) {
+  // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
+  const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
+  await withResume("opencode", job, async (resume) => {
+    const isolated = opencodeHome(home, { rules: OPENCODE_BUILDER_RULES });
+    try {
+      if (job.model && !opencodeHasModel(job.model, isolated.env, job.workspace)) throw opencodeModelRejected(job.model);
+      await runCli(
+        "opencode",
+        opencodeArgs(job, resume),
+        job,
+        opencodeActivity,
+        TIMEOUT_MS,
+        // Its logins come as a file in its own home: no Keychain, none of your ~/.config/opencode. A local model server's port stays open.
+        { ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback },
+        isolated.env,
+        // Its session (every event names it), for the next attempt to resume.
+        (e) => typeof e?.sessionID === "string" && e.sessionID && noteSession("opencode", job.buildId, e.sessionID),
+        OPENCODE_QUIET_START_MS,
+      );
+    } finally {
+      isolated.done();
+    }
+  });
+}
+
 /** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
 export const claudeBuilder: CapabilityBuilder = {
   name: "claude",
@@ -362,4 +563,4 @@ async function claudeRun(job: BuildJob) {
   });
 }
 
-export const BUILDERS: Record<string, CapabilityBuilder> = { codex: codexBuilder, claude: claudeBuilder };
+export const BUILDERS: Record<string, CapabilityBuilder> = { codex: codexBuilder, claude: claudeBuilder, opencode: opencodeBuilder };

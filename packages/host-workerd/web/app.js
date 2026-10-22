@@ -389,7 +389,7 @@ async function paletteItems() {
     act("New tool", () => go("#/new"), "make create build", "plus"),
     act("Add a widget", () => addWidgetSheet(), "home", "widget"),
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
-    act("Connect an agent", () => connectDialog(), "claude codex chatgpt mcp", "agent"),
+    act("Connect an agent", () => connectDialog(), "claude codex opencode chatgpt mcp", "agent"),
     act("Add a connection", () => addConnectionSheet(), "account service", "link"),
     // Hosted: the host builds; the model is under Settings › AI.
     !settings?.hosted && act("Who builds tools…", () => jobPicker({ thenModel: true }), "builder intake job model", "hammer"),
@@ -1415,7 +1415,7 @@ async function firstRun() {
                 x.connected ? h("span", { class: "pill ok with-dot" }, "connected") : h("button", { class: "primary sm", onclick: () => connectDialog(x.agentId).then(renderAll) }, "Connect"),
               ),
             )
-          : h("li", {}, h("div", { class: "grow" }, h("span", {}, "None found"), h("span", { class: "sub" }, "Install Claude Code or Codex and sign in")), h("button", { class: "sm", onclick: renderAgents }, "Look again")),
+          : h("li", {}, h("div", { class: "grow" }, h("span", {}, "None found"), h("span", { class: "sub" }, "Install Claude Code, Codex or OpenCode and sign in")), h("button", { class: "sm", onclick: renderAgents }, "Look again")),
         h("li", {}, h("div", { class: "grow" }, h("span", { class: "muted" }, "claude.ai, ChatGPT and other agents")), h("button", { class: "ghost sm", onclick: () => connectDialog().then(renderAll) }, "Connect…")),
       ),
     );
@@ -4264,6 +4264,7 @@ const AGENT_CATALOG = [
   { id: "claude-code", label: "Claude Code", where: "local", connect: "claude-code", tool: "claude" },
   { id: "codex", label: "Codex", where: "local", connect: "codex", tool: "codex" },
   { id: "codex-desktop", label: "Codex Desktop", where: "local", connect: "codex-desktop", shares: "codex", apps: true },
+  { id: "opencode", label: "OpenCode", where: "local", connect: "opencode", tool: "opencode" },
   { id: "claude-desktop", label: "Claude Desktop", where: "local", connect: "cloud-desktop", shares: "claude", match: /^claude(-ai)?$/, apps: true },
   { id: "gemini-cli", label: "Gemini CLI", where: "local", buildSoon: true },
   { id: "cursor", label: "Cursor", where: "local", apps: true },
@@ -4273,7 +4274,7 @@ const AGENT_CATALOG = [
   { id: "gemini", label: "Gemini", where: "cloud" },
 ];
 /** Agents' tiles: [hue, logo] (web/logos/, Simple Icons and LobeHub; see SOURCES.md). */
-const TILES = { "claude-code": [30, "claude"], claude: [30, "claude"], "claude-desktop": [30, "claude"], codex: [200, "openai"], "codex-desktop": [200, "openai"], chatgpt: [160, "openai"], "gemini-cli": [250, "googlegemini"], gemini: [250, "googlegemini"], cursor: [0, "cursor"], vscode: [220, "githubcopilot"] };
+const TILES = { "claude-code": [30, "claude"], claude: [30, "claude"], "claude-desktop": [30, "claude"], codex: [200, "openai"], "codex-desktop": [200, "openai"], opencode: [90, "opencode"], chatgpt: [160, "openai"], "gemini-cli": [250, "googlegemini"], gemini: [250, "googlegemini"], cursor: [0, "cursor"], vscode: [220, "githubcopilot"] };
 /** A tile with a brand's logo as a mask (it takes the tile's glyph colour), or the monogram. */
 const logoTile = (hue, logo, letters, size) =>
   h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
@@ -4355,7 +4356,7 @@ async function modelSheet(t) {
       let chosen = cur.model ?? "default";
       const listed = catalog.models.some((m) => m.id === chosen);
       const name = `model-${Math.random().toString(36).slice(2)}`;
-      const other = h("input", { type: "text", placeholder: t.name === "claude" ? "claude-fable-5-1" : "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
+      const other = h("input", { type: "text", placeholder: t.name === "claude" ? "claude-fable-5-1" : t.name === "opencode" ? "provider/model" : "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
       const effort = h("select", { "aria-label": "Effort" });
       const efforts = () => (chosen === "" ? catalog.models[0]?.efforts ?? [] : catalog.models.find((m) => m.id === chosen)?.efforts ?? catalog.models[0]?.efforts ?? []);
       const fillEffort = (keep) => {
@@ -4648,7 +4649,7 @@ async function addSheet() {
         h(
           "ul",
           { class: "list" },
-          choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
+          choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, OpenCode, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
           // Hosted: the host builds; there are no agents on the machine to work for Hewn.
           !settings?.hosted && choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
           // Hosted: tools that think run on the host's models.

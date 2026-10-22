@@ -18,7 +18,7 @@
 
 <p align="center"><img src="docs/images/home.png" alt="Hewn's Home: your tools and widgets" width="840"></p>
 
-Hewn keeps small [tools](docs/concepts.md#tools) of your own (a running log, a reading list, a word quiz) on your machine, each with its own data. Describe a tool, and your coding agent builds it in a sandbox; Hewn tests it on a copy of your data before it goes live. Claude, ChatGPT, Codex and any MCP client can then use it, once you've approved them: what you record in one, you can read in another.
+Hewn keeps small [tools](docs/concepts.md#tools) of your own (a running log, a reading list, a word quiz) on your machine, each with its own data. Describe a tool, and your coding agent builds it in a sandbox; Hewn tests it on a copy of your data before it goes live. Claude, ChatGPT, Codex, OpenCode and any MCP client can then use it, once you've approved them: what you record in one, you can read in another.
 
 <p align="center">
   <picture>
@@ -37,7 +37,7 @@ hewn service install   # run in the background, start at login
 hewn open              # connect an agent, build your first tool
 ```
 
-You need Node.js 24 and Claude Code or Codex, signed in. macOS, Linux and Windows (WSL). See the [quickstart](docs/quickstart.md).
+You need Node.js 24 and Claude Code, Codex or OpenCode, signed in. macOS, Linux and Windows (WSL). See the [quickstart](docs/quickstart.md).
 
 ### Documentation
 

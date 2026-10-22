@@ -115,7 +115,7 @@ export const empty = (title, text) => h("div", { class: "empty" }, h("strong", {
 
 // ---------- agents and actors ----------
 
-const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
+const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
 /** Agents' own names (from the Agents API), for activity and cards. */
 export const rememberAgents = (list) => list.forEach((a) => a.name && (AGENT_LABELS[a.id] = a.name));
 /** Human name for an actor id: agents by label; the owner (web, CLI, an opened app) is "You". */
@@ -126,7 +126,7 @@ export function actorLabel(id, caps) {
   return AGENT_LABELS[id] ?? id;
 }
 /** A builder by name: the CLIs Hewn runs ("claude" is Claude Code, not the claude.ai agent). */
-const BUILDERS = { claude: "Claude Code", codex: "Codex" };
+const BUILDERS = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
 export const builderLabel = (b) => (b === "agent" ? "your agent" : BUILDERS[b] ?? AGENT_LABELS[b] ?? b);
 
 // ---------- capabilities and their icons ----------

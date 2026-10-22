@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The models each agent's CLI offers, for Settings › AI and the model menu in the intake's chat box. Read from the CLI where it
-// can say (Codex's catalog); Claude Code has no list, so its families stand in (they follow the newest).
+// can say (Codex's catalog, OpenCode's list); Claude Code has no list, so its families stand in (they follow the newest).
 import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
 import type { ModelCatalog, ModelChoice } from "@hewntools/host-workerd/surface/host.ts";
 
 /** Claude Code's `--effort` levels. */
@@ -64,7 +65,54 @@ export function codexCatalogFrom(raw: string): ModelCatalog {
   return { agent: "codex", models: [defaultChoice(CODEX_EFFORTS, "Codex's own choice"), ...models], other: !models.length };
 }
 
-const run = (cmd: string, args: string[]) => new Promise<string>((resolve, reject) => execFile(cmd, args, { timeout: 15_000, encoding: "utf8", maxBuffer: 8 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
+/**
+ * OpenCode's list (`opencode models --verbose`: each model's `provider/id` line, then its record as
+ * JSON): what its logins, its config and the free tier offer, in its order, each with the reasoning
+ * levels it takes (`variants`). Every id names one model, so each is pinned; `other` always, since any
+ * `provider/model` may be typed. The plain list (ids only) reads too.
+ */
+export function opencodeCatalogFrom(raw: string): ModelCatalog {
+  const models: ModelChoice[] = [];
+  const choice = (id: string, m: any = {}): ModelChoice => ({
+    id,
+    label: typeof m.name === "string" && m.name ? m.name : id.split("/").slice(1).join("/") || id,
+    kind: "pinned",
+    description: id.split("/")[0],
+    efforts: m.variants && typeof m.variants === "object" ? Object.keys(m.variants) : [],
+  });
+  let id: string | undefined;
+  let json: string[] | undefined;
+  for (const line of raw.split("\n")) {
+    if (json) {
+      json.push(line);
+      if (line === "}") {
+        try {
+          const m = JSON.parse(json.join("\n"));
+          if (id && m?.status !== "retired") models.push(choice(id, m));
+        } catch {
+          // a record that isn't JSON: the id alone, when its line comes
+        }
+        id = undefined;
+        json = undefined;
+      }
+      continue;
+    }
+    if (line === "{") {
+      json = [line];
+      continue;
+    }
+    const t = line.trim();
+    if (!t || !/^[\w.-]+\/\S+$/.test(t)) continue;
+    if (id) models.push(choice(id));
+    id = t;
+  }
+  if (id) models.push(choice(id));
+  return { agent: "opencode", models: [defaultChoice([], "OpenCode's own choice"), ...models], other: true };
+}
+
+const run = (cmd: string, args: string[], env?: NodeJS.ProcessEnv) => new Promise<string>((resolve, reject) => execFile(cmd, args, { timeout: 15_000, encoding: "utf8", maxBuffer: 8 << 20, ...(env ? { env, cwd: tmpdir() } : {}) }, (e, out) => (e ? reject(e) : resolve(out))));
+/** `opencode models`, in your own OpenCode (its logins and providers), with plugins and the update check off. */
+const opencodeModels = () => run("opencode", ["models", "--verbose", "--pure"], { ...process.env, OPENCODE_CONFIG_CONTENT: '{"autoupdate":false}' });
 
 /** A remote builder's catalog: `GET <url>/v1/models` (see docs/internal/remote-builder.md). */
 export async function remoteCatalog(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
@@ -81,11 +129,12 @@ export async function remoteCatalog(url: string, token: string, fetchImpl: typeo
  * Model catalogs, kept for 10 minutes (Settings › AI, every intake and the Inbox ask). A failed read
  * gives Default only, and is retried on the next ask.
  */
-export function modelCatalogs(o: { remote?: { url: string; token: string }; codexModels?: () => Promise<string>; fetch?: typeof fetch } = {}) {
+export function modelCatalogs(o: { remote?: { url: string; token: string }; codexModels?: () => Promise<string>; opencodeModels?: () => Promise<string>; fetch?: typeof fetch } = {}) {
   const cache = new Map<string, { at: number; catalog: ModelCatalog }>();
   const read = async (agent: string): Promise<ModelCatalog> => {
     if (agent === "claude") return claudeCatalog();
     if (agent === "codex") return codexCatalogFrom(await (o.codexModels ?? (() => run("codex", ["debug", "models"])))());
+    if (agent === "opencode") return opencodeCatalogFrom(await (o.opencodeModels ?? opencodeModels)());
     if (agent === "remote" && o.remote) return remoteCatalog(o.remote.url, o.remote.token, o.fetch);
     throw new Error(`no models for ${agent}`);
   };
@@ -106,4 +155,4 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; code
  * Output meaning the CLI won't run the model it was given (retired, misspelled, or not on this
  * account): the build stops, saying so (never a quiet switch to the default).
  */
-export const MODEL_REJECTED = /issue with the selected model|selected model .{0,80}(not exist|access)|model[^\n]{0,60}\b(not found|does not exist|doesn't exist|is not available|isn't available|not supported|is not supported)|unknown model|invalid model|not_found_error[^\n]*model/i;
+export const MODEL_REJECTED = /issue with the selected model|selected model .{0,80}(not exist|access)|model[^\n]{0,60}\b(not found|does not exist|doesn't exist|is not available|isn't available|not supported|is not supported)|unknown model|invalid model|not_found_error[^\n]*model|(Provider)?ModelNotFound|provider[^\n]{0,40}\bnot found/i;

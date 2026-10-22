@@ -158,9 +158,10 @@ describe("hewn setup", () => {
 
   test("interactive: asks per detected harness, skips missing, confirms before applying", async () => {
     const hs = allDetected().map((h) => (h.agentId === "claude-code" ? { ...h, detect: () => false } : h));
-    await run({ harnesses: hs, io: scripted(["", "n"]) }); // yes to Codex, then decline apply
+    await run({ harnesses: hs, io: scripted(["", "", "n"]) }); // yes to Codex and OpenCode, then decline apply
     assert.match(out.join("\n"), /Claude Code: not found on PATH/);
     assert.ok(out.some((l) => l.startsWith("Set up Codex?")));
+    assert.ok(out.some((l) => l.startsWith("Set up OpenCode?")));
     assert.match(out.join("\n"), /Aborted/);
     assert.deepEqual(calls, []);
   });
