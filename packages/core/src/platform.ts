@@ -72,6 +72,7 @@ import { randomToken, sha256, utf8 } from "./sha256.ts";
 import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
 import type { TestCase } from "@hewntools/spec/cases.ts";
+import spec from "@hewntools/spec/package.json" with { type: "json" };
 
 export interface CapabilitySummary {
   id: string;
@@ -288,6 +289,8 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 /** The most turns a conversation kept with a build may have, and the longest turn. */
 const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
+/** The longest structured reply kept with an intake turn (as JSON). */
+const MAX_REPLY_CHARS = 100_000;
 
 /** The owner's instructions for building: at most this many lines per scope, each this long. */
 const MAX_INSTRUCTION_LINES = 50;
@@ -368,8 +371,8 @@ export class Platform {
   private catalogIndex?: { fetchedAt: string; byId: Map<string, CatalogEntry> };
   private providerLists = new Map<string, { raw: string | undefined; list: ReturnType<Platform["providerList"]> }>();
   private brief: string;
-  /** Which brief builds run on, recorded with each build (a short hash of the brief's text). */
-  private briefHash: string;
+  /** Which brief builds run on, recorded with each build: the spec's version and a short hash of the brief's text. */
+  private briefId: string;
   private designSystem?: () => Promise<string | undefined>;
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
@@ -403,7 +406,7 @@ export class Platform {
     this.agentStore = new AgentStore(opts.sql);
     this.agentStore.onChange = () => this.events.emit("changed");
     this.brief = opts.brief;
-    this.briefHash = sha256(opts.brief).slice(0, 12);
+    this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
     // Everything worth a log line may change what agents see (catalog, readiness): open MCP
     // sessions re-check their tool lists (debounced, and only notified when it differs).
@@ -2534,7 +2537,7 @@ export class Platform {
   /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
   private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
     const instructions = this.instructionsForBuild(capabilityId);
-    return { brief: this.briefHash, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
+    return { brief: this.briefId, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
   }
 
   /**
@@ -2549,7 +2552,9 @@ export class Platform {
       if (!t || (t.role !== "user" && t.role !== "intake") || typeof t.content !== "string" || t.content.length > MAX_TURN_CHARS) {
         throw new PlatformError("invalid_request", `each turn of the conversation needs a role ("user" or "intake") and content of at most ${MAX_TURN_CHARS} characters`);
       }
-      return { role: t.role, content: t.content };
+      // An intake turn may carry its structured reply, for showing the proposal as it was; kept as is, within reason.
+      const reply = t.role === "intake" && t.reply && typeof t.reply === "object" && JSON.stringify(t.reply).length <= MAX_REPLY_CHARS ? t.reply : undefined;
+      return { role: t.role, content: t.content, ...(reply ? { reply } : {}) };
     });
   }
 
@@ -2957,32 +2962,38 @@ export class Platform {
    */
   applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } {
     requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
     const out: { remember: Instruction[]; forget: Instruction[] } = { remember: [], forget: [] };
     for (const scope of ["global", "tool"] as const) {
       const id = scope === "tool" ? capabilityId : undefined;
-      if (scope === "tool" && (!id || !this.registry.getCapability(id))) continue;
+      if (scope === "tool" && !id) continue;
       const add = instructionEntries(remember, scope);
       const drop = instructionEntries(forget, scope);
       if (!add.length && !drop.length) continue;
       let list = this.instructionLines(id);
+      const dropped: string[] = [];
+      const added: string[] = [];
       for (const t of drop) {
         if (!list.includes(t)) continue;
         list = list.filter((x) => x !== t);
-        out.forget.push({ scope, text: t });
+        dropped.push(t);
       }
       for (const t of add) {
         if (list.includes(t) || list.length >= MAX_INSTRUCTION_LINES) continue;
         list.push(t);
-        out.remember.push({ scope, text: t });
+        added.push(t);
       }
+      if (!added.length && !dropped.length) continue;
+      out.forget.push(...dropped.map((text) => ({ scope, text })));
+      out.remember.push(...added.map((text) => ({ scope, text })));
       this.registry.setKv(this.instructionsKey(id), list);
-      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${add.length}, dropped ${drop.length}`);
+      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${added.length}, dropped ${dropped.length}`);
     }
     return out;
   }
 
   /** The "Owner's instructions" section of BUILDER.md: the rules for every tool, then this tool's. Empty when there are none. */
-  instructionsForBuild(capabilityId: string): string {
+  private instructionsForBuild(capabilityId: string): string {
     const global = this.instructionLines();
     const tool = this.instructionLines(capabilityId);
     if (!global.length && !tool.length) return "";
@@ -3598,7 +3609,6 @@ export class Platform {
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md for a workspace: the request, the implementation contract, the owner's catalog. */
   /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
   private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";

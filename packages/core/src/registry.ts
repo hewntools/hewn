@@ -81,6 +81,8 @@ export interface BuildModel {
 export interface BuildTurn {
   role: "user" | "intake";
   content: string;
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform. */
+  reply?: unknown;
 }
 
 /** What led to a build, kept with it for the capability's life (`build_context`). */
@@ -89,7 +91,7 @@ export interface BuildContext {
   conversation?: BuildTurn[];
   /** The owner's instructions the build ran with. */
   instructions?: string;
-  /** Which brief it ran on: a short hash of spec/builder-brief.md. */
+  /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
   brief?: string;
 }
 
@@ -279,8 +281,8 @@ CREATE TABLE IF NOT EXISTS build_charges (
   unit           TEXT NOT NULL
 );
 -- What led to a build, kept for the capability's life: the owner's conversation with the intake
--- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (a
--- short hash of spec/builder-brief.md as this Hewn had it).
+-- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (the
+-- spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
 CREATE TABLE IF NOT EXISTS build_context (
   build_id       TEXT PRIMARY KEY,
   conversation   TEXT,
@@ -805,18 +807,18 @@ export class Registry {
     this.db.prepare("DELETE FROM passkeys WHERE credential_id = ?").run(credentialId);
   }
 
-  /** Implementation history with the build that produced each version. */
+  /** Implementation history with the build that produced each version, and whether it kept a conversation. */
   versions(capabilityId: string) {
     return this.db
       .prepare(
-        `SELECT v.version, v.created_at, v.build_id, b.kind, b.requested_by, b.builder, b.request
-         FROM capability_versions v LEFT JOIN builds b ON b.id = v.build_id
+        `SELECT v.version, v.created_at, v.build_id, b.kind, b.requested_by, b.builder, b.request, c.conversation IS NOT NULL AS conversation
+         FROM capability_versions v LEFT JOIN builds b ON b.id = v.build_id LEFT JOIN build_context c ON c.build_id = v.build_id
          WHERE v.capability_id = ? ORDER BY v.version DESC`,
       )
       .all(capabilityId)
       .map((r) => {
         const x = r as Row;
-        return { version: x.version, createdAt: x.created_at, buildId: x.build_id, kind: x.kind, requestedBy: x.requested_by, builder: x.builder ?? "agent", request: x.request ? JSON.parse(x.request) : null };
+        return { version: x.version, createdAt: x.created_at, buildId: x.build_id, kind: x.kind, requestedBy: x.requested_by, builder: x.builder ?? "agent", request: x.request ? JSON.parse(x.request) : null, conversation: x.conversation === 1 };
       });
   }
 
@@ -932,8 +934,8 @@ export class Registry {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
-      // Its failed calls (for "Ask builder to fix this") go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key = ?").run(`failures:${id}`);
+      // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?)").run(`failures:${id}`, `instructions:${id}`);
     });
   }
 
