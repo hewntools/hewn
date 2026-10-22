@@ -5,6 +5,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.6 (unreleased)
 
 - **A build keeps what led to it,** for the tool's life: your conversation with the intake, the spec, and the builder's log (which used to go after 30 days). The build page has **Conversation** next to **Spec agreed**; in **Versions**, each version's **Details** opens its conversation, spec and log, and **Continue from here** starts a change with that conversation as context. Builds also record which brief they ran on.
+- **A failed validation no longer starts the builder over.** The next attempt resumes the first one's session with the failure (Claude Code and Codex), so it fixes the candidate instead of re-reading the brief and rewriting it: a second attempt takes a fraction of the first. The host's builder gets a `session` per build to do the same. Claude Code builds also run `--restricted` (no code-running tools), and every workspace gets an `AGENTS.md` pointing at the brief, for builders that read it on their own.
 
 ## 0.4.5 (2026-10-21)
 

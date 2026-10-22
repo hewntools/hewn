@@ -79,6 +79,7 @@ describe("remote builder and intake", () => {
     assert.equal(sent.body.model, "fable");
     assert.equal(sent.body.effort, "high");
     assert.equal(sent.body.feedback, "1 test failed");
+    assert.equal(sent.body.session, "b-1", "one session per build, for the service to resume on a later attempt");
     assert.match(sent.body.prompt, /builder for Hewn/);
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);

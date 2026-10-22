@@ -7,6 +7,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { dirname, join, relative } from "node:path";
 import { build as esbuild } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
+import { claudeBuildHome, forgetSession, pruneCodexSessions } from "./builders/cli.ts";
 import { isArtefact } from "@hewntools/core/files.ts";
 import type { BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
 import type { VisualCheck } from "./visual.ts";
@@ -120,6 +121,10 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     },
     async remove(buildId) {
       rmSync(ws(buildId), { recursive: true, force: true });
+      // What its builder kept between attempts: Claude Code's config dir (the session), Codex's old sessions.
+      rmSync(claudeBuildHome(dirname(opts.root), buildId), { recursive: true, force: true });
+      forgetSession(buildId);
+      pruneCodexSessions(dirname(opts.root));
     },
     async build(job: BuildJob, hooks) {
       // "keep": the workspace is already the candidate (e.g. an install from given files).

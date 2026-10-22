@@ -116,10 +116,12 @@ A failed build leaves the active version serving. A build whose base is no longe
 
 **The builder sandbox** (`packages/cli/src/builders/`). Builders run headless in the OS sandbox: Seatbelt on macOS, bubblewrap on Linux. They can't read the Hewn home except their workspace, can't read the owner's repos or credential stores, and can write only the workspace, temp and their own state. Their environment is cut down to the basics and their own model settings. Each runs on however its CLI is signed in (a subscription, an API key or a cloud provider):
 
-- Claude Code gets a config directory of its own per build holding only the model login, with settings, hooks, slash commands and the owner's `~/.claude` left out.
+- Claude Code gets a config directory of its own per build holding only the model login, with settings, hooks, slash commands and the owner's `~/.claude` left out, and runs `--restricted` (no code-running tools) on top of its file-tool allow-list.
 - Codex gets its own `HOME` and `CODEX_HOME` holding only `auth.json`.
 
-A refreshed login is copied back. Versions never keep builder configuration (dotfiles, `CLAUDE.md`, `AGENTS.md`), so a build can't plant it for the next one. On Linux, bubblewrap shares loopback with the host, so a builder can reach local ports; on macOS it can't.
+A refreshed login is copied back. Versions never keep builder configuration (dotfiles, `CLAUDE.md`, `AGENTS.md`), so a build can't plant it for the next one; the platform itself writes `AGENTS.md` into every workspace (where the brief is, and the owner's instructions) for builders that read it on their own. On Linux, bubblewrap shares loopback with the host, so a builder can reach local ports; on macOS it can't.
+
+**Attempts resume.** A failed validation doesn't start the builder over: the next attempt resumes the first one's session with the failure (`resumePrompt`), so the brief isn't re-read and the candidate not rewritten. Claude Code: `--session-id` on the first attempt, `--resume` after, with its config directory kept between attempts (only the login file goes after each run; the directory goes with the workspace). Codex: its thread id from `thread.started`, `codex exec … resume <id>`, with sessions kept in its own home (pruned after two days). The sessions are known to the running process only; after a restart, or when a resume fails before touching the workspace, the attempt starts fresh. The host's builder gets `session` (the build id) with every attempt and may do the same.
 
 **The visual check** (`packages/cli/src/visual.ts`) renders a candidate UI, or a sheet of its changed widgets, in a local Chromium over the DevTools protocol, with the UI's API running the candidate on scratch state. Uncaught errors, console errors and failed requests fail the build; the screenshots are kept. It is skipped when no browser is found.
 
