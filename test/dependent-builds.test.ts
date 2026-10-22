@@ -257,6 +257,17 @@ describe("intake: a connection first", () => {
     const again = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "now add y" }], earlier: { buildId: "b-1", version: 3, messages: [{ role: "user", content: "make x" }, { role: "intake", content: "DRAFT\nX" }] } });
     assert.match(again, /An earlier conversation, which led to version 3[^]*USER: make x[^]*YOU \(intake\): DRAFT[^]*Conversation so far:[^]*USER: now add y/);
     assert.doesNotMatch(prompt, /earlier conversation/);
+    // The owner's standing rules, and how to remember new ones (creating: global only; modifying: this tool too).
+    assert.doesNotMatch(prompt, /standing rules for building \(/);
+    const ruled = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "x" }], instructions: { global: ["Swedish copy"], tool: ["One screen"] } });
+    assert.match(ruled, /The owner's standing rules for building[^]*For every tool:\n- Swedish copy\n[^]*For this tool:\n- One screen\n/);
+    assert.match(ruled, /Remember standing rules[^]*put its exact text in "forget"/);
+    assert.doesNotMatch(ruled, /there is no tool yet/);
+    assert.match(intakePrompt({ mode: "create", messages: [{ role: "user", content: "x" }], instructions: { global: ["Swedish copy"] } }), /For every tool:\n- Swedish copy\n[^]*there is no tool yet/);
+    // The reply's memory comes through on any kind of reply, well-formed entries only.
+    const remembered = parseIntake(JSON.stringify({ kind: "questions", message: "", questions: ["q?"], remember: [{ scope: "global", text: " Swedish copy " }, { scope: "nope", text: "x" }, { scope: "tool" }], forget: [] }), "modify") as any;
+    assert.deepEqual(remembered.remember, [{ scope: "global", text: "Swedish copy" }]);
+    assert.equal(remembered.forget, undefined);
   });
 
   test("creating: several ideas at once, each a full draft (incomplete ones dropped, at most five)", async () => {

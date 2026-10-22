@@ -97,6 +97,8 @@ request → build row ("waiting" while its `after` build hasn't promoted)
   → promoted, review, failed or cancelled
 ```
 
+**Instructions** are the owner's standing rules for building: lines in `platform_kv` (`instructions:global`, `instructions:<capabilityId>`), owner-only (`instructions`, `setInstructions`; the web client edits them under Settings › AI and a tool's Info). The intake gets them in its prompt and may add to or drop them (`remember`, `forget` in its reply, applied by `applyIntakeMemory` as the surface hands the reply back; the client shows what was saved, with Undo). A build snapshots them when it's opened (`build_context.instructions`, as the "Owner's instructions" section of `BUILDER.md`, after the request and before the contract), so the host's builder gets them too.
+
 What led to a build stays with it for the capability's life: `build_context` holds the owner's conversation with the intake (the web client sends it as `conversation` with the request; an agent's build carries only its request), the owner's instructions it ran with, and a short hash of the brief it ran on. When the build ends, the builder's transcript is copied from the workbench into blobs (`transcripts/<buildId>.log`). Both are the owner's (`buildContext`, `buildTranscript`): agents never see them, since they show source. A version knows its build (`capability_versions.build_id`), so the web client shows them per version, and "Continue from here" gives the intake that conversation as `earlier` context.
 
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.

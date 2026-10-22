@@ -438,6 +438,10 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 /* "Spec agreed" opens to the spec; "Conversation" to the chat that led to the build (kept with it). */
 .spec-step > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
 .thread.kept { max-height: 50vh; overflow: auto; margin-top: 8px; }
+/* What the intake remembered for later builds, and the owner's instructions (one per line). */
+.memory-notice { align-items: flex-start; }
+.memory-notice .memory-text { font-size: var(--fs-sm); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 .spec-step > summary::-webkit-details-marker { display: none; }
 .spec-step > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .6; }
 .spec-step[open] > summary::after { transform: rotate(45deg); margin-top: -3px; }

@@ -289,6 +289,45 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
 
+/** The owner's instructions for building: at most this many lines per scope, each this long. */
+const MAX_INSTRUCTION_LINES = 50;
+const MAX_INSTRUCTION_CHARS = 500;
+
+/** Where an instruction applies: every tool the owner builds, or one tool. */
+export type InstructionScope = "global" | "tool";
+export interface Instruction {
+  scope: InstructionScope;
+  text: string;
+}
+
+/** Instructions as the owner gives them: lines, or a text to split into lines; trimmed, bullets dropped, no repeats. */
+function cleanInstructions(lines: unknown): string[] {
+  const raw = typeof lines === "string" ? lines.split("\n") : Array.isArray(lines) ? lines : undefined;
+  if (!raw) throw new PlatformError("invalid_request", "instructions: a text, one rule per line");
+  const out: string[] = [];
+  for (const l of raw) {
+    if (typeof l !== "string") throw new PlatformError("invalid_request", "instructions: each line must be text");
+    const t = l.trim().replace(/^[-*•]\s+/, "");
+    if (!t) continue;
+    if (t.length > MAX_INSTRUCTION_CHARS) throw new PlatformError("invalid_request", `instructions: each line at most ${MAX_INSTRUCTION_CHARS} characters`);
+    if (!out.includes(t)) out.push(t);
+  }
+  if (out.length > MAX_INSTRUCTION_LINES) throw new PlatformError("invalid_request", `instructions: at most ${MAX_INSTRUCTION_LINES} lines`);
+  return out;
+}
+
+/** What the intake asks to remember or drop, for one scope: well-formed entries only (the model wrote them: the rest is ignored, never an error). */
+function instructionEntries(list: unknown, scope: InstructionScope): string[] {
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const x of list) {
+    if (!x || x.scope !== scope || typeof x.text !== "string") continue;
+    const t = x.text.trim().replace(/^[-*•]\s+/, "");
+    if (t && t.length <= MAX_INSTRUCTION_CHARS && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
 
@@ -2492,6 +2531,12 @@ export class Platform {
     return { ...b, widgetsBuildId: w.buildId };
   }
 
+  /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
+  private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
+    const instructions = this.instructionsForBuild(capabilityId);
+    return { brief: this.briefHash, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
+  }
+
   /**
    * The conversation the owner had with the intake, kept with the build (the web client sends it):
    * the owner's only; an agent's build carries its request instead.
@@ -2666,7 +2711,7 @@ export class Platform {
       if (reserve) this.registry.insertCapability({ id, name: req.name, purpose: req.purpose, createdBy: agent.id });
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.registry.setBuildContext(buildId, { brief: this.briefHash, ...(conversation ? { conversation } : {}) });
+      this.registry.setBuildContext(buildId, this.contextFor(id, conversation));
     });
     if (dependsOn) this.waitFor(buildId, id, dependsOn, `build ${buildId} [create ${id} by ${agent.id}]`);
     else await this.startCreate(buildId, seed);
@@ -2693,7 +2738,7 @@ export class Platform {
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}`)),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}`, this.registry.buildContext(buildId)?.instructions)),
       ...(await this.designSystemFile()),
     });
     if (this.cancelledWhileOpening(buildId)) return;
@@ -2730,7 +2775,7 @@ export class Platform {
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.registry.setBuildContext(buildId, { brief: this.briefHash, ...(conversation ? { conversation } : {}) });
+      this.registry.setBuildContext(buildId, this.contextFor(cap.id, conversation));
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
@@ -2759,7 +2804,7 @@ export class Platform {
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.registry.setBuildContext(buildId, { brief: this.briefHash, ...(conversation ? { conversation } : {}) });
+      this.registry.setBuildContext(buildId, this.contextFor(cap.id, conversation));
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`);
     else await this.startModify(buildId);
@@ -2776,7 +2821,7 @@ export class Platform {
     const request = (b.request as { request?: string }).request ?? "";
     const ask = b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask)), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -2873,6 +2918,76 @@ export class Platform {
     this.mustBuild(buildId);
     const kept = await this.blobs.get(`transcripts/${buildId}.log`);
     return kept ? text(kept) : await this.workbench.transcript(buildId);
+  }
+
+  // ---------- Instructions: the owner's standing rules for building, read by the intake and the builder ----------
+
+  private instructionsKey = (capabilityId?: string) => (capabilityId ? `instructions:${capabilityId}` : "instructions:global");
+
+  private instructionLines(capabilityId?: string): string[] {
+    return this.registry.getKv<string[]>(this.instructionsKey(capabilityId)) ?? [];
+  }
+
+  private mustCapabilityForInstructions(capabilityId: string) {
+    const cap = this.registry.getCapability(capabilityId);
+    if (!cap || cap.archivedAt) throw new PlatformError("not_found", `no capability ${capabilityId}`);
+  }
+
+  /** The owner's instructions, one per line: for every tool (no id), or for one tool. Owner only. */
+  instructions(owner: Agent, capabilityId?: string): string[] {
+    requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
+    return this.instructionLines(capabilityId);
+  }
+
+  /** Replace the owner's instructions for a scope with the list as edited (a text, one per line, or lines). */
+  setInstructions(owner: Agent, capabilityId: string | undefined, lines: unknown): string[] {
+    requireOwner(owner);
+    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
+    const list = cleanInstructions(lines);
+    this.registry.setKv(this.instructionsKey(capabilityId), list);
+    this.logger(`instructions for ${capabilityId ?? "every tool"}: ${list.length} line(s), set by ${owner.id}`);
+    return list;
+  }
+
+  /**
+   * What the intake remembered or dropped in one turn, applied: a remembered rule goes at the end of
+   * its scope (never twice, never past the limit); a dropped one must match a line. Creating, there is
+   * no tool yet, so only rules for every tool are kept. Returns what changed, for the owner to see and undo.
+   */
+  applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } {
+    requireOwner(owner);
+    const out: { remember: Instruction[]; forget: Instruction[] } = { remember: [], forget: [] };
+    for (const scope of ["global", "tool"] as const) {
+      const id = scope === "tool" ? capabilityId : undefined;
+      if (scope === "tool" && (!id || !this.registry.getCapability(id))) continue;
+      const add = instructionEntries(remember, scope);
+      const drop = instructionEntries(forget, scope);
+      if (!add.length && !drop.length) continue;
+      let list = this.instructionLines(id);
+      for (const t of drop) {
+        if (!list.includes(t)) continue;
+        list = list.filter((x) => x !== t);
+        out.forget.push({ scope, text: t });
+      }
+      for (const t of add) {
+        if (list.includes(t) || list.length >= MAX_INSTRUCTION_LINES) continue;
+        list.push(t);
+        out.remember.push({ scope, text: t });
+      }
+      this.registry.setKv(this.instructionsKey(id), list);
+      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${add.length}, dropped ${drop.length}`);
+    }
+    return out;
+  }
+
+  /** The "Owner's instructions" section of BUILDER.md: the rules for every tool, then this tool's. Empty when there are none. */
+  instructionsForBuild(capabilityId: string): string {
+    const global = this.instructionLines();
+    const tool = this.instructionLines(capabilityId);
+    if (!global.length && !tool.length) return "";
+    const bullets = (l: string[]) => l.map((x) => `- ${x}`).join("\n");
+    return `## Owner's instructions\n\nThe owner's standing rules for how their tools are built. Follow them wherever they apply; the contract below still holds.\n${global.length ? `\nFor every tool:\n${bullets(global)}\n` : ""}${tool.length ? `\nFor this tool:\n${bullets(tool)}\n` : ""}`;
   }
 
   /** The transcript goes with the build for the capability's life (the workbench's copy goes with cleanup). Best-effort. */
@@ -3484,9 +3599,10 @@ export class Platform {
   }
 
   /** BUILDER.md for a workspace: the request, the implementation contract, the owner's catalog. */
-  private brief_(kind: BuildKind, id: string, request: string): string {
+  /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
+  private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
-    return `# Build: ${kind} \`${id}\`\n\n${request}\n\n${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
+    return `# Build: ${kind} \`${id}\`\n\n${request}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {

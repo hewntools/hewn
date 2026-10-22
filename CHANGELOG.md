@@ -5,6 +5,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.6 (unreleased)
 
 - **A build keeps what led to it,** for the tool's life: your conversation with the intake, the spec, and the builder's log (which used to go after 30 days). The build page has **Conversation** next to **Spec agreed**; in **Versions**, each version's **Details** opens its conversation, spec and log, and **Continue from here** starts a change with that conversation as context. Builds also record which brief they ran on.
+- **Instructions for building:** standing rules the builder follows on every build, for every tool (Settings › AI › Instructions for building) or for one tool (Info › Instructions). Tell the intake a rule ("always Swedish copy", "keep this one to a single screen") and it remembers it: the chat shows what was saved, with Undo. One rule per line, yours to edit. Each build records the instructions it ran with.
 
 ## 0.4.5 (2026-10-21)
 

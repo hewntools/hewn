@@ -16,8 +16,8 @@ import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
  * themselves. It runs headless, sandboxed, with no tools that matter and no MCP.
  */
 
-export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
-import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeInstruction, IntakeMemory, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeInstruction, IntakeMemory, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { MAX_IDEAS } from "@hewntools/host-workerd/surface/intake-types.ts";
 
 /**
@@ -142,11 +142,17 @@ const IDEAS = {
   },
 };
 
+/** Standing rules to remember or drop for the owner (see "Remember standing rules" in the prompt). */
+const MEMORY = {
+  type: "array",
+  items: { type: "object", additionalProperties: false, required: ["scope", "text"], properties: { scope: { type: "string", enum: ["global", "tool"] }, text: { type: "string" } } },
+};
+
 /** One reply shape for both modes ("widgets" and "schedules" only when modifying, "ideas" only when creating). */
 export const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["kind", "message", "questions", "name", "purpose", "requirements", "request", "operations", "widgets", "model", "uses", "hosts", "secrets", "connection", "proposals", "ideas", "schedules"],
+  required: ["kind", "message", "questions", "name", "purpose", "requirements", "request", "operations", "widgets", "model", "uses", "hosts", "secrets", "connection", "proposals", "ideas", "schedules", "remember", "forget"],
   properties: {
     kind: { type: "string", enum: ["questions", "draft", "widgets", "ideas", "schedules"] },
     message: { type: "string" },
@@ -165,6 +171,8 @@ export const SCHEMA = {
     proposals: PROPOSALS,
     ideas: IDEAS,
     schedules: SCHEDULES,
+    remember: MEMORY,
+    forget: MEMORY,
   },
 };
 
@@ -195,6 +203,12 @@ export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): 
     ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turn(m, EARLIER_CHARS)).join("\n\n")}\n\n`
     : "";
   const focus = req.widget ? req.current?.widgets?.find((w) => w.name === req.widget) : undefined;
+  const rules = req.instructions;
+  const bullets = (l: string[]) => l.map((x) => `- ${x}`).join("\n");
+  const instructions =
+    rules && (rules.global.length || rules.tool?.length)
+      ? `\nThe owner's standing rules for building (follow them, build on them, don't repeat them back; they're listed so you don't remember one twice):\n${rules.global.length ? `For every tool:\n${bullets(rules.global)}\n` : ""}${rules.tool?.length ? `For this tool:\n${bullets(rules.tool)}\n` : ""}`
+      : "";
   return `You are the intake for Hewn, a personal capability platform. A human (the owner) describes something they want. Turn it into a precise ${req.mode === "create" ? "capability creation" : "modification"} request for a separate builder agent, who will implement it without asking anything.
 
 How capabilities work (constraints the request must respect):
@@ -214,13 +228,14 @@ ${WIDGETS_GUIDE}
 
 The owner's existing capabilities:
 ${(req.catalog ?? []).map((c) => `- ${c.name} (${c.id})${c.kind === "connection" ? " [connection]" : ""}: ${c.purpose} [${c.operations.join(", ")}]`).join("\n") || "(none)"}
-${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
+${instructions}${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
 ${earlier}Conversation so far:
 ${convo}
 
 Decide:
 - When you talk to the owner ("message", "questions"), call capabilities "tools": that is the owner's word for them (capability is Hewn's technical term). The builder-facing fields keep "capability".
 - Engage with what the owner actually said in their latest message. If they point you at something (a service, API, link), address it explicitly in "message".
+- Remember standing rules. When the owner states a preference or a rule meant to hold beyond this request ("always Swedish copy", "never delete buttons", "keep this one to a single screen"), put it in "remember": scope "global" for every tool they build, "tool" for this one only${req.mode === "create" ? ' (creating, there is no tool yet: a rule for this tool goes into the requirements instead, and "remember" takes global ones only)' : ""}. One short rule each, in the owner's terms (not their sentence verbatim); never a rule they didn't state, never a secret, never a one-off detail of this request, never one already listed above. When they withdraw or contradict a listed rule, put its exact text in "forget". The owner sees what was saved and can undo it. Otherwise leave both empty.
 ${opts.web ? "- You can look things up (WebFetch/WebSearch) to check services or APIs the owner mentions: whether they exist, are maintained, legitimate, and what they offer. Only fetch what's needed." : "- You cannot open links or browse. If the owner sends one, say so in \"message\" and work from what you know."}
 - Never design around piracy, credential sharing, or scraping that violates a service's terms. If a suggested source looks like that, say so plainly in "message" and propose a legitimate alternative.
 - The conversation may hold your earlier draft or ideas (after "DRAFT" or "IDEAS"). If the owner keeps talking after one, revise it: change what they asked for and keep everything else as it was (names, operations, details, schedules), unless they ask for something new.
@@ -245,6 +260,18 @@ export function parseIntake(raw: string, mode: IntakeRequest["mode"], current?: 
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error(`intake returned no JSON: ${text.slice(0, 200)}`);
   const j = JSON.parse(text.slice(start, end + 1));
+  return { ...replyOf(j, mode, current), ...memoryOf(j) };
+}
+
+/** What the reply asks to remember or drop: well-formed entries only (the platform checks again as it saves). */
+function memoryOf(j: Record<string, unknown>): IntakeMemory {
+  const list = (v: unknown): IntakeInstruction[] => (Array.isArray(v) ? v.filter((x) => x && (x.scope === "global" || x.scope === "tool") && typeof x.text === "string" && x.text.trim()).map((x) => ({ scope: x.scope, text: String(x.text).trim() })) : []);
+  const remember = list(j.remember);
+  const forget = list(j.forget);
+  return { ...(remember.length ? { remember } : {}), ...(forget.length ? { forget } : {}) };
+}
+
+function replyOf(j: any, mode: IntakeRequest["mode"], current?: CapabilityManifest): IntakeReply {
   const message = typeof j.message === "string" ? j.message : "";
   if (mode === "modify" && j.kind === "widgets") return { kind: "widgets", message, proposals: proposals(j.proposals, current) };
   if (mode === "modify" && j.kind === "schedules") {

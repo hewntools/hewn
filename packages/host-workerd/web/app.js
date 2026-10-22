@@ -598,6 +598,60 @@ async function versionSheet(c, v) {
   );
 }
 
+/**
+ * The owner's standing rules for building, one per line: for every tool (no `c`), or for one tool.
+ * The intake adds to them when the owner states a rule; the builder reads them on every build.
+ * Resolves true when saved.
+ */
+async function instructionsSheet(c) {
+  const path = c ? `/capabilities/${enc(c.id)}/instructions` : "/instructions";
+  const { lines } = await api(path);
+  return modal(
+    (close) => {
+      const text = h("textarea", { rows: 8, class: "instructions", "aria-label": "Instructions", placeholder: c ? "e.g. Keep it to one screen" : "e.g. Swedish copy in every screen" }, lines.join("\n"));
+      const save = h("button", { type: "button", class: "primary" }, "Save");
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await api(path, { method: "PUT", body: { text: text.value } });
+          toast("Instructions saved");
+          close(true);
+        } catch (e) {
+          save.disabled = false;
+          fail(e);
+        }
+      });
+      const hint = c
+        ? h("div", { class: "small faint" }, "One rule per line, for this tool only. Rules for every tool are under ", h("a", { href: "#/settings/ai", onclick: () => close(false) }, "Settings › AI"), ".")
+        : h("div", { class: "small faint" }, "One rule per line, for every tool you build. The intake adds to these when you tell it a rule; the builder reads them on every build.");
+      setTimeout(() => text.focus());
+      return [sheetHead(c ? appIcon(c, { size: 44 }) : null, c ? `Instructions · ${c.name}` : "Instructions for building"), h("div", { class: "stack-md" }, text, hint), sheetActions(h("button", { type: "button", onclick: () => close(false) }, "Cancel"), save)];
+    },
+    { width: 560 },
+  );
+}
+
+/** What the intake remembered (or dropped) for later builds, shown as saved, with Undo. */
+function memoryNotice(what, { scope, text }, cap) {
+  const where = scope === "tool" && cap ? `${cap.name}'s builder instructions` : "global builder instructions";
+  const path = scope === "tool" && cap ? `/capabilities/${enc(cap.id)}/instructions` : "/instructions";
+  const undo = h("button", { type: "button", class: "link sm" }, "Undo");
+  const el = h("div", { class: "notice info memory-notice" }, h("div", { class: "grow col" }, h("span", { class: "strong" }, what === "remember" ? `Saved to ${where}` : `Removed from ${where}`), h("span", { class: "memory-text" }, text)), undo);
+  undo.addEventListener("click", async () => {
+    undo.disabled = true;
+    try {
+      const { lines } = await api(path);
+      const next = what === "remember" ? lines.filter((l) => l !== text) : lines.includes(text) ? lines : [...lines, text];
+      await api(path, { method: "PUT", body: { text: next.join("\n") } });
+      put(el, h("span", { class: "grow muted" }, what === "remember" ? `Not saved: ${text}` : `Kept: ${text}`));
+    } catch (e) {
+      undo.disabled = false;
+      fail(e);
+    }
+  });
+  return el;
+}
+
 /** Inline rename: the label becomes an input. Enter saves, Esc cancels. */
 function inlineRename(c, labelEl, { onSaved } = {}) {
   const input = h("input", { type: "text", class: "rename", value: c.name, maxLength: 60, "aria-label": `Rename ${c.name}` });
@@ -2532,7 +2586,7 @@ async function infoPage(id) {
   const pendingN = items.filter((i) => !i.approved).length;
   const rows = h("ul", { class: "list" });
   const fill = async () => {
-    const [scheds, home, m] = await Promise.all([api("/schedules").catch(() => []), api("/home").catch(() => ({ layout: [], gallery: [] })), cap.requires?.model ? api("/models").catch(() => null) : null]);
+    const [scheds, home, m, instr] = await Promise.all([api("/schedules").catch(() => []), api("/home").catch(() => ({ layout: [], gallery: [] })), cap.requires?.model ? api("/models").catch(() => null) : null, api(`/capabilities/${enc(id)}/instructions`).catch(() => ({ lines: [] }))]);
     const mine = scheds.filter((x) => x.capabilityId === id);
     const paused = mine.filter((x) => x.status === "paused");
     const widgets = home.gallery.find((g) => g.capabilityId === id)?.widgets ?? [];
@@ -2547,6 +2601,7 @@ async function infoPage(id) {
       req && infoRow("Model", `${req.tier ? `${titleCase(req.tier)} tier` : req.model}${m ? ` · ${usd(spent)} this month` : ""}`, () => toolModelSheet(c).then((ok) => ok || route()), cap.status.retiredModel ? "danger" : cap.status.missingModel ? "warn" : null),
       infoRow("Schedules", mine.length ? [mine.filter((x) => x.status === "active").map((x) => cadenceText(x.cadence)).join(", "), paused.length ? `${paused.length} paused` : "", mine.some((x) => x.status === "proposed") ? "1 proposed" : ""].filter(Boolean).join(" · ") || "None" : "None", () => schedulesSheet(c, ops).then(() => route()), paused.some((x) => x.pausedReason) ? "danger" : mine.some((x) => x.status === "proposed") ? "warn" : null),
       infoRow("Widgets", widgets.length ? `${widgets.length} · ${placed} on Home` : "None", () => toolWidgetsSheet(c).then(() => route())),
+      infoRow("Instructions", instr.lines.length ? `${plural(instr.lines.length, "rule")} for this tool` : "None · rules for every tool are under Settings › AI", () => instructionsSheet(c).then(() => route())),
       latest && infoRow("Versions", `v${c.version ?? latest.version} · ${ago(latest.createdAt)}`, () => versionsDialog(c)),
     );
   };
@@ -2783,6 +2838,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       live.remove();
       activity.remove();
       if (reply.message) say("them", reply.message);
+      // What it remembered (or dropped) for later builds: shown as saved, with Undo.
+      for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
       const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
@@ -4702,12 +4759,21 @@ async function aiSection() {
       h("button", { class: "sm", onclick: () => agentModelsSheet(builder).then((saved) => saved && route()) }, "Change…"),
     );
   const prov = m?.provider && m.providers.find((p) => p.id === m.provider);
+  // The owner's standing rules for building: the intake remembers them, the builder reads them on every build.
+  const rules = await api("/instructions").then((r) => r.lines).catch(() => []);
+  const instructions = h(
+    "div",
+    { class: "setting" },
+    h("div", { class: "grow" }, h("span", { class: "strong" }, "Instructions for building"), h("span", { class: "sub clip-1" }, rules.length ? `${plural(rules.length, "rule")} · ${rules.join(" · ")}` : "None yet · tell the intake a rule, or write one here")),
+    h("button", { class: "sm", onclick: () => instructionsSheet().then((saved) => saved && route()) }, "Edit…"),
+  );
   settingsFrame(
     "ai",
     h("div", { class: "row between" }, h("h1", { class: "flush" }, "AI"), h("button", { onclick: () => addSheet().then(() => !location.hash.startsWith("#/settings/ai/models") && route()) }, "Add…")),
     settingsCard(
       h("div", { class: "setting-with-extra" }, builds, h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
       asks,
+      instructions,
       h(
         "div",
         { class: "setting" },
