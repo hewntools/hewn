@@ -368,6 +368,24 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");
 
+  // Images and files for the intake's box: uploaded as they're added, fetched back for thumbnails. Owner only.
+  if (resource === "attachments") {
+    if (!id && method === "POST") return platform.addAttachment(owner, pick(await readJson(req), ["session", "kind", "name", "mediaType", "data"]));
+    if (id && method === "GET") {
+      const { meta, bytes: data } = await platform.attachmentBytes(owner, id);
+      return new Response(body(data), {
+        status: 200,
+        headers: {
+          "content-type": meta.kind === "image" ? meta.mediaType : "text/plain; charset=utf-8",
+          "content-security-policy": "default-src 'none'; sandbox",
+          "x-content-type-options": "nosniff",
+          "content-disposition": `inline; filename="${meta.name.replace(/["\\]/g, "")}"`,
+          "cache-control": "private, max-age=3600",
+        },
+      });
+    }
+  }
+
   // The owner's standing rules for building, for every tool (one per line; the intake adds to them, the builder reads them).
   if (resource === "instructions" && !id) {
     if (method === "PUT") return { lines: platform.setInstructions(owner, undefined, (await readJson(req)).text) };
@@ -573,7 +591,10 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     };
     // The owner's standing rules, for the intake to follow (and add to: what it remembers is saved below, and shown as saved).
     const instructions = { global: platform.instructions(owner), ...(currentManifest ? { tool: platform.instructions(owner, body.capabilityId!) } : {}) };
-    const request = { ...body, catalog, current: currentManifest, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
+    // What the owner attached (the client sends refs): the bytes come from the store, for the intake to read.
+    if (!Array.isArray(body.messages)) throw new PlatformError("invalid_request", "messages must be a list");
+    const messages = await Promise.all(body.messages.map(async (m) => (m?.attachments?.length ? { ...m, attachments: await platform.attachmentsWithData(owner, m.attachments) } : { ...m })));
+    const request = { ...body, messages, catalog, current: currentManifest, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
     const kept = (reply: IntakeReply): IntakeReply => {
       const { remember, forget, ...rest } = reply;
       const saved = platform.applyIntakeMemory(owner, body.capabilityId, remember, forget);

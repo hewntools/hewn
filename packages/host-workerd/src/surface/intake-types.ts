@@ -3,9 +3,25 @@
 // implementation lives in src/intake.ts).
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
 
+/**
+ * An image or text file the owner attached with a message: a ref into the owner's attachments
+ * (the web client uploads each as it's added); the platform adds `data` (base64) for the intake.
+ */
+export interface IntakeAttachment {
+  ref: string;
+  kind: "image" | "file";
+  name: string;
+  mediaType: string;
+  bytes?: number;
+  width?: number;
+  height?: number;
+  data?: string;
+}
+
 export interface IntakeMessage {
   role: "user" | "intake";
   content: string;
+  attachments?: IntakeAttachment[];
   /** The intake's structured reply, which the web client keeps with the build; the intake reads only `content`. */
   reply?: unknown;
 }

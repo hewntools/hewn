@@ -16,8 +16,8 @@ import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
  * themselves. It runs headless, sandboxed, with no tools that matter and no MCP.
  */
 
-export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeInstruction, IntakeMemory, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
-import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeInstruction, IntakeMemory, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { MAX_IDEAS } from "@hewntools/host-workerd/surface/intake-types.ts";
 
 /**
@@ -191,11 +191,35 @@ export function intakeManifest(m: CapabilityManifest): string {
 const EARLIER_TURNS = 30;
 const EARLIER_CHARS = 4000;
 
+/** The images attached across the conversation (with their bytes), newest last, for the intake to look at. */
+export const intakeImages = (req: IntakeRequest): IntakeAttachment[] => req.messages.flatMap((m) => (m.attachments ?? []).filter((a) => a.kind === "image" && !!a.data)).slice(-10);
+
+/** How much of an attached text file goes into the prompt. */
+const FILE_CHARS = 100_000;
+
+/**
+ * One turn as the prompt shows it. What the owner attached is listed under the message; a text
+ * file's content follows (images are given to the model apart from the text).
+ */
+function turnText(m: { role: string; content: string; attachments?: IntakeAttachment[] }, max = Infinity): string {
+  const head = `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content.length > max ? `${m.content.slice(0, max)}…` : m.content}`;
+  const atts = m.attachments ?? [];
+  if (!atts.length) return head;
+  const list = atts.map((a) => `${a.name} (${a.kind === "image" ? `image${a.width && a.height ? ` ${a.width}×${a.height}` : ""}` : "file"})`).join(", ");
+  const files = atts
+    .filter((a) => a.kind === "file" && a.data)
+    .map((a) => {
+      const text = Buffer.from(a.data!, "base64").toString("utf8");
+      return `--- attached file ${a.name} ---\n${text.length > FILE_CHARS ? `${text.slice(0, FILE_CHARS)}\n… (cut at ${FILE_CHARS} characters)` : text}\n--- end of ${a.name} ---`;
+    })
+    .join("\n");
+  return `${head}\n[attached: ${list}]${files ? `\n${files}` : ""}`;
+}
+
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): string {
-  const turn = (m: { role: string; content: string }, max = Infinity) => `${m.role === "user" ? "USER" : "YOU (intake)"}: ${m.content.length > max ? `${m.content.slice(0, max)}…` : m.content}`;
-  const convo = req.messages.map((m) => turn(m)).join("\n\n");
+  const convo = req.messages.map((m) => turnText(m)).join("\n\n");
   const earlier = req.earlier?.messages?.length
-    ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turn(m, EARLIER_CHARS)).join("\n\n")}\n\n`
+    ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turnText(m, EARLIER_CHARS)).join("\n\n")}\n\n`
     : "";
   const focus = req.widget ? req.current?.widgets?.find((w) => w.name === req.widget) : undefined;
   const rules = req.instructions;
@@ -231,6 +255,7 @@ Decide:
 - When you talk to the owner ("message", "questions"), call capabilities "tools": that is the owner's word for them (capability is Hewn's technical term). The builder-facing fields keep "capability".
 - Write for a chat: short and clear. Say only what the owner needs to know or decide; never restate their request, and never list what the tool won't need (no network, no model, no key…). Put a blank line between paragraphs; when there are several things, a list (one per line, starting with "- ") instead of a long sentence. "message" is at most three short paragraphs: the proposal card carries the details. Each question is one line with its default in it.
 - Engage with what the owner actually said in their latest message. If they point you at something (a service, API, link), address it explicitly in "message".
+- Attachments: the owner may attach screenshots and files ("[attached: …]" under a message; a text file's content follows it; images are shown to you). A screenshot shows the screen or the look they mean, a sketch what they want; a file is reference material (a script to port, data to import, notes). Read them as part of the request: say in "message" what you took from them, and carry what matters into the requirements or the request in words (the builder gets copies of the attachments in its workspace, listed in the request, so name them when it should look at one).
 - Remember standing rules. When the owner states a preference or a rule meant to hold beyond this request ("always Swedish copy", "never delete buttons", "keep this one to a single screen"), put it in "remember": scope "global" for every tool they build, "tool" for this one only${req.mode === "create" ? ' (creating, there is no tool yet: a rule for this tool goes into the requirements instead, and "remember" takes global ones only)' : ""}. One short rule each, in the owner's terms (not their sentence verbatim); never a rule they didn't state, never a secret, never a one-off detail of this request, never one already listed above. When they withdraw or contradict a listed rule, put its exact text in "forget". The owner sees what was saved and can undo it. Otherwise leave both empty.
 ${opts.web ? "- You can look things up (WebFetch/WebSearch) to check services or APIs the owner mentions: whether they exist, are maintained, legitimate, and what they offer. Only fetch what's needed." : "- You cannot open links or browse. If the owner sends one, say so in \"message\" and work from what you know."}
 - Never design around piracy, credential sharing, or scraping that violates a service's terms. If a suggested source looks like that, say so plainly in "message" and propose a legitimate alternative.
@@ -346,18 +371,27 @@ function draftSpec(j: Record<string, unknown>): DraftSpec | undefined {
   return operations.length || spec.widgets.length || model || spec.uses.length || spec.hosts.length || spec.secrets.length ? spec : undefined;
 }
 
+/** Claude Code's stream-json input: the prompt and the attached images as one user message (how images reach it headless). */
+export function claudeIntakeInput(prompt: string, images: { mediaType: string; data: string }[]): string {
+  const content = [{ type: "text", text: prompt }, ...images.map((i) => ({ type: "image", source: { type: "base64", media_type: i.mediaType, data: i.data } }))];
+  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
+}
+
+const IMAGE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
 /** A failsafe for a run that hangs (you can stop one yourself): long enough for a big brief on a slow, careful model. */
 export const INTAKE_TIMEOUT_MS = 15 * 60_000;
 
-export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal): Promise<string> {
+export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal, stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("stopped"));
-    const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, env, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    if (stdin !== undefined) child.stdin!.end(stdin);
     signal?.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
     let out = "";
     let err = "";
     let pending = "";
-    child.stdout.on("data", (d) => {
+    child.stdout!.on("data", (d) => {
       out += d;
       if (!onLine) return;
       pending += d;
@@ -365,7 +399,7 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
       pending = lines.pop()!;
       for (const l of lines) if (l.trim()) onLine(l);
     });
-    child.stderr.on("data", (d) => (err += d));
+    child.stderr!.on("data", (d) => (err += d));
     let timedOut = false;
     const timer = setTimeout(() => ((timedOut = true), child.kill("SIGTERM")), timeoutMs);
     child.once("error", (e) => (clearTimeout(timer), reject(e)));
@@ -405,11 +439,19 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
       // Claude gets web lookup (WebFetch/WebSearch) to check services the owner mentions;
       // the owner reviews every draft before anything is built.
       const prompt = intakePrompt(req, { web: which === "claude" });
+      const images = intakeImages(req);
       const h = homedir();
       if (which === "codex") {
         writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
+        // Attached images go in as files next to the prompt (-i); text files are in the prompt already.
+        const imageArgs = images.flatMap((img, i) => {
+          const p = join(ws, `attachment-${i + 1}.${IMAGE_EXT[img.mediaType] ?? "png"}`);
+          writeFileSync(p, Buffer.from(img.data!, "base64"));
+          return ["-i", p];
+        });
+        // `-i` takes several files: it goes before another flag, never right before the prompt (it would take it).
         const args = [
-          "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check",
+          "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", ...imageArgs,
           ...codexModelArgs(model),
           "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
           "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), prompt,
@@ -424,8 +466,11 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         }
         return parseIntake(readFileSync(join(ws, "out.json"), "utf8"), req.mode, req.current);
       }
+      // With images, the prompt goes in on stdin as one user message with image blocks (stream-json input).
+      const stdin = images.length ? claudeIntakeInput(prompt, images.map((i) => ({ mediaType: i.mediaType, data: i.data! }))) : undefined;
       const args = [
-        "-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
+        ...(stdin === undefined ? ["-p", prompt] : ["-p", "--input-format", "stream-json"]),
+        "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
         ...claudeModelArgs(model),
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
@@ -467,7 +512,7 @@ function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: J
         }
       };
       try {
-        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal);
+        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal, stdin);
       } catch (e) {
         // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
         if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);

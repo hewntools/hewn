@@ -2818,13 +2818,45 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
   const draftNow = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
-  const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, draftNow, modelChip(), send));
+  // Images and files for the request: pasted, dropped or attached; uploaded as they're added, sent as refs.
+  const pending = [];
+  const chips = h("div", { class: "attachments", hidden: true });
+  const picker = h("input", { type: "file", multiple: true, accept: "image/*,text/*,.csv,.json,.md,.txt,.yaml,.yml,.toml,.sql,.js,.ts,.py,.sh,.html,.css", hidden: true, "aria-label": "Files to attach" });
+  const attach = h("button", { type: "button", class: "ghost sm", onclick: () => picker.click() }, "Attach");
+  const syncChips = () => ((chips.hidden = !pending.length), put(chips, pending.map((a) => attachmentChip(a, () => (pending.splice(pending.indexOf(a), 1), syncChips())))), syncSend());
+  // Per message: up to 5 images and 10 files (Hewn checks the same as the message is sent).
+  const perMessage = { image: 5, file: 10 };
+  const addFiles = async (files) => {
+    for (const f of files) {
+      const kind = /^image\//.test(f.type) ? "image" : "file";
+      if (pending.filter((a) => a.kind === kind).length >= perMessage[kind]) {
+        fail(new Error(`Up to ${perMessage[kind]} ${kind}s per message`));
+        continue;
+      }
+      try {
+        pending.push(await uploadAttachment(f, session));
+        syncChips();
+      } catch (e) {
+        fail(e);
+      }
+    }
+  };
+  picker.addEventListener("change", () => (addFiles([...picker.files]), (picker.value = "")));
+  input.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData?.files ?? [])];
+    if (files.length) (e.preventDefault(), addFiles(files));
+  });
+  const composer = h("form", { class: "composer boxed" }, chips, input, h("div", { class: "composer-tools" }, attach, picker, draftNow, modelChip(), send));
+  composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
+  composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
+  composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
+  composer.prepend(offer);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
   const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
-  const say = (who, text) => thread.append(h("div", { class: `bubble ${who}` }, text));
-  const syncSend = () => send.classList.toggle("primary", !!input.value.trim());
+  const say = (who, text, attachments) => thread.append(h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
+  const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
   syncSend();
 
@@ -2851,6 +2883,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const text = input.value.trim();
     // One turn at a time: the box is disabled while the intake answers (Draft now submits through here too).
     if (!text || input.disabled) return;
+    // A message may be attachments alone ("like this", with a screenshot).
+    if (!text && !pending.length) return;
     // Text put in from the address (m=, "Ask builder to fix this") is sent: a redraw mustn't put it back.
     const [path, qs = ""] = location.hash.split("?");
     const params = new URLSearchParams(qs);
@@ -2860,10 +2894,13 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       history.replaceState(null, "", `${path}${params.size ? `?${params}` : ""}`);
     }
     if (focus === null && widgetParam && !widgetsMode && capId) focus = ((await api(`/capabilities/${enc(capId)}`).catch(() => null))?.widgets ?? []).find((w) => w.name === widgetParam) ?? false;
-    messages.push({ role: "user", content: text });
+    // What was attached goes with this turn, as refs (the bytes are already up).
+    const attachments = pending.splice(0).map(({ ref, kind, name, mediaType, bytes, width, height }) => ({ ref, kind, name, mediaType, bytes, width, height }));
+    syncChips();
+    messages.push({ role: "user", content: text, ...(attachments.length ? { attachments } : {}) });
     heading.hidden = embedded;
     offer.remove();
-    say("me", text);
+    say("me", text, attachments);
     input.value = "";
     input.placeholder = ""; // the example is for an empty conversation
     grow();
@@ -3084,6 +3121,94 @@ function modelChip() {
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
+
+/** Attachments as a message shows them: thumbnails, file names. */
+const attachmentsView = (list) => (list?.length ? h("div", { class: "attachments" }, list.map((a) => attachmentChip(a))) : null);
+
+/** One attachment: a thumbnail or the file's name, and (in the box, before sending) × to drop it. */
+const attachmentChip = (a, onRemove) =>
+  h(
+    "span",
+    { class: "attachment" },
+    a.kind === "image" ? h("img", { src: `/api/attachments/${enc(a.ref)}`, alt: a.name, title: a.name }) : h("span", { class: "file-chip", title: a.name }, a.name),
+    onRemove && h("button", { type: "button", class: "x", "aria-label": `Remove ${a.name}`, onclick: onRemove }, "×"),
+  );
+
+/**
+ * Upload one pasted, dropped or picked file for the request: an image is resized first (long side
+ * at most 1568 px, what the models read well), a text file goes as it is. Resolves the attachment
+ * (its ref and what it is) once Hewn has it.
+ */
+async function uploadAttachment(file, session) {
+  const image = /^image\//.test(file.type);
+  if (!image && file.size > 256 * 1024) throw new Error(`${file.name}: a file may be at most 256 KB`);
+  const blob = image ? await resizeImage(file) : file;
+  if (image && blob.size > 2 * 1024 * 1024) throw new Error(`${file.name || "The image"} is too large even after resizing`);
+  const data = await new Promise((ok, no) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).split(",")[1] ?? "");
+    r.onerror = () => no(r.error);
+    r.readAsDataURL(blob);
+  });
+  return api("/attachments", { method: "POST", body: { session, kind: image ? "image" : "file", name: file.name || (image ? "pasted.png" : "pasted.txt"), mediaType: image ? blob.type : file.type || "text/plain", data } });
+}
+
+/**
+ * A pasted or dropped image no bigger than the models read well: long side at most 1568 px. One
+ * already within that (and a type Hewn takes) goes as it is, a GIF's animation included; one that
+ * needs shrinking, or another type, is redrawn as PNG (JPEG stays JPEG).
+ */
+async function resizeImage(file) {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) throw new Error(`${file.name || "The image"} can't be read`);
+  const scale = Math.min(1, 1568 / Math.max(bitmap.width, bitmap.height));
+  if (scale === 1 && ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) && file.size <= 2 * 1024 * 1024) return (bitmap.close?.(), file);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const type = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
+  return new Promise((ok, no) => canvas.toBlob((b) => (b ? ok(b) : no(new Error("couldn't read the image"))), type, 0.9));
+}
+
+/**
+ * "Got what you asked for?", asked once as a toast when a tool is opened after a build went live
+ * (its newest version's build, within a week, no answer yet): Yes, Not quite (which opens the
+ * change drawer, so what's off becomes the next change), or × to skip. The answer stays in your
+ * Hewn; nothing is sent anywhere.
+ */
+async function askFeedbackOnOpen(c, drawerApi) {
+  const d = await api(`/capabilities/${enc(c.id)}`).catch(() => null);
+  const last = d?.versions?.find((v) => v.buildId);
+  if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
+  const ctx = await api(`/builds/${enc(last.buildId)}/context`).catch(() => null);
+  if (!ctx || ctx.feedback) return;
+  // Once per version in this browser: ignoring it is an answer too.
+  const askedKey = `hewn.asked.${c.id}`;
+  if (localStorage.getItem(askedKey) === String(last.version)) return;
+  localStorage.setItem(askedKey, String(last.version));
+  let region = document.querySelector(".toast-region");
+  if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
+  // An answer that didn't reach Hewn is asked for again next time.
+  const send = (score) =>
+    api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } }).catch((e) => {
+      localStorage.removeItem(askedKey);
+      throw e;
+    });
+  const el = h("div", { class: "toast feedback-toast" });
+  const gone = () => el.remove();
+  put(
+    el,
+    h("span", { class: "dot info" }),
+    h("span", {}, `v${last.version} · got what you asked for?`),
+    h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
+    h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.()), fail) }, "Not quite"),
+    h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
+  );
+  region.append(el);
+  onLeave(gone);
+}
 /**
  * The reply an intake turn kept as text only was (conversations from before replies were kept):
  * the message, then the draft, ideas, schedules or widgets as `draftText` and friends wrote them.
@@ -3158,46 +3283,8 @@ const conversationNodes = (turns, ctx = {}) =>
       const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, nextVersion: ctx.version, readOnly: true })[0];
       return [r.message && h("div", { class: "bubble them" }, r.message), card];
     }
-    return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content);
+    return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content, attachmentsView(t.attachments));
   });
-
-/**
- * "Got what you asked for?", asked once as a toast when a tool is opened after a build went live
- * (its newest version's build, within a week, no answer yet): Yes, Not quite (which opens the
- * change drawer, so what's off becomes the next change), or × to skip. The answer stays in your
- * Hewn; nothing is sent anywhere.
- */
-async function askFeedbackOnOpen(c, drawerApi) {
-  const d = await api(`/capabilities/${enc(c.id)}`).catch(() => null);
-  const last = d?.versions?.find((v) => v.buildId);
-  if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
-  const ctx = await api(`/builds/${enc(last.buildId)}/context`).catch(() => null);
-  if (!ctx || ctx.feedback) return;
-  // Once per version in this browser: ignoring it is an answer too.
-  const askedKey = `hewn.asked.${c.id}`;
-  if (localStorage.getItem(askedKey) === String(last.version)) return;
-  localStorage.setItem(askedKey, String(last.version));
-  let region = document.querySelector(".toast-region");
-  if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
-  // An answer that didn't reach Hewn is asked for again next time.
-  const send = (score) =>
-    api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } }).catch((e) => {
-      localStorage.removeItem(askedKey);
-      throw e;
-    });
-  const el = h("div", { class: "toast feedback-toast" });
-  const gone = () => el.remove();
-  put(
-    el,
-    h("span", { class: "dot info" }),
-    h("span", {}, `v${last.version} · got what you asked for?`),
-    h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
-    h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.()), fail) }, "Not quite"),
-    h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
-  );
-  region.append(el);
-  onLeave(gone);
-}
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
 const draftText = (d) =>

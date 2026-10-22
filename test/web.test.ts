@@ -297,6 +297,32 @@ describe("web client (owner surface)", () => {
       assert.ok((await api("/capabilities")).json.some((c: any) => c.id === "secret-echo"));
     });
 
+    test("attachments: uploaded as added, served back sandboxed, handed to the intake with their bytes, kept with the build", async () => {
+      const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+9AAAADklEQVQIW2P4z8DwHwAFAAH/yQ0wtQAAAABJRU5ErkJggg==";
+      const up = await api("/attachments", { method: "POST", body: { session: "s-web", kind: "image", name: "screen.png", mediaType: "image/png", data: PNG } });
+      assert.equal(up.status, 200, JSON.stringify(up.json));
+      assert.deepEqual({ ...up.json, ref: "" }, { ref: "", kind: "image", name: "screen.png", mediaType: "image/png", bytes: 70, width: 2, height: 1 });
+      const got = await http(`/api/attachments/${up.json.ref}`);
+      assert.equal(got.status, 200);
+      assert.equal(got.headers["content-type"], "image/png");
+      assert.match(String(got.headers["content-security-policy"]), /sandbox/);
+      assert.equal((await api("/attachments/at-nope")).status, 404);
+      assert.equal((await api("/attachments", { method: "POST", body: { session: "s-web", kind: "file", name: "x.bin", mediaType: "application/octet-stream", data: "AAAA" } })).status, 400);
+      // The intake gets the bytes; the client only sent the ref.
+      const turn = { role: "user", content: "make it look like this", attachments: [{ ref: up.json.ref, kind: "image", name: "screen.png", mediaType: "image/png" }] };
+      const r = await api("/intake", { method: "POST", body: { mode: "create", messages: [turn] } });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.equal(intakeCalls.at(-1)!.messages[0].attachments![0].data, PNG);
+      assert.equal(intakeCalls.at(-1)!.messages[0].attachments![0].width, 2);
+      assert.equal((await api("/intake", { method: "POST", body: { mode: "create", messages: [{ ...turn, attachments: [{ ref: "at-nope" }] }] } })).status, 404);
+      // With the build: refs resolved to what they are, kept in the conversation.
+      const b = await api("/capabilities", { method: "POST", body: { name: "Shown Log", purpose: "p", requirements: "r", conversation: [turn, { role: "intake", content: "DRAFT\nShown Log" }] } });
+      assert.equal(b.status, 200, JSON.stringify(b.json));
+      await platform.settle(b.json.buildId);
+      const ctx = (await api(`/builds/${b.json.buildId}/context`)).json;
+      assert.deepEqual(ctx.conversation[0].attachments, [{ ref: up.json.ref, kind: "image", name: "screen.png", mediaType: "image/png", bytes: 70, width: 2, height: 1 }]);
+    });
+
     test("intake: questions, then a draft; the platform supplies the catalog", async () => {
       const q = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "coffee beans" }] } });
       assert.equal(q.json.kind, "questions");
