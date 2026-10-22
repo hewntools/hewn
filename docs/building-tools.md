@@ -43,6 +43,12 @@ Some changes need no builder: picking another model tier, for example, is a new 
 
 **Changes made by agents:** an agent's change that adds operations, or changes a connection, waits for you to approve it (the Inbox, or `hewn review`). You see what it adds before it goes live. Other changes go live after their checks, and any new grants still wait for you.
 
+## Instructions
+
+Standing rules for how your tools are built, which the builder reads on every build: for every tool ("Swedish copy in every screen", "never a delete button without Undo") or for one tool ("keep it to a single screen"). Tell the intake a rule while you talk a request through and it remembers it: the chat shows **Saved to global builder instructions** (or to the tool's) with the rule as it was written down, and **Undo** if that's not what you meant. Withdraw a rule the same way.
+
+They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool. Each build records the instructions it ran with, next to its conversation and spec.
+
 ## When a build fails
 
 The build says why: a failing test, an invalid manifest, an error on its screen. Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
