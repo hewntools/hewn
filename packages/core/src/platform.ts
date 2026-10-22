@@ -288,6 +288,8 @@ const pickAsk = (o: ModelAsk): ModelAsk => ({ ...(o.model !== undefined ? { mode
 /** The most turns a conversation kept with a build may have, and the longest turn. */
 const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
+/** The longest structured reply kept with an intake turn (as JSON). */
+const MAX_REPLY_CHARS = 100_000;
 
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
@@ -2504,7 +2506,9 @@ export class Platform {
       if (!t || (t.role !== "user" && t.role !== "intake") || typeof t.content !== "string" || t.content.length > MAX_TURN_CHARS) {
         throw new PlatformError("invalid_request", `each turn of the conversation needs a role ("user" or "intake") and content of at most ${MAX_TURN_CHARS} characters`);
       }
-      return { role: t.role, content: t.content };
+      // An intake turn may carry its structured reply, for showing the proposal as it was; kept as is, within reason.
+      const reply = t.role === "intake" && t.reply && typeof t.reply === "object" && JSON.stringify(t.reply).length <= MAX_REPLY_CHARS ? t.reply : undefined;
+      return { role: t.role, content: t.content, ...(reply ? { reply } : {}) };
     });
   }
 

@@ -586,7 +586,7 @@ function versionPane(c, v, isActive, close) {
     ? [
         lazy("Conversation", async () => {
           const ctx = await api(`/builds/${enc(v.buildId)}/context`);
-          return ctx.conversation?.length ? conversationThread(ctx.conversation) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
+          return ctx.conversation?.length ? conversationThread(ctx.conversation, { mode: v.kind === "create" ? "create" : "modify", cap: c, all: await caps(true).catch(() => new Map()) }) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
         }),
         spec && h("details", { class: "spec-step" }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
         lazy("Builder's log", async () => {
@@ -1522,17 +1522,20 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else for (const k of ["change", "m", "send", "widget", "from"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
+  // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
+  const shown = () => !!drawer && drawer.el.style.display !== "none";
   const open = () => {
-    drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
-    layout.append(drawer.el);
+    if (!drawer) {
+      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
+      layout.append(drawer.el);
+    } else drawer.el.style.display = "";
     change.setAttribute("aria-pressed", "true");
     setUrl(true);
   };
-  const toggle = (want = !drawer) => {
-    if (want && !drawer) open();
-    else if (!want && drawer) {
-      drawer.el.remove();
-      drawer = null;
+  const toggle = (want = !shown()) => {
+    if (want && !shown()) open();
+    else if (!want && shown()) {
+      drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
       for (const k of ["m", "send", "widget", "from"]) q.delete(k);
       setUrl(false);
@@ -2700,20 +2703,21 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   let focus = null;
   const messages = [];
   const thread = h("div", { class: "thread", "aria-live": "polite" });
-  // Picking up an earlier conversation ("Continue from here" on a version, or the offer on a change):
-  // its turns show at the top, dimmed, and go to the intake as context.
+  // Picking up an earlier conversation ("Continue from here" on a version, or the card on a change):
+  // its turns show at the top as they were (proposals as cards), and go to the intake as context.
   let from = q?.get("from") || null;
-  const earlierEl = h("div", { class: "earlier", hidden: true });
+  const earlierEl = h("div", { class: "thread earlier", hidden: true });
   thread.prepend(earlierEl);
   const continueFrom = async (buildId) => {
     from = buildId;
     const [b, ctx] = await Promise.all([api(`/builds/${enc(buildId)}`), api(`/builds/${enc(buildId)}/context`)]);
-    put(earlierEl, h("div", { class: "small faint" }, `The conversation that made v${b.resultVersion ?? "?"}`), (ctx.conversation ?? []).map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
+    put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode, cap, all }));
     earlierEl.hidden = false;
   };
   if (from) continueFrom(from).catch(fail);
-  // A change to a tool with a conversation behind it: offer to pick it up (a card on top of the box, × to decline).
-  const offer = h("div", { class: "notice info continue-offer", hidden: true });
+  // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
+  const offer = h("div", { class: "card continue-card", hidden: true });
+  thread.append(offer);
   if (mode === "modify" && capId && !from && !widgetsMode) {
     api(`/capabilities/${enc(capId)}`)
       .then(async (d) => {
@@ -2722,9 +2726,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
         if (!ctx.conversation?.length) return;
         put(
           offer,
-          h("span", { class: "grow" }, `Continue from the last conversation (v${last.version})?`),
-          h("button", { type: "button", class: "sm", onclick: () => ((offer.hidden = true), continueFrom(last.buildId).catch(fail)) }, "Continue"),
-          h("button", { type: "button", class: "ghost sm icon-only", "aria-label": "No", title: "No", onclick: () => (offer.hidden = true) }, "×"),
+          h("div", { class: "continue-title" }, "Continue the last conversation?"),
+          h("div", { class: "small muted" }, `The chat that made v${last.version} comes along, so you don't explain the tool again.`),
+          h("div", { class: "row tight continue-actions" }, h("button", { type: "button", class: "sm primary", onclick: () => (offer.remove(), continueFrom(last.buildId).catch(fail)) }, "Continue"), h("button", { type: "button", class: "sm ghost", onclick: () => offer.remove() }, "Start fresh")),
         );
         offer.hidden = false;
       })
@@ -2752,7 +2756,6 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const composer = h("form", { class: "composer boxed" }, input, h("div", { class: "composer-tools" }, modelChip(), send));
-  composer.prepend(offer);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -2795,6 +2798,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     if (focus === null && widgetParam && !widgetsMode && capId) focus = ((await api(`/capabilities/${enc(capId)}`).catch(() => null))?.widgets ?? []).find((w) => w.name === widgetParam) ?? false;
     messages.push({ role: "user", content: text });
     heading.hidden = embedded;
+    offer.remove();
     say("me", text);
     input.value = "";
     grow();
@@ -2826,23 +2830,23 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
       const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
       if (reply.kind === "questions") {
-        messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n") });
+        messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
         reply.questions.forEach((x) => say("them", x));
       } else if (reply.kind === "widgets") {
         // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
-        messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n") });
+        messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
         if (!reply.proposals.length) say("them", "No widgets to suggest for this. Say what you'd like to see.");
         else showProposal(...proposalCard("widgets", reply.proposals, ctx));
       } else if (reply.kind === "ideas") {
         // Remembered in full, so "build the first two" or "make #3 simpler" revises them rather than starting over.
-        messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n") });
+        messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n"), reply });
         showProposal(...proposalCard("ideas", reply.ideas, ctx));
       } else if (reply.kind === "schedules") {
-        messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n") });
+        messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n"), reply });
         showProposal(...proposalCard("schedules", reply.schedules, ctx));
       } else {
         // The whole draft, so "Keep talking" changes it instead of starting over.
-        messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n") });
+        messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"), reply });
         showProposal(...proposalCard("draft", [reply.draft], ctx));
       }
     } catch (err) {
@@ -3006,8 +3010,22 @@ function modelChip() {
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
 
-/** A kept conversation (what led to a build), as the chat looked: the owner's turns and the intake's. */
-const conversationThread = (turns) => h("div", { class: "thread kept" }, turns.map((t) => h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content)));
+/**
+ * A kept conversation (what led to a build), as the chat looked: the owner's turns, the intake's
+ * questions, and its proposals as the cards they were (read-only). `ctx`: { mode, cap, all } for the cards.
+ */
+const conversationThread = (turns, ctx = {}) => h("div", { class: "thread kept" }, conversationNodes(turns, ctx));
+const conversationNodes = (turns, ctx = {}) =>
+  turns.map((t) => {
+    const r = t.role === "intake" ? t.reply : null;
+    const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
+    if (list?.length && "cap" in ctx) {
+      const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
+      const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, readOnly: true })[0];
+      return [r.message && h("div", { class: "bubble them" }, r.message), card];
+    }
+    return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content);
+  });
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
 const draftText = (d) =>
@@ -3083,7 +3101,8 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  * are several, icon, name, purpose, summary pills), ▸ opens its details (G2). Returns [card, summary].
  */
 function proposalCard(kind, list, ctx) {
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done } = ctx;
+  // `readOnly`: a card from a kept conversation: as it was, nothing to tick or build.
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done, readOnly = false } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -3120,6 +3139,7 @@ function proposalCard(kind, list, ctx) {
     else rows.filter((x) => x.box.checked && plan.needs(x.d).includes(capabilityId(r.d.name))).forEach((x) => tick(x, false));
   };
   rows.forEach((r) => r.box.addEventListener("change", () => (tick(r, r.box.checked), count())));
+  if (readOnly) rows.forEach((r) => ((r.box.disabled = true), r.ticks.set(false)));
 
   const preview = (d) => (kind === "widgets" || kind === "schedules" || mode === "modify" ? cap : { id: slug(d.name ?? connection ?? "new"), name: d.name ?? connection });
   const toolPills = (d) => {
@@ -3252,8 +3272,8 @@ function proposalCard(kind, list, ctx) {
     h("div", { class: "eyebrow" }, `Proposal · ${summary}`),
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
-    kind !== "schedules" && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
-    h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
+    kind !== "schedules" && !readOnly && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
+    !readOnly && h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
   );
   return [card, summary];
 }
@@ -3393,7 +3413,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
     const specView = specText ? h("details", { class: "spec-step" }, h("summary", {}, "Spec agreed"), h("pre", { class: "spec-text" }, specText)) : null;
     // The conversation that led to it (kept with the build); an agent's build has none.
-    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation)) : null;
+    const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation, { mode: b.kind === "create" ? "create" : "modify", cap: cap(), all })) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
     const live = () => {

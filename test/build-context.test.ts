@@ -23,11 +23,23 @@ describe("what a build keeps", () => {
 
     const ctx = t.platform.buildContext(USER, b.buildId);
     assert.deepEqual(ctx.conversation, turns);
+    // An intake turn keeps its structured reply (the card as it was); an oversized one is dropped, a user's ignored.
+    const withReply = [
+      { role: "user" as const, content: "x", reply: { kind: "nope" } },
+      { role: "intake" as const, content: "DRAFT\nX", reply: { kind: "draft", message: "", draft: { name: "X", purpose: "x", requirements: "r" } } },
+      { role: "intake" as const, content: "big", reply: { kind: "draft", pad: "x".repeat(100_001) } },
+    ];
+    const m = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add notes", conversation: withReply as any }), () => {});
+    assert.deepEqual(t.platform.buildContext(USER, m.buildId).conversation, [
+      { role: "user", content: "x" },
+      { role: "intake", content: "DRAFT\nX", reply: withReply[1].reply },
+      { role: "intake", content: "big" },
+    ]);
     assert.match(ctx.brief!, /^[0-9a-f]{12}$/);
 
     assert.ok(await t.platform.blobs.get(`transcripts/${b.buildId}.log`), "the transcript is kept in blobs");
     assert.match((await t.platform.buildTranscript(USER, b.buildId)) ?? "", /\[platform\]/);
-    assert.equal(t.platform.registry.versions("running-log")[0].buildId, b.buildId);
+    assert.equal(t.platform.registry.versions("running-log").at(-1)!.buildId, b.buildId, "v1 knows the build that made it");
   });
 
   test("only the owner attaches a conversation, and only a well-formed one; only the owner reads it", async () => {

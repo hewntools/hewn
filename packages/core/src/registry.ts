@@ -81,6 +81,8 @@ export interface BuildModel {
 export interface BuildTurn {
   role: "user" | "intake";
   content: string;
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform. */
+  reply?: unknown;
 }
 
 /** What led to a build, kept with it for the capability's life (`build_context`). */
