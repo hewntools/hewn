@@ -351,6 +351,19 @@ describe("web client (owner surface)", () => {
       assert.match(r.body, /event: reply\ndata: \{"kind":"questions"/);
     });
 
+    test("Got what you asked for?: the answer is kept with the build's context, once it's live; nothing leaves", async () => {
+      const b = await api("/capabilities/running-log/modify", { method: "POST", body: { request: "add a note field" } });
+      await platform.settle(b.json.buildId);
+      assert.equal((await api(`/builds/${b.json.buildId}`)).json.status, "promoted");
+      assert.equal((await api(`/builds/${b.json.buildId}/context`)).json.feedback, undefined);
+      const no = await api(`/builds/${b.json.buildId}/feedback`, { method: "POST", body: { score: "no", note: "the field is hidden" } });
+      assert.equal(no.status, 200, JSON.stringify(no.json));
+      assert.equal(no.json.note, "the field is hidden");
+      assert.deepEqual((await api(`/builds/${b.json.buildId}/context`)).json.feedback, no.json);
+      assert.equal((await api(`/builds/${b.json.buildId}/feedback`, { method: "POST", body: { score: "great" } })).status, 400);
+      assert.equal((await api("/builds/b-nope/feedback", { method: "POST", body: { score: "yes" } })).status, 404);
+    });
+
     test("a build from the chat keeps its conversation and its log; the intake can continue from it", async () => {
       const turns = [
         { role: "user", content: "a plant log" },

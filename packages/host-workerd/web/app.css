@@ -438,6 +438,8 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 /* "Spec agreed" opens to the spec; "Conversation" to the chat that led to the build (kept with it). */
 .spec-step > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
 .thread.kept { max-height: 50vh; overflow: auto; margin-top: 8px; }
+/* "Got what you asked for?": a toast when a tool is opened after a build went live. */
+.feedback-toast { flex-wrap: wrap; }
 /* A version's pane in Versions: what led to it, at the bottom. */
 .version-pane { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .version-kept { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }

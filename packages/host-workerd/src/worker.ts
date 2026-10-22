@@ -579,6 +579,7 @@ const ADMIN_CALLS: Record<string, { owner: boolean }> = {
   archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
+  buildReport: { owner: true },
   cleanup: { owner: false },
   listSchedules: { owner: true }, createSchedule: { owner: true }, updateSchedule: { owner: true }, deleteSchedule: { owner: true },
   createWebTicket: { owner: true }, createUiTicket: { owner: false }, publicUrl: { owner: false }, setPublicUrl: { owner: true }, passkeys: { owner: true }, removePasskey: { owner: true },
