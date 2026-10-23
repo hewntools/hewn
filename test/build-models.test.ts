@@ -12,8 +12,9 @@ import { explainFailure } from "@hewntools/core/failure.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { writeConfig } from "@hewntools/cli/config.ts";
-import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED, modelCatalogs, modelRejectReason, noteModelFailure, noteModelRan } from "@hewntools/cli/builders/models.ts";
-import { claudeModelArgs, codexModelArgs, modelUnavailableText, withModelCheck } from "@hewntools/cli/builders/cli.ts";
+import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED, modelCatalogs, modelRejectReason, noteModelFailure, noteModelRan, opencodeCatalogFrom } from "@hewntools/cli/builders/models.ts";
+import { builderEnv, claudeModelArgs, codexModelArgs, modelUnavailableText, OPENCODE_PROVIDER_ENV, withModelCheck } from "@hewntools/cli/builders/cli.ts";
+import { builderProfile } from "@hewntools/cli/builders/sandbox.ts";
 import { intakeJob, type ModelCatalog, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import { toolsFor } from "@hewntools/host-workerd/mcp.ts";
 import { notesSince } from "@hewntools/cli/upgrade.ts";
@@ -292,6 +293,20 @@ describe("model lists and flags", () => {
     assert.equal((await catalogs("opencode")).models.find((m) => m.failed), undefined);
     await withModelCheck("claude", job, async () => {});
     assert.equal((await catalogs("claude")).models.find((m) => m.id === "fable")?.failed, undefined);
+  });
+
+  test("the other providers' keys reach the OpenCode run only; your OpenCode dirs stay closed where XDG puts them; only passable levels are offered", () => {
+    const env = { PATH: "/bin", ANTHROPIC_API_KEY: "a", OPENROUTER_API_KEY: "r", GOOGLE_GENERATIVE_AI_API_KEY: "g", GOOGLE_CLOUD_PROJECT: "p", OLLAMA_HOST: "h", OPENCODE_API_KEY: "o", AWS_SECRET_ACCESS_KEY: "s" };
+    assert.deepEqual(Object.keys(builderEnv(env)).sort(), ["ANTHROPIC_API_KEY", "PATH"], "Claude Code's and Codex's runs see none of them");
+    assert.deepEqual(Object.keys(builderEnv(env, OPENCODE_PROVIDER_ENV)).sort(), ["ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "OLLAMA_HOST", "OPENCODE_API_KEY", "OPENROUTER_API_KEY", "PATH"], "never a cloud project or an AWS secret");
+    // The sandbox: XDG-moved OpenCode directories are denied like the defaults (for your own home; another home isn't moved).
+    const profile = builderProfile({ workspace: "/tmp/ws", platformRoot: "/tmp/home", ownState: [], denyKeychain: true, env: { XDG_DATA_HOME: "/x/data", XDG_CONFIG_HOME: "/x/cfg" } });
+    assert.match(profile, /\/x\/data\/opencode/);
+    assert.match(profile, /\/x\/cfg\/opencode/);
+    assert.doesNotMatch(builderProfile({ workspace: "/tmp/ws", platformRoot: "/tmp/home", ownState: [], denyKeychain: true, home: "/tmp/other", env: { XDG_DATA_HOME: "/x/data" } }), /\/x\/data/);
+    // A variant Hewn can't pass as an effort (EFFORT: letters only) isn't offered, so what's listed is what's sent.
+    const cat = opencodeCatalogFrom('opencode/x\n{\n  "id": "x",\n  "name": "X",\n  "variants": {\n    "low": {},\n    "high": {},\n    "thinking-32k": {}\n  }\n}\n');
+    assert.deepEqual(cat.models.find((m) => m.id === "opencode/x")?.efforts, ["low", "high"]);
   });
 
 });

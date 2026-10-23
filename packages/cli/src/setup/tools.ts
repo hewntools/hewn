@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { OPENCODE_NO_UPDATE } from "../builders/opencode-dirs.ts";
 
 export interface ToolStatus {
   name: "claude" | "codex" | "opencode";
@@ -29,7 +30,7 @@ export function loggedIn(name: string): boolean | undefined {
   }
   if (name === "opencode") {
     // Signed in to a provider, or not: OpenCode also runs on keys from the environment, on local models and on its free tier, so "no" can't be told.
-    const r = spawnSync("opencode", ["auth", "list"], { encoding: "utf8", timeout: 15_000, env: { ...process.env, OPENCODE_CONFIG_CONTENT: '{"autoupdate":false}' } });
+    const r = spawnSync("opencode", ["auth", "list"], { encoding: "utf8", timeout: 15_000, env: { ...process.env, ...OPENCODE_NO_UPDATE } });
     const n = /(\d+)\s+credentials?/i.exec(r.stdout + r.stderr)?.[1];
     return n && Number(n) > 0 ? true : undefined;
   }

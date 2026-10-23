@@ -149,6 +149,10 @@ describe("OpenCode's home", () => {
       // Unchanged: nothing copied back; the login goes.
       h.done();
       assert.ok(!existsSync(join(dir, "data", "opencode", "auth.json")));
+      // Your provider config (keys and all) goes with it; the rules stay in the file.
+      const afterRun = JSON.parse(readFileSync(join(dir, "config", "opencode", "opencode.json"), "utf8"));
+      assert.equal(afterRun.provider, undefined);
+      assert.deepEqual(afterRun.permission, OPENCODE_BUILDER_RULES.permission);
       assert.equal(readFileSync(join(yours.data, "auth.json"), "utf8"), '{"anthropic":{"type":"oauth"}}');
       // A later attempt: the same home, nothing copied twice, the login back for the run.
       const again = await opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => undefined });

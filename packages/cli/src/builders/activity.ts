@@ -33,7 +33,8 @@ export function opencodeActivity(e: any, cwd: string): string | null {
 }
 
 /** An OpenCode error, as its event carries it: a name with the message in `data`, or a message. */
-const errorText = (err: any): string => (typeof err === "string" ? err : err?.data?.message ?? err?.message ?? err?.name ?? JSON.stringify(err ?? "error"));
+/** An OpenCode error, in words: its message when it has one, else its name. */
+export const errorText = (err: any): string => (typeof err === "string" ? err : err?.data?.message ?? err?.message ?? err?.name ?? JSON.stringify(err ?? "error"));
 
 /** `codex exec --json` events. */
 export function codexActivity(e: any, cwd: string): string | null {

@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { HarnessStatus } from "@hewntools/host-workerd/surface/host.ts";
 import { MARKDOWN, removeBlock, SHELL, writeBlock } from "./blocks.ts";
+import { opencodeConfigDir, opencodeUserDirs } from "../builders/opencode-dirs.ts";
 
 export { AGENT_POINTER } from "@hewntools/host-workerd/pointer.ts";
 import { AGENT_POINTER } from "@hewntools/host-workerd/pointer.ts";
@@ -193,7 +194,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
 }
 
 /** OpenCode's global config directory: `$XDG_CONFIG_HOME/opencode` for your own home, else `<home>/.config/opencode`. */
-export const opencodeConfigDir = (home: string, env: NodeJS.ProcessEnv = process.env) => join((home === homedir() && env.XDG_CONFIG_HOME) || join(home, ".config"), "opencode");
+export { opencodeConfigDir };
 
 /** JSON with comments and trailing commas (OpenCode's `opencode.jsonc`), read leniently. */
 export function parseJsonc(text: string): unknown {
@@ -261,7 +262,7 @@ export function opencodeForget(home: string, file: string, env: NodeJS.ProcessEn
     if (cfg.mcp.servers) delete cfg.mcp.servers.hewn;
   }
   writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
-  const logins = join((home === homedir() && env.XDG_DATA_HOME) || join(home, ".local", "share"), "opencode", "mcp-auth.json");
+  const logins = join(opencodeUserDirs(home, env).data, "mcp-auth.json");
   if (!existsSync(logins)) return;
   try {
     const auth = JSON.parse(readFileSync(logins, "utf8")) as Record<string, unknown>;

@@ -3055,7 +3055,7 @@ function modelChip() {
     slider.addEventListener("input", show);
     slider.addEventListener("change", () => save({ effort: stops[slider.value] }));
     const pick = (id) => save({ model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
-    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s.builder === "claude" ? "Another: claude-fable-5-1" : "Another model, by name", "aria-label": "Another model, by name" });
+    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s.builder === "claude" ? "Another: claude-fable-5-1" : ctx.s.builder === "opencode" ? "Another: provider/model" : "Another model, by name", "aria-label": "Another model, by name" });
     other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
     // A model that failed lately says so (the list can't tell on its own).
     const sub = (m) => [m.description, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");

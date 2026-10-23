@@ -3,7 +3,9 @@
 // can say (Codex's catalog, OpenCode's list); Claude Code has no list, so its families stand in (they follow the newest).
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
+import { EFFORT } from "@hewntools/core/build-models.ts";
 import type { ModelCatalog, ModelChoice } from "@hewntools/host-workerd/surface/host.ts";
+import { OPENCODE_NO_UPDATE } from "./opencode-dirs.ts";
 
 /** Claude Code's `--effort` levels. */
 export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
@@ -78,7 +80,8 @@ export function opencodeCatalogFrom(raw: string): ModelCatalog {
     label: typeof m.name === "string" && m.name ? m.name : id.split("/").slice(1).join("/") || id,
     kind: "pinned",
     description: id.split("/")[0],
-    efforts: m.variants && typeof m.variants === "object" ? Object.keys(m.variants) : [],
+    // Its named reasoning levels, those Hewn can pass on (`--variant`, checked against EFFORT like every effort).
+    efforts: m.variants && typeof m.variants === "object" ? Object.keys(m.variants).filter((e) => EFFORT.test(e)) : [],
   });
   let id: string | undefined;
   let json: string[] | undefined;
@@ -112,7 +115,7 @@ export function opencodeCatalogFrom(raw: string): ModelCatalog {
 
 const run = (cmd: string, args: string[], env?: NodeJS.ProcessEnv) => new Promise<string>((resolve, reject) => execFile(cmd, args, { timeout: 15_000, encoding: "utf8", maxBuffer: 8 << 20, ...(env ? { env, cwd: tmpdir() } : {}) }, (e, out) => (e ? reject(e) : resolve(out))));
 /** `opencode models`, in your own OpenCode (its logins and providers), with plugins and the update check off. */
-const opencodeModels = () => run("opencode", ["models", "--verbose", "--pure"], { ...process.env, OPENCODE_CONFIG_CONTENT: '{"autoupdate":false}' });
+const opencodeModels = () => run("opencode", ["models", "--verbose", "--pure"], { ...process.env, ...OPENCODE_NO_UPDATE });
 
 /** A remote builder's catalog: `GET <url>/v1/models` (see docs/internal/remote-builder.md). */
 export async function remoteCatalog(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {

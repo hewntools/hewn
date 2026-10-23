@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
 import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./builders/models.ts";
+import { errorText } from "./builders/activity.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
@@ -460,7 +461,7 @@ export function opencodeOutput(onEvent?: (e: any) => void): { line: (line: strin
         return;
       }
       if (e?.type === "text" && typeof e.part?.text === "string" && e.part.text.trim()) text = e.part.text;
-      if (e?.type === "error") error = typeof e.error === "string" ? e.error : (e.error?.data?.message ?? e.error?.message ?? e.error?.name ?? JSON.stringify(e.error));
+      if (e?.type === "error") error = errorText(e.error);
       onEvent?.(e);
     },
     text: () => text,
@@ -489,8 +490,10 @@ function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel):
           return ["-f", p];
         });
         const args = ["run", ...imageArgs, "--format", "json", "--pure", "--auto", ...opencodeModelArgs(model), prompt];
-        // Its own home, like the builder: none of your OpenCode config, plugins or sessions. Kept between intakes (no session is resumed).
-        const isolated = await opencodeHome(join(platformRoot, "builder-home", "intake-opencode"), { rules: OPENCODE_INTAKE_RULES });
+        // Its own home, like the builder: none of your OpenCode config, plugins or sessions. One per intake (two at once would
+        // share a session database and a login copy), gone after it: no session is resumed.
+        mkdirSync(join(platformRoot, "builder-home"), { recursive: true, mode: 0o700 });
+        const isolated = await opencodeHome(mkdtempSync(join(platformRoot, "builder-home", "intake-opencode-")), { rules: OPENCODE_INTAKE_RULES });
         const out = opencodeOutput((e) => {
           if (!onProgress) return;
           if (e.type === "step_start") onProgress({ activity: "Thinking" });
@@ -507,6 +510,7 @@ function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel):
           throw e;
         } finally {
           isolated.done();
+          rmSync(isolated.dir, { recursive: true, force: true });
         }
         if (out.error() || !out.text()) throw new Error(`intake failed: ${(out.error() ?? "no reply").slice(0, 300)}`);
         return parseIntake(out.text()!, req.mode, req.current);
