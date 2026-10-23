@@ -4346,7 +4346,8 @@ async function jobPicker({ thenModel = false } = {}) {
  * gone, builds fail saying so until another is picked). Other… takes a full name.
  */
 async function modelSheet(t) {
-  const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models`), api("/settings")]);
+  // Read afresh: a provider signed in to since the last look shows at once.
+  const [catalog, s] = await Promise.all([api(`/tools/${enc(t.name)}/models?fresh=1`), api("/settings")]);
   const cur = jobModelOf(s, "builder", t.name);
   const kindWords = { default: "lets it decide", family: "follows the newest", pinned: "stays on this one" };
   return formSheet({
@@ -4361,17 +4362,19 @@ async function modelSheet(t) {
       const other = h("input", { type: "text", placeholder: t.name === "claude" ? "claude-fable-5-1" : t.name === "opencode" ? "provider/model" : "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
       const effort = h("select", { "aria-label": "Effort" });
       const efforts = () => (chosen === "" ? catalog.models[0]?.efforts ?? [] : catalog.models.find((m) => m.id === chosen)?.efforts ?? catalog.models[0]?.efforts ?? []);
+      const effortField = h("label", { class: "field" }, h("span", { class: "label" }, "Effort"), effort);
+      // The effort field shows for a model with levels; a model without has nothing to pick.
       const fillEffort = (keep) => {
         const list = efforts();
         const def = catalog.models.find((m) => m.id === chosen)?.defaultEffort;
         put(effort, h("option", { value: "" }, def ? `Default (${def})` : "Default"), list.map((e) => h("option", { value: e, selected: e === keep }, e[0].toUpperCase() + e.slice(1))));
-        effort.disabled = !list.length;
+        effortField.hidden = !list.length;
       };
       const rows = catalog.models.map((m) => {
         const radio = h("input", { type: "radio", name, checked: m.id === chosen });
         radio.addEventListener("change", () => ((chosen = m.id), fillEffort(effort.value)));
-        // A family's or the default's own description says it; a pinned model also says it stays put, and whether it failed lately.
-        const sub = [m.description ?? kindWords[m.kind], m.kind === "pinned" && m.description && kindWords.pinned, m.upgrade && `${m.upgrade} replaces it`, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");
+        // The model's own description (a family's or the default's says what it does), its successor, and whether it failed lately.
+        const sub = [m.description ?? kindWords[m.kind], m.upgrade && `${m.upgrade} replaces it`, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");
         return h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, m.label), sub && h("span", { class: "sub" }, sub)));
       });
       if (catalog.other) {
@@ -4379,7 +4382,7 @@ async function modelSheet(t) {
         const pickOther = () => ((radio.checked = true), (chosen = other.value.trim()), fillEffort(effort.value));
         radio.addEventListener("change", pickOther);
         other.addEventListener("input", pickOther);
-        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, "A full model name: stays on that one"), other)));
+        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, t.name === "opencode" ? "By its full name, provider/model" : "By its full name"), other)));
       }
       fillEffort(cur.effort);
       const save = h("button", { class: "primary" }, "Save");
@@ -4833,6 +4836,8 @@ function connectDialog(agentId) {
           if (!tool) return;
           const { tools, ready, settings: s, label } = await buildJobs();
           if (!ready(tools.find((t) => t.name === tool))) return;
+          // Already the one building tools: nothing to offer.
+          if (buildsChosen(s) && s.builder === tool) return;
           const sw = h("input", { type: "checkbox", class: "switch", "aria-label": "Build tools" });
           sw.addEventListener("change", async () => {
             try {

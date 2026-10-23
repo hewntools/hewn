@@ -114,13 +114,13 @@ describe("OpenCode's home", () => {
     return yours;
   };
 
-  test("its own HOME and XDG dirs, with your logins for the run, your providers, the plugin SDK copied from yours; never your config, plugins or MCP tokens", () => {
+  test("its own HOME and XDG dirs, with your logins for the run, your providers, the plugin SDK copied from yours; never your config, plugins or MCP tokens", async () => {
     const root = mkdtempSync(join(tmpdir(), "hewn-oc-home-"));
     try {
       const yours = yoursIn(root);
       const dir = join(root, "platform", "builder-home", "opencode", "b-1");
       const providers = { ollama: { npm: "@ai-sdk/openai-compatible", options: { baseURL: "http://localhost:11434/v1" } } };
-      const h = opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => providers });
+      const h = await opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => providers });
       assert.equal(h.dir, dir);
       assert.equal(h.env.HOME, dir);
       assert.equal(h.env.XDG_CONFIG_HOME, join(dir, "config"));
@@ -151,7 +151,7 @@ describe("OpenCode's home", () => {
       assert.ok(!existsSync(join(dir, "data", "opencode", "auth.json")));
       assert.equal(readFileSync(join(yours.data, "auth.json"), "utf8"), '{"anthropic":{"type":"oauth"}}');
       // A later attempt: the same home, nothing copied twice, the login back for the run.
-      const again = opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => undefined });
+      const again = await opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => undefined });
       assert.ok(existsSync(join(dir, "data", "opencode", "auth.json")));
       assert.equal(JSON.parse(readFileSync(join(dir, "config", "opencode", "opencode.json"), "utf8")).provider, undefined);
       assert.deepEqual(again.loopback, []);
@@ -166,11 +166,11 @@ describe("OpenCode's home", () => {
     }
   });
 
-  test("without an OpenCode of your own: an empty home that still runs (OpenCode installs its SDK itself)", () => {
+  test("without an OpenCode of your own: an empty home that still runs (OpenCode installs its SDK itself)", async () => {
     const root = mkdtempSync(join(tmpdir(), "hewn-oc-home-"));
     try {
       const yours = { config: join(root, "none", "config"), data: join(root, "none", "data"), cache: join(root, "none", "cache") };
-      const h = opencodeHome(join(root, "home"), { rules: OPENCODE_INTAKE_RULES, yours, providers: () => undefined });
+      const h = await opencodeHome(join(root, "home"), { rules: OPENCODE_INTAKE_RULES, yours, providers: () => undefined });
       assert.ok(existsSync(join(h.dir, "config", "opencode", "opencode.json")));
       assert.ok(!existsSync(join(h.dir, "config", "opencode", "node_modules")));
       assert.ok(!existsSync(join(h.dir, "data", "opencode", "auth.json")));
@@ -180,10 +180,10 @@ describe("OpenCode's home", () => {
     }
   });
 
-  test("your custom providers come from OpenCode's resolved config; a local model server's port is the one loopback allowance", () => {
+  test("your custom providers come from OpenCode's resolved config; a local model server's port is the one loopback allowance", async () => {
     const lmstudio = { lmstudio: { options: { baseURL: "http://127.0.0.1:1234/v1" } } };
-    assert.deepEqual(opencodeProviders(() => JSON.stringify({ provider: lmstudio })), lmstudio);
-    assert.deepEqual(opencodeProviders(() => { throw new Error("not asked again for a while"); }), lmstudio, "kept for a while");
+    assert.deepEqual(await opencodeProviders(() => JSON.stringify({ provider: lmstudio })), lmstudio);
+    assert.deepEqual(await opencodeProviders(() => { throw new Error("not asked again for a while"); }), lmstudio, "kept for a while");
     assert.deepEqual(loopbackPorts({ a: { options: { baseURL: "http://localhost:11434/v1" } }, b: { options: { baseURL: "https://api.example.com/v1" } }, c: { options: { baseURL: "http://127.0.0.1:1234" } }, d: { options: { baseURL: "not a url" } }, e: {} }), [1234, 11434]);
     assert.deepEqual(loopbackPorts(undefined), []);
     const profile = builderProfile({ workspace: "/tmp/ws", platformRoot: "/tmp/home", ownState: [], denyKeychain: true, allowLoopback: [11434, 70000, -1] });
@@ -192,12 +192,12 @@ describe("OpenCode's home", () => {
     assert.ok(PRIVATE_HOME_DIRS.includes(".local/share/opencode"), "your OpenCode logins and sessions stay closed to builders");
   });
 
-  test("the model is checked against `opencode models` first: one it doesn't list stops the run (a run with it would hang)", () => {
+  test("the model is checked against `opencode models` first: one it doesn't list stops the run (a run with it would hang)", async () => {
     const list = () => "opencode/big-pickle\nanthropic/claude-sonnet-4-5\n";
-    assert.ok(opencodeHasModel("anthropic/claude-sonnet-4-5", {}, "/tmp", list));
-    assert.ok(!opencodeHasModel("anthropic/claude-sonnet-4-6", {}, "/tmp", list));
-    assert.ok(!opencodeHasModel("big-pickle", {}, "/tmp", list), "the provider is part of the name");
-    assert.ok(opencodeHasModel("anything", {}, "/tmp", () => { throw new Error("no opencode"); }), "can't tell: run anyway");
+    assert.ok(await opencodeHasModel("anthropic/claude-sonnet-4-5", {}, "/tmp", list));
+    assert.ok(!(await opencodeHasModel("anthropic/claude-sonnet-4-6", {}, "/tmp", list)));
+    assert.ok(!(await opencodeHasModel("big-pickle", {}, "/tmp", list)), "the provider is part of the name");
+    assert.ok(await opencodeHasModel("anything", {}, "/tmp", () => { throw new Error("no opencode"); }), "can't tell: run anyway");
   });
 
   const sb = builderSandboxAvailable();
@@ -439,11 +439,24 @@ describe("OpenCode as an MCP client", () => {
       assert.match(h.loginFix("Unknown command: mcp"), /too old/);
       assert.match(h.loginFix("MCP server not found: hewn"), /too old/);
       assert.match(h.loginFix("Error: connect ECONNREFUSED"), /opencode mcp auth hewn/);
-      // Uninstall: no `mcp remove` to run; the pointer block goes, the config entry is the owner's to take out.
-      writeFileSync(join(root, ".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { hewn: { type: "remote", url: "http://127.0.0.1:7717/mcp" } } }));
+      // Uninstall: no `mcp remove` to run, so Hewn edits the config itself (plain JSON), and drops its sign-in from OpenCode's MCP logins.
+      writeFileSync(join(root, ".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { hewn: { type: "remote", url: "http://127.0.0.1:7717/mcp" }, other: { type: "remote", url: "http://x/mcp" } }, theme: "dark" }));
+      mkdirSync(join(root, ".local", "share", "opencode"), { recursive: true });
+      writeFileSync(join(root, ".local", "share", "opencode", "mcp-auth.json"), JSON.stringify({ hewn: { tokens: { access: "t" } }, other: { tokens: {} } }));
       const plan = uninstallPlan({ homeRoot: join(root, "data"), backupDir: join(root, "backups"), appDir: root, bundled: true, userHome: root, harnesses: harnesses(), exec: () => {}, service: { installed: false, uninstall: () => {} }, binDirs: [], keySource: "file", linux: false });
-      assert.deepEqual(plan.steps.map((s) => s.describe), [`remove the Hewn pointer block from ${join(root, ".config", "opencode", "AGENTS.md")}`]);
-      assert.match(plan.leftovers.join("\n"), /Hewn in OpenCode: take "hewn" out of "mcp" in .*opencode\.json/);
+      const cfgFile = join(root, ".config", "opencode", "opencode.json");
+      assert.deepEqual(plan.steps.map((s) => s.describe), [`remove Hewn from OpenCode (take "hewn" out of "mcp" in ${cfgFile}, and its sign-in to Hewn)`, `remove the Hewn pointer block from ${join(root, ".config", "opencode", "AGENTS.md")}`]);
+      assert.doesNotMatch(plan.leftovers.join("\n"), /OpenCode/);
+      plan.steps[0].run();
+      assert.deepEqual(JSON.parse(readFileSync(cfgFile, "utf8")), { mcp: { other: { type: "remote", url: "http://x/mcp" } }, theme: "dark" }, "the rest of the config stays");
+      assert.deepEqual(JSON.parse(readFileSync(join(root, ".local", "share", "opencode", "mcp-auth.json"), "utf8")), { other: { tokens: {} } }, "its sign-in to Hewn goes, others stay");
+      assert.equal(harnesses().find((x) => x.agentId === "opencode")!.registered(root), false);
+      // A .jsonc with comments isn't rewritten: the entry is listed for the owner instead.
+      rmSync(cfgFile);
+      writeFileSync(join(root, ".config", "opencode", "opencode.jsonc"), '{\n  // mine\n  "mcp": { "servers": { "hewn": { "url": "http://127.0.0.1:7717/mcp" } } },\n}\n');
+      const plan2 = uninstallPlan({ homeRoot: join(root, "data"), backupDir: join(root, "backups"), appDir: root, bundled: true, userHome: root, harnesses: harnesses(), exec: () => {}, service: { installed: false, uninstall: () => {} }, binDirs: [], keySource: "file", linux: false });
+      assert.ok(!plan2.steps.some((s) => /remove Hewn from OpenCode/.test(s.describe)));
+      assert.match(plan2.leftovers.join("\n"), /Hewn in OpenCode: take "hewn" out of "mcp" in .*opencode\.jsonc \(it has comments/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

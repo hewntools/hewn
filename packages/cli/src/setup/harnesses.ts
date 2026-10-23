@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { HarnessStatus } from "@hewntools/host-workerd/surface/host.ts";
@@ -218,6 +218,59 @@ export function opencodeMcpUrl(home: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Where Hewn's entry sits in OpenCode's global config, and whether Hewn may edit that file: plain
+ * JSON, yes; a `.jsonc` with comments or trailing commas is the owner's to edit (rewriting it would
+ * lose them).
+ */
+export function opencodeHewnEntry(home: string): { file: string; editable: boolean } | undefined {
+  const dir = opencodeConfigDir(home);
+  for (const name of ["opencode.json", "opencode.jsonc"]) {
+    const file = join(dir, name);
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8");
+    let cfg: { mcp?: { hewn?: unknown; servers?: { hewn?: unknown } } } | undefined;
+    try {
+      cfg = parseJsonc(text) as typeof cfg;
+    } catch {
+      continue;
+    }
+    if (!cfg?.mcp?.hewn && !cfg?.mcp?.servers?.hewn) continue;
+    let editable = true;
+    try {
+      JSON.parse(text);
+    } catch {
+      editable = false;
+    }
+    return { file, editable };
+  }
+  return undefined;
+}
+
+/**
+ * Take Hewn out of OpenCode's global config (`mcp.hewn`, or `mcp.servers.hewn`) and its sign-in to
+ * Hewn out of OpenCode's MCP logins (`mcp-auth.json`): OpenCode has no `mcp remove`. Plain JSON
+ * only (see `opencodeHewnEntry`); the login file is OpenCode's own JSON.
+ */
+export function opencodeForget(home: string, file: string, env: NodeJS.ProcessEnv = process.env): void {
+  const cfg = JSON.parse(readFileSync(file, "utf8")) as { mcp?: { hewn?: unknown; servers?: { hewn?: unknown } } };
+  if (cfg.mcp) {
+    delete cfg.mcp.hewn;
+    if (cfg.mcp.servers) delete cfg.mcp.servers.hewn;
+  }
+  writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
+  const logins = join((home === homedir() && env.XDG_DATA_HOME) || join(home, ".local", "share"), "opencode", "mcp-auth.json");
+  if (!existsSync(logins)) return;
+  try {
+    const auth = JSON.parse(readFileSync(logins, "utf8")) as Record<string, unknown>;
+    if (!("hewn" in auth)) return;
+    delete auth.hewn;
+    writeFileSync(logins, JSON.stringify(auth, null, 2) + "\n");
+  } catch {
+    // not a file Hewn understands: left as it is
+  }
 }
 
 export const defaultHome = () => homedir();

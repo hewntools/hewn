@@ -138,9 +138,10 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; code
     if (agent === "remote" && o.remote) return remoteCatalog(o.remote.url, o.remote.token, o.fetch);
     throw new Error(`no models for ${agent}`);
   };
-  return async (agent: string): Promise<ModelCatalog> => {
+  // `fresh`: read now (Settings › AI's sheet, so a provider just signed in to shows at once).
+  return async (agent: string, fresh = false): Promise<ModelCatalog> => {
     const hit = cache.get(agent);
-    if (hit && Date.now() - hit.at < 10 * 60_000) return withFailures(hit.catalog);
+    if (hit && !fresh && Date.now() - hit.at < 10 * 60_000) return withFailures(hit.catalog);
     try {
       const catalog = await read(agent);
       cache.set(agent, { at: Date.now(), catalog });

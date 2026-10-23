@@ -490,7 +490,7 @@ function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel):
         });
         const args = ["run", ...imageArgs, "--format", "json", "--pure", "--auto", ...opencodeModelArgs(model), prompt];
         // Its own home, like the builder: none of your OpenCode config, plugins or sessions. Kept between intakes (no session is resumed).
-        const isolated = opencodeHome(join(platformRoot, "builder-home", "intake-opencode"), { rules: OPENCODE_INTAKE_RULES });
+        const isolated = await opencodeHome(join(platformRoot, "builder-home", "intake-opencode"), { rules: OPENCODE_INTAKE_RULES });
         const out = opencodeOutput((e) => {
           if (!onProgress) return;
           if (e.type === "step_start") onProgress({ activity: "Thinking" });
@@ -498,7 +498,7 @@ function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel):
         });
         try {
           // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
-          if (model.model && !opencodeHasModel(model.model, isolated.env, ws)) throw opencodeModelRejected(model.model);
+          if (model.model && !(await opencodeHasModel(model.model, isolated.env, ws))) throw opencodeModelRejected(model.model);
           const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
           await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, undefined, OPENCODE_QUIET_START_MS);
         } catch (e) {

@@ -450,7 +450,7 @@ export class HewnDO extends DurableObject<Env> {
         return reply;
       },
       intakeLog: async (entry) => void (await sv.json("/intake/log", entry)),
-      modelCatalog: (agent) => sv.json<ModelCatalog>("/models/catalog", { agent }),
+      modelCatalog: (agent, fresh) => sv.json<ModelCatalog>("/models/catalog", { agent, ...(fresh ? { fresh: true } : {}) }),
       // The supervisor checked the link is https; checked again, as it goes into an href.
       ...(hosted ? { hosted: env.HOST_SIGNIN_URL && URL.canParse(env.HOST_SIGNIN_URL) && new URL(env.HOST_SIGNIN_URL).protocol === "https:" ? { signInUrl: env.HOST_SIGNIN_URL } : {} } : {}),
       // Hosted: no local agents to connect, and the public address is the host's (no tunnel).

@@ -310,7 +310,13 @@ export function modal(build, { width = 440, cls = "" } = {}) {
       dlg.close();
     };
     dlg.addEventListener("close", () => (dlg.remove(), resolve(result)));
-    dlg.addEventListener("click", (e) => e.target === dlg && close());
+    // A click on the backdrop closes. A click on a disabled control inside also lands on the dialog
+    // element (the control can't take it), so the pointer has to be outside the box too.
+    dlg.addEventListener("click", (e) => {
+      if (e.target !== dlg) return;
+      const r = dlg.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
+    });
     dlg.append(...[build(close, dlg)].flat(Infinity).filter(Boolean));
     document.body.append(dlg);
     dlg.showModal();

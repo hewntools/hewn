@@ -70,10 +70,10 @@ It installs the newest release in your minor line (e.g. 0.4.x) with npm, into th
 
 ```sh
 hewn uninstall          # lists what it would remove
-hewn uninstall --yes    # the service, Hewn in Claude Code / Codex, the pointer blocks, the hewn command
+hewn uninstall --yes    # the service, Hewn in Claude Code / Codex / OpenCode, the pointer blocks, the hewn command
 ```
 
-Your data, backups, Hewn itself (`npm uninstall -g @hewntools/cli`), the secrets key and Hewn's entry in OpenCode's config stay. It prints how to remove each of them.
+Your data, backups, Hewn itself (`npm uninstall -g @hewntools/cli`) and the secrets key stay. It prints how to remove each of them. (Hewn's entry in an `opencode.jsonc` with comments stays too, listed with them: Hewn doesn't rewrite a file it can't keep intact.)
 
 ## Next
 

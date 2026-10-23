@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, copyFileSync, cpSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, constants, copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cp } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -217,12 +218,14 @@ export function loopbackPorts(providers: Record<string, unknown> | undefined): n
  * written: its `provider` section is what a run needs to see your custom providers (a local model
  * server, a provider with options). Kept for 10 minutes. Nothing when OpenCode can't say.
  */
+/** `opencode <args>`, its stdout: asked without a synchronous wait (Hewn's own process keeps serving meanwhile). */
+const opencodeSays = (args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeout: number }) => new Promise<string>((resolve, reject) => execFile("opencode", args, { ...o, encoding: "utf8", maxBuffer: 16 << 20 }, (e, out) => (e ? reject(e) : resolve(out))));
 let providerCache: { at: number; providers?: Record<string, unknown> } | undefined;
-export function opencodeProviders(read: () => string = () => execFileSync("opencode", ["debug", "config", "--pure"], { cwd: tmpdir(), encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, OPENCODE_CONFIG_CONTENT: '{"autoupdate":false}' } })): Record<string, unknown> | undefined {
+export async function opencodeProviders(read: () => Promise<string> | string = () => opencodeSays(["debug", "config", "--pure"], { cwd: tmpdir(), env: { ...process.env, OPENCODE_CONFIG_CONTENT: '{"autoupdate":false}' }, timeout: 20_000 })): Promise<Record<string, unknown> | undefined> {
   if (providerCache && Date.now() - providerCache.at < 10 * 60_000) return providerCache.providers;
   let providers: Record<string, unknown> | undefined;
   try {
-    const cfg = JSON.parse(read());
+    const cfg = JSON.parse(await read());
     if (cfg && typeof cfg.provider === "object" && cfg.provider && Object.keys(cfg.provider).length) providers = cfg.provider;
   } catch {
     // no OpenCode, or no config: the run sees the providers it's logged in to, and the free ones
@@ -238,9 +241,9 @@ export function opencodeProviders(read: () => string = () => execFileSync("openc
  * on 1.18.18), and the build would wait its whole timeout to say nothing. Can't tell (the command
  * fails): run anyway.
  */
-export function opencodeHasModel(model: string, env: NodeJS.ProcessEnv, cwd: string, list: () => string = () => execFileSync("opencode", ["models", "--pure"], { cwd, env, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] })): boolean {
+export async function opencodeHasModel(model: string, env: NodeJS.ProcessEnv, cwd: string, list: () => Promise<string> | string = () => opencodeSays(["models", "--pure"], { cwd, env, timeout: 30_000 })): Promise<boolean> {
   try {
-    return list().split("\n").map((l) => l.trim()).includes(model);
+    return (await list()).split("\n").map((l) => l.trim()).includes(model);
   } catch {
     return true;
   }
@@ -270,18 +273,21 @@ export interface OpencodeHomeOptions {
  * ~/.claude's instructions or a project config (`OPENCODE_DISABLE_*`). What else it writes (a
  * build's session, for a later attempt to resume) stays until the dir goes.
  */
-export function opencodeHome(dir: string, o: OpencodeHomeOptions): { env: NodeJS.ProcessEnv; dir: string; loopback: number[]; done: () => void } {
+export async function opencodeHome(dir: string, o: OpencodeHomeOptions): Promise<{ env: NodeJS.ProcessEnv; dir: string; loopback: number[]; done: () => void }> {
   const yours = o.yours ?? opencodeUserDirs();
   const config = join(dir, "config", "opencode");
   const data = join(dir, "data", "opencode");
   const cache = join(dir, "cache", "opencode");
   for (const d of [dir, config, data, cache, join(dir, "state")]) mkdirSync(d, { recursive: true, mode: 0o700 });
+  // Copies that may be big (the SDK is 60 MB in thousands of files): cloned where the file system can (APFS), and never a
+  // synchronous wait, which once froze Hewn long enough for its watchdog to restart workerd under a running build.
+  const clone = (from: string, to: string) => cp(from, to, { recursive: true, mode: constants.COPYFILE_FICLONE });
   // The plugin SDK OpenCode installs into its config dir on every start when missing (from npm, minutes on a slow registry): yours instead.
   if (!existsSync(join(config, "node_modules")) && existsSync(join(yours.config, "node_modules", "@opencode-ai", "plugin"))) {
-    for (const f of ["package.json", "package-lock.json", "node_modules"]) if (existsSync(join(yours.config, f))) cpSync(join(yours.config, f), join(config, f), { recursive: true });
+    for (const f of ["package.json", "package-lock.json", "node_modules"]) if (existsSync(join(yours.config, f))) await clone(join(yours.config, f), join(config, f));
   }
-  for (const f of ["models.json", "bin"]) if (!existsSync(join(cache, f)) && existsSync(join(yours.cache, f))) cpSync(join(yours.cache, f), join(cache, f), { recursive: true });
-  const providers = (o.providers ?? opencodeProviders)();
+  for (const f of ["models.json", "bin"]) if (!existsSync(join(cache, f)) && existsSync(join(yours.cache, f))) await clone(join(yours.cache, f), join(cache, f));
+  const providers = await (o.providers ?? opencodeProviders)();
   writeFileSync(join(config, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json", autoupdate: false, share: "disabled", ...(providers ? { provider: providers } : {}), ...o.rules }, null, 2));
   const mine = join(yours.data, "auth.json");
   const theirs = join(data, "auth.json");
@@ -496,9 +502,9 @@ async function opencodeRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
   await withResume("opencode", job, async (resume) => {
-    const isolated = opencodeHome(home, { rules: OPENCODE_BUILDER_RULES });
+    const isolated = await opencodeHome(home, { rules: OPENCODE_BUILDER_RULES });
     try {
-      if (job.model && !opencodeHasModel(job.model, isolated.env, job.workspace)) throw opencodeModelRejected(job.model);
+      if (job.model && !(await opencodeHasModel(job.model, isolated.env, job.workspace))) throw opencodeModelRejected(job.model);
       await runCli(
         "opencode",
         opencodeArgs(job, resume),

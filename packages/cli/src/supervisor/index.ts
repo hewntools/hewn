@@ -321,7 +321,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     "/tunnel/status": async () => tunnel.current(),
     // Hosted: no agents on the machine, only the host's builder.
     "/setup/tools": async () => [...(o.hosted ? [] : (o.tools ?? toolStatus)()), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
-    "/models/catalog": async (b) => models(String(b.agent)),
+    "/models/catalog": async (b) => models(String(b.agent), b.fresh === true),
     "/status/info": async () => ({ machine: hostname().replace(/\.local$/, ""), version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(backupDir())[0]?.at ?? null, backupDir: backupDir(), latest: o.latest?.() ?? null, notes: o.latestNotes?.() ?? [] }),
     "/setup/connect": async (b, req, res) => {
       const send = ndjson(res);
@@ -479,7 +479,9 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     timer = setInterval(async () => {
       if (checking) return;
       checking = true;
-      if (await healthy(intervalMs)) lastOk = Date.now();
+      // A ping that timed out may have been this process's own pause (a long synchronous step, a laptop
+      // waking), not workerd's: one more, with a fresh timeout, before it counts.
+      if ((await healthy(intervalMs)) || (await healthy(intervalMs))) lastOk = Date.now();
       else if (Date.now() - lastOk > stallMs) {
         log(`workerd unresponsive for ${Math.round((Date.now() - lastOk) / 1000)}s (a capability may be stuck in a loop); restarting it`);
         lastOk = Date.now() + 5000;

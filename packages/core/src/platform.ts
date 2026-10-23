@@ -3033,6 +3033,12 @@ export class Platform {
     requireScope(agent, scopeOf(old.kind));
     if (old.status !== "failed" && old.status !== "cancelled") throw new PlatformError("conflict", `only failed or cancelled builds can be retried (this one is ${old.status})`);
     if (opts.fix && old.status !== "failed") throw new PlatformError("conflict", "only failed builds can be fixed; retry it instead");
+    // Retried already (by hand, or by Hewn after a restart): one retry at a time, or two builds of the same request run at once.
+    if (this.registry.retryOf(old.id)) {
+      const cur = this.currentBuild(old.id);
+      const ended = cur.status === "failed" || cur.status === "cancelled";
+      throw new PlatformError("conflict", `build ${old.id} was already retried as ${cur.id}${ended ? `, which ${cur.status}; retry ${cur.id} instead` : ` (${cur.status}); wait for that one`}`);
+    }
     const req: Record<string, any> = { ...old.request, retryOf: old.id };
     delete req.autoRetryOf;
     // An automatic retry (after a restart) runs on what was asked; an agent's own retry is checked
@@ -3374,11 +3380,13 @@ export class Platform {
 
     // Cancelled: cancelBuild already recorded it; just stop.
     const cancelled = () => signal.aborted;
+    // The clock runs from the first attempt: a retry after a failed validation doesn't start it over.
+    const buildStarted = Date.now();
     for (let attempt = 1; attempt <= max; attempt++) {
       if (cancelled()) return;
       this.registry.updateBuild(buildId, { status: "building", log: history });
       const started = Date.now();
-      const live: { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number } = { attempt, maxAttempts: max, startedAt: started };
+      const live: { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number } = { attempt, maxAttempts: max, startedAt: buildStarted };
       this.progress.set(buildId, live);
       this.setStep(buildId, build.capabilityId, "code");
       this.buildEvent(buildId, `builder ${builder} working (attempt ${attempt}/${max})`, tag);

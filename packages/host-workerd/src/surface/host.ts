@@ -130,7 +130,8 @@ export interface SurfaceHost {
   /** Builder / intake CLIs on this machine: installed, signed in (first run, Settings). */
   tools?: () => Promise<{ name: string; label: string; found: boolean; loggedIn?: boolean; fix?: string; remote?: boolean }[]>;
   /** The models an agent offers (its CLI's list, or the host's builder's). Absent: only Default. */
-  modelCatalog?: (agent: string) => Promise<ModelCatalog>;
+  /** `fresh`: read the agent's CLI now instead of the kept list (the sheet in Settings › AI). */
+  modelCatalog?: (agent: string, fresh?: boolean) => Promise<ModelCatalog>;
   /** Backup and version status (Settings). */
   status?: () => Promise<{ machine?: string; version: string; dataFormat: number; lastBackup: string | null; backupDir: string; latest?: string | null; notes?: { version: string; date?: string; items: string[] }[] }>;
   /**
