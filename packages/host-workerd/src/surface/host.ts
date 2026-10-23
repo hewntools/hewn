@@ -78,6 +78,8 @@ export interface ModelCatalog {
   agent: string;
   models: ModelChoice[];
   other?: boolean;
+  /** An example of a full name for "Other…" (Claude Code: "claude-fable-5-1"; OpenCode: "provider/model"). */
+  otherHint?: string;
   /** The host's builder: what each tier runs on for tools' model calls (labels, e.g. "Haiku 5.5"). */
   tiers?: Partial<Record<"light" | "standard" | "strong" | "max", string>>;
 }

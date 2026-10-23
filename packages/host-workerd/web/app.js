@@ -3055,7 +3055,7 @@ function modelChip() {
     slider.addEventListener("input", show);
     slider.addEventListener("change", () => save({ effort: stops[slider.value] }));
     const pick = (id) => save({ model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
-    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s.builder === "claude" ? "Another: claude-fable-5-1" : ctx.s.builder === "opencode" ? "Another: provider/model" : "Another model, by name", "aria-label": "Another model, by name" });
+    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: cat.otherHint ? `Another: ` : "Another model, by name", "aria-label": "Another model, by name" });
     other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
     // A model that failed lately says so (the list can't tell on its own).
     const sub = (m) => [m.description, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");
@@ -3617,7 +3617,7 @@ function buildMeta(b) {
     "div",
     { class: "build-meta" },
     asked && cell("Asked by", [agentTile(catalogOf({ id: b.requestedBy })?.id ?? b.requestedBy, who, 18), who]),
-    cell("Builder", [agentTile(b.builder === "claude" ? "claude-code" : b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder !== "remote" && "on your account"),
+    cell("Builder", [agentTile(AGENT_CATALOG.find((c) => c.tool === b.builder)?.id ?? b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder !== "remote" && "on your account"),
     cell("Model", model ? pretty(model) : "Default", null, model),
     cell("Effort", [h("span", { class: "meter", "aria-hidden": "true" }, efforts.map((_, i) => h("i", { class: i < level ? "on" : "" }))), b.model?.effort ? b.model.effort[0].toUpperCase() + b.model.effort.slice(1) : "Default"]),
   );
@@ -4311,7 +4311,7 @@ async function setJobs(keys, tool) {
 }
 
 const ALL_JOBS = ["intake", "builder"];
-const agentTileOf = (t, size) => agentTile(t.name === "claude" ? "claude-code" : t.name, t.label, size);
+const agentTileOf = (t, size) => agentTile(t.harnessId ?? t.name, t.label, size);
 
 /**
  * O2 Who builds tools: the signed-in agents on this machine (and the host's builder, if it runs
@@ -4359,7 +4359,7 @@ async function modelSheet(t) {
       let chosen = cur.model ?? "default";
       const listed = catalog.models.some((m) => m.id === chosen);
       const name = `model-${Math.random().toString(36).slice(2)}`;
-      const other = h("input", { type: "text", placeholder: t.name === "claude" ? "claude-fable-5-1" : t.name === "opencode" ? "provider/model" : "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
+      const other = h("input", { type: "text", placeholder: catalog.otherHint ?? "model name", "aria-label": "Model name", value: listed ? "" : chosen, class: "mono" });
       const effort = h("select", { "aria-label": "Effort" });
       const efforts = () => (chosen === "" ? catalog.models[0]?.efforts ?? [] : catalog.models.find((m) => m.id === chosen)?.efforts ?? catalog.models[0]?.efforts ?? []);
       const effortField = h("label", { class: "field" }, h("span", { class: "label" }, "Effort"), effort);
@@ -4382,7 +4382,7 @@ async function modelSheet(t) {
         const pickOther = () => ((radio.checked = true), (chosen = other.value.trim()), fillEffort(effort.value));
         radio.addEventListener("change", pickOther);
         other.addEventListener("input", pickOther);
-        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, t.name === "opencode" ? "By its full name, provider/model" : "By its full name"), other)));
+        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, "By its full name"), other)));
       }
       fillEffort(cur.effort);
       const save = h("button", { class: "primary" }, "Save");
@@ -4687,7 +4687,7 @@ function hewnAgentsSheet() {
             h(
               "li",
               {},
-              agentTile(t.name === "claude" ? "claude-code" : t.name, t.label),
+              agentTile(t.harnessId ?? t.name, t.label),
               h("div", { class: "grow" }, h("span", {}, t.label), h("span", { class: "sub" }, !t.found ? "Not installed" : ready(t) ? ["Installed · signed in", ...does(t)].join(" · ") : "Installed · not signed in")),
               ready(t)
                 ? h("button", { class: "primary sm", onclick: () => pickJob(t) }, "Use")

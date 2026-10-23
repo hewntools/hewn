@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { backupLocation, backupNow, findBackup, listBackups, restoreBackup } from "./backup.ts";
-import { BUILDERS } from "./builders/cli.ts";
+import { BUILDERS, cliIntake, isCliAgent } from "./builders/cli-agents.ts";
 import { startMetrics } from "./supervisor/metrics.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
 import { initConfig, readConfig, writeConfig } from "./config.ts";
@@ -16,7 +16,6 @@ import { formatChecks, runDoctor } from "./doctor.ts";
 import { openHome } from "./home.ts";
 import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
-import { cliIntake } from "./intake.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
 import * as service from "./service.ts";
 import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
@@ -145,7 +144,8 @@ async function main() {
             if (!remote) throw new Error("the host's intake isn't configured here (HEWN_BUILD_URL); pick another in Settings › AI");
             return remoteIntake(remote, run);
           }
-          return cliIntake(which as "claude" | "codex" | "opencode", home.root, run);
+          if (!isCliAgent(which)) throw new Error(`no intake named ${which}; pick one in Settings › AI`);
+          return cliIntake(which, home.root, run);
         },
         ...(remote ? { remote } : {}),
         ...(hosted ? { hosted } : {}),

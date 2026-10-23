@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { HarnessStatus } from "@hewntools/host-workerd/surface/host.ts";
 import { MARKDOWN, removeBlock, SHELL, writeBlock } from "./blocks.ts";
+import { CLI_AGENTS } from "../builders/cli-agents.ts";
 import { opencodeConfigDir, opencodeUserDirs } from "../builders/opencode-dirs.ts";
 
 export { AGENT_POINTER } from "@hewntools/host-workerd/pointer.ts";
@@ -72,11 +73,11 @@ function shellProfile(home: string): string {
 export function harnesses(exec: Exec = realExec): Harness[] {
   return [
     {
-      agentId: "claude-code",
-      label: "Claude Code",
+      agentId: CLI_AGENTS.claude.harnessId,
+      label: CLI_AGENTS.claude.label,
       pointerRequired: false,
       pointerNote: "optional: Claude Code shows MCP server instructions, which already describe Hewn",
-      detect: () => onPath("claude"),
+      detect: () => onPath(CLI_AGENTS.claude.bin),
       registered: (home) => {
         try {
           return !!JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers?.hewn;
@@ -117,11 +118,11 @@ export function harnesses(exec: Exec = realExec): Harness[] {
       },
     },
     {
-      agentId: "codex",
-      label: "Codex",
+      agentId: CLI_AGENTS.codex.harnessId,
+      label: CLI_AGENTS.codex.label,
       pointerRequired: true,
       pointerNote: "required: Codex defers MCP tools and ignores server instructions",
-      detect: () => onPath("codex"),
+      detect: () => onPath(CLI_AGENTS.codex.bin),
       registered: (home) => {
         const config = join(home, ".codex", "config.toml");
         return existsSync(config) && /^\[mcp_servers\.hewn\]/m.test(readFileSync(config, "utf8"));
@@ -160,11 +161,11 @@ export function harnesses(exec: Exec = realExec): Harness[] {
       },
     },
     {
-      agentId: "opencode",
-      label: "OpenCode",
+      agentId: CLI_AGENTS.opencode.harnessId,
+      label: CLI_AGENTS.opencode.label,
       pointerRequired: true,
       pointerNote: "required: OpenCode reads its global AGENTS.md, not MCP server instructions",
-      detect: () => onPath("opencode"),
+      detect: () => onPath(CLI_AGENTS.opencode.bin),
       registered: (home) => !!opencodeMcpUrl(home),
       registeredUrl: (home) => opencodeMcpUrl(home),
       // `opencode mcp auth` runs the server's OAuth sign-in (it opens the browser at Hewn's approval page).
