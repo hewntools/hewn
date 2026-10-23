@@ -12,8 +12,9 @@ import { explainFailure } from "@hewntools/core/failure.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { writeConfig } from "@hewntools/cli/config.ts";
-import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED } from "@hewntools/cli/builders/models.ts";
-import { claudeModelArgs, codexModelArgs, withModelCheck } from "@hewntools/cli/builders/cli.ts";
+import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED, modelCatalogs, modelRejectReason, noteModelFailure, noteModelRan, opencodeCatalogFrom } from "@hewntools/cli/builders/models.ts";
+import { builderEnv, claudeModelArgs, codexModelArgs, modelUnavailableText, OPENCODE_PROVIDER_ENV, withModelCheck } from "@hewntools/cli/builders/cli.ts";
+import { builderProfile } from "@hewntools/cli/builders/sandbox.ts";
 import { intakeJob, type ModelCatalog, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import { toolsFor } from "@hewntools/host-workerd/mcp.ts";
 import { notesSince } from "@hewntools/cli/upgrade.ts";
@@ -256,10 +257,56 @@ describe("model lists and flags", () => {
     assert.doesNotMatch("→ Edit src/models.ts", MODEL_REJECTED);
     const job = { buildId: "b1", capabilityId: "x", kind: "create", workspace: "/tmp", attempt: 1, logPath: "/dev/null", model: "fable-5-1" } as BuildJob;
     await assert.rejects(
-      withModelCheck(job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))),
-      (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /fable-5-1 isn't available\. Pick another/.test(e.message),
+      withModelCheck("claude", job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))),
+      (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /^fable-5-1 isn't available \(issue with the selected model\)\. Pick another/.test(e.message),
     );
-    await assert.rejects(withModelCheck(job, async () => Promise.reject(new Error("boom"))), /boom/);
+    await assert.rejects(withModelCheck("claude", job, async () => Promise.reject(new Error("boom"))), /boom/);
+  });
+
+  test("the reason comes in the agent's words, and the lists mark a model that failed lately", async () => {
+    assert.equal(modelRejectReason('{"type":"error","error":{"name":"APIError","data":{"message":"Upstream request failed: Model is unavailable.","statusCode":400}}}'), "Upstream request failed: Model is unavailable");
+    assert.equal(modelRejectReason("intake failed: Upstream request failed: Model is unavailable."), "Upstream request failed: Model is unavailable");
+    assert.equal(modelRejectReason("model not found: opencode/foo (not in opencode models)"), "OpenCode doesn't list it");
+    assert.equal(modelRejectReason('{"type":"turn.failed","error":{"message":"The model `gpt-x` does not exist"}}'), "The model `gpt-x` does not exist");
+    assert.equal(modelRejectReason("There's an issue with the selected model (claude-fable-5-1). It may not exist or you may not have access to it."), "There's an issue with the selected model (claude-fable-5-1). It may not exist or you may not have access to it");
+    // OpenCode's free tier: why the list offered it anyway. A misspelled one gets no such note.
+    assert.equal(
+      modelUnavailableText("opencode/deepseek-v4-flash-free", "Upstream request failed: Model is unavailable"),
+      "opencode/deepseek-v4-flash-free isn't available (Upstream request failed: Model is unavailable). Pick another model (in the chat box or Settings › AI). OpenCode's free tier changes which models it serves, and its list can lag behind; Hewn's lists mark the ones that failed lately.",
+    );
+    assert.equal(modelUnavailableText("opencode/big-pickel", "OpenCode doesn't list it"), "opencode/big-pickel isn't available (OpenCode doesn't list it). Pick another model (in the chat box or Settings › AI).");
+    assert.equal(modelUnavailableText("gpt-x"), "gpt-x isn't available. Pick another model (in the chat box or Settings › AI).");
+    // The mark: on the list for the model that failed, gone once a run on it goes through.
+    const catalogs = modelCatalogs({ opencodeModels: async () => "opencode/big-pickle\nopencode/hy3-free\n" });
+    noteModelFailure("opencode", "opencode/hy3-free", "Upstream request failed: Model is unavailable");
+    let cat = await catalogs("opencode");
+    assert.equal(cat.models.find((m) => m.id === "opencode/big-pickle")?.failed, undefined);
+    assert.equal(cat.models.find((m) => m.id === "opencode/hy3-free")?.failed?.reason, "Upstream request failed: Model is unavailable");
+    assert.ok(Date.now() - Date.parse(cat.models.find((m) => m.id === "opencode/hy3-free")!.failed!.at) < 5_000);
+    noteModelRan("opencode", "opencode/hy3-free");
+    cat = await catalogs("opencode");
+    assert.equal(cat.models.find((m) => m.id === "opencode/hy3-free")?.failed, undefined);
+    // The builder's check marks it too (and a different agent's list doesn't show it).
+    const job = { buildId: "b2", capabilityId: "x", kind: "create", workspace: "/tmp", attempt: 1, logPath: "/dev/null", model: "fable" } as BuildJob;
+    await assert.rejects(withModelCheck("claude", job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))));
+    assert.equal((await catalogs("claude")).models.find((m) => m.id === "fable")?.failed?.reason, "issue with the selected model");
+    assert.equal((await catalogs("opencode")).models.find((m) => m.failed), undefined);
+    await withModelCheck("claude", job, async () => {});
+    assert.equal((await catalogs("claude")).models.find((m) => m.id === "fable")?.failed, undefined);
+  });
+
+  test("the other providers' keys reach the OpenCode run only; your OpenCode dirs stay closed where XDG puts them; only passable levels are offered", () => {
+    const env = { PATH: "/bin", ANTHROPIC_API_KEY: "a", OPENROUTER_API_KEY: "r", GOOGLE_GENERATIVE_AI_API_KEY: "g", GOOGLE_CLOUD_PROJECT: "p", OLLAMA_HOST: "h", OPENCODE_API_KEY: "o", AWS_SECRET_ACCESS_KEY: "s" };
+    assert.deepEqual(Object.keys(builderEnv(env)).sort(), ["ANTHROPIC_API_KEY", "PATH"], "Claude Code's and Codex's runs see none of them");
+    assert.deepEqual(Object.keys(builderEnv(env, OPENCODE_PROVIDER_ENV)).sort(), ["ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "OLLAMA_HOST", "OPENCODE_API_KEY", "OPENROUTER_API_KEY", "PATH"], "never a cloud project or an AWS secret");
+    // The sandbox: XDG-moved OpenCode directories are denied like the defaults (for your own home; another home isn't moved).
+    const profile = builderProfile({ workspace: "/tmp/ws", platformRoot: "/tmp/home", ownState: [], denyKeychain: true, env: { XDG_DATA_HOME: "/x/data", XDG_CONFIG_HOME: "/x/cfg" } });
+    assert.match(profile, /\/x\/data\/opencode/);
+    assert.match(profile, /\/x\/cfg\/opencode/);
+    assert.doesNotMatch(builderProfile({ workspace: "/tmp/ws", platformRoot: "/tmp/home", ownState: [], denyKeychain: true, home: "/tmp/other", env: { XDG_DATA_HOME: "/x/data" } }), /\/x\/data/);
+    // A variant Hewn can't pass as an effort (EFFORT: letters only) isn't offered, so what's listed is what's sent.
+    const cat = opencodeCatalogFrom('opencode/x\n{\n  "id": "x",\n  "name": "X",\n  "variants": {\n    "low": {},\n    "high": {},\n    "thinking-32k": {}\n  }\n}\n');
+    assert.deepEqual(cat.models.find((m) => m.id === "opencode/x")?.efforts, ["low", "high"]);
   });
 
 });
@@ -267,7 +314,7 @@ describe("model lists and flags", () => {
 describe("settings for models", () => {
   const base = { builder: "claude", intake: "claude", maxBuildAttempts: 3, sandbox: true, logRetentionDays: 14 };
   test("remote is a choice only where the host offers it; a saved one doesn't block other changes", () => {
-    assert.deepEqual(settingsProblems({ ...base, builder: "remote" }), ["builder must be claude, codex"]);
+    assert.deepEqual(settingsProblems({ ...base, builder: "remote" }), ["builder must be claude, codex, opencode"]);
     assert.deepEqual(settingsProblems({ ...base, builder: "remote" }, { changed: ["timeZone"] }), []);
     assert.deepEqual(settingsProblems({ ...base, builder: "remote", intake: "remote" }, { remote: true }), []);
   });

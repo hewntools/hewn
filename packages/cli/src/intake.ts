@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText } from "./builders/cli.ts";
-import { MODEL_REJECTED } from "./builders/models.ts";
+import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
+import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./builders/models.ts";
+import { errorText } from "./builders/activity.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
@@ -382,7 +383,7 @@ const IMAGE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "j
 /** A failsafe for a run that hangs (you can stop one yourself): long enough for a big brief on a slow, careful model. */
 export const INTAKE_TIMEOUT_MS = 15 * 60_000;
 
-export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal, stdin?: string): Promise<string> {
+export function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onLine?: (line: string) => void, signal?: AbortSignal, stdin?: string, quietStartMs?: number): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("stopped"));
     const child = spawn(command, args, { cwd, env, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
@@ -391,7 +392,12 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
     let out = "";
     let err = "";
     let pending = "";
+    // A CLI that never says anything (OpenCode has been seen stuck before its first event): stop it early, with a reason.
+    let stalled = false;
+    let quiet = quietStartMs ? setTimeout(() => ((stalled = true), child.kill("SIGTERM")), quietStartMs) : undefined;
+    const spoke = () => (clearTimeout(quiet), (quiet = undefined));
     child.stdout!.on("data", (d) => {
+      spoke();
       out += d;
       if (!onLine) return;
       pending += d;
@@ -399,14 +405,16 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
       pending = lines.pop()!;
       for (const l of lines) if (l.trim()) onLine(l);
     });
-    child.stderr!.on("data", (d) => (err += d));
+    child.stderr!.on("data", (d) => (spoke(), (err += d)));
     let timedOut = false;
     const timer = setTimeout(() => ((timedOut = true), child.kill("SIGTERM")), timeoutMs);
-    child.once("error", (e) => (clearTimeout(timer), reject(e)));
+    child.once("error", (e) => (clearTimeout(timer), spoke(), reject(e)));
     child.once("close", (code) => {
       clearTimeout(timer);
+      spoke();
       if (signal?.aborted) return reject(new Error("stopped"));
       if (timedOut) return reject(new Error(`intake took longer than ${Math.round(timeoutMs / 60_000)} minutes, so Hewn stopped it`));
+      if (stalled) return reject(new Error(`intake ${command} said nothing for ${Math.round(quietStartMs! / 60_000)} minutes, so Hewn stopped it (it never started); try again`));
       code === 0 ? resolve(out) : reject(new Error(`intake ${command} exited ${code}: ${(err.trim() || out.trim().split("\n").at(-1) || "no output").slice(-500)}`));
     });
   });
@@ -417,30 +425,96 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
  * the owner's model for building (`run`, Settings › AI); one the CLI won't run stops it with a
  * reason the owner can act on (pick another), never a quiet switch to the default.
  */
-export function cliIntake(which: "claude" | "codex", platformRoot: string, run: JobModel = {}): Intake {
+export type IntakeCli = "claude" | "codex" | "opencode";
+
+export function cliIntake(which: IntakeCli, platformRoot: string, run: JobModel = {}): Intake {
   const once = cliIntakeOnce(which, platformRoot, run);
   return async (req, onProgress, signal) => {
     try {
-      return await once(req, onProgress, signal);
+      const reply = await once(req, onProgress, signal);
+      if (run.model) noteModelRan(which, run.model);
+      return reply;
     } catch (e) {
-      if (run.model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) throw new Error(modelUnavailableText(run.model));
+      if (run.model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) {
+        const reason = modelRejectReason((e as Error).message);
+        noteModelFailure(which, run.model, reason);
+        throw new Error(modelUnavailableText(run.model, reason));
+      }
       throw e;
     }
   };
 }
 
-function cliIntakeOnce(which: "claude" | "codex", platformRoot: string, model: JobModel): Intake {
+/**
+ * What an `opencode run --format json` stream says once it's done: the reply (its last text part), or
+ * why it failed. `onEvent` sees each event as it comes (progress).
+ */
+export function opencodeOutput(onEvent?: (e: any) => void): { line: (line: string) => void; text: () => string | undefined; error: () => string | undefined } {
+  let text: string | undefined;
+  let error: string | undefined;
+  return {
+    line: (line) => {
+      let e: any;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (e?.type === "text" && typeof e.part?.text === "string" && e.part.text.trim()) text = e.part.text;
+      if (e?.type === "error") error = errorText(e.error);
+      onEvent?.(e);
+    },
+    text: () => text,
+    error: () => error,
+  };
+}
+
+function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel): Intake {
   return async (req, onProgress, signal) => {
     // They become CLI arguments (and Codex config): names and levels only.
     if (model.model !== undefined && !MODEL_NAME.test(String(model.model))) throw new Error("intake: model must be a model name");
     if (model.effort !== undefined && !EFFORT.test(String(model.effort))) throw new Error("intake: effort must be a level such as low or high");
     const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
     try {
-      // Claude gets web lookup (WebFetch/WebSearch) to check services the owner mentions;
-      // the owner reviews every draft before anything is built.
-      const prompt = intakePrompt(req, { web: which === "claude" });
+      // Claude and OpenCode get web lookup (WebFetch/WebSearch; OpenCode's webfetch) to check services the owner
+      // mentions; the owner reviews every draft before anything is built.
+      const prompt = intakePrompt(req, { web: which !== "codex" });
       const images = intakeImages(req);
       const h = homedir();
+      if (which === "opencode") {
+        // Attached images go in as files (-f; a model that takes images sees them); text files are in the prompt already.
+        // `-f` takes several files: it goes before another flag, never right before the prompt (it would take it).
+        const imageArgs = images.flatMap((img, i) => {
+          const p = join(ws, `attachment-${i + 1}.${IMAGE_EXT[img.mediaType] ?? "png"}`);
+          writeFileSync(p, Buffer.from(img.data!, "base64"));
+          return ["-f", p];
+        });
+        const args = ["run", ...imageArgs, "--format", "json", "--pure", "--auto", ...opencodeModelArgs(model), prompt];
+        // Its own home, like the builder: none of your OpenCode config, plugins or sessions. One per intake (two at once would
+        // share a session database and a login copy), gone after it: no session is resumed.
+        mkdirSync(join(platformRoot, "builder-home"), { recursive: true, mode: 0o700 });
+        const isolated = await opencodeHome(mkdtempSync(join(platformRoot, "builder-home", "intake-opencode-")), { rules: OPENCODE_INTAKE_RULES });
+        const out = opencodeOutput((e) => {
+          if (!onProgress) return;
+          if (e.type === "step_start") onProgress({ activity: "Thinking" });
+          else if (e.type === "tool_use") onProgress({ activity: e.part?.tool === "webfetch" ? "Reading a web page" : "Looking" });
+        });
+        try {
+          // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
+          if (model.model && !(await opencodeHasModel(model.model, isolated.env, ws))) throw opencodeModelRejected(model.model);
+          const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
+          await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, undefined, OPENCODE_QUIET_START_MS);
+        } catch (e) {
+          // OpenCode says why it stopped (a model it won't run, a provider without a key) in an error event.
+          if (out.error() && !signal?.aborted) throw new Error(`intake failed: ${out.error()!.slice(0, 300)}`);
+          throw e;
+        } finally {
+          isolated.done();
+          rmSync(isolated.dir, { recursive: true, force: true });
+        }
+        if (out.error() || !out.text()) throw new Error(`intake failed: ${(out.error() ?? "no reply").slice(0, 300)}`);
+        return parseIntake(out.text()!, req.mode, req.current);
+      }
       if (which === "codex") {
         writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
         // Attached images go in as files next to the prompt (-i); text files are in the prompt already.

@@ -82,7 +82,7 @@ Use it (as the owner; talks to the running Hewn)
                       zipped snapshots (never secrets in plain text, never agent tokens)
 
 Agents (MCP clients sign in with OAuth; you approve them)
-  setup [--agents claude-code,codex] [--yes] [--dry-run]
+  setup [--agents claude-code,codex,opencode] [--yes] [--dry-run]
                       connect local agents: registers Hewn with them, then they sign in
   agents              connected agents; agents pending | approve <code> [--scopes a,b] [--name n] [--only id,id]
                       | deny <code> | scopes <agent> a,b | revoke <agent>
@@ -145,7 +145,7 @@ async function main() {
             if (!remote) throw new Error("the host's intake isn't configured here (HEWN_BUILD_URL); pick another in Settings › AI");
             return remoteIntake(remote, run);
           }
-          return cliIntake(which as "claude" | "codex", home.root, run);
+          return cliIntake(which as "claude" | "codex" | "opencode", home.root, run);
         },
         ...(remote ? { remote } : {}),
         ...(hosted ? { hosted } : {}),

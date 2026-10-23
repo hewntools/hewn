@@ -9,7 +9,7 @@ You can approve in three places:
 
 ![The request sheet for Codex: the scopes it asked for (see your tools, use them, make new ones, change existing ones), each with a switch, Only some tools, its name, the code to check, and Decline or Approve](images/agent-approval.png)
 
-## Claude Code and Codex (on the same machine)
+## Claude Code, Codex and OpenCode (on the same machine)
 
 ```sh
 hewn setup
@@ -18,6 +18,7 @@ hewn setup
 Or, in the web client: **Agents → Add… → An agent that uses your tools**. For each one, Hewn:
 - **Claude Code:** registers Hewn (`claude mcp add … hewn http://127.0.0.1:7717/mcp`), then signs it in (`claude mcp login hewn`).
 - **Codex:** adds a pointer to `~/.codex/AGENTS.md` (Codex needs it to think of Hewn), then `codex mcp add hewn --url …`, which signs it in.
+- **OpenCode:** registers Hewn in its global config (`opencode mcp add hewn --url …`, in `~/.config/opencode/opencode.json`), adds a pointer to `~/.config/opencode/AGENTS.md` (OpenCode reads that, not Hewn's own description), then signs it in (`opencode mcp auth hewn`). If you had no `~/.config/opencode/AGENTS.md` before, OpenCode now reads it instead of `~/.claude/CLAUDE.md`: move any rules you kept there.
 
 Start a new agent session afterwards, so it sees the tools.
 

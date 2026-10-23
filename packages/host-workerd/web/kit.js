@@ -115,7 +115,7 @@ export const empty = (title, text) => h("div", { class: "empty" }, h("strong", {
 
 // ---------- agents and actors ----------
 
-const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
+const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
 /** Agents' own names (from the Agents API), for activity and cards. */
 export const rememberAgents = (list) => list.forEach((a) => a.name && (AGENT_LABELS[a.id] = a.name));
 /** Human name for an actor id: agents by label; the owner (web, CLI, an opened app) is "You". */
@@ -126,7 +126,7 @@ export function actorLabel(id, caps) {
   return AGENT_LABELS[id] ?? id;
 }
 /** A builder by name: the CLIs Hewn runs ("claude" is Claude Code, not the claude.ai agent). */
-const BUILDERS = { claude: "Claude Code", codex: "Codex" };
+const BUILDERS = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
 export const builderLabel = (b) => (b === "agent" ? "your agent" : BUILDERS[b] ?? AGENT_LABELS[b] ?? b);
 
 // ---------- capabilities and their icons ----------
@@ -310,7 +310,13 @@ export function modal(build, { width = 440, cls = "" } = {}) {
       dlg.close();
     };
     dlg.addEventListener("close", () => (dlg.remove(), resolve(result)));
-    dlg.addEventListener("click", (e) => e.target === dlg && close());
+    // A click on the backdrop closes. A click on a disabled control inside also lands on the dialog
+    // element (the control can't take it), so the pointer has to be outside the box too.
+    dlg.addEventListener("click", (e) => {
+      if (e.target !== dlg) return;
+      const r = dlg.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
+    });
     dlg.append(...[build(close, dlg)].flat(Infinity).filter(Boolean));
     document.body.append(dlg);
     dlg.showModal();

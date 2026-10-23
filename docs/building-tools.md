@@ -18,7 +18,7 @@ You can also ask an agent ("make me a reading list in Hewn"), if you allowed it 
 
 ## The build
 
-The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code or Codex on your machine, in a sandbox, on however it's signed in: a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI) writes the tool. Then Hewn:
+The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
@@ -61,7 +61,7 @@ A build gets up to three attempts on its own (Settings › AI › Build attempts
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
 
-If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude` or `codex login`), then try again.
+If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude`, `codex login` or `opencode auth login`), then try again.
 
 ## Versions
 

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { HarnessStatus } from "@hewntools/host-workerd/surface/host.ts";
 import { MARKDOWN, removeBlock, SHELL, writeBlock } from "./blocks.ts";
+import { opencodeConfigDir, opencodeUserDirs } from "../builders/opencode-dirs.ts";
 
 export { AGENT_POINTER } from "@hewntools/host-workerd/pointer.ts";
 import { AGENT_POINTER } from "@hewntools/host-workerd/pointer.ts";
@@ -52,10 +53,10 @@ export interface Harness {
 export const withPty = (argv: string[]): string[] =>
   process.platform === "darwin" ? ["script", "-q", "/dev/null", ...argv] : ["script", "-qfec", argv.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" "), "/dev/null"];
 
-export type Exec = (command: string, args: string[], opts?: { allowFail?: boolean }) => void;
+export type Exec = (command: string, args: string[], opts?: { allowFail?: boolean; cwd?: string }) => void;
 
 export const realExec: Exec = (command, args, opts = {}) => {
-  const r = spawnSync(command, args, { encoding: "utf8" });
+  const r = spawnSync(command, args, { encoding: "utf8", ...(opts.cwd ? { cwd: opts.cwd } : {}) });
   if (r.status !== 0 && !opts.allowFail) {
     throw new Error(`${command} ${args.slice(0, 3).join(" ")} … failed: ${(r.stderr || r.stdout || r.error?.message || "").trim()}`);
   }
@@ -158,7 +159,119 @@ export function harnesses(exec: Exec = realExec): Harness[] {
         return steps;
       },
     },
+    {
+      agentId: "opencode",
+      label: "OpenCode",
+      pointerRequired: true,
+      pointerNote: "required: OpenCode reads its global AGENTS.md, not MCP server instructions",
+      detect: () => onPath("opencode"),
+      registered: (home) => !!opencodeMcpUrl(home),
+      registeredUrl: (home) => opencodeMcpUrl(home),
+      // `opencode mcp auth` runs the server's OAuth sign-in (it opens the browser at Hewn's approval page).
+      login: () => ["opencode", "mcp", "auth", "hewn"],
+      loginFix: (output) =>
+        /unknown (command|argument)|unrecognized|not found: hewn/i.test(output)
+          ? "This OpenCode is too old to sign in to MCP servers. Update it (opencode upgrade), then connect again."
+          : "Run opencode mcp auth hewn in a terminal to see why, and approve it in Hewn.",
+      steps(ctx) {
+        const dir = opencodeConfigDir(ctx.home);
+        const agentsMd = join(dir, "AGENTS.md");
+        return [
+          {
+            // Run in its global config directory: older OpenCode writes there whatever the directory, newer ones write to the directory's config.
+            describe: `opencode mcp add hewn --url ${ctx.url}  (in ${dir}; replaces any existing 'hewn')`,
+            kind: "register",
+            run: () => {
+              mkdirSync(dir, { recursive: true });
+              exec("opencode", ["mcp", "add", "hewn", "--url", ctx.url], { cwd: dir });
+            },
+          },
+          { describe: `add Hewn pointer block to ${agentsMd}`, kind: "pointer", file: agentsMd, run: () => writeBlock(agentsMd, AGENT_POINTER, MARKDOWN) },
+        ];
+      },
+    },
   ];
+}
+
+/** OpenCode's global config directory: `$XDG_CONFIG_HOME/opencode` for your own home, else `<home>/.config/opencode`. */
+export { opencodeConfigDir };
+
+/** JSON with comments and trailing commas (OpenCode's `opencode.jsonc`), read leniently. */
+export function parseJsonc(text: string): unknown {
+  const stripped = text
+    .replace(/("(?:[^"\\]|\\.)*")|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m, str) => str ?? "")
+    .replace(/,(\s*[}\]])/g, "$1");
+  return JSON.parse(stripped);
+}
+
+/** The address Hewn is registered at in OpenCode's global config (`mcp.hewn`, or `mcp.servers.hewn` in newer versions). */
+export function opencodeMcpUrl(home: string): string | undefined {
+  const dir = opencodeConfigDir(home);
+  for (const name of ["opencode.json", "opencode.jsonc"]) {
+    const file = join(dir, name);
+    if (!existsSync(file)) continue;
+    try {
+      const cfg = parseJsonc(readFileSync(file, "utf8")) as { mcp?: { hewn?: { url?: unknown }; servers?: { hewn?: { url?: unknown } } } };
+      const url = cfg?.mcp?.hewn?.url ?? cfg?.mcp?.servers?.hewn?.url;
+      if (typeof url === "string") return url;
+    } catch {
+      // not readable as JSON: not registered as far as Hewn can tell
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Where Hewn's entry sits in OpenCode's global config, and whether Hewn may edit that file: plain
+ * JSON, yes; a `.jsonc` with comments or trailing commas is the owner's to edit (rewriting it would
+ * lose them).
+ */
+export function opencodeHewnEntry(home: string): { file: string; editable: boolean } | undefined {
+  const dir = opencodeConfigDir(home);
+  for (const name of ["opencode.json", "opencode.jsonc"]) {
+    const file = join(dir, name);
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8");
+    let cfg: { mcp?: { hewn?: unknown; servers?: { hewn?: unknown } } } | undefined;
+    try {
+      cfg = parseJsonc(text) as typeof cfg;
+    } catch {
+      continue;
+    }
+    if (!cfg?.mcp?.hewn && !cfg?.mcp?.servers?.hewn) continue;
+    let editable = true;
+    try {
+      JSON.parse(text);
+    } catch {
+      editable = false;
+    }
+    return { file, editable };
+  }
+  return undefined;
+}
+
+/**
+ * Take Hewn out of OpenCode's global config (`mcp.hewn`, or `mcp.servers.hewn`) and its sign-in to
+ * Hewn out of OpenCode's MCP logins (`mcp-auth.json`): OpenCode has no `mcp remove`. Plain JSON
+ * only (see `opencodeHewnEntry`); the login file is OpenCode's own JSON.
+ */
+export function opencodeForget(home: string, file: string, env: NodeJS.ProcessEnv = process.env): void {
+  const cfg = JSON.parse(readFileSync(file, "utf8")) as { mcp?: { hewn?: unknown; servers?: { hewn?: unknown } } };
+  if (cfg.mcp) {
+    delete cfg.mcp.hewn;
+    if (cfg.mcp.servers) delete cfg.mcp.servers.hewn;
+  }
+  writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
+  const logins = join(opencodeUserDirs(home, env).data, "mcp-auth.json");
+  if (!existsSync(logins)) return;
+  try {
+    const auth = JSON.parse(readFileSync(logins, "utf8")) as Record<string, unknown>;
+    if (!("hewn" in auth)) return;
+    delete auth.hewn;
+    writeFileSync(logins, JSON.stringify(auth, null, 2) + "\n");
+  } catch {
+    // not a file Hewn understands: left as it is
+  }
 }
 
 export const defaultHome = () => homedir();

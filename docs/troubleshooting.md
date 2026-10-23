@@ -87,7 +87,10 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 
 ## Building
 
-**"Builder isn't logged in"**: run `claude` once and sign in, or `codex login`. Then check Settings › AI, or run `hewn doctor`.
+**"Builder isn't logged in"**: run `claude` once and sign in, or `codex login`, or `opencode auth login`. Then check Settings › AI, or run `hewn doctor`.
+
+**"opencode said nothing for 3 minutes, so Hewn stopped it (it never started)"**
+OpenCode sometimes never gets going (seen with 1.18.18, mostly when a model it can't resolve is involved). Hewn stops it after three silent minutes instead of waiting the whole build out. Retry the build; if it keeps happening, check that the model in Settings › AI is one `opencode models` lists.
 
 **"intake took longer than 15 minutes, so Hewn stopped it"**
 The talk before a build had no answer after 15 minutes, which usually means it hung (a dropped connection, a stuck sign-in). Send your message again. If it keeps happening with a long brief, pick a faster model or a lower effort in the chat box's model menu.
@@ -95,8 +98,8 @@ The talk before a build had no answer after 15 minutes, which usually means it h
 **A build fails**
 The build says why (the failing test, the invalid manifest, the error on its screen), with its log, and offers **Ask builder to fix**. When the builder itself is unavailable (signed out, out of usage), Hewn stops instead of retrying.
 
-**"Model not available: … isn't available. Pick another model"**
-The model you pinned for building is gone (retired, misspelled, or not on your account), so nothing was built. Pick another in the chat box's model menu or Settings › AI (**Builds tools › Model…**), or a family such as Fable, which follows the newest. Then retry the build.
+**"Model not available: … isn't available (…). Pick another model"**
+The model you pinned for building won't run, and the brackets carry the agent's reason: it's gone (retired, misspelled, or not on your account), or, on OpenCode's free tier, "Model is unavailable": that tier changes which models it serves, and its list can lag behind. Nothing was built. Pick another in the chat box's model menu or Settings › AI (**Builds tools › Model…**), where a model that failed in the last hour says so, or a family such as Fable, which follows the newest. Then retry the build.
 
 **An agent's build fails with "the owner doesn't let agents ask for …"**
 The agent asked for a model you haven't allowed. Tick it under **Agents may ask for** in Settings › AI, or let the agent leave the model out (your choice is used then).
@@ -117,7 +120,7 @@ Better still, run Hewn as a user other than root.
 ## Agents
 
 **An agent can't connect, or keeps asking to sign in**
-Check the **Inbox** in the web client (or `hewn agents pending`) for a request waiting for you. Requests expire after 15 minutes. Run `hewn setup` again for Claude Code or Codex.
+Check the **Inbox** in the web client (or `hewn agents pending`) for a request waiting for you. Requests expire after 15 minutes. Run `hewn setup` again for Claude Code, Codex or OpenCode.
 
 **Connect an agent (web) waits forever at "signs in"**
 The agent couldn't open a browser (WSL, or Hewn running as a service with no desktop session). Use **Open the sign-in page** in the dialog when it appears. Otherwise run the sign-in in a terminal yourself: `claude mcp login hewn`, and approve it in Hewn. It gives up after 15 minutes.
@@ -129,7 +132,10 @@ Add the Hewn pointer to its instructions (see [Connecting agents](agents.md)).
 A quick tunnel gets a new address when it starts. Check `hewn tunnel status`, and update the connector. Use a named tunnel for a stable address.
 
 **Codex asks you to log in again after a Codex build**
-Hewn keeps the builder's own copy of your Codex login and syncs it back after a build. If you used Codex yourself during a build and both refreshed it, one copy loses. `codex login` fixes it.
+Hewn keeps the builder's own copy of your Codex login and syncs it back after a build. If you used Codex yourself during a build and both refreshed it, one copy loses. `codex login` fixes it. The same goes for OpenCode's provider logins (`opencode auth login`).
+
+**OpenCode doesn't offer the model you expect**
+Hewn lists what `opencode models` lists: the providers you're signed in to (`opencode auth list`), those in `~/.config/opencode/opencode.json`, and its free tier. A model from your own `opencode.json` under a project folder isn't there: Hewn runs OpenCode with your global config only.
 
 ## Data
 

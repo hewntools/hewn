@@ -39,10 +39,10 @@ export const JOBS = ["builder", "intake"] as const;
 export type Job = (typeof JOBS)[number];
 
 /** The agents that can do Hewn's jobs: the CLIs on this machine, and the host's builder when it offers one. */
-export const jobAgents = (remote: boolean) => ["claude", "codex", ...(remote ? ["remote"] : [])];
+export const jobAgents = (remote: boolean) => ["claude", "codex", "opencode", ...(remote ? ["remote"] : [])];
 
 /** Models agents may ask for until the owner changes it: the default and Claude Code's families (they follow the newest). */
-export const DEFAULT_AGENT_MODELS: Record<string, string[]> = { claude: ["default", "fable", "opus", "sonnet", "haiku"], codex: ["default"], remote: ["default"] };
+export const DEFAULT_AGENT_MODELS: Record<string, string[]> = { claude: ["default", "fable", "opus", "sonnet", "haiku"], codex: ["default"], opencode: ["default"], remote: ["default"] };
 
 /** The owner's model and effort for `job` on `agent`. */
 export const jobModel = (s: Pick<Settings, "jobModels">, job: Job, agent: string): JobModel => s.jobModels?.[job]?.[agent] ?? {};
@@ -69,6 +69,8 @@ export interface ModelChoice {
   defaultEffort?: string;
   /** A pinned model's successor, when its CLI names one (Codex's catalog). */
   upgrade?: string;
+  /** It wouldn't run lately (within the hour): when, and the CLI's reason. A list can't tell that on its own. */
+  failed?: { at: string; reason: string };
 }
 
 /** An agent's model list, read from its CLI (or the host's builder). `other`: full names beyond the list are accepted. */
@@ -128,7 +130,8 @@ export interface SurfaceHost {
   /** Builder / intake CLIs on this machine: installed, signed in (first run, Settings). */
   tools?: () => Promise<{ name: string; label: string; found: boolean; loggedIn?: boolean; fix?: string; remote?: boolean }[]>;
   /** The models an agent offers (its CLI's list, or the host's builder's). Absent: only Default. */
-  modelCatalog?: (agent: string) => Promise<ModelCatalog>;
+  /** `fresh`: read the agent's CLI now instead of the kept list (the sheet in Settings › AI). */
+  modelCatalog?: (agent: string, fresh?: boolean) => Promise<ModelCatalog>;
   /** Backup and version status (Settings). */
   status?: () => Promise<{ machine?: string; version: string; dataFormat: number; lastBackup: string | null; backupDir: string; latest?: string | null; notes?: { version: string; date?: string; items: string[] }[] }>;
   /**

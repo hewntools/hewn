@@ -320,6 +320,8 @@ describe("platform-assigned builder", () => {
     assert.equal(failed.status, "failed");
     ok = true;
     const retried = await platform.retryBuild(t.claude, failed.buildId);
+    // Retried already: a second retry of the old build (an agent checking on it after a restart) would run the same request twice.
+    await assert.rejects(platform.retryBuild(t.claude, failed.buildId), (e) => e instanceof PlatformError && e.code === "conflict" && new RegExp(`already retried as ${retried.buildId}`).test(e.message));
     assert.equal(retried.capabilityId, "running-log");
     assert.equal((retried.request as any).requirements, "record runs");
     assert.equal((retried.request as any).retryOf, failed.buildId);
