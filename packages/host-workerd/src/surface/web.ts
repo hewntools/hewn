@@ -475,7 +475,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     // /api/tools/<agent>/models: what that agent's CLI (or the host's builder) offers, and the
     // names agents may ask a build by it to use, as the platform checks them.
     if (id && sub === "models") {
-      const catalog = host.modelCatalog ? await host.modelCatalog(id) : { agent: id, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }] };
+      const catalog = host.modelCatalog ? await host.modelCatalog(id, url.searchParams.get("fresh") === "1") : { agent: id, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }] };
       return { ...catalog, agentModels: agentModels(await host.settings.read(), id) };
     }
     return host.tools ? host.tools() : [];

@@ -7,7 +7,8 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { dirname, join, relative } from "node:path";
 import { build as esbuild } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
-import { claudeBuildHome, codexBuildHome, forgetSession } from "./builders/cli.ts";
+import { CLI_AGENTS } from "./builders/cli-agents.ts";
+import { forgetSession } from "./builders/cli.ts";
 import { isArtefact } from "@hewntools/core/files.ts";
 import type { BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
 import type { VisualCheck } from "./visual.ts";
@@ -121,8 +122,8 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     },
     async remove(buildId) {
       rmSync(ws(buildId), { recursive: true, force: true });
-      // What its builder kept between attempts: its home per build (Claude Code's config dir, Codex's HOME: the session).
-      for (const home of [claudeBuildHome, codexBuildHome]) rmSync(home(dirname(opts.root), buildId), { recursive: true, force: true });
+      // What its builder kept between attempts: its home per build (Claude Code's config dir, Codex's and OpenCode's HOME: the session).
+      for (const a of Object.values(CLI_AGENTS)) rmSync(a.buildHome(dirname(opts.root), buildId), { recursive: true, force: true });
       forgetSession(buildId);
     },
     async build(job: BuildJob, hooks) {

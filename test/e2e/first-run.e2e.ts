@@ -18,7 +18,7 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor } from "@hewntools/cli/supervisor/index.ts";
-import { BUILDERS } from "@hewntools/cli/builders/cli.ts";
+import { BUILDERS } from "@hewntools/cli/builders/cli-agents.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
 import { editJson, SEED } from "../helpers.ts";
 import { freePort } from "../workerd-helpers.ts";
@@ -147,7 +147,8 @@ try {
     const row = page.locator(".setting", { hasText: "Builds tools" }).first();
     await row.getByRole("button", { name: "Model…" }).click();
     const sheet = page.locator("dialog[open]", { hasText: "Model for building tools" });
-    await sheet.locator("label.job-option", { hasText: "Fable" }).locator("input").check();
+    // The row labelled exactly "Fable" (the "Other…" row's example name, claude-fable-5-1, contains it too).
+    await sheet.locator("label.job-option").filter({ has: page.getByText("Fable", { exact: true }) }).locator("input").check();
     await sheet.getByLabel("Effort").selectOption("high");
     await sheet.getByRole("button", { name: "Save" }).click();
     await row.getByText(/Fable · high effort/).waitFor();

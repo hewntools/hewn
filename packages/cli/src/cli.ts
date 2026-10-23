@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { backupLocation, backupNow, findBackup, listBackups, restoreBackup } from "./backup.ts";
-import { BUILDERS } from "./builders/cli.ts";
+import { BUILDERS, cliIntake, isCliAgent } from "./builders/cli-agents.ts";
 import { startMetrics } from "./supervisor/metrics.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
 import { initConfig, readConfig, writeConfig } from "./config.ts";
@@ -16,7 +16,6 @@ import { formatChecks, runDoctor } from "./doctor.ts";
 import { openHome } from "./home.ts";
 import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
-import { cliIntake } from "./intake.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
 import * as service from "./service.ts";
 import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
@@ -82,7 +81,7 @@ Use it (as the owner; talks to the running Hewn)
                       zipped snapshots (never secrets in plain text, never agent tokens)
 
 Agents (MCP clients sign in with OAuth; you approve them)
-  setup [--agents claude-code,codex] [--yes] [--dry-run]
+  setup [--agents claude-code,codex,opencode] [--yes] [--dry-run]
                       connect local agents: registers Hewn with them, then they sign in
   agents              connected agents; agents pending | approve <code> [--scopes a,b] [--name n] [--only id,id]
                       | deny <code> | scopes <agent> a,b | revoke <agent>
@@ -145,7 +144,8 @@ async function main() {
             if (!remote) throw new Error("the host's intake isn't configured here (HEWN_BUILD_URL); pick another in Settings › AI");
             return remoteIntake(remote, run);
           }
-          return cliIntake(which as "claude" | "codex", home.root, run);
+          if (!isCliAgent(which)) throw new Error(`no intake named ${which}; pick one in Settings › AI`);
+          return cliIntake(which, home.root, run);
         },
         ...(remote ? { remote } : {}),
         ...(hosted ? { hosted } : {}),

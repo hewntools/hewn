@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
 import { backupLocation, listBackups } from "./backup.ts";
+import { CLI_AGENTS, isCliAgent } from "./builders/cli-agents.ts";
 import { builderSandboxAvailable } from "./builders/sandbox.ts";
 import { readConfig } from "./config.ts";
 import type { Home } from "./home.ts";
@@ -143,10 +144,13 @@ export async function runDoctor(d: DoctorDeps): Promise<Check[]> {
   const name = "Builds tools";
   const builds = (): Check => {
     if (agent === "remote") return { name, state: "ok", detail: `the host's builder (HEWN_BUILD_URL)${model}` };
-    if (!which(agent)) return { name, state: "fail", detail: `${agent} isn't on PATH`, fix: `install ${agent}, or pick another in Settings › AI` };
+    // One of the CLIs: its binary and its own install and sign-in words (the descriptor's); another name is checked as is.
+    const cli = isCliAgent(agent) ? CLI_AGENTS[agent] : undefined;
+    const label = cli?.label ?? agent;
+    if (!which(cli?.bin ?? agent)) return { name, state: "fail", detail: `${label} isn't on PATH`, fix: `${cli ? cli.install : `install ${agent}`}, or pick another in Settings › AI` };
     const li = loggedIn(agent);
-    if (li === false) return { name, state: "fail", detail: `${agent} isn't logged in`, fix: `run ${agent} once and log in` };
-    return { name, state: "ok", detail: `${agent} found${li ? ", logged in" : ""}${model}` };
+    if (li === false) return { name, state: "fail", detail: `${label} isn't logged in`, fix: cli ? cli.login : `run ${agent} once and log in` };
+    return { name, state: "ok", detail: `${label} found${li ? ", logged in" : ""}${model}` };
   };
   add(builds());
 

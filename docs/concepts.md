@@ -13,7 +13,7 @@ Tools are **versioned**. Each change is a new version, tested before it becomes 
 
 ## Agents
 
-**Agents** are the AI assistants you use: Claude Code, Codex, claude.ai, ChatGPT, or any MCP client. They connect to Hewn over MCP.
+**Agents** are the AI assistants you use: Claude Code, Codex, OpenCode, claude.ai, ChatGPT, or any MCP client. They connect to Hewn over MCP.
 - **Approval:** they sign in with OAuth, and you approve each one in Hewn.
 - **Scopes:** they get only what you approve: *see* your tools, *use* them, *make* new ones, *change* existing ones. Optionally, only some tools.
 - **Owner-only actions:** agents can't approve anything for themselves: grants, secrets, schedules, other agents.
@@ -25,7 +25,7 @@ See [Connecting agents](agents.md).
 
 Hewn uses AI itself, for two jobs (Settings › AI):
 
-- **Builds tools:** an agent talks your request through with you, proposes a **spec** of what to build, and once you say Build, writes the tool in a sandbox. It runs Claude Code or Codex on your machine, on however it's signed in: a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI. Hewn adds no fees of its own. You choose its model and effort; [Choosing the model](models.md#building-tools) says how.
+- **Builds tools:** an agent talks your request through with you, proposes a **spec** of what to build, and once you say Build, writes the tool in a sandbox. It runs Claude Code, Codex or OpenCode on your machine, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or (OpenCode) a local model server. Hewn adds no fees of its own. You choose its model and effort; [Choosing the model](models.md#building-tools) says how.
 - **Thinks inside tools:** tools that need a model call one through Hewn, with your API key and a monthly budget. See [Models](models.md).
 
 Building is two parts underneath: the **intake** talks it through (quick, writes nothing) and the **builder** builds (in a sandbox, takes minutes). One agent does both, on the model you pick.

@@ -14,8 +14,27 @@ const rel = (p: string, cwd: string) => {
   return p;
 };
 
-/** An activity line that means the builder used a tool: a Claude Code tool call, a Codex command or file change. */
+/** An activity line that means the builder used a tool: a Claude Code or OpenCode tool call, a Codex command or file change. */
 export const USED_TOOL = /^(→|\$|✎) /;
+
+/** `opencode run --format json` events: a part per line (text, reasoning, a tool call once it ended, a step), or an error. */
+export function opencodeActivity(e: any, cwd: string): string | null {
+  if (e?.type === "error") return `✖ ${clip(errorText(e.error))}`;
+  const part = e?.part;
+  if (!part) return null;
+  if (e.type === "text") return part.text?.trim() ? `💬 ${clip(part.text)}` : null;
+  if (e.type === "reasoning") return part.text?.trim() ? `… ${clip(part.text)}` : null;
+  if (e.type === "step_finish") return part.reason === "stop" ? "✔ builder finished its turn" : null;
+  if (e.type !== "tool_use") return null;
+  const i = part.state?.input ?? {};
+  const target = i.filePath ?? i.path ?? i.pattern ?? i.command ?? i.url ?? "";
+  const line = `→ ${part.tool ?? "tool"} ${clip(rel(String(target), cwd), 120)}`.trimEnd();
+  return part.state?.status === "error" ? `${line}\n  ↳ ${clip(String(part.state.error ?? "failed"))}` : line;
+}
+
+/** An OpenCode error, as its event carries it: a name with the message in `data`, or a message. */
+/** An OpenCode error, in words: its message when it has one, else its name. */
+export const errorText = (err: any): string => (typeof err === "string" ? err : err?.data?.message ?? err?.message ?? err?.name ?? JSON.stringify(err ?? "error"));
 
 /** `codex exec --json` events. */
 export function codexActivity(e: any, cwd: string): string | null {

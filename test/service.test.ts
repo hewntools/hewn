@@ -115,7 +115,8 @@ describe("service and doctor", () => {
       assert.match(by.Sandbox.fix!, /bubblewrap|sandbox-exec/);
       assert.equal(by["Secrets key"].state, "warn");
       // An older split setting: one line, from the builder (it talks it through too).
-      assert.match(by["Builds tools"].detail, /claude isn't logged in/);
+      assert.match(by["Builds tools"].detail, /Claude Code isn't logged in/);
+      assert.equal(by["Builds tools"].fix, "run claude once and sign in", "the agent's own sign-in words");
       assert.ok(!by.Builds && !by["Talks it through"], "no line for the old intake setting");
       assert.equal(by["Visual check"].state, "warn");
       assert.equal(by.Codex.state, "warn");
@@ -143,7 +144,7 @@ describe("service and doctor", () => {
       assert.deepEqual(healthy.filter((c) => c.state !== "ok").map((c) => c.name), ["Backups"], "only 'no backup yet' remains");
       // One agent does both: one line, with the model it builds on.
       const builds = healthy.find((c) => c.name === "Builds tools");
-      assert.match(builds!.detail, /claude found, logged in · fable, high effort/);
+      assert.match(builds!.detail, /Claude Code found, logged in · fable, high effort/);
       assert.ok(!healthy.some((c) => c.name === "Builds" || c.name === "Talks it through"));
     } finally {
       t.cleanup();

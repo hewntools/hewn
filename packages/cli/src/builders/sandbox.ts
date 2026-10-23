@@ -2,6 +2,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { opencodeUserDirs } from "./opencode-dirs.ts";
 
 /**
  * Seatbelt profile for headless builders. Reads are deny-based (builders legitimately need their
@@ -17,10 +18,19 @@ export interface BuilderSandboxOptions {
   ownState: string[];
   /** For builders with a shell: block the `security` CLI and Keychain files (their auth must not need them). */
   denyKeychain: boolean;
+  /** Ports on this machine the builder may reach (macOS; a local model server's). Everything else local stays closed. */
+  allowLoopback?: number[];
   home?: string;
+  /** The environment whose XDG variables may move your OpenCode directories (default: this process's). */
+  env?: NodeJS.ProcessEnv;
 }
 
 const q = (p: string) => `"${p.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+/**
+ * Your OpenCode's directories where the XDG variables put them: closed to builders like their default
+ * places (those are in PRIVATE_HOME_DIRS; with the variables unset this repeats them, harmlessly).
+ */
+const xdgOpencodeDirs = (o: Pick<BuilderSandboxOptions, "home" | "env">) => Object.values(opencodeUserDirs(o.home ?? homedir(), o.env));
 const real = (p: string) => {
   try {
     return realpathSync(p);
@@ -31,12 +41,13 @@ const real = (p: string) => {
 
 /**
  * Locations under $HOME that hold the user's work and credentials. The builders' own logins are
- * here too (.claude, .codex): each builder re-opens only its own (`ownState`).
+ * here too (.claude, .codex, .config/opencode and .local/share/opencode): each builder re-opens only
+ * its own (`ownState`).
  */
 export const PRIVATE_HOME_DIRS = [
   "github", "Documents", "Desktop", "Downloads",
   ".ssh", ".aws", ".azure", ".gnupg", ".config", ".docker", ".kube", ".gem", ".cargo", ".password-store", ".local/share/keyrings", ".mozilla",
-  ".claude", ".codex",
+  ".claude", ".codex", ".local/share/opencode", ".local/state/opencode", ".agents",
   "Library/Keychains", "Library/Application Support", "Library/Cookies", "Library/Mail", "Library/Messages", "Library/Safari",
 ];
 /** Files directly under $HOME with credentials or history. */
@@ -52,13 +63,15 @@ export function builderProfile(o: BuilderSandboxOptions): string {
   const home = real(o.home ?? homedir());
   const sub = (ps: string[]) => ps.map((p) => `(subpath ${q(real(p))})`).join(" ");
   // Claude loads its own login from the Keychain; builders without a shell keep the Keychain dir readable.
-  const privateDirs = [...PRIVATE_HOME_DIRS.filter((d) => o.denyKeychain || d !== "Library/Keychains"), ...PRIVATE_HOME_FILES].map((d) => join(home, d));
+  const privateDirs = [...[...PRIVATE_HOME_DIRS.filter((d) => o.denyKeychain || d !== "Library/Keychains"), ...PRIVATE_HOME_FILES].map((d) => join(home, d)), ...xdgOpencodeDirs(o)];
   return [
     "(version 1)",
     "(allow default)",
     `(deny file-read* ${sub([o.platformRoot, ...privateDirs])})`,
     // Not Hewn's own ports (or anything else on this machine): builders only need their model API.
     '(deny network-outbound (remote ip "localhost:*"))',
+    // Except a local model server's port (the owner's OpenCode provider config names it).
+    ...(o.allowLoopback ?? []).filter((p) => Number.isInteger(p) && p > 0 && p < 65536).map((p) => `(allow network-outbound (remote ip "localhost:${p}"))`),
     "(allow file-read-metadata)",
     `(allow file-read* ${sub([o.workspace, ...o.ownState])})`,
     '(deny file-write* (subpath "/"))',
@@ -91,7 +104,7 @@ export function bubblewrapArgs(o: BuilderSandboxOptions): string[] {
   // A file: an empty one bound over it.
   const hideFile = (p: string) => (existsSync(p) && !own.has(real(p)) ? ["--ro-bind", "/dev/null", real(p)] : []);
   const rw = (p: string) => (existsSync(p) ? ["--bind", real(p), real(p)] : []);
-  const privateDirs = PRIVATE_HOME_DIRS.filter((d) => !d.startsWith("Library/")).map((d) => join(home, d));
+  const privateDirs = [...new Set([...PRIVATE_HOME_DIRS.filter((d) => !d.startsWith("Library/")).map((d) => join(home, d)), ...xdgOpencodeDirs(o)])];
   // A builder with a shell may not reach the desktop keyring over D-Bus either.
   const runtime = process.env.XDG_RUNTIME_DIR;
   const hides = [...privateDirs.flatMap(hide), ...PRIVATE_HOME_FILES.map((f) => join(home, f)).flatMap(hideFile), ...hide(o.platformRoot), ...(o.denyKeychain && runtime ? hide(runtime) : [])];
