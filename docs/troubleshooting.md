@@ -98,8 +98,8 @@ The talk before a build had no answer after 15 minutes, which usually means it h
 **A build fails**
 The build says why (the failing test, the invalid manifest, the error on its screen), with its log, and offers **Ask builder to fix**. When the builder itself is unavailable (signed out, out of usage), Hewn stops instead of retrying.
 
-**"Model not available: … isn't available. Pick another model"**
-The model you pinned for building is gone (retired, misspelled, or not on your account), so nothing was built. Pick another in the chat box's model menu or Settings › AI (**Builds tools › Model…**), or a family such as Fable, which follows the newest. Then retry the build.
+**"Model not available: … isn't available (…). Pick another model"**
+The model you pinned for building won't run, and the brackets carry the agent's reason: it's gone (retired, misspelled, or not on your account), or, on OpenCode's free tier, "Model is unavailable": that tier changes which models it serves, and its list can lag behind. Nothing was built. Pick another in the chat box's model menu or Settings › AI (**Builds tools › Model…**), where a model that failed in the last hour says so, or a family such as Fable, which follows the newest. Then retry the build.
 
 **An agent's build fails with "the owner doesn't let agents ask for …"**
 The agent asked for a model you haven't allowed. Tick it under **Agents may ask for** in Settings › AI, or let the agent leave the model out (your choice is used then).

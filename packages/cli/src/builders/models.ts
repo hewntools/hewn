@@ -140,13 +140,13 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; code
   };
   return async (agent: string): Promise<ModelCatalog> => {
     const hit = cache.get(agent);
-    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.catalog;
+    if (hit && Date.now() - hit.at < 10 * 60_000) return withFailures(hit.catalog);
     try {
       const catalog = await read(agent);
       cache.set(agent, { at: Date.now(), catalog });
-      return catalog;
+      return withFailures(catalog);
     } catch {
-      return defaultOnly(agent);
+      return withFailures(defaultOnly(agent));
     }
   };
 }
@@ -157,3 +157,39 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; code
  * lists): the build stops, saying so (never a quiet switch to the default).
  */
 export const MODEL_REJECTED = /issue with the selected model|selected model .{0,80}(not exist|access)|model[^\n]{0,60}\b(not found|does not exist|doesn't exist|is not available|isn't available|is unavailable|not supported|is not supported)|unknown model|invalid model|not_found_error[^\n]*model|(Provider)?ModelNotFound|provider[^\n]{0,40}\bnot found/i;
+
+/**
+ * Why the CLI wouldn't run the model, in its own words, from what it printed: the message inside an
+ * error event (JSON), a stderr line, or Hewn's own check against `opencode models`.
+ */
+export function modelRejectReason(text: string): string {
+  let t = text.trim().replace(/^(intake failed|intake): /, "");
+  if (/not in opencode models/.test(t)) return "OpenCode doesn't list it";
+  if (t.startsWith("{")) {
+    try {
+      const e = JSON.parse(t);
+      const m = [e?.error?.data?.message, e?.error?.message, e?.message, e?.result, e?.error].find((s) => typeof s === "string" && s.trim());
+      if (m) t = m.trim();
+    } catch {
+      // not JSON after all: the text as it is
+    }
+  }
+  return t.replace(/\.$/, "").slice(0, 200);
+}
+
+/**
+ * Models that wouldn't run lately, per agent, with the CLI's reason: the lists say so for an hour,
+ * since a list can't tell on its own (OpenCode's free tier changes which models it serves, and its
+ * list can lag behind). A run that goes through clears the mark.
+ */
+const failed = new Map<string, { at: string; reason: string }>();
+const FAILED_FOR_MS = 60 * 60_000;
+export const noteModelFailure = (agent: string, model: string, reason: string): void => void failed.set(`${agent} ${model}`, { at: new Date().toISOString(), reason: reason.slice(0, 200) });
+export const noteModelRan = (agent: string, model: string): void => void failed.delete(`${agent} ${model}`);
+const withFailures = (c: ModelCatalog): ModelCatalog => ({
+  ...c,
+  models: c.models.map((m) => {
+    const f = failed.get(`${c.agent} ${m.id}`);
+    return f && Date.now() - Date.parse(f.at) < FAILED_FOR_MS ? { ...m, failed: f } : m;
+  }),
+});

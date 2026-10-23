@@ -69,6 +69,8 @@ export interface ModelChoice {
   defaultEffort?: string;
   /** A pinned model's successor, when its CLI names one (Codex's catalog). */
   upgrade?: string;
+  /** It wouldn't run lately (within the hour): when, and the CLI's reason. A list can't tell that on its own. */
+  failed?: { at: string; reason: string };
 }
 
 /** An agent's model list, read from its CLI (or the host's builder). `other`: full names beyond the list are accepted. */

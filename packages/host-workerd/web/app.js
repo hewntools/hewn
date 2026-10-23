@@ -3057,11 +3057,13 @@ function modelChip() {
     const pick = (id) => save({ model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
     const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: ctx.s.builder === "claude" ? "Another: claude-fable-5-1" : "Another model, by name", "aria-label": "Another model, by name" });
     other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
+    // A model that failed lately says so (the list can't tell on its own).
+    const sub = (m) => [m.description, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");
     return [
-      row(curModel.label, curModel.description, { checked: true }),
+      row(curModel.label, sub(curModel), { checked: true }),
       efforts.length > 0 && h("label", { class: "mm-effort" }, h("span", { class: "row between" }, h("span", {}, "Effort"), value), slider),
       others.length > 0 && h("hr"),
-      others.map((m) => row(m.label, m.description, { onClick: () => pick(m.id) })),
+      others.map((m) => row(m.label, sub(m), { onClick: () => pick(m.id) })),
       other && h("div", { class: "mm-other" }, other),
     ];
   };
@@ -4368,8 +4370,8 @@ async function modelSheet(t) {
       const rows = catalog.models.map((m) => {
         const radio = h("input", { type: "radio", name, checked: m.id === chosen });
         radio.addEventListener("change", () => ((chosen = m.id), fillEffort(effort.value)));
-        // A family's or the default's own description says it; a pinned model also says it stays put.
-        const sub = [m.description ?? kindWords[m.kind], m.kind === "pinned" && m.description && kindWords.pinned, m.upgrade && `${m.upgrade} replaces it`].filter(Boolean).join(" · ");
+        // A family's or the default's own description says it; a pinned model also says it stays put, and whether it failed lately.
+        const sub = [m.description ?? kindWords[m.kind], m.kind === "pinned" && m.description && kindWords.pinned, m.upgrade && `${m.upgrade} replaces it`, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");
         return h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, m.label), sub && h("span", { class: "sub" }, sub)));
       });
       if (catalog.other) {

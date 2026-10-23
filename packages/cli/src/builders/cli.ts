@@ -7,7 +7,7 @@ import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EFFORT } from "@hewntools/core/build-models.ts";
 import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./activity.ts";
-import { MODEL_REJECTED } from "./models.ts";
+import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./models.ts";
 import { wrapBuilder } from "./sandbox.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 
@@ -139,17 +139,24 @@ export const OPENCODE_QUIET_START_MS = 3 * 60_000;
  * the build stops at once and says so: the owner picks another; nothing is built on a model they
  * didn't choose.
  */
-export async function withModelCheck(job: BuildJob, run: (job: BuildJob) => Promise<void>): Promise<void> {
+export async function withModelCheck(agent: string, job: BuildJob, run: (job: BuildJob) => Promise<void>): Promise<void> {
   try {
     await run(job);
+    if (job.model) noteModelRan(agent, job.model);
   } catch (e) {
     if (!(e as { modelRejected?: boolean }).modelRejected || !job.model) throw e;
-    throw Object.assign(new Error(modelUnavailableText(job.model)), { modelUnavailable: true });
+    const reason = modelRejectReason((e as Error).message);
+    noteModelFailure(agent, job.model, reason);
+    throw Object.assign(new Error(modelUnavailableText(job.model, reason)), { modelUnavailable: true });
   }
 }
 
-/** What the owner reads when a model can't run. */
-export const modelUnavailableText = (model: string) => `${model} isn't available. Pick another model (in the chat box or Settings › AI).`;
+/**
+ * What the owner reads when a model can't run: the CLI's reason, and for OpenCode's free tier
+ * (`opencode/…`) why the list offered it anyway.
+ */
+export const modelUnavailableText = (model: string, reason?: string) =>
+  `${model} isn't available${reason ? ` (${reason})` : ""}. Pick another model (in the chat box or Settings › AI).${model.startsWith("opencode/") && !/doesn't list/.test(reason ?? "") ? " OpenCode's free tier changes which models it serves, and its list can lag behind; Hewn's lists mark the ones that failed lately." : ""}`;
 
 /** `--model` / `--effort` for Claude Code. */
 export const claudeModelArgs = (m: { model?: string; effort?: string }) => [...(m.model ? ["--model", m.model] : []), ...(m.effort ? ["--effort", m.effort] : [])];
@@ -405,7 +412,7 @@ export const opencodeBuildHome = (platformHome: string, buildId: string) => join
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
   name: "codex",
-  build: (job) => withModelCheck(job, codexRun),
+  build: (job) => withModelCheck("codex", job, codexRun),
 };
 
 /**
@@ -473,7 +480,7 @@ async function codexRun(job: BuildJob) {
 /** OpenCode, headless, in a home of its own. File tools only (no shell, no web, no subagents); OS sandbox limits writes to the workspace. */
 export const opencodeBuilder: CapabilityBuilder = {
   name: "opencode",
-  build: (job) => withModelCheck(job, opencodeRun),
+  build: (job) => withModelCheck("opencode", job, opencodeRun),
 };
 
 /**
@@ -514,7 +521,7 @@ async function opencodeRun(job: BuildJob) {
 /** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
 export const claudeBuilder: CapabilityBuilder = {
   name: "claude",
-  build: (job) => withModelCheck(job, claudeRun),
+  build: (job) => withModelCheck("claude", job, claudeRun),
 };
 
 /** Claude Code's arguments for an attempt: fresh with a session id of its own, or resuming the build's earlier session with the failure. */

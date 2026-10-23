@@ -3,8 +3,8 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, opencodeHasModel, opencodeHome, opencodeModelArgs } from "./builders/cli.ts";
-import { MODEL_REJECTED } from "./builders/models.ts";
+import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
+import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./builders/models.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
@@ -430,9 +430,15 @@ export function cliIntake(which: IntakeCli, platformRoot: string, run: JobModel 
   const once = cliIntakeOnce(which, platformRoot, run);
   return async (req, onProgress, signal) => {
     try {
-      return await once(req, onProgress, signal);
+      const reply = await once(req, onProgress, signal);
+      if (run.model) noteModelRan(which, run.model);
+      return reply;
     } catch (e) {
-      if (run.model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) throw new Error(modelUnavailableText(run.model));
+      if (run.model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) {
+        const reason = modelRejectReason((e as Error).message);
+        noteModelFailure(which, run.model, reason);
+        throw new Error(modelUnavailableText(run.model, reason));
+      }
       throw e;
     }
   };
@@ -492,7 +498,7 @@ function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel):
         });
         try {
           // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
-          if (model.model && !opencodeHasModel(model.model, isolated.env, ws)) throw new Error(`intake: model not found: ${model.model}`);
+          if (model.model && !opencodeHasModel(model.model, isolated.env, ws)) throw opencodeModelRejected(model.model);
           const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
           await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, undefined, OPENCODE_QUIET_START_MS);
         } catch (e) {

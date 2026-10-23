@@ -298,7 +298,7 @@ echo '{"type":"step_finish","sessionID":"ses_new","part":{"type":"step-finish","
       assert.equal(readFileSync(join(home, ".local", "share", "opencode", "auth.json"), "utf8"), '{"yours":true}');
       // A model it doesn't list: the build stops at once, in the owner's words, and OpenCode never runs.
       const calls = fake.calls().length;
-      await assert.rejects(opencodeBuilder.build(job({ buildId: "b-8", workspace: ws, logPath, platformRoot: undefined, model: "anthropic/claude-sonnet-4-6" })), (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /claude-sonnet-4-6 isn't available\. Pick another/.test(e.message));
+      await assert.rejects(opencodeBuilder.build(job({ buildId: "b-8", workspace: ws, logPath, platformRoot: undefined, model: "anthropic/claude-sonnet-4-6" })), (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /claude-sonnet-4-6 isn't available \(OpenCode doesn't list it\)\. Pick another/.test(e.message));
       assert.equal(fake.calls().length, calls);
     } finally {
       for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);

@@ -12,8 +12,8 @@ import { explainFailure } from "@hewntools/core/failure.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { writeConfig } from "@hewntools/cli/config.ts";
-import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED } from "@hewntools/cli/builders/models.ts";
-import { claudeModelArgs, codexModelArgs, withModelCheck } from "@hewntools/cli/builders/cli.ts";
+import { claudeCatalog, codexCatalogFrom, MODEL_REJECTED, modelCatalogs, modelRejectReason, noteModelFailure, noteModelRan } from "@hewntools/cli/builders/models.ts";
+import { claudeModelArgs, codexModelArgs, modelUnavailableText, withModelCheck } from "@hewntools/cli/builders/cli.ts";
 import { intakeJob, type ModelCatalog, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import { toolsFor } from "@hewntools/host-workerd/mcp.ts";
 import { notesSince } from "@hewntools/cli/upgrade.ts";
@@ -256,10 +256,42 @@ describe("model lists and flags", () => {
     assert.doesNotMatch("→ Edit src/models.ts", MODEL_REJECTED);
     const job = { buildId: "b1", capabilityId: "x", kind: "create", workspace: "/tmp", attempt: 1, logPath: "/dev/null", model: "fable-5-1" } as BuildJob;
     await assert.rejects(
-      withModelCheck(job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))),
-      (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /fable-5-1 isn't available\. Pick another/.test(e.message),
+      withModelCheck("claude", job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))),
+      (e: Error & { modelUnavailable?: boolean }) => e.modelUnavailable === true && /^fable-5-1 isn't available \(issue with the selected model\)\. Pick another/.test(e.message),
     );
-    await assert.rejects(withModelCheck(job, async () => Promise.reject(new Error("boom"))), /boom/);
+    await assert.rejects(withModelCheck("claude", job, async () => Promise.reject(new Error("boom"))), /boom/);
+  });
+
+  test("the reason comes in the agent's words, and the lists mark a model that failed lately", async () => {
+    assert.equal(modelRejectReason('{"type":"error","error":{"name":"APIError","data":{"message":"Upstream request failed: Model is unavailable.","statusCode":400}}}'), "Upstream request failed: Model is unavailable");
+    assert.equal(modelRejectReason("intake failed: Upstream request failed: Model is unavailable."), "Upstream request failed: Model is unavailable");
+    assert.equal(modelRejectReason("model not found: opencode/foo (not in opencode models)"), "OpenCode doesn't list it");
+    assert.equal(modelRejectReason('{"type":"turn.failed","error":{"message":"The model `gpt-x` does not exist"}}'), "The model `gpt-x` does not exist");
+    assert.equal(modelRejectReason("There's an issue with the selected model (claude-fable-5-1). It may not exist or you may not have access to it."), "There's an issue with the selected model (claude-fable-5-1). It may not exist or you may not have access to it");
+    // OpenCode's free tier: why the list offered it anyway. A misspelled one gets no such note.
+    assert.equal(
+      modelUnavailableText("opencode/deepseek-v4-flash-free", "Upstream request failed: Model is unavailable"),
+      "opencode/deepseek-v4-flash-free isn't available (Upstream request failed: Model is unavailable). Pick another model (in the chat box or Settings › AI). OpenCode's free tier changes which models it serves, and its list can lag behind; Hewn's lists mark the ones that failed lately.",
+    );
+    assert.equal(modelUnavailableText("opencode/big-pickel", "OpenCode doesn't list it"), "opencode/big-pickel isn't available (OpenCode doesn't list it). Pick another model (in the chat box or Settings › AI).");
+    assert.equal(modelUnavailableText("gpt-x"), "gpt-x isn't available. Pick another model (in the chat box or Settings › AI).");
+    // The mark: on the list for the model that failed, gone once a run on it goes through.
+    const catalogs = modelCatalogs({ opencodeModels: async () => "opencode/big-pickle\nopencode/hy3-free\n" });
+    noteModelFailure("opencode", "opencode/hy3-free", "Upstream request failed: Model is unavailable");
+    let cat = await catalogs("opencode");
+    assert.equal(cat.models.find((m) => m.id === "opencode/big-pickle")?.failed, undefined);
+    assert.equal(cat.models.find((m) => m.id === "opencode/hy3-free")?.failed?.reason, "Upstream request failed: Model is unavailable");
+    assert.ok(Date.now() - Date.parse(cat.models.find((m) => m.id === "opencode/hy3-free")!.failed!.at) < 5_000);
+    noteModelRan("opencode", "opencode/hy3-free");
+    cat = await catalogs("opencode");
+    assert.equal(cat.models.find((m) => m.id === "opencode/hy3-free")?.failed, undefined);
+    // The builder's check marks it too (and a different agent's list doesn't show it).
+    const job = { buildId: "b2", capabilityId: "x", kind: "create", workspace: "/tmp", attempt: 1, logPath: "/dev/null", model: "fable" } as BuildJob;
+    await assert.rejects(withModelCheck("claude", job, async () => Promise.reject(Object.assign(new Error("issue with the selected model"), { modelRejected: true }))));
+    assert.equal((await catalogs("claude")).models.find((m) => m.id === "fable")?.failed?.reason, "issue with the selected model");
+    assert.equal((await catalogs("opencode")).models.find((m) => m.failed), undefined);
+    await withModelCheck("claude", job, async () => {});
+    assert.equal((await catalogs("claude")).models.find((m) => m.id === "fable")?.failed, undefined);
   });
 
 });
