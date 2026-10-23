@@ -36,7 +36,11 @@ export interface CliAgent {
   /** Where a build's home lives: one per build, removed with the workspace. */
   buildHome(platformHome: string, buildId: string): string;
   builder: CapabilityBuilder;
-  /** The intake on it (one request, one reply), confined like a build, on the owner's model for building. */
+  /**
+   * The intake on it (one request, one reply), confined like a build, on the owner's model for building: the run
+   * itself. `cliIntake` below is the one to call: it adds what every CLI shares (a model that won't run stops it,
+   * in the owner's words, and the lists remember).
+   */
   intake(platformRoot: string, model: JobModel): Intake;
 }
 
@@ -48,7 +52,7 @@ export const CLI_AGENTS: Record<CliAgentName, CliAgent> = {
     bin: "claude",
     install: "npm install -g @anthropic-ai/claude-code",
     login: "run claude once and sign in",
-    // Its login: on macOS the Keychain item, elsewhere the credentials file.
+    // Its login: the credentials file where there is one, else (macOS) the Keychain item.
     loggedIn: () => {
       if (existsSync(join(homedir(), ".claude", ".credentials.json"))) return true;
       if (platform() === "darwin") return spawnSync("/usr/bin/security", ["find-generic-password", "-s", "Claude Code-credentials"]).status === 0;

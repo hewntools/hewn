@@ -3055,7 +3055,7 @@ function modelChip() {
     slider.addEventListener("input", show);
     slider.addEventListener("change", () => save({ effort: stops[slider.value] }));
     const pick = (id) => save({ model: id, effort: cur.effort && (cat.models.find((m) => m.id === id)?.efforts ?? []).includes(cur.effort) ? cur.effort : undefined }).then(render);
-    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: cat.otherHint ? `Another: ` : "Another model, by name", "aria-label": "Another model, by name" });
+    const other = !cat.other ? null : h("input", { type: "text", class: "mono sm", placeholder: cat.otherHint ? `Another: ${cat.otherHint}` : "Another model, by name", "aria-label": "Another model, by name" });
     other?.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), other.value.trim() && pick(other.value.trim())));
     // A model that failed lately says so (the list can't tell on its own).
     const sub = (m) => [m.description, m.failed && `didn't run ${ago(m.failed.at)}: ${m.failed.reason}`].filter(Boolean).join(" · ");
@@ -4382,7 +4382,7 @@ async function modelSheet(t) {
         const pickOther = () => ((radio.checked = true), (chosen = other.value.trim()), fillEffort(effort.value));
         radio.addEventListener("change", pickOther);
         other.addEventListener("input", pickOther);
-        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, "By its full name"), other)));
+        rows.push(h("label", { class: "job-option" }, radio, h("span", { class: "grow col" }, h("span", {}, "Other…"), h("span", { class: "sub" }, catalog.otherHint ? `By its full name (${catalog.otherHint})` : "By its full name"), other)));
       }
       fillEffort(cur.effort);
       const save = h("button", { class: "primary" }, "Save");

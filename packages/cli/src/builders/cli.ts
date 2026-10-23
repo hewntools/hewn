@@ -579,5 +579,3 @@ async function claudeRun(job: BuildJob) {
     }
   });
 }
-
-export const BUILDERS: Record<string, CapabilityBuilder> = { codex: codexBuilder, claude: claudeBuilder, opencode: opencodeBuilder };

@@ -141,7 +141,7 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; cata
   const cache = new Map<string, { at: number; catalog: ModelCatalog }>();
   // `catalogs`: each CLI agent's list (cli-agents.ts's `cliCatalogs()`); the host's builder reads its own over HTTP.
   const read = async (agent: string): Promise<ModelCatalog> => {
-    const own = o.catalogs?.[agent];
+    const own = o.catalogs && Object.hasOwn(o.catalogs, agent) ? o.catalogs[agent] : undefined;
     if (own) return own();
     if (agent === "remote" && o.remote) return remoteCatalog(o.remote.url, o.remote.token, o.fetch);
     throw new Error(`no models for ${agent}`);

@@ -18,7 +18,7 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor } from "@hewntools/cli/supervisor/index.ts";
-import { BUILDERS } from "@hewntools/cli/builders/cli.ts";
+import { BUILDERS } from "@hewntools/cli/builders/cli-agents.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
 import { editJson, SEED } from "../helpers.ts";
 import { freePort } from "../workerd-helpers.ts";

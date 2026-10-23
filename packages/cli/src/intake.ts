@@ -419,14 +419,7 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
   });
 }
 
-/**
- * The intake on a headless coding-agent CLI, confined by the builder sandbox profile, on the owner's
- * model for building (`model`, Settings › AI). Each CLI has its own below (`claudeIntake`, `codexIntake`,
- * `opencodeIntake`, the descriptor's `intake`); `cliIntake` in cli-agents.ts wraps them so a model the
- * CLI won't run stops with a reason the owner can act on. Shared here: the checks on the model (they
- * become CLI arguments), a workspace for the run, the prompt and the attachments; `body` runs the CLI
- * and returns its reply text, parsed leniently as the draft.
- */
+/** What one intake run gets: its workspace, the prompt, the attached images, and the request's progress and stop signals. */
 interface IntakeRun {
   ws: string;
   prompt: string;
@@ -434,14 +427,22 @@ interface IntakeRun {
   onProgress?: Parameters<Intake>[1];
   signal?: Parameters<Intake>[2];
 }
+
+/**
+ * The intake on a headless coding-agent CLI, confined by the builder sandbox profile, on the owner's
+ * model for building (`model`, Settings › AI). Each CLI has its own below (`claudeIntake`, `codexIntake`,
+ * `opencodeIntake`: the descriptor's `intake`); `cliIntake` in cli-agents.ts wraps them so a model the
+ * CLI won't run stops with a reason the owner can act on. Shared here: the checks on the model (it
+ * becomes CLI arguments), a workspace for the run, the prompt (`web`: it may say to look services up,
+ * where the CLI has web tools) and the attachments; `body` runs the CLI and returns its reply text,
+ * parsed leniently as the draft. The owner reviews every draft before anything is built.
+ */
 function intakeOn(model: JobModel, o: { web: boolean }, body: (x: IntakeRun) => Promise<string>): Intake {
   return async (req, onProgress, signal) => {
     if (model.model !== undefined && !MODEL_NAME.test(String(model.model))) throw new Error("intake: model must be a model name");
     if (model.effort !== undefined && !EFFORT.test(String(model.effort))) throw new Error("intake: effort must be a level such as low or high");
     const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
     try {
-      // Claude and OpenCode get web lookup (WebFetch/WebSearch; OpenCode's webfetch) to check services the owner
-      // mentions; the owner reviews every draft before anything is built.
       const text = await body({ ws, prompt: intakePrompt(req, { web: o.web }), images: intakeImages(req), onProgress, signal });
       return parseIntake(text, req.mode, req.current);
     } finally {
