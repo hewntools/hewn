@@ -277,7 +277,7 @@ describe("model lists and flags", () => {
     assert.equal(modelUnavailableText("opencode/big-pickel", "OpenCode doesn't list it"), "opencode/big-pickel isn't available (OpenCode doesn't list it). Pick another model (in the chat box or Settings › AI).");
     assert.equal(modelUnavailableText("gpt-x"), "gpt-x isn't available. Pick another model (in the chat box or Settings › AI).");
     // The mark: on the list for the model that failed, gone once a run on it goes through.
-    const catalogs = modelCatalogs({ opencodeModels: async () => "opencode/big-pickle\nopencode/hy3-free\n" });
+    const catalogs = modelCatalogs({ catalogs: { opencode: async () => opencodeCatalogFrom("opencode/big-pickle\nopencode/hy3-free\n"), claude: async () => claudeCatalog() } });
     noteModelFailure("opencode", "opencode/hy3-free", "Upstream request failed: Model is unavailable");
     let cat = await catalogs("opencode");
     assert.equal(cat.models.find((m) => m.id === "opencode/big-pickle")?.failed, undefined);

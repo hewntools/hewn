@@ -35,6 +35,7 @@ export function claudeCatalog(): ModelCatalog {
       family("haiku", "Haiku", "The newest Haiku"),
     ],
     other: true,
+    otherHint: "claude-fable-5-1",
   };
 }
 
@@ -110,12 +111,16 @@ export function opencodeCatalogFrom(raw: string): ModelCatalog {
     id = t;
   }
   if (id) models.push(choice(id));
-  return { agent: "opencode", models: [defaultChoice([], "OpenCode's own choice"), ...models], other: true };
+  return { agent: "opencode", models: [defaultChoice([], "OpenCode's own choice"), ...models], other: true, otherHint: "provider/model" };
 }
 
 const run = (cmd: string, args: string[], env?: NodeJS.ProcessEnv) => new Promise<string>((resolve, reject) => execFile(cmd, args, { timeout: 15_000, encoding: "utf8", maxBuffer: 8 << 20, ...(env ? { env, cwd: tmpdir() } : {}) }, (e, out) => (e ? reject(e) : resolve(out))));
 /** `opencode models`, in your own OpenCode (its logins and providers), with plugins and the update check off. */
 const opencodeModels = () => run("opencode", ["models", "--verbose", "--pure"], { ...process.env, ...OPENCODE_NO_UPDATE });
+/** Codex's list, read from its CLI (the descriptor's `catalog`). */
+export const codexCatalog = async (): Promise<ModelCatalog> => codexCatalogFrom(await run("codex", ["debug", "models"]));
+/** OpenCode's list, read from your own OpenCode (the descriptor's `catalog`). */
+export const opencodeCatalog = async (): Promise<ModelCatalog> => opencodeCatalogFrom(await opencodeModels());
 
 /** A remote builder's catalog: `GET <url>/v1/models` (see docs/internal/remote-builder.md). */
 export async function remoteCatalog(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
@@ -132,12 +137,12 @@ export async function remoteCatalog(url: string, token: string, fetchImpl: typeo
  * Model catalogs, kept for 10 minutes (Settings › AI, every intake and the Inbox ask). A failed read
  * gives Default only, and is retried on the next ask.
  */
-export function modelCatalogs(o: { remote?: { url: string; token: string }; codexModels?: () => Promise<string>; opencodeModels?: () => Promise<string>; fetch?: typeof fetch } = {}) {
+export function modelCatalogs(o: { remote?: { url: string; token: string }; catalogs?: Record<string, () => Promise<ModelCatalog>>; fetch?: typeof fetch } = {}) {
   const cache = new Map<string, { at: number; catalog: ModelCatalog }>();
+  // `catalogs`: each CLI agent's list (cli-agents.ts's `cliCatalogs()`); the host's builder reads its own over HTTP.
   const read = async (agent: string): Promise<ModelCatalog> => {
-    if (agent === "claude") return claudeCatalog();
-    if (agent === "codex") return codexCatalogFrom(await (o.codexModels ?? (() => run("codex", ["debug", "models"])))());
-    if (agent === "opencode") return opencodeCatalogFrom(await (o.opencodeModels ?? opencodeModels)());
+    const own = o.catalogs && Object.hasOwn(o.catalogs, agent) ? o.catalogs[agent] : undefined;
+    if (own) return own();
     if (agent === "remote" && o.remote) return remoteCatalog(o.remote.url, o.remote.token, o.fetch);
     throw new Error(`no models for ${agent}`);
   };

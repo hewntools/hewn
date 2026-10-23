@@ -26,6 +26,7 @@ import { readConfig } from "../config.ts";
 import { type KeySource, masterKey } from "./master-key.ts";
 import { Tunnel, validTunnelConfig } from "./tunnel.ts";
 import { toolStatus } from "../setup/tools.ts";
+import { cliCatalogs } from "../builders/cli-agents.ts";
 import { modelCatalogs } from "../builders/models.ts";
 import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
@@ -225,7 +226,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const controlToken = randomBytes(24).toString("hex");
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
-  const models = o.models ?? modelCatalogs({ ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
+  const models = o.models ?? modelCatalogs({ catalogs: cliCatalogs(), ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
   const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined) });
   const blobRoot = join(data, "blobs");
 

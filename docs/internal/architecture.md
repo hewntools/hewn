@@ -121,6 +121,8 @@ The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the re
 
 A failed build leaves the active version serving. A build whose base is no longer the active version fails with `conflict`. Builds interrupted by a restart are retried once at start. The compatibility rules are in [Writing a tool](../../spec/tools.md#changing-a-published-operation).
 
+**The CLI agents** (`packages/cli/src/builders/cli-agents.ts`). One descriptor per coding-agent CLI Hewn runs (Claude Code, Codex, OpenCode): its names (builder name, harness id, label, binary), how to install and sign in, whether it's signed in, its model list, where a build's home lives, its builder and its intake. The builder wiring (`BUILDERS`), the intake (`cliIntake`), setup's tool status, the harness list, the workbench's cleanup and the model catalogs read it; another agent is one more entry, with its run functions in `cli.ts` and `intake.ts`. (The sandbox profile and the activity formatters still name agents themselves.)
+
 **The builder sandbox** (`packages/cli/src/builders/`). Builders run headless in the OS sandbox: Seatbelt on macOS, bubblewrap on Linux. They can't read the Hewn home except their workspace, can't read the owner's repos or credential stores, and can write only the workspace, temp and their own state. Their environment is cut down to the basics and their own model settings. Each runs on however its CLI is signed in (a subscription, an API key or a cloud provider):
 
 - Claude Code gets a config directory of its own per build holding only the model login, with settings, hooks, slash commands and the owner's `~/.claude` left out, and runs `--restricted` (no code-running tools) on top of its file-tool allow-list.

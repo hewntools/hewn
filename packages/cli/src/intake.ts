@@ -3,8 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, modelUnavailableText, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
-import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./builders/models.ts";
+import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
 import { errorText } from "./builders/activity.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
@@ -420,27 +419,34 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
   });
 }
 
-/**
- * Intake backed by a headless coding-agent CLI, confined by the builder sandbox profile. It runs on
- * the owner's model for building (`run`, Settings › AI); one the CLI won't run stops it with a
- * reason the owner can act on (pick another), never a quiet switch to the default.
- */
-export type IntakeCli = "claude" | "codex" | "opencode";
+/** What one intake run gets: its workspace, the prompt, the attached images, and the request's progress and stop signals. */
+interface IntakeRun {
+  ws: string;
+  prompt: string;
+  images: ReturnType<typeof intakeImages>;
+  onProgress?: Parameters<Intake>[1];
+  signal?: Parameters<Intake>[2];
+}
 
-export function cliIntake(which: IntakeCli, platformRoot: string, run: JobModel = {}): Intake {
-  const once = cliIntakeOnce(which, platformRoot, run);
+/**
+ * The intake on a headless coding-agent CLI, confined by the builder sandbox profile, on the owner's
+ * model for building (`model`, Settings › AI). Each CLI has its own below (`claudeIntake`, `codexIntake`,
+ * `opencodeIntake`: the descriptor's `intake`); `cliIntake` in cli-agents.ts wraps them so a model the
+ * CLI won't run stops with a reason the owner can act on. Shared here: the checks on the model (it
+ * becomes CLI arguments), a workspace for the run, the prompt (`web`: it may say to look services up,
+ * where the CLI has web tools) and the attachments; `body` runs the CLI and returns its reply text,
+ * parsed leniently as the draft. The owner reviews every draft before anything is built.
+ */
+function intakeOn(model: JobModel, o: { web: boolean }, body: (x: IntakeRun) => Promise<string>): Intake {
   return async (req, onProgress, signal) => {
+    if (model.model !== undefined && !MODEL_NAME.test(String(model.model))) throw new Error("intake: model must be a model name");
+    if (model.effort !== undefined && !EFFORT.test(String(model.effort))) throw new Error("intake: effort must be a level such as low or high");
+    const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
     try {
-      const reply = await once(req, onProgress, signal);
-      if (run.model) noteModelRan(which, run.model);
-      return reply;
-    } catch (e) {
-      if (run.model && !signal?.aborted && MODEL_REJECTED.test((e as Error).message)) {
-        const reason = modelRejectReason((e as Error).message);
-        noteModelFailure(which, run.model, reason);
-        throw new Error(modelUnavailableText(run.model, reason));
-      }
-      throw e;
+      const text = await body({ ws, prompt: intakePrompt(req, { web: o.web }), images: intakeImages(req), onProgress, signal });
+      return parseIntake(text, req.mode, req.current);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
     }
   };
 }
@@ -469,135 +475,127 @@ export function opencodeOutput(onEvent?: (e: any) => void): { line: (line: strin
   };
 }
 
-function cliIntakeOnce(which: IntakeCli, platformRoot: string, model: JobModel): Intake {
-  return async (req, onProgress, signal) => {
-    // They become CLI arguments (and Codex config): names and levels only.
-    if (model.model !== undefined && !MODEL_NAME.test(String(model.model))) throw new Error("intake: model must be a model name");
-    if (model.effort !== undefined && !EFFORT.test(String(model.effort))) throw new Error("intake: effort must be a level such as low or high");
-    const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
+/** Attached images as files in the workspace, for a CLI that takes them as arguments; text files are in the prompt already. */
+const imageFiles = (ws: string, images: IntakeRun["images"]) =>
+  images.map((img, i) => {
+    const p = join(ws, `attachment-${i + 1}.${IMAGE_EXT[img.mediaType] ?? "png"}`);
+    writeFileSync(p, Buffer.from(img.data!, "base64"));
+    return p;
+  });
+
+/** OpenCode: `opencode run` in a home of its own per intake, reading and fetching only; the reply is the run's last text part. */
+export const opencodeIntake = (platformRoot: string, model: JobModel): Intake =>
+  intakeOn(model, { web: true }, async ({ ws, prompt, images, onProgress, signal }) => {
+    // `-f` takes several files: it goes before another flag, never right before the prompt (it would take it).
+    const imageArgs = imageFiles(ws, images).flatMap((p) => ["-f", p]);
+    const args = ["run", ...imageArgs, "--format", "json", "--pure", "--auto", ...opencodeModelArgs(model), prompt];
+    // Its own home, like the builder: none of your OpenCode config, plugins or sessions. One per intake (two at once would
+    // share a session database and a login copy), gone after it: no session is resumed.
+    mkdirSync(join(platformRoot, "builder-home"), { recursive: true, mode: 0o700 });
+    const isolated = await opencodeHome(mkdtempSync(join(platformRoot, "builder-home", "intake-opencode-")), { rules: OPENCODE_INTAKE_RULES });
+    const out = opencodeOutput((e) => {
+      if (!onProgress) return;
+      if (e.type === "step_start") onProgress({ activity: "Thinking" });
+      else if (e.type === "tool_use") onProgress({ activity: e.part?.tool === "webfetch" ? "Reading a web page" : "Looking" });
+    });
     try {
-      // Claude and OpenCode get web lookup (WebFetch/WebSearch; OpenCode's webfetch) to check services the owner
-      // mentions; the owner reviews every draft before anything is built.
-      const prompt = intakePrompt(req, { web: which !== "codex" });
-      const images = intakeImages(req);
-      const h = homedir();
-      if (which === "opencode") {
-        // Attached images go in as files (-f; a model that takes images sees them); text files are in the prompt already.
-        // `-f` takes several files: it goes before another flag, never right before the prompt (it would take it).
-        const imageArgs = images.flatMap((img, i) => {
-          const p = join(ws, `attachment-${i + 1}.${IMAGE_EXT[img.mediaType] ?? "png"}`);
-          writeFileSync(p, Buffer.from(img.data!, "base64"));
-          return ["-f", p];
-        });
-        const args = ["run", ...imageArgs, "--format", "json", "--pure", "--auto", ...opencodeModelArgs(model), prompt];
-        // Its own home, like the builder: none of your OpenCode config, plugins or sessions. One per intake (two at once would
-        // share a session database and a login copy), gone after it: no session is resumed.
-        mkdirSync(join(platformRoot, "builder-home"), { recursive: true, mode: 0o700 });
-        const isolated = await opencodeHome(mkdtempSync(join(platformRoot, "builder-home", "intake-opencode-")), { rules: OPENCODE_INTAKE_RULES });
-        const out = opencodeOutput((e) => {
-          if (!onProgress) return;
-          if (e.type === "step_start") onProgress({ activity: "Thinking" });
-          else if (e.type === "tool_use") onProgress({ activity: e.part?.tool === "webfetch" ? "Reading a web page" : "Looking" });
-        });
-        try {
-          // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
-          if (model.model && !(await opencodeHasModel(model.model, isolated.env, ws))) throw opencodeModelRejected(model.model);
-          const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
-          await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, undefined, OPENCODE_QUIET_START_MS);
-        } catch (e) {
-          // OpenCode says why it stopped (a model it won't run, a provider without a key) in an error event.
-          if (out.error() && !signal?.aborted) throw new Error(`intake failed: ${out.error()!.slice(0, 300)}`);
-          throw e;
-        } finally {
-          isolated.done();
-          rmSync(isolated.dir, { recursive: true, force: true });
-        }
-        if (out.error() || !out.text()) throw new Error(`intake failed: ${(out.error() ?? "no reply").slice(0, 300)}`);
-        return parseIntake(out.text()!, req.mode, req.current);
-      }
-      if (which === "codex") {
-        writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
-        // Attached images go in as files next to the prompt (-i); text files are in the prompt already.
-        const imageArgs = images.flatMap((img, i) => {
-          const p = join(ws, `attachment-${i + 1}.${IMAGE_EXT[img.mediaType] ?? "png"}`);
-          writeFileSync(p, Buffer.from(img.data!, "base64"));
-          return ["-i", p];
-        });
-        // `-i` takes several files: it goes before another flag, never right before the prompt (it would take it).
-        const args = [
-          "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", ...imageArgs,
-          ...codexModelArgs(model),
-          "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
-          "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), prompt,
-        ];
-        // Its own home, like the builder: none of your Codex config or instructions.
-        const isolated = codexHome(join(platformRoot, "builder-home", "intake-codex"));
-        try {
-          const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
-          await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, undefined, signal);
-        } finally {
-          isolated.done();
-        }
-        return parseIntake(readFileSync(join(ws, "out.json"), "utf8"), req.mode, req.current);
-      }
-      // With images, the prompt goes in on stdin as one user message with image blocks (stream-json input).
-      const stdin = images.length ? claudeIntakeInput(prompt, images.map((i) => ({ mediaType: i.mediaType, data: i.data! }))) : undefined;
-      const args = [
-        ...(stdin === undefined ? ["-p", prompt] : ["-p", "--input-format", "stream-json"]),
-        "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
-        ...claudeModelArgs(model),
-        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-        // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
-        "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
-        // Web tools only: --restricted drops every code-running tool, also ones added later.
-        "--restricted",
-        "--allowedTools", "WebFetch", "WebSearch",
-        "--disallowedTools", "Bash", "Edit", "Write", "Task",
-      ];
-      // Its own config dir per request, with your model login only (never your MCP tokens).
-      const isolated = claudeHome(join(platformRoot, "builder-home", "intake-claude", basename(ws)));
-      const w = wrapBuilder("claude", args, {
-        workspace: ws,
-        platformRoot,
-        ownState: [isolated.dir, join(h, "Library", "Caches", "claude-cli-nodejs"), join(h, ".cache", "claude-cli-nodejs")],
-        denyKeychain: true,
-      });
-      // Stream: text deltas of the current assistant turn, parsed as they arrive; tool calls as activity.
-      let text = "";
-      let out: { result?: string; is_error?: boolean } = {};
-      const onLine = (line: string) => {
-        let j: any;
-        try {
-          j = JSON.parse(line);
-        } catch {
-          return;
-        }
-        if (j.type === "result") out = j;
-        if (j.type !== "stream_event" || !onProgress) return;
-        const e = j.event;
-        if (e?.type === "message_start") text = "";
-        else if (e?.type === "content_block_delta" && e.delta?.type === "text_delta") {
-          text += e.delta.text;
-          onProgress(partialReply(text));
-        } else if (e?.type === "content_block_start" && e.content_block?.type === "thinking") {
-          onProgress({ activity: "Thinking" });
-        } else if (e?.type === "content_block_start" && e.content_block?.type === "tool_use") {
-          onProgress({ activity: e.content_block.name === "WebSearch" ? "Searching the web" : "Reading a web page" });
-        }
-      };
-      try {
-        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal, stdin);
-      } catch (e) {
-        // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
-        if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);
-        throw e;
-      } finally {
-        isolated.done();
-      }
-      if (out.is_error || !out.result) throw new Error(`intake failed: ${String(out.result ?? "no result").slice(0, 300)}`);
-      return parseIntake(out.result, req.mode, req.current);
+      // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
+      if (model.model && !(await opencodeHasModel(model.model, isolated.env, ws))) throw opencodeModelRejected(model.model);
+      const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
+      await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, undefined, OPENCODE_QUIET_START_MS);
+    } catch (e) {
+      // OpenCode says why it stopped (a model it won't run, a provider without a key) in an error event.
+      if (out.error() && !signal?.aborted) throw new Error(`intake failed: ${out.error()!.slice(0, 300)}`);
+      throw e;
     } finally {
-      rmSync(ws, { recursive: true, force: true });
+      isolated.done();
+      rmSync(isolated.dir, { recursive: true, force: true });
     }
-  };
-}
+    if (out.error() || !out.text()) throw new Error(`intake failed: ${(out.error() ?? "no reply").slice(0, 300)}`);
+    return out.text()!;
+  });
+
+/** Codex: `codex exec` with the draft's schema as its output schema, in a home of its own; no web lookup. */
+export const codexIntake = (platformRoot: string, model: JobModel): Intake =>
+  intakeOn(model, { web: false }, async ({ ws, prompt, images, signal }) => {
+    writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
+    // `-i` takes several files: it goes before another flag, never right before the prompt (it would take it).
+    const imageArgs = imageFiles(ws, images).flatMap((p) => ["-i", p]);
+    const args = [
+      "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", ...imageArgs,
+      ...codexModelArgs(model),
+      "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
+      "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), prompt,
+    ];
+    // Its own home, like the builder: none of your Codex config or instructions.
+    const isolated = codexHome(join(platformRoot, "builder-home", "intake-codex"));
+    try {
+      const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
+      await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, undefined, signal);
+    } finally {
+      isolated.done();
+    }
+    return readFileSync(join(ws, "out.json"), "utf8");
+  });
+
+/** Claude Code: `claude -p` with web tools only, in a config dir of its own per request; the reply streams as it comes. */
+export const claudeIntake = (platformRoot: string, model: JobModel): Intake =>
+  intakeOn(model, { web: true }, async ({ ws, prompt, images, onProgress, signal }) => {
+    const h = homedir();
+    // With images, the prompt goes in on stdin as one user message with image blocks (stream-json input).
+    const stdin = images.length ? claudeIntakeInput(prompt, images.map((i) => ({ mediaType: i.mediaType, data: i.data! }))) : undefined;
+    const args = [
+      ...(stdin === undefined ? ["-p", prompt] : ["-p", "--input-format", "stream-json"]),
+      "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", "8",
+      ...claudeModelArgs(model),
+      "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+      // None of your settings, hooks or memory: it reads web pages, which may try to steer it.
+      "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands",
+      // Web tools only: --restricted drops every code-running tool, also ones added later.
+      "--restricted",
+      "--allowedTools", "WebFetch", "WebSearch",
+      "--disallowedTools", "Bash", "Edit", "Write", "Task",
+    ];
+    // Its own config dir per request, with your model login only (never your MCP tokens).
+    const isolated = claudeHome(join(platformRoot, "builder-home", "intake-claude", basename(ws)));
+    const w = wrapBuilder("claude", args, {
+      workspace: ws,
+      platformRoot,
+      ownState: [isolated.dir, join(h, "Library", "Caches", "claude-cli-nodejs"), join(h, ".cache", "claude-cli-nodejs")],
+      denyKeychain: true,
+    });
+    // Stream: text deltas of the current assistant turn, parsed as they arrive; tool calls as activity.
+    let text = "";
+    let out: { result?: string; is_error?: boolean } = {};
+    const onLine = (line: string) => {
+      let j: any;
+      try {
+        j = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (j.type === "result") out = j;
+      if (j.type !== "stream_event" || !onProgress) return;
+      const e = j.event;
+      if (e?.type === "message_start") text = "";
+      else if (e?.type === "content_block_delta" && e.delta?.type === "text_delta") {
+        text += e.delta.text;
+        onProgress(partialReply(text));
+      } else if (e?.type === "content_block_start" && e.content_block?.type === "thinking") {
+        onProgress({ activity: "Thinking" });
+      } else if (e?.type === "content_block_start" && e.content_block?.type === "tool_use") {
+        onProgress({ activity: e.content_block.name === "WebSearch" ? "Searching the web" : "Reading a web page" });
+      }
+    };
+    try {
+      await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal, stdin);
+    } catch (e) {
+      // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
+      if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);
+      throw e;
+    } finally {
+      isolated.done();
+    }
+    if (out.is_error || !out.result) throw new Error(`intake failed: ${String(out.result ?? "no result").slice(0, 300)}`);
+    return out.result;
+  });

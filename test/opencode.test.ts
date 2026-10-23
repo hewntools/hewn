@@ -468,7 +468,7 @@ describe("OpenCode as an MCP client", () => {
 
   test("the first run and doctor list it: installed, and signed in when it has a credential", () => {
     const s = toolStatus((bin) => bin === "opencode", (name) => (name === "opencode" ? true : undefined));
-    assert.deepEqual(s.find((t) => t.name === "opencode"), { name: "opencode", label: "OpenCode", found: true, loggedIn: true });
+    assert.deepEqual(s.find((t) => t.name === "opencode"), { name: "opencode", label: "OpenCode", harnessId: "opencode", found: true, loggedIn: true });
     assert.equal(toolStatus(() => false).find((t) => t.name === "opencode")?.fix, "Install it: curl -fsSL https://opencode.ai/install | bash");
   });
 });
