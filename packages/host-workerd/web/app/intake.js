@@ -218,6 +218,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
         say("them", chatText(reply.message, reply.questions));
+      } else if (reply.kind === "answer") {
+        // A question about Hewn, answered above (no card): remembered, so "ok, build that" follows on.
+        messages.push({ role: "intake", content: reply.message, reply });
       } else if (reply.kind === "widgets") {
         // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
         messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });

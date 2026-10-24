@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Hewn's own docs for agents: the pages the hosts serve, the search over them, and hewn_docs over MCP.
+// Hewn's own docs for agents and the intake: the pages the hosts serve, the search over them,
+// hewn_docs over MCP, and the intake's "answer" to a question about Hewn.
 import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import { readdirSync, readFileSync } from "node:fs";
@@ -9,6 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { DOC_PAGES, type DocPage, docExcerpts, docSections, docsText, findPage, readDocs, searchDocs, sectionText, slug } from "@hewntools/core/docs.ts";
 import { hewnDocs, sourceAsset } from "@hewntools/cli/assets.ts";
+import { intakePrompt, looksLikeQuestion, parseIntake, SCHEMA } from "@hewntools/cli/intake.ts";
 import { serverUrl } from "@hewntools/test-host/server.ts";
 import { serve, setup, TOKENS } from "./helpers.ts";
 
@@ -146,5 +148,39 @@ describe("docs: hewn_docs", () => {
       assert.match(text(missing), /"error": "not_found"/);
       await agent.close();
     });
+  });
+});
+
+describe("docs: the intake answers questions about Hewn", () => {
+  test("a question reads like one: a ?, or a question word first", () => {
+    for (const q of ["how do grants work", "Can a tool read my calendar", "what is a connection?", "a habit tracker? with streaks", "Is there a dark mode"]) assert.ok(looksLikeQuestion(q), q);
+    for (const r of ["a habit tracker with streaks", "track my coffee", "Show pace per km", "Isolation please"]) assert.ok(!looksLikeQuestion(r), r);
+  });
+
+  test("the prompt carries excerpts of the docs for a question only, in both modes, and offers kind answer", async () => {
+    const docs = await hewnDocs();
+    const ask = (mode: "create" | "modify", content: string) => intakePrompt({ mode, ...(mode === "modify" ? { capabilityId: "x" } : {}), messages: [{ role: "user", content: "a coffee log" }, { role: "intake", content: "Daily?" }, { role: "user", content }] }, { docs });
+    for (const mode of ["create", "modify"] as const) {
+      const q = ask(mode, "how do grants work?");
+      assert.match(q, /Excerpts from Hewn's docs that match the owner's latest message[^]*--- docs\/concepts\.md#grants \(Concepts › Grants\) ---/);
+      assert.match(q, /reply kind "answer"[^]*Answer from the excerpts of Hewn's docs above[^]*Never invent features/);
+      const excerpts = /Excerpts from Hewn's docs[^\n]*\n([^]*?)\n\nConversation so far:/.exec(q)![1];
+      assert.ok(excerpts.length <= 9000, `${excerpts.length} characters`);
+      const plain = ask(mode, "ok, and a weekly chart");
+      assert.doesNotMatch(plain, /Excerpts from Hewn's docs/);
+      assert.match(plain, /reply kind "answer"/, "it can still answer a question the heuristic missed");
+      assert.equal(plain, intakePrompt({ mode, ...(mode === "modify" ? { capabilityId: "x" } : {}), messages: [{ role: "user", content: "a coffee log" }, { role: "intake", content: "Daily?" }, { role: "user", content: "ok, and a weekly chart" }] }), "no docs, no question: the same prompt");
+    }
+    assert.match(ask("modify", "can it read my calendar?"), /a change to this one would do what they asked about/);
+  });
+
+  test("the reply: kind answer in both modes, its message the answer; an empty answer is no reply", () => {
+    assert.ok((SCHEMA.properties.kind.enum as string[]).includes("answer"));
+    for (const mode of ["create", "modify"] as const) {
+      const r = parseIntake(JSON.stringify({ kind: "answer", message: "Through a connection.", questions: [], name: "", request: "", remember: [], forget: [] }), mode);
+      assert.deepEqual(r, { kind: "answer", message: "Through a connection." });
+    }
+    assert.deepEqual(parseIntake(JSON.stringify({ kind: "answer", message: "Yes.", remember: [{ scope: "global", text: "Swedish copy" }] }), "create"), { kind: "answer", message: "Yes.", remember: [{ scope: "global", text: "Swedish copy" }] });
+    assert.throws(() => parseIntake(JSON.stringify({ kind: "answer", message: " " }), "create"), /answer is empty/);
   });
 });

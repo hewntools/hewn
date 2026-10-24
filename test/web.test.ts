@@ -85,6 +85,8 @@ describe("web client (owner surface)", () => {
         // A rule stated in passing is remembered (global, or for the tool when modifying); "forget" drops one.
         const last = req.messages.at(-1)?.content ?? "";
         const memory = /always Swedish/.test(last) ? { remember: [{ scope: "global" as const, text: "Swedish copy in every screen" }, { scope: "tool" as const, text: "One screen only" }] } : /drop the Swedish rule/.test(last) ? { forget: [{ scope: "global" as const, text: "Swedish copy in every screen" }] } : {};
+        // A question about Hewn itself is answered: nothing to build.
+        if (/^how .*\?$/i.test(last)) return { kind: "answer", message: "Through a connection: it holds the sign-in." };
         if (req.mode === "modify") return { kind: "widgets", message: "", proposals: [{ title: "Runs this week", shows: "How far you ran.", template: "stat", sizes: ["small"] }], ...memory };
         if (memory.remember) return { kind: "questions", message: "", questions: ["Noted. Anything else?"], ...memory };
         return {
@@ -376,6 +378,13 @@ describe("web client (owner surface)", () => {
       assert.equal(r.json.proposals[0].title, "Runs this week");
       assert.equal(intakeCalls.at(-1)!.current?.id, "running-log");
       assert.equal((await api("/intake", { method: "POST", body: { mode: "modify", messages: [] } })).status, 400);
+    });
+
+    test("a question about Hewn gets an answer, in either mode", async () => {
+      const c = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "How does a tool use my Todoist account?" }] } });
+      assert.deepEqual(c.json, { kind: "answer", message: "Through a connection: it holds the sign-in." });
+      const m = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "How do I see its old versions?" }] } });
+      assert.equal(m.json.kind, "answer");
     });
 
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {
