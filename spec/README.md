@@ -41,6 +41,7 @@ The spec is versioned by the **ABI**, never by Hewn's releases. One version cove
 | 2.1 | Manifest `kind` ("connection") and `requires.secrets` (connections only); deprecated operations; manifest `config`, `ctx.config`, `config:NAME` hosts |
 | 2.2 | Manifest `requires.model`; `ctx.model.generate` |
 | 2.3 | Manifest `widgets`, and the widget view models their operations return |
+| 2.4 | Manifest `saturation` |
 
 2.0 replaced the pre-release 1.x, which no Hewn runs.
 
