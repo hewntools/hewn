@@ -18,6 +18,11 @@ import type { Attachments } from "./attachments.ts";
 import type { Instructions } from "./instructions.ts";
 import type { Grants } from "./grants.ts";
 import type { Connections } from "./connections.ts";
+import type { Models } from "./models.ts";
+import type { Invocation } from "./invocation.ts";
+import type { Schedules } from "./schedules.ts";
+import type { Builds } from "./builds.ts";
+import type { Validation } from "./validation.ts";
 import type { Platform } from "../platform.ts";
 
 /** Minimal event emitter (no node:events in the core). */
@@ -48,13 +53,18 @@ export interface LoadedVersion {
 /** One of each domain, set up by Platform's constructor. */
 export interface Domains {
   attachments: Attachments;
+  builds: Builds;
   connections: Connections;
   data: Data;
   discovery: Discovery;
   grants: Grants;
   instructions: Instructions;
+  invocation: Invocation;
+  models: Models;
   presentation: Presentation;
+  schedules: Schedules;
   sessions: Sessions;
+  validation: Validation;
 }
 
 /** What Platform hands each domain. */
