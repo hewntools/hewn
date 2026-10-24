@@ -24,15 +24,17 @@ Start a new agent session afterwards, so it sees the tools.
 
 The same agent can also [build your tools](concepts.md#hewns-two-jobs). The last step of connecting it offers that, or choose later in Settings › AI.
 
-## claude.ai and ChatGPT
+## claude.ai, Claude Desktop and ChatGPT
 
-Cloud agents can't reach `127.0.0.1`: they need Hewn on an address the internet can reach.
+Cloud agents can't reach `127.0.0.1`: they need Hewn on an address the internet can reach. Claude Desktop is one of them: its connectors are reached from Anthropic's cloud, even with Hewn on the same Mac.
 
 **The easy way: your public URL.** If Hewn runs on a machine that's always on, follow [Using Hewn from anywhere](remote-access.md) first. You get one address for everything (`https://hewn.example.com`), and the connector address is `https://hewn.example.com/mcp`. It stays the same across restarts.
 
 Then:
 
-1. **claude.ai:** Settings → Connectors → Add custom connector. **ChatGPT:** Settings → Connectors → Create (developer mode). Paste the `/mcp` address, and leave the OAuth client fields empty.
+1. **claude.ai or Claude Desktop:** Settings → Connectors → Add custom connector. **ChatGPT:** Settings → Connectors → Create (developer mode). Paste the `/mcp` address, and leave the OAuth client fields empty.
+
+   Claude Desktop and the Claude mobile apps use the same connectors as claude.ai: add Hewn once, on claude.ai or in Claude Desktop, and it shows up in all of them. The mobile apps can't add one.
 2. Connect. The page asks you to approve it in Hewn: check the code, and approve.
 3. **Tell it to look in Hewn.** Cloud agents don't use the instructions Hewn sends, so add the pointer to claude.ai's Settings → Profile (personal preferences), or ChatGPT's custom instructions. The web client has it ready to copy (Agents → Add… → claude.ai or ChatGPT):
 

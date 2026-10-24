@@ -84,7 +84,9 @@ describe("docs: sections and search", () => {
   test("the real docs: questions find the page that answers them", async () => {
     const pages = await hewnDocs();
     assert.equal(searchDocs(pages, "how do grants work?")[0].page, "docs/concepts.md");
-    assert.ok(searchDocs(pages, "how do I connect claude.ai?").some((s) => s.page === "docs/agents.md" && s.slug === "claudeai-and-chatgpt"));
+    assert.ok(searchDocs(pages, "how do I connect claude.ai?").some((s) => s.page === "docs/agents.md" && s.slug === "claudeai-claude-desktop-and-chatgpt"));
+    const desktop = searchDocs(pages, "How do I connect claude desktop")[0];
+    assert.deepEqual([desktop.page, desktop.slug], ["docs/agents.md", "claudeai-claude-desktop-and-chatgpt"]);
     assert.equal(searchDocs(pages, "what happens when a build fails")[0].slug, "when-a-build-fails");
   });
 });
