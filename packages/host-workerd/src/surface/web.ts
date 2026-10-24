@@ -101,9 +101,14 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
 
 /**
  * A fingerprint of the web client's code, sent on every API response (x-hewn-web) so a page that
- * stays open across an upgrade notices it is running old code and offers a reload.
+ * stays open across an upgrade notices it is running old code and offers a reload. The host can't
+ * list its files, so every one is named here, the client's modules in app/ too (`test/web.test.ts`
+ * checks none is missing).
  */
-const WEB_CODE = ["index.html", "app.js", "kit.js", "passkey.js", "app.css"];
+export const WEB_CODE = [
+  ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "widgets"].map((m) => `app/${m}.js`),
+];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
   return (webBuild ??= (async () => {

@@ -166,6 +166,11 @@ describe("workerd host (integration)", () => {
     const page = await http("/", cookie);
     assert.equal(page.status, 200);
     assert.match(page.body, /<script/);
+    // The client's modules, from app/ in the assets: JavaScript, under the page's CSP.
+    const mod = await http("/app/router.js", cookie);
+    assert.equal(mod.status, 200);
+    assert.match(mod.headers["content-type"], /^text\/javascript/);
+    assert.equal(mod.headers["content-security-policy"], page.headers["content-security-policy"]);
     const caps = JSON.parse((await http("/api/capabilities", cookie)).body);
     assert.ok(caps.some((c: any) => c.id === "running-log"));
     assert.equal((await http("/_platform/ui.css")).status, 200);

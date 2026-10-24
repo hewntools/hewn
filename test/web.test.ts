@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { appendFileSync, cpSync, readFileSync } from "node:fs";
+import { appendFileSync, cpSync, readdirSync, readFileSync } from "node:fs";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
@@ -10,9 +10,13 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { IntakeRequest } from "@hewntools/cli/intake.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { WEB_CODE } from "@hewntools/host-workerd/surface/web.ts";
 import { installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
+/** The web client's JavaScript: app.js, the kit, and its modules in app/. */
+const WEB = resolve(import.meta.dirname, "../packages/host-workerd/web");
+const webJs = () => readdirSync(WEB, { recursive: true }).map(String).filter((f) => f.endsWith(".js"));
 
 interface Res {
   status: number;
@@ -137,7 +141,7 @@ describe("web client (owner surface)", () => {
       assert.doesNotMatch(page.body, /<script/);
       assert.equal((await http("/auth?ticket=nope", { cookie: "" })).status, 401);
       for (const f of ["/manifest.webmanifest", "/icons/hewn-192.png", "/hewn-mark.svg", "/app.css"]) assert.equal((await http(f, { cookie: "" })).status, 200, f);
-      assert.equal((await http("/app.js", { cookie: "" })).status, 401, "the app itself needs a session");
+      for (const f of ["/app.js", "/app/router.js"]) assert.equal((await http(f, { cookie: "" })).status, 401, `${f}: the app itself needs a session`);
       assert.equal(JSON.parse((await http("/manifest.webmanifest", { cookie: "" })).body).display, "standalone");
     });
 
@@ -203,6 +207,8 @@ describe("web client (owner surface)", () => {
       const b = await http("/api/settings", { headers: { "x-hewn-ui": "1" } });
       assert.match(String(a.headers["x-hewn-web"]), /^[0-9a-f]{16}$/);
       assert.equal(a.headers["x-hewn-web"], b.headers["x-hewn-web"]);
+      // It covers all of the client's code: a module left out of WEB_CODE could change unnoticed.
+      assert.deepEqual([...WEB_CODE].sort(), [...webJs(), "index.html", "app.css"].sort());
       const bad = await api("/capabilities/running-log/invoke", { method: "POST", body: { operation: "record_run", input: {} } });
       assert.equal(bad.status, 400);
       assert.match(bad.json.message, /inputSchema \(missing [a-zA-Z, ]+\)/, "names the missing fields");
@@ -213,8 +219,14 @@ describe("web client (owner surface)", () => {
       const csp = String(r.headers["content-security-policy"]);
       assert.match(csp, /script-src 'self'/);
       assert.doesNotMatch(csp, /unsafe-inline'[^;]*;?\s*$|script-src[^;]*unsafe-inline/);
-      for (const file of ["app.js", "kit.js", "passkey.js"]) {
-        const js = readFileSync(resolve(import.meta.dirname, "../packages/host-workerd/web", file), "utf8").replace(/^\/\/.*$/gm, "");
+      const mod = await http("/app/router.js");
+      assert.equal(mod.status, 200, "the client's modules, from app/");
+      assert.match(String(mod.headers["content-type"]), /^text\/javascript/);
+      assert.equal(mod.headers["content-security-policy"], r.headers["content-security-policy"]);
+      const files = webJs();
+      assert.ok(files.includes("app.js") && files.includes("app/router.js"), "the modules in app/ too");
+      for (const file of files) {
+        const js = readFileSync(resolve(WEB, file), "utf8").replace(/^\/\/.*$/gm, "");
         assert.doesNotMatch(js, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, file);
         // Dialogs, inline edits and toasts instead of browser built-ins.
         assert.doesNotMatch(js, /(?<![\w.])(alert|confirm|prompt)\(/, file);
