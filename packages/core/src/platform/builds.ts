@@ -246,7 +246,9 @@ export class Builds extends Domain {
 
   /** Resolves when a build has finished (promoted, failed or cancelled). */
   async settle(buildId: string): Promise<BuildView> {
-    while (this.mustBuild(buildId).status === "waiting" && !this.running.has(buildId)) await new Promise((r) => this.events.once(`${buildId}:state`, r));
+    // Waiting, or started and still opening its workspace (its builder not running yet).
+    const before = (s: BuildRow["status"]) => s === "waiting" || s === "open";
+    while (before(this.mustBuild(buildId).status) && !this.running.has(buildId)) await new Promise((r) => this.events.once(`${buildId}:state`, r));
     await this.running.get(buildId);
     return this.buildView(this.mustBuild(buildId));
   }
@@ -308,6 +310,15 @@ export class Builds extends Domain {
       out.push({ buildId, capabilityId: s.capabilityId, kind: b.kind, name: req.name ?? s.capabilityId, purpose: req.purpose ?? "", connection: b.kind === "create" && req.kind === "connection", state: this.stepState(buildId)! });
     }
     return out;
+  }
+
+  /**
+   * A manifest-only change makes a new version at once: a change on its way would then fail at the
+   * end ("capability changed since this build started"), so it waits until that one is done.
+   */
+  noChangeOnItsWay(capabilityId: string, what: string) {
+    const ahead = this.registry.unfinishedBuild(capabilityId);
+    if (ahead) throw new PlatformError("conflict", `a change to ${capabilityId} is on its way (build ${ahead.id}); ${what} once it's done`);
   }
 
   /**
@@ -554,6 +565,8 @@ export class Builds extends Domain {
   /** Open a create build's workspace (skeleton, or seeded files) and start its builder. */
   private async startCreate(buildId: string, seed?: Files) {
     const b = this.mustBuild(buildId);
+    // Started: no longer waiting (as in startModify).
+    this.registry.updateBuild(buildId, { status: "open" });
     const req = b.request as unknown as CreateRequest;
     const id = b.capabilityId;
     const connection = req.kind === "connection";
@@ -655,6 +668,8 @@ export class Builds extends Domain {
       this.events.emit("changed");
       return;
     }
+    // Started: no longer waiting, so a second release skips it and the next change's turn waits for it.
+    this.registry.updateBuild(buildId, { status: "open" });
     const cap = this.registry.getCapability(b.capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${b.capabilityId} is no longer active`);
     const base = await this.loadVersion(cap.id, cap.activeVersion);

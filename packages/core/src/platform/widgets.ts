@@ -157,6 +157,7 @@ export class Widgets extends Domain {
   async removeWidget(owner: Agent, capabilityId: string, name: string): Promise<BuildView> {
     requireOwner(owner);
     this.visibleActive(owner, capabilityId);
+    this.d.builds.noChangeOnItsWay(capabilityId, "delete the widget");
     const w = widgetOf(this.activeManifest(capabilityId), name);
     if (!w) throw new PlatformError("not_found", `${capabilityId} has no widget ${name}`);
     const b = await this.d.builds.manifestOnlyModify(owner, capabilityId, (m) => { const rest = (m.widgets ?? []).filter((x) => x.name !== name); if (rest.length) m.widgets = rest; else delete m.widgets; }, `delete the "${w.title}" widget`);

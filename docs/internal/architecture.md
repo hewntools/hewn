@@ -76,7 +76,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | `instructions.ts` | the owner's instructions for building |
 | `housekeeping.ts` | the cleanup at start and daily, and the metrics aggregates |
 
-Each extends `Domain` (`context.ts`): the ports, the event bus, the cache of loaded versions, and the lookups every domain makes (`activeManifest`, `loadVersion` …). A domain calls another domain's public methods through the facade (`this.platform.readiness()`), so a wrapper on a `Platform` method sees every call, and reaches what `Platform` doesn't offer through `this.d` (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`, `logRetentionDays` …) stay on `Platform` and are read from it each time.
+Each extends `Domain` (`context.ts`): the ports, the event bus, the cache of loaded versions, and the lookups every domain makes (`activeManifest`, `loadVersion` …). A domain calls another domain's public methods through the facade (`this.platform.readiness()`), so a wrapper on a `Platform` method sees every call from another domain (a domain's calls to its own methods stay inside it), and reaches what `Platform` doesn't offer through `this.d` (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`, `logRetentionDays` …) stay on `Platform` and are read from it each time.
 
 The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store) and the rest. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
 
@@ -114,7 +114,9 @@ Both directions are token-authenticated (`HEWN_ADMIN_TOKEN` into workerd, `HEWN_
 Every change to a capability is a build, run by a platform builder: Claude Code or Codex, chosen by the owner, or the host's own builder (`remote`, below). An agent asks (`capabilities_create`, `capabilities_modify`, `capabilities_add_widgets`) or the owner does from the web client; nobody hands in code directly. `hewn install <dir>` is a build with a copy builder.
 
 ```text
-request → build row ("waiting" while its `after` build hasn't promoted)
+request → build row ("waiting" while its `after` build hasn't promoted, or, for a change or widgets build,
+                     while an earlier change to the same capability is open or building: it starts when that
+                     one ends, however it ends, or goes to review; `queued` in the build view)
   → workspace: a skeleton or the active version, plus BUILDER.md (the brief) and PLATFORM_UI.css
   → up to maxBuildAttempts (default 3): run the builder, then validate;
     a failed validation goes back to the builder as feedback

@@ -250,6 +250,14 @@ describe("widgets: running", () => {
     t.platform.placeWidget(USER, { id: "widget-counter", widget: "count", size: "small" });
     await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "nope"), /no widget nope/);
     await assert.rejects(t.platform.removeWidget(t.claude, "widget-counter", "count"), /owner/);
+    // A version made now would fail a change on its way at its end: it waits for that one.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async () => void (await gate));
+    const change = await t.platform.modify(USER, { capabilityId: "widget-counter", request: "x" });
+    await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), /a change to widget-counter is on its way/);
+    release();
+    await t.platform.settle(change.buildId);
     const b = await t.platform.settle((await t.platform.removeWidget(USER, "widget-counter", "count")).buildId);
     assert.equal(b.status, "promoted", b.log.join("\n"));
     assert.equal(b.builder, "keep");
