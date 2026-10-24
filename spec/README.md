@@ -33,7 +33,7 @@ The spec is versioned by the **ABI**, never by Hewn's releases. One version cove
 - A tool declares the lowest ABI it needs in `capability.json` (`"abi": "2.2"`; none means 2.0). A host implements one major and runs every minor up to its own; it refuses a manifest that uses something newer than it declares.
 - **Minor versions only add.** So this document, at 2.3, describes all of 2.x: every addition is marked with the minor that introduced it ("since 2.2"), here, in the types, and in `src/abi.ts` (`ABI_HISTORY`, `CTX_MEMBERS`).
 - **A new major** is a breaking change. When ABI 3 arrives, the 2.x spec is frozen in `v2/` and stays published as `@hewntools/spec@2.x`; the current major lives here.
-- `@hewntools/spec`'s version is the ABI: `2.3.x` describes ABI 2.3; the patch number is for fixes to the text, types or schemas that change nothing in the contract.
+- `@hewntools/spec`'s version is the ABI: `2.4.x` describes ABI 2.4; the patch number is for fixes to the text, types or schemas that change nothing in the contract.
 
 | ABI | Added |
 | --- | --- |
@@ -41,6 +41,7 @@ The spec is versioned by the **ABI**, never by Hewn's releases. One version cove
 | 2.1 | Manifest `kind` ("connection") and `requires.secrets` (connections only); deprecated operations; manifest `config`, `ctx.config`, `config:NAME` hosts |
 | 2.2 | Manifest `requires.model`; `ctx.model.generate` |
 | 2.3 | Manifest `widgets`, and the widget view models their operations return |
+| 2.4 | Manifest `saturation` |
 
 2.0 replaced the pre-release 1.x, which no Hewn runs.
 

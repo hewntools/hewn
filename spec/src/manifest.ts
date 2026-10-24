@@ -46,6 +46,8 @@ export interface CapabilityManifest {
   runtime?: (typeof RUNTIME_PROFILES)[number];
   /** Tile colour for the app icon (OKLCH hue, 0–359). The design system derives tile and glyph shades from it. */
   hue?: number;
+  /** How colourful the tile is, in percent of the design system's chroma (0–150, default 100); 0 is black or white on grey. Since ABI 2.4. */
+  saturation?: number;
   /**
    * Non-secret settings the owner fills in (ABI 2.1), e.g. a site URL. Code reads them as
    * `ctx.config.NAME`; `requires.hosts` may name one as `config:NAME` (its host).

@@ -150,6 +150,8 @@ export interface BuildView {
   failure?: BuildFailure;
   /** The build this one waits for (status "waiting" until it promotes). */
   dependsOn?: string;
+  /** Waiting its turn behind an earlier change to the same capability (starts when that one ends, however it ends). */
+  queued?: boolean;
   /** Status "review": what the change would add; it goes live once the owner approves it. */
   review?: BuildReview;
   /** What it runs on: the model and effort (as asked for or set), and the model it ran on. */
@@ -277,6 +279,8 @@ interface LoadedVersion {
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
+/** Tile saturation cap, in percent of the design system's chroma: more turns neon in dark mode. */
+export const MAX_SATURATION = 150;
 
 /** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
 export type ModelAsk = {
@@ -516,7 +520,7 @@ export class Platform {
       const dep = this.currentBuild(b.dependsOn!);
       if (dep.id !== b.dependsOn) this.registry.updateBuild(b.id, { dependsOn: dep.id });
       this.setStep(b.id, b.capabilityId, "waiting");
-      if (["promoted", "failed", "cancelled"].includes(dep.status)) await this.releaseDependents(dep.id);
+      if (["promoted", "failed", "cancelled", "review"].includes(dep.status)) await this.releaseDependents(dep.id);
     }
   }
 
@@ -603,21 +607,24 @@ export class Platform {
 
   /**
    * The icon an in-flight build has written so far (builders write it first), re-rendered from its
-   * cells so nothing else from the workspace is ever served; plus its hue if capability.json has one.
+   * cells so nothing else from the workspace is ever served; plus its hue and saturation if
+   * capability.json has them.
    */
-  async buildGlyph(buildId: string): Promise<{ svg: string; hue: number | null } | undefined> {
+  async buildGlyph(buildId: string): Promise<{ svg: string; hue: number | null; saturation: number | null } | undefined> {
     const svg = await this.workbench.file(buildId, "ui/icon.svg").catch(() => undefined);
     if (!svg) return undefined;
     const cells = cellsFromSvg(text(svg));
     if (!cells) return undefined;
     let hue: number | null = null;
+    let saturation: number | null = null;
     try {
-      const h = JSON.parse(text(await this.workbench.file(buildId, "capability.json"))).hue;
-      if (Number.isInteger(h) && h >= 0 && h <= 359) hue = h;
+      const m = JSON.parse(text(await this.workbench.file(buildId, "capability.json")));
+      if (Number.isInteger(m.hue) && m.hue >= 0 && m.hue <= 359) hue = m.hue;
+      if (Number.isInteger(m.saturation) && m.saturation >= 0 && m.saturation <= MAX_SATURATION) saturation = m.saturation;
     } catch {
       // not written yet
     }
-    return { svg: glyphSvg(cells), hue };
+    return { svg: glyphSvg(cells), hue, saturation };
   }
 
   /** In-flight builds, by capability (Home shows these as building tiles). */
@@ -724,10 +731,23 @@ export class Platform {
     return this.registry.getCapability(capabilityId)?.hue ?? this.activeManifest(capabilityId).hue ?? null;
   }
 
-  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. */
-  async icon(capabilityId: string): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
+  /** Owner tile saturation (percent, 0–150), or null to use the manifest's. Presentation only. */
+  setSaturation(owner: Agent, capabilityId: string, saturation: number | null) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    if (saturation !== null && !(Number.isInteger(saturation) && saturation >= 0 && saturation <= MAX_SATURATION)) throw new PlatformError("invalid_request", `saturation must be an integer 0–${MAX_SATURATION}`);
+    this.registry.setOwnerPrefs(capabilityId, { saturation });
+  }
+
+  /** Tile saturation in percent: the owner's, else the manifest's; null means the default (100). */
+  saturationOf(capabilityId: string): number | null {
+    return this.registry.getCapability(capabilityId)?.saturation ?? this.activeManifest(capabilityId).saturation ?? null;
+  }
+
+  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. `owner: false`: the builder's only (Set icon's Use default). */
+  async icon(capabilityId: string, { owner = true }: { owner?: boolean } = {}): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
     const cap = this.registry.getCapability(capabilityId);
-    if (cap?.iconType) {
+    if (owner && cap?.iconType) {
       const data = await this.blobs.get(`icons/${capabilityId}`);
       const glyph = cap.iconType === "glyph";
       if (data) return { data, type: glyph ? "image/svg+xml" : cap.iconType, glyph };
@@ -2795,6 +2815,35 @@ export class Platform {
     return dep.id;
   }
 
+  /**
+   * The build to queue a change behind: the newest unfinished one of the same capability, so two
+   * changes never run at once (the second would fail at the end: "capability changed since this
+   * build started"). A change waiting for the owner's review doesn't hold others up. Not for an
+   * automatic retry: it takes the place of the build it retries, and what queued behind that one
+   * waits for it.
+   */
+  private queueBehind(capabilityId: string, req: object): string | undefined {
+    if ("autoRetryOf" in req) return undefined;
+    return this.registry.unfinishedBuild(capabilityId)?.id;
+  }
+
+  /**
+   * Changes to a capability on their way (queued or building), oldest first: a new
+   * change lands after them, so whoever drafts it (the intake, an agent) builds on them.
+   */
+  changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] {
+    requireScope(agent, "modify");
+    this.visibleActive(agent, capabilityId);
+    return this.registry.pendingChanges(capabilityId).map((b) => ({ buildId: b.id, kind: b.kind, status: b.status, request: String(b.request.request ?? "") }));
+  }
+
+  /** Waiting its turn behind an earlier change to the same capability, not for a build it needs (`after`). */
+  private queued(b: BuildRow): boolean {
+    if (b.status !== "waiting" || !b.dependsOn) return false;
+    const after = (b.request as { after?: string }).after;
+    return !after || this.currentBuild(after).id !== b.dependsOn;
+  }
+
   /** A build, or its newest retry if it was retried. */
   private currentBuild(buildId: string): BuildRow {
     let b = this.mustBuild(buildId);
@@ -2804,17 +2853,19 @@ export class Platform {
 
   /**
    * A build ended: builds waiting for it start if it promoted, and fail otherwise (they can be
-   * retried once it has been).
+   * retried once it has been). A change queued behind it starts either way, and already when it
+   * waits for the owner's review.
    */
   private async releaseDependents(buildId: string) {
     const dep = this.registry.getBuild(buildId);
-    // Waiting for the owner's review: dependents keep waiting (approve or reject releases them).
-    if (!dep || dep.status === "review") return;
+    if (!dep) return;
     for (const listed of this.registry.waitingBuilds(buildId)) {
       // Re-read: an earlier start awaited, and this one may have been cancelled meanwhile.
       const b = this.mustBuild(listed.id);
       if (b.status !== "waiting") continue;
-      if (dep.status !== "promoted") {
+      // Waiting for the owner's review: what needs it keeps waiting (approve or reject releases it).
+      if (dep.status === "review" && !this.queued(b)) continue;
+      if (dep.status !== "promoted" && !this.queued(b)) {
         this.failBuild(b.id, `build ${buildId}, which it waited for, ${dep.status}; retry that one, then this one`);
         continue;
       }
@@ -2903,9 +2954,9 @@ export class Platform {
     return this.buildView(this.registry.getBuild(buildId)!);
   }
 
-  private waitFor(buildId: string, capabilityId: string, dependsOn: string, tag: string) {
+  private waitFor(buildId: string, capabilityId: string, dependsOn: string, tag: string, queued = false) {
     const dep = this.mustBuild(dependsOn);
-    this.buildEvent(buildId, `waiting for build ${dependsOn} (${dep.kind} ${dep.capabilityId}); starts when it promotes`, tag);
+    this.buildEvent(buildId, queued ? `waiting for build ${dependsOn}, the change to ${capabilityId} before it; starts when it ends` : `waiting for build ${dependsOn} (${dep.kind} ${dep.capabilityId}); starts when it promotes`, tag);
     this.setStep(buildId, capabilityId, "waiting");
   }
 
@@ -2956,16 +3007,17 @@ export class Platform {
     const cap = this.visibleActive(agent, req.capabilityId);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
-    const dependsOn = this.dependency(agent, req.after);
+    const after = this.dependency(agent, req.after);
+    const dependsOn = after ?? this.queueBehind(cap.id, req);
     const { after: _after, conversation: _turns, ...rest } = req;
-    const request = { ...rest, ...(dependsOn ? { after: dependsOn } : {}) };
+    const request = { ...rest, ...(after ? { after } : {}) };
     const buildId = newBuildId();
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, cap.id, conversation);
     });
-    if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`);
+    if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`, !after);
     else await this.startModify(buildId);
     return this.buildView(this.registry.getBuild(buildId)!);
   }
@@ -2980,21 +3032,22 @@ export class Platform {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation);
-    const dependsOn = this.dependency(agent, req.after);
-    const cap = dependsOn ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
+    const after = this.dependency(agent, req.after);
+    const cap = after ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
     if (cap.activeVersion && isConnection(this.activeManifest(cap.id))) throw new PlatformError("invalid_request", `${cap.id} is a connection; connections have no widgets`);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
+    const dependsOn = after ?? this.queueBehind(cap.id, req);
     const { after: _after, conversation: _turns, ...rest } = req;
-    const request = { ...rest, capabilityId: cap.id, request: rest.request?.trim() ?? "", ...(dependsOn ? { after: dependsOn } : {}) };
+    const request = { ...rest, capabilityId: cap.id, request: rest.request?.trim() ?? "", ...(after ? { after } : {}) };
     const buildId = newBuildId();
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, cap.id, conversation);
     });
-    if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`);
+    if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`, !after);
     else await this.startModify(buildId);
     return this.buildView(this.registry.getBuild(buildId)!);
   }
@@ -3002,6 +3055,15 @@ export class Platform {
   /** Open a modify (or widgets) build's workspace from the active version (at start time) and start its builder. */
   private async startModify(buildId: string) {
     const b = this.mustBuild(buildId);
+    // Another change to this capability started while this one waited for its `after`: its turn comes after that one.
+    const ahead = this.registry.unfinishedBuild(b.capabilityId, { running: true, except: buildId });
+    if (ahead) {
+      this.registry.updateBuild(buildId, { status: "waiting", dependsOn: ahead.id });
+      this.waitFor(buildId, b.capabilityId, ahead.id, `build ${buildId} [${b.kind} ${b.capabilityId} by ${b.requestedBy}]`, true);
+      this.events.emit(`${buildId}:state`);
+      this.events.emit("changed");
+      return;
+    }
     const cap = this.registry.getCapability(b.capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${b.capabilityId} is no longer active`);
     const base = await this.loadVersion(cap.id, cap.activeVersion);
@@ -3918,7 +3980,10 @@ export class Platform {
     if (model && Object.keys(model).length) view.model = model;
     const charge = this.registry.buildCharge(b.id);
     if (charge) view.charge = charge;
-    if (b.status === "waiting") {
+    if (b.status === "waiting" && this.queued(b)) {
+      view.queued = true;
+      view.instructions = `This change waits for build ${b.dependsOn}, the change to the same capability before it, and starts on its own once that one ends, from the version it leaves. Call builds_wait to follow it.`;
+    } else if (b.status === "waiting") {
       view.instructions = `This build waits for build ${b.dependsOn} and starts on its own once that one promotes (if it fails, this one fails too). Call builds_wait to follow it.`;
     }
     if (b.status === "review" && b.review) {

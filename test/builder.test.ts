@@ -173,7 +173,7 @@ describe("platform-assigned builder", () => {
       fakeBuilder("fake", async (job) => {
         mkdirSync(join(job.workspace, "ui"), { recursive: true });
         writeFileSync(join(job.workspace, "ui", "icon.svg"), '<svg viewBox="0 0 5 5"><script>x</script><rect x="1" y="1" width="1" height="1"/></svg>');
-        writeFileSync(join(job.workspace, "capability.json"), JSON.stringify({ hue: 42 }));
+        writeFileSync(join(job.workspace, "capability.json"), JSON.stringify({ hue: 42, saturation: 0 }));
         await gate;
         cpSync(SEED, job.workspace, { recursive: true });
       }),
@@ -182,6 +182,7 @@ describe("platform-assigned builder", () => {
     await new Promise((r) => setTimeout(r, 20));
     const g = (await platform.buildGlyph(opened.buildId))!;
     assert.equal(g.hue, 42);
+    assert.equal(g.saturation, 0);
     assert.ok(!g.svg.includes("script") && g.svg.includes('<rect x="1" y="1"'));
     release();
     await platform.settle(opened.buildId);

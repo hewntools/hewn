@@ -61,4 +61,4 @@ From a checkout of the repo: `hewn install seeds/habits`.
 
 ## Reference
 
-The manifest and the ABI (the module, `ctx`, environment, versions) are described in full in [capability-model.md](../spec/capability-model.md#capability-manifest). Hewn implements ABI 2.3. A capability declares the lowest version it needs in `"abi"`; minor versions only add, so a capability built for 2.0 keeps running.
+The manifest and the ABI (the module, `ctx`, environment, versions) are described in full in [capability-model.md](../spec/capability-model.md#capability-manifest). Hewn implements ABI 2.4. A capability declares the lowest version it needs in `"abi"`; minor versions only add, so a capability built for 2.0 keeps running.
