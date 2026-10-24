@@ -10,6 +10,7 @@ import { after, before, describe, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
+import { DOC_PAGES } from "@hewntools/core/docs.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor, type Supervisor } from "@hewntools/cli/supervisor/index.ts";
 import { editJson, editText, type Script, SEED } from "./helpers.ts";
@@ -85,6 +86,16 @@ describe("workerd host (integration)", () => {
     await client.close();
     const bad = await fetch(`${sv.url}/mcp`, { method: "POST", headers: { authorization: "Bearer nope" }, body: "{}" });
     assert.equal(bad.status, 401);
+  });
+
+  test("hewn_docs: an agent reads Hewn's docs, served to workerd from the docs and spec folders", async () => {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${sv.url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    const text = async (args: Record<string, string>) => ((await client.callTool({ name: "hewn_docs", arguments: args })) as any).content[0].text as string;
+    assert.match(await text({}), new RegExp(`^Hewn's docs: ${DOC_PAGES.length} pages[^]*docs/concepts\\.md: Concepts[^]*spec/builder-brief\\.md:`));
+    assert.match(await text({ query: "how do grants work?" }), /--- docs\/concepts\.md#grants \(Concepts › Grants\) ---/);
+    assert.match(await text({ page: "spec/agents.md#hewns-docs" }), /^spec\/agents\.md#hewns-docs\n\n## Hewn's docs\n/);
+    await client.close();
   });
 
   test("modify: an additive migration promotes and state survives; a breaking change is refused", async () => {

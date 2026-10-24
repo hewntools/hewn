@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Build the npm packages into build/npm/ (nothing is published here; see docs/internal/releasing.md):
 //   cli/   @hewntools/cli: the CLI bundled to dist/cli.js, the workerd host prebuilt (dist/host/),
-//          the web client (dist/web/) and the UI kit (dist/platform-ui/)
+//          the web client (dist/web/), the UI kit (dist/platform-ui/) and the docs pages agents and
+//          the intake read (dist/docs/, the spec's in dist/docs/spec/)
 //   spec/  @hewntools/spec: the contract compiled to JavaScript with type declarations, and its JSON Schemas
 // Run: npm run build:npm   Then: npm pack build/npm/cli (a tarball, local only).
 import { spawnSync } from "node:child_process";
@@ -9,6 +10,7 @@ import { chmodSync, copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, 
 import { join, resolve } from "node:path";
 import { build } from "esbuild";
 import { buildHostFiles } from "../packages/cli/src/supervisor/bundle.ts";
+import { DOC_PAGES } from "../packages/core/src/docs.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const OUT = join(ROOT, "build", "npm");
@@ -42,6 +44,9 @@ async function cli() {
   cpSync(join(ROOT, "packages", "host-workerd", "web"), join(out, "dist", "web"), { recursive: true });
   cpSync(join(ROOT, "packages", "ui", "src"), join(out, "dist", "platform-ui"), { recursive: true });
   copyFileSync(join(ROOT, "packages", "ui", "LICENSE"), join(out, "dist", "platform-ui", "LICENSE"));
+  // As they are (hewn_docs and the intake read them, links and all); assetDirs() finds them there.
+  for (const page of DOC_PAGES) write(join(out, "dist", "docs", page.replace(/^docs\//, "")), readFileSync(join(ROOT, page), "utf8"));
+  copyFileSync(join(ROOT, "spec", "LICENSE"), join(out, "dist", "docs", "spec", "LICENSE"));
   for (const f of ["LICENSE", "LICENSING.md"]) copyFileSync(join(ROOT, f), join(out, f));
   for (const f of ["README.md", "CHANGELOG.md"]) write(join(out, f), absoluteLinks(readFileSync(join(ROOT, f), "utf8")));
 

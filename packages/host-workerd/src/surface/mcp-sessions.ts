@@ -7,6 +7,7 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Agent } from "@hewntools/core/auth.ts";
+import { DOC_PAGES, type DocPage, readDocs } from "@hewntools/core/docs.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { randomToken } from "@hewntools/core/sha256.ts";
 import { createMcpServer, toolSignature } from "../mcp.ts";
@@ -35,6 +36,8 @@ export class McpSessions {
 
   /** The ui://hewn/widget HTML (MCP Apps), built once from the platform assets. */
   private widgetHtml?: () => Promise<string>;
+  /** Hewn's docs (hewn_docs), read once from the platform assets (again next time if some were missing). */
+  private docs?: () => Promise<DocPage[]>;
 
   constructor(platform: Platform, log: (line: string) => void, asset?: (path: string) => Promise<Uint8Array | undefined>) {
     this.platform = platform;
@@ -42,6 +45,8 @@ export class McpSessions {
     if (asset) {
       let html: Promise<string> | undefined;
       this.widgetHtml = () => (html ??= widgetAppHtml(asset).catch((e) => ((html = undefined), Promise.reject(e))));
+      let docs: Promise<DocPage[]> | undefined;
+      this.docs = () => (docs ??= readDocs(asset).then((pages) => (pages.length < DOC_PAGES.length && (docs = undefined), pages)));
     }
     this.unsubscribe = platform.onChange(() => {
       // Debounced: a build promotion logs several lines in a row.
@@ -102,7 +107,7 @@ export class McpSessions {
         this.sessions.set(sid, session);
       },
     });
-    const server = createMcpServer(this.platform, () => session.agent, this.log, { widgetHtml: this.widgetHtml });
+    const server = createMcpServer(this.platform, () => session.agent, this.log, { widgetHtml: this.widgetHtml, docs: this.docs });
     session.server = server;
     session.transport = transport;
     transport.onclose = () => session.id && this.sessions.delete(session.id);

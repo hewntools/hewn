@@ -158,7 +158,7 @@ describe("hewn url --listen: the public listener on the network", () => {
   });
 
   test("0.0.0.0 (every interface, as in a container) is one socket, not a second one on the same port", () => {
-    const base = { dir: "/d", keys: STORAGE_KEYS, port: 7717, publicPort: 7718, supervisorPort: 1, data: "/d", assets: { web: "/w", ui: "/u" } };
+    const base = { dir: "/d", keys: STORAGE_KEYS, port: 7717, publicPort: 7718, supervisorPort: 1, data: "/d", assets: { web: "/w", ui: "/u", docs: "/d", spec: "/s" } };
     const sockets = (publicListen?: string) => [...supervisorConfig({ ...base, publicListen }).matchAll(/address = "([^"]+)", http = \(\), service = \(name = "main", entrypoint = "Public"\)/g)].map((m) => m[1]);
     assert.deepEqual(sockets(), ["127.0.0.1:7718"]);
     assert.deepEqual(sockets("192.168.1.50"), ["127.0.0.1:7718", "192.168.1.50:7718"]);
