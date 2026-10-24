@@ -37,6 +37,7 @@ Widgets have no files of their own: they are declared in the manifest and backed
 | `config` | no | 2.1 | Non-secret settings the owner fills in: `[{ name, description }]`. See [Config](#config-since-21). |
 | `runtime` | no | 2.0 | Leave it out. The only profile is `"isolate"`. |
 | `hue` | no | 2.0 | Tile colour for the icon: an OKLCH hue, integer 0–359. |
+| `saturation` | no | 2.4 | How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. `0` draws the icon black or white on grey (for a black-and-white brand). |
 | `tags` | no | 2.0 | Strings agents can filter on. |
 | `requires` | no | 2.0 | Authority the code needs: `secrets`, `hosts`, `capabilities`, and `model` (since 2.2). See [Grants](#grants). |
 | `operations` | yes | 2.0 | At least one. See [Operations](#operations). |
@@ -55,7 +56,7 @@ Some rules can't be expressed in the schema. The host also checks that:
 
 ## Versions
 
-The `abi` field says which version of the contract the tool is written against. A host implements one major version and runs every minor up to its own; it refuses a manifest that declares a version it doesn't implement, or that uses a field newer than the version it declares. Minor versions only add, so a tool written for 2.0 runs unchanged on a 2.3 host.
+The `abi` field says which version of the contract the tool is written against. A host implements one major version and runs every minor up to its own; it refuses a manifest that declares a version it doesn't implement, or that uses a field newer than the version it declares. Minor versions only add, so a tool written for 2.0 runs unchanged on a 2.4 host.
 
 | ABI | Added |
 | --- | --- |

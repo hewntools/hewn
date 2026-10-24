@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { USER } from "@hewntools/core/auth.ts";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { editJson, editText, installSeed, setup } from "./helpers.ts";
@@ -164,17 +165,51 @@ describe("modification lifecycle", () => {
     assert.match(r.log.join("\n"), /get_summary@1/);
   });
 
-  test("stale build is rejected after another promotion", async () => {
+  test("a build is rejected if the capability changed while it ran (a rollback)", async () => {
+    await t.build(() => t.platform.modify(t.claude, { capabilityId: "running-log", request: "a" }), () => {});
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     t.queue(() => gate);
-    const stale = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a" });
-    const fresh = await t.build(() => t.platform.modify(t.claude, { capabilityId: "running-log", request: "b" }), () => {});
-    assert.equal(fresh.status, "promoted", fresh.log.join("\n"));
+    const stale = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "b" });
+    await t.platform.rollback(USER, "running-log");
     release();
     const done = await t.platform.settle(stale.buildId);
     assert.equal(done.status, "failed");
     assert.match(done.log.join("\n"), /changed since this build started/);
+  });
+
+  test("changes to one capability take turns: each starts from what the one before it left", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const seen: string[] = [];
+    const mark = (n: string) => (ws: string) => (seen.push(readFileSync(join(ws, "src", "index.ts"), "utf8")), editText(join(ws, "src", "index.ts"), (s) => `${s}\n// ${n}`));
+    t.queue(async (ws) => (await gate, mark("first")(ws)), mark("second"), mark("third"));
+    const first = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a" });
+    const second = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "b" });
+    const third = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "c" });
+    assert.equal(second.status, "waiting");
+    assert.equal(second.dependsOn, first.buildId);
+    assert.equal(second.queued, true);
+    assert.match(second.instructions!, /the change to the same capability before it/);
+    assert.equal(third.dependsOn, second.buildId, "in the order asked");
+    release();
+    for (const b of [first, second, third]) assert.equal((await t.platform.settle(b.buildId)).status, "promoted");
+    assert.equal(t.platform.registry.getBuild(third.buildId)!.resultVersion, 4);
+    assert.match(seen[2], /\/\/ first\n\/\/ second$/, "the third built on the first two");
+  });
+
+  test("a change queued behind one that fails starts anyway, from the active version", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws) => (await gate, writeFileSync(join(ws, "capability.json"), "{ not json")), () => {});
+    const first = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a" });
+    const second = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "b" });
+    assert.equal(second.status, "waiting");
+    release();
+    assert.equal((await t.platform.settle(first.buildId)).status, "failed");
+    const done = await t.platform.settle(second.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.equal(done.resultVersion, 2);
   });
 });
 

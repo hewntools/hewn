@@ -63,7 +63,7 @@ export function viewFor(output, size) {
 
 /**
  * Whose widget it is: the capability's app icon, small, in the top-right corner. `icon`: { id,
- * name, hue?, kind?: "glyph" | "image", src? (the icon file, a URL or data: URI) }.
+ * name, hue?, saturation? (percent), kind?: "glyph" | "image", src? (the icon file, a URL or data: URI) }.
  */
 function mark(icon) {
   let hue = icon.hue;
@@ -76,6 +76,7 @@ function mark(icon) {
   el.setAttribute("aria-hidden", "true");
   el.style.setProperty("--size", "16px");
   el.style.setProperty("--hue", String(hue));
+  if (Number.isInteger(icon.saturation)) el.style.setProperty("--s", String(icon.saturation / 100));
   if (icon.src && icon.kind === "image") {
     const img = node("img", "icon-img");
     img.alt = "";

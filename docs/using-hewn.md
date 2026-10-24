@@ -13,7 +13,7 @@ Home holds your tools as icons, and the widgets you've put there. Click a tool t
 Right-click a tool for its menu:
 - **Open**, **Change…** and **Info**
 - **Widgets…**, **Activity** and **Versions…**
-- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour, or upload an image) and **Export data**
+- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand) and **Export data**
 - **Delete…**
 
 Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget that takes options, such as which item to show: the same form as when you added it, with a preview), **Change…** and **Remove widget**.

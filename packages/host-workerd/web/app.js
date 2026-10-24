@@ -45,6 +45,7 @@ import {
   sheetSteps,
   skeleton,
   stepRow,
+  tintOf,
   toast,
   withContextMenu,
 } from "./kit.js";
@@ -187,7 +188,7 @@ function moment(asciiPos, ...content) {
 
 async function hues(first = []) {
   const list = [...(await caps().catch(() => new Map())).values()];
-  return [...first, ...list.map(hueOf)].slice(0, 4);
+  return [...first, ...list.map(tintOf)].slice(0, 4);
 }
 
 /** "this Mac" / "this computer" / "this server": where Hewn (and the agents it runs) live. */
@@ -730,13 +731,14 @@ async function deleteDialog(c) {
 
 const SEEDS = [".....", ".....", ".....", ".....", "....."];
 
-/** Set icon (N3), a Picker: draw a 5×5 glyph or use an image, pick its hue, or go back to the default. */
+/** Set icon (N3), a Picker: draw a 5×5 glyph or use an image, pick its hue and saturation, or go back to the default. */
 async function iconDialog(c) {
   const id = enc(c.id);
   const cells = await (c.iconKind === "glyph" ? glyphCells(c) : Promise.resolve([]));
   const grid = SEEDS.map((r) => [...r].map(() => false));
   for (const { x, y } of cells) if (grid[y]?.[x] !== undefined) grid[y][x] = true;
   let hue = hueOf(c);
+  let saturation = Number.isInteger(c.saturation) ? c.saturation : 100;
   let mode = c.iconKind === "image" ? "image" : "glyph";
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
   const status = h("p", { class: "small error" });
@@ -744,9 +746,9 @@ async function iconDialog(c) {
   const rows = () => grid.map((r) => r.map((on) => (on ? "#" : ".")).join(""));
 
   const drawPreview = () => {
-    const tile = h("span", { class: "app-icon", style: { "--size": "48px", "--hue": hue } });
+    const tile = h("span", { class: "app-icon", style: { "--size": "48px", "--hue": hue, "--s": saturation / 100 } });
     if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
-    else tile.append(appIcon({ ...c, hue }, { size: 48 }).firstChild ?? "");
+    else tile.append(appIcon({ ...c, hue, saturation }, { size: 48 }).firstChild ?? "");
     put(preview, tile);
   };
   const editor = h(
@@ -762,6 +764,9 @@ async function iconDialog(c) {
   );
   const hueInput = h("input", { type: "range", min: 0, max: 359, value: hue, class: "hue-range", "aria-label": "Colour" });
   hueInput.addEventListener("input", () => ((hue = Number(hueInput.value)), drawPreview()));
+  // 0: black or white on grey (a black-and-white brand); 100 is the default; capped at 150 (more turns neon in dark mode).
+  const satInput = h("input", { type: "range", min: 0, max: 150, step: 5, value: saturation, class: "hue-range", "aria-label": "Saturation" });
+  satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), drawPreview()));
   const panes = {
     glyph: h("div", { class: "stack-sm" }, editor, h("span", { class: "small faint" }, "7–17 lit cells, one simple idea.")),
     image: h("label", { class: "field" }, h("span", { class: "label" }, "Image"), file, h("span", { class: "hint" }, "PNG, JPEG, WebP or SVG, up to 256 KB")),
@@ -779,7 +784,7 @@ async function iconDialog(c) {
       try {
         if (mode === "glyph") {
           if (!grid.flat().some(Boolean)) return (status.textContent = "Light at least one cell.");
-          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { glyph: rows(), hue } });
+          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { glyph: rows(), hue, saturation } });
         } else {
           if (!file.files[0]) return (status.textContent = "Choose an image.");
           const dataUrl = await new Promise((res, rej) => {
@@ -788,7 +793,7 @@ async function iconDialog(c) {
             r.onerror = rej;
             r.readAsDataURL(file.files[0]);
           });
-          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { dataUrl, hue } });
+          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { dataUrl, hue, saturation } });
         }
         done(close);
       } catch (e) {
@@ -801,6 +806,7 @@ async function iconDialog(c) {
       seg,
       body,
       h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), hueInput),
+      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), satInput),
       status,
       h(
         "div",
@@ -847,7 +853,7 @@ async function home({ editing = false } = {}) {
   const onHome = (cs) => [...cs.values()].filter((c) => c.kind !== "connection");
   const [all0, homeData] = await Promise.all([caps(true), api("/home").catch(() => ({ layout: [], gallery: [] }))]);
   const list = onHome(all0);
-  setWallpaper(list.map(hueOf), { dim: !list.length });
+  setWallpaper(list.map(tintOf), { dim: !list.length });
   // The first run's moment screen, until a tool exists (even after leaving it once).
   if (!list.some((c) => c.version || c.building)) return firstRun();
 
@@ -1119,7 +1125,7 @@ function widgetTile(e, c, { remove, options }) {
 }
 
 /** The tool's icon as the widget renderer draws it in the corner (the same in agent chats). */
-const widgetIcon = (c) => ({ id: c.id, name: c.name, hue: hueOf(c), ...(c.iconKind ? { kind: c.iconKind, src: iconUrl(c) } : {}) });
+const widgetIcon = (c) => ({ id: c.id, name: c.name, hue: hueOf(c), ...(Number.isInteger(c.saturation) ? { saturation: c.saturation } : {}), ...(c.iconKind ? { kind: c.iconKind, src: iconUrl(c) } : {}) });
 
 const TEMPLATE_LABEL = { stat: "Number", list: "List", chart: "Chart", progress: "Progress", text: "Text" };
 
@@ -1789,7 +1795,7 @@ async function runPage(id, q) {
   document.body.classList.add("app-mode");
   const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
   const c = all.get(id) ?? { id, name: cap.name, kind: cap.kind };
-  setWallpaper(await hues([hueOf(c)]));
+  setWallpaper(await hues([tintOf(c)]));
   const ops = runnableOps(cap);
   let selected = ops.find((o) => o.name === q.get("op")) ?? ops[0];
   const right = h("div", { class: "run-main" });
@@ -2580,7 +2586,7 @@ async function infoPage(id) {
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("50%", "30%", "90%", "70%")));
   const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
   const c = all.get(id) ?? { id, name: cap.name, ui: !!cap.ui?.available, ready: cap.status.ready, kind: cap.kind };
-  setWallpaper(await hues([hueOf(c)]));
+  setWallpaper(await hues([tintOf(c)]));
   if (cap.kind === "connection") return connectionPage(c, cap, all);
   const ops = runnableOps(cap);
   const items = cap.authorization?.items ?? [];
@@ -3376,9 +3382,11 @@ function proposalCard(kind, list, ctx) {
   const single = rows.length === 1;
   const build = h("button", { class: `primary ${embedded ? "" : "lg"}` });
   const chosen = () => rows.filter((r) => r.box.checked);
+  // "Keep talking" sets this proposal aside: Build greys out, the next reply brings a new one (or Draft now does).
+  let talking = false;
   const count = () => {
     const n = chosen().length;
-    build.disabled = n === 0;
+    build.disabled = n === 0 || talking;
     build.textContent =
       kind === "widgets"
         ? single
@@ -3534,7 +3542,7 @@ function proposalCard(kind, list, ctx) {
     h("ul", { class: "list" }, rows.map(row)),
     // Say what spends the owner's account before it happens (a schedule-only proposal builds nothing).
     kind !== "schedules" && !readOnly && h("div", { class: "small faint" }, settings?.builder === "remote" ? `${builderLabel("remote")} builds it.` : `${settings?.builder ? builderLabel(settings.builder) : "Your builder"} builds it, on its own account: your subscription, API key or cloud provider.`),
-    !readOnly && h("div", { class: "row end tight" }, h("button", { onclick: keepTalking }, "Keep talking"), build),
+    !readOnly && h("div", { class: "row end tight" }, h("button", { onclick: () => ((talking = true), count(), keepTalking()) }, "Keep talking"), build),
   );
   return [card, summary];
 }
@@ -3664,7 +3672,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const [b0, all, context] = await Promise.all([api(`/builds/${enc(id)}`), caps(true).catch(() => new Map()), api(`/builds/${enc(id)}/context`).catch(() => ({}))]);
     let b = b0;
     const cap = () => all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.request?.name ?? b.capabilityId };
-    if (!compact) setWallpaper(await hues([hueOf(cap()), 125]));
+    if (!compact) setWallpaper(await hues([tintOf(cap()), 125]));
     // Elapsed time of the current attempt (the honest number while code is being written).
     let startedAt = Date.now() - (b0.progress?.elapsedSeconds ?? 0) * 1000;
     const clockEl = h("div", { class: "mono muted small" });
@@ -3694,7 +3702,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         put(
           card,
           head(appIcon(cap(), { size: compact ? 36 : 56 }), cap().name, null, kindTag("waiting", "warn")),
-          h("div", { class: "small muted row tight wrap" }, "Starts once ", dep ? h("a", { href: `#/b/${enc(dep)}` }, "the build it needs") : "the build it needs", " is done · you can leave"),
+          h("div", { class: "small muted row tight wrap" }, "Starts once ", dep ? h("a", { href: `#/b/${enc(dep)}` }, b.queued ? "the change before it" : "the build it needs") : "the build it needs", " is done · you can leave"),
           logBlock(false),
         );
         return;
@@ -4130,7 +4138,7 @@ async function activityPage(q) {
   const agent = q.get("agent") ?? "";
   const viewKey = ACTIVITY_VIEWS.some(([k]) => k === q.get("view")) ? q.get("view") : "all";
   const [all, agents] = await Promise.all([caps(true), api("/agents").catch(() => [])]);
-  setWallpaper(await hues(capability && all.get(capability) ? [hueOf(all.get(capability))] : []));
+  setWallpaper(await hues(capability && all.get(capability) ? [tintOf(all.get(capability))] : []));
   const setQ = (k, v) => {
     const p = new URLSearchParams({ view: viewKey, capability, agent });
     v ? p.set(k, v) : p.delete(k);
@@ -4192,7 +4200,7 @@ async function buildsView(head, only, all0) {
     const rest = list.filter((b) => !LIVE_BUILD.has(b.status) && b.status !== "review" && !failed.has(b.buildId));
     const nameOf = (b) => all.get(b.capabilityId)?.name ?? b.request?.name ?? b.capabilityId;
     const sub = (b) => {
-      if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Waiting for ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, "another build") : "another build");
+      if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Waiting for ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, b.queued ? "the change before it" : "another build") : "another build");
       if (b.status === "review") return h("span", { class: "sub" }, `${actorLabel(b.requestedBy, all)} changed it: it waits for you`);
       if (LIVE_BUILD.has(b.status)) return h("span", { class: "sub row tight" }, askedBy(b) && h("span", { class: "faint" }, `${askedBy(b)}on your ${builderLabel(b.builder)}`), milestones(b));
       const first = String(b.request?.request || b.request?.purpose || "").split("\n")[0];
@@ -4275,20 +4283,23 @@ const AGENT_CATALOG = [
   { id: "chatgpt", label: "ChatGPT", where: "cloud", connect: "cloud", apps: true },
   { id: "gemini", label: "Gemini", where: "cloud" },
 ];
-/** Agents' tiles: [hue, logo] (web/logos/, Simple Icons and LobeHub; see SOURCES.md). */
-const TILES = { "claude-code": [30, "claude"], claude: [30, "claude"], "claude-desktop": [30, "claude"], codex: [200, "openai"], "codex-desktop": [200, "openai"], opencode: [90, "opencode"], chatgpt: [160, "openai"], "gemini-cli": [250, "googlegemini"], gemini: [250, "googlegemini"], cursor: [0, "cursor"], vscode: [220, "githubcopilot"] };
+/**
+ * Agents' tiles: [hue, logo, saturation %] (web/logos/, Simple Icons and LobeHub; see SOURCES.md).
+ * Saturation 0 for the black-and-white brands: their logo black or white on grey.
+ */
+const TILES = { "claude-code": [30, "claude"], claude: [30, "claude"], "claude-desktop": [30, "claude"], codex: [200, "openai", 0], "codex-desktop": [200, "openai", 0], opencode: [90, "opencode", 0], chatgpt: [160, "openai", 0], "gemini-cli": [250, "googlegemini"], gemini: [250, "googlegemini"], cursor: [0, "cursor", 0], vscode: [220, "githubcopilot", 0] };
 /** A tile with a brand's logo as a mask (it takes the tile's glyph colour), or the monogram. */
-const logoTile = (hue, logo, letters, size) =>
-  h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
+const logoTile = (hue, logo, letters, size, saturation = 100) =>
+  h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue, "--s": saturation / 100 }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
 /** An agent's tile, by id (claude-code-2 → claude-code) or by its name. */
 const agentTile = (id, label = id, size = 44) => {
   if (id === "remote") return brandTile(size);
   const entry = AGENT_CATALOG.find((c) => id === c.id || String(id).startsWith(`${c.id}-`) || c.label === label || c.label === id);
-  const [hue, logo] = TILES[entry?.id ?? id] ?? [260, null];
-  return logoTile(hue, logo, String(label).replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "AG", size);
+  const [hue, logo, saturation] = TILES[entry?.id ?? id] ?? [260, null];
+  return logoTile(hue, logo, String(label).replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "AG", size, saturation);
 };
 /** A model provider's tile. */
-const providerTile = (id, size = 28) => logoTile({ anthropic: 30, openai: 160, openrouter: 250 }[id] ?? 200, id, PROVIDERS[id]?.label[0] ?? "?", size);
+const providerTile = (id, size = 28) => logoTile({ anthropic: 30, openai: 160, openrouter: 250 }[id] ?? 200, id, PROVIDERS[id]?.label[0] ?? "?", size, { openai: 0, openrouter: 0 }[id]);
 /** The catalog entry an MCP connection belongs to (for its tile), by id: claude-code, claude-code-2 … */
 const catalogOf = (a) => AGENT_CATALOG.find((c) => a.id === c.id || a.id.startsWith(`${c.id}-`) || c.match?.test(a.id));
 /** The local CLI an agent identity runs as, when Hewn can give it jobs (claude-code → claude). */

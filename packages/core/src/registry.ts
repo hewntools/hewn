@@ -13,6 +13,8 @@ export interface CapabilityRow {
   iconType: string | null;
   /** Owner's tile hue (overrides the manifest's). */
   hue: number | null;
+  /** Owner's tile saturation in percent (overrides the manifest's). */
+  saturation: number | null;
   /** Owner's position on Home (null: after the ordered ones, by name). */
   homeOrder: number | null;
   archivedAt: string | null;
@@ -149,7 +151,8 @@ CREATE TABLE IF NOT EXISTS capabilities (
   archived_at    TEXT,
   hue            TEXT,
   home_order     TEXT,
-  ui_key         TEXT
+  ui_key         TEXT,
+  saturation     INTEGER
 );
 CREATE TABLE IF NOT EXISTS capability_versions (
   capability_id TEXT NOT NULL REFERENCES capabilities(id),
@@ -382,6 +385,7 @@ const toCapability = (r: Row): CapabilityRow => ({
   displayName: r.display_name ?? null,
   iconType: r.icon_type ?? null,
   hue: r.hue === null || r.hue === undefined ? null : Number(r.hue),
+  saturation: r.saturation === null || r.saturation === undefined ? null : Number(r.saturation),
   homeOrder: r.home_order === null || r.home_order === undefined ? null : Number(r.home_order),
   archivedAt: r.archived_at ?? null,
   createdBy: r.created_by,
@@ -437,6 +441,9 @@ const passkeyRow = (r: Row) => ({
   lastUsedAt: (r.last_used_at as string | null) ?? null,
 });
 
+/** Columns added to a table after it first shipped (also in SCHEMA, for new homes): [table, column, type]. */
+const ADDED_COLUMNS: [string, string, string][] = [["capabilities", "saturation", "INTEGER"]];
+
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
 export class Registry {
   db: Sql;
@@ -444,6 +451,10 @@ export class Registry {
   constructor(db: Sql) {
     this.db = db;
     this.db.exec(SCHEMA);
+    // Columns added after their table first shipped: CREATE TABLE IF NOT EXISTS leaves an existing table as it was.
+    for (const [table, column, type] of ADDED_COLUMNS) {
+      if (!(this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
   }
 
   // ---------- metrics (aggregates only; never inputs, outputs or names of data) ----------
@@ -623,8 +634,8 @@ export class Registry {
     return key;
   }
 
-  setOwnerPrefs(id: string, prefs: { displayName?: string | null; iconType?: string | null; archivedAt?: string | null; hue?: number | null }) {
-    const map: Record<string, string> = { displayName: "display_name", iconType: "icon_type", archivedAt: "archived_at", hue: "hue" };
+  setOwnerPrefs(id: string, prefs: { displayName?: string | null; iconType?: string | null; archivedAt?: string | null; hue?: number | null; saturation?: number | null }) {
+    const map: Record<string, string> = { displayName: "display_name", iconType: "icon_type", archivedAt: "archived_at", hue: "hue", saturation: "saturation" };
     for (const [k, v] of Object.entries(prefs)) this.db.prepare(`UPDATE capabilities SET ${map[k]} = ? WHERE id = ?`).run(v ?? null, id);
   }
 
@@ -835,6 +846,16 @@ export class Registry {
       ? this.db.prepare("SELECT * FROM builds WHERE status = 'waiting' AND depends_on = ? ORDER BY created_at").all(buildId)
       : this.db.prepare("SELECT * FROM builds WHERE status = 'waiting' ORDER BY created_at").all();
     return rows.map(toBuild);
+  }
+
+  /**
+   * The newest build of a capability still on its way: waiting, running or validating (not one done
+   * and waiting for the owner's review). `running`: only one running or validating now.
+   */
+  unfinishedBuild(capabilityId: string, { running = false, except = "" }: { running?: boolean; except?: string } = {}): BuildRow | undefined {
+    const statuses = running ? "'open', 'building', 'validating'" : "'waiting', 'open', 'building', 'validating'";
+    const row = this.db.prepare(`SELECT * FROM builds WHERE capability_id = ? AND id != ? AND status IN (${statuses}) ORDER BY rowid DESC LIMIT 1`).get(capabilityId, except);
+    return row ? toBuild(row as Row) : undefined;
   }
 
   /** The newest retry of a build ("retryOf" in its request), if any. */

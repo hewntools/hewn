@@ -164,6 +164,57 @@ describe("dependent builds", () => {
     assert.ok(done.log.some((l) => /site-connection\/pages@1/.test(l)));
   });
 
+  test("a change that waited for another build still takes its turn behind a change to the same capability", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    t.queue(writeConsumer);
+    await t.platform.settle((await t.platform.create(t.claude, consumerReq)).buildId);
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let releaseConn!: () => void;
+    const connGate = new Promise<void>((r) => (releaseConn = r));
+    t.queue(
+      () => gate,
+      async () => void (await connGate),
+      () => {},
+    );
+    const running = await t.platform.modify(t.claude, { capabilityId: "site-report", request: "reword" });
+    const connChange = await t.platform.modify(USER, { capabilityId: "site-connection", request: "tidy" });
+    const change = await t.platform.modify(t.claude, { capabilityId: "site-report", request: "after the connection", after: connChange.buildId });
+    assert.equal(change.dependsOn, connChange.buildId);
+    assert.equal(change.queued, undefined, "waits for the build it needs");
+    releaseConn();
+    assert.equal((await t.platform.settle(connChange.buildId)).status, "promoted");
+    const queued = t.platform.getBuild(t.claude, change.buildId);
+    assert.equal(queued.status, "waiting");
+    assert.equal(queued.dependsOn, running.buildId, "then for the change already running on site-report");
+    assert.equal(queued.queued, true);
+    release();
+    assert.equal((await t.platform.settle(running.buildId)).status, "promoted");
+    const done = await t.platform.settle(change.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+
+  test("a change waiting for the owner's review doesn't hold up the next change to the capability", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    // An agent's change to a connection waits for the owner's review.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async () => void (await gate), () => {});
+    const reviewed = await t.platform.modify(t.claude, { capabilityId: "site-connection", request: "a" });
+    const next = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    assert.equal(next.queued, true, "queued while the first one builds");
+    release();
+    assert.equal((await t.platform.settle(reviewed.buildId)).status, "review");
+    assert.equal((await t.platform.settle(next.buildId)).status, "promoted", "started once the first one was only waiting for review");
+    const after = await t.platform.modify(USER, { capabilityId: "site-connection", request: "c" });
+    assert.notEqual(after.status, "waiting", "nothing to wait for: the review doesn't count");
+    t.queue(() => {});
+    await t.platform.settle(after.buildId);
+  });
+
   test("cancelling a waiting build; whatever waits for it fails", async () => {
     let release!: () => void;
     t.queue(async (ws) => {
@@ -200,6 +251,35 @@ describe("dependent builds across a restart", () => {
       assert.equal(fresh.registry.getBuild(consumer.buildId)!.dependsOn, retry, "re-pointed to the retry");
       assert.equal((await fresh.settle(retry)).status, "promoted");
       assert.equal((await fresh.settle(consumer.buildId)).status, "promoted");
+    } finally {
+      await fresh.drain();
+      fresh.close();
+    }
+  });
+});
+
+describe("queued changes across a restart", () => {
+  test("the interrupted change is retried, and the change queued behind it follows the retry", async () => {
+    const t = setup();
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    // The first platform's builder never finishes: Hewn "stops" mid-build.
+    t.queue(() => new Promise<void>(() => {}));
+    const first = await t.platform.modify(USER, { capabilityId: "site-connection", request: "a" });
+    const second = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    const third = await t.platform.modify(USER, { capabilityId: "site-connection", request: "c" });
+    assert.equal(third.dependsOn, second.buildId);
+    t.platform.close();
+
+    const scripts: Script[] = [() => {}, () => {}, () => {}];
+    const builder: CapabilityBuilder = { name: "script", build: async (job) => scripts.shift()!(job.workspace, job) };
+    const fresh = nodePlatform(t.home, { secrets: new MemorySecretStore(), builders: { script: builder }, builder: () => "script", maxBuildAttempts: () => 1 });
+    try {
+      const [retry] = await fresh.recoverInterruptedBuilds();
+      assert.ok(retry);
+      assert.equal(fresh.registry.getBuild(retry)!.dependsOn, null, "the retry takes the first one's place: it waits for nothing");
+      assert.equal(fresh.registry.getBuild(second.buildId)!.dependsOn, retry, "re-pointed to the retry");
+      for (const id of [retry, second.buildId, third.buildId]) assert.equal((await fresh.settle(id)).status, "promoted");
     } finally {
       await fresh.drain();
       fresh.close();

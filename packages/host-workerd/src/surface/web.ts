@@ -290,6 +290,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "PUT icon": {
         const body = await readJson(req);
         if (body.hue !== undefined) platform.setHue(owner, id, body.hue);
+        if (body.saturation !== undefined) platform.setSaturation(owner, id, body.saturation);
         if (body.glyph !== undefined) {
           const cells = typeof body.glyph === "string" ? cellsFromSvg(body.glyph) : cellsFromRows(body.glyph);
           if (!cells) throw new PlatformError("invalid_request", 'glyph must be five rows like ".##.." or a 5×5 SVG');
@@ -305,6 +306,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "DELETE icon":
         await platform.setIcon(owner, id, null);
         platform.setHue(owner, id, null);
+        platform.setSaturation(owner, id, null);
         return { ok: true };
       case "POST rename":
         platform.rename(owner, id, String((await readJson(req)).name ?? ""));
@@ -687,6 +689,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       // "image": an owner upload (shown as is); "glyph": a 5×5 glyph, the owner's or the builder's ui/icon.svg (tinted by the tile).
       iconKind: !icon ? null : icon.glyph ? "glyph" : "image",
       hue: platform.hueOf(c.id),
+      saturation: platform.saturationOf(c.id),
       ui: !!m.ui?.available,
       version: row?.activeVersion ?? null,
       requests: platform.registry.accessRequests(c.id).length,
@@ -709,6 +712,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       iconKind: glyph ? "glyph" : null,
       iconUrl: glyph ? `/api/builds/${b.buildId}/icon` : null,
       hue: glyph?.hue ?? null,
+      saturation: glyph?.saturation ?? null,
       ui: false,
       version: null,
       requests: 0,

@@ -56,7 +56,8 @@ const grouped = (caps: CapabilitySummary[]) => ({ capabilities: caps.filter((c) 
 async function widgetIcon(platform: Platform, id: string) {
   const file = await platform.icon(id).catch(() => undefined);
   const src = file && file.data.byteLength <= 32_768 ? { kind: file.glyph ? "glyph" : "image", src: `data:${file.type};base64,${btoa(Array.from(file.data, (b) => String.fromCharCode(b)).join(""))}` } : {};
-  return { id, name: platform.activeManifest(id).name, hue: platform.hueOf(id), ...src };
+  const saturation = platform.saturationOf(id);
+  return { id, name: platform.activeManifest(id).name, hue: platform.hueOf(id), ...(saturation === null ? {} : { saturation }), ...src };
 }
 
 function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[]): Tool[] {

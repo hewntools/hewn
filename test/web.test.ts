@@ -571,10 +571,17 @@ describe("web client (owner surface)", () => {
       assert.equal(clean.match(/<rect /g)!.length, 5);
       assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { glyph: ["#"] } })).status, 400);
       assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { hue: 400 } })).status, 400);
+      // Saturation: 0 (black or white on grey) to 150; the cap keeps tiles from turning neon.
+      assert.equal(rl.saturation, null, "the default");
+      assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { saturation: 0 } })).status, 200);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "running-log").saturation, 0);
+      assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { saturation: 151 } })).status, 400);
+      assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { saturation: 12.5 } })).status, 400);
       await api("/capabilities/running-log/icon", { method: "DELETE" });
       rl = (await api("/capabilities")).json.find((c: any) => c.id === "running-log");
       assert.equal(rl.iconKind, null);
       assert.equal(rl.hue, null, "back to the manifest's (none)");
+      assert.equal(rl.saturation, null);
     });
 
     test("cancel from the web", async () => {
