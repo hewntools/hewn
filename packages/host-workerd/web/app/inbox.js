@@ -159,7 +159,6 @@ async function pollInbox(withRecent = false) {
   }
   inboxTimer = setTimeout(pollInbox, inboxData.building?.length ? 4000 : 15000);
 }
-window.refreshInbox = pollInbox;
 
 /** The one exception to "everything goes to the Inbox": an agent blocked on a destructive call. */
 function showBanner(blocking) {

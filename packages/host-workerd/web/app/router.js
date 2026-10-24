@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The router: the address (#/…) to a page. It imports the pages, and starts the client.
 import { empty, errorBox, h, setWallpaper } from "../kit.js";
-// Load order: the theme, then the page frame (it brings in the Inbox before the command palette,
-// whose glyphs use the Inbox's bell), then the pages; this module starts the client last.
+// No module reads another's binding as it loads, so the order below is free; the client starts at the end of this module.
 import "./appearance.js";
 import { hues, leaving, loadSettings, page } from "./frame.js";
 import { accountsPage } from "./accounts.js";
