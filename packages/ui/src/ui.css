@@ -154,7 +154,7 @@ small, .muted { color: var(--text-2); }
 .glass-bar > [aria-current], .glass-bar > [aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
 /* Wallpaper: big soft pixels behind glass. <div class="wallpaper"><i style="--h:250;--x:10%;--y:20%;--w:380px"></i>…</div> */
 .wallpaper { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
-.wallpaper i { position: absolute; left: var(--x, 0); top: var(--y, 0); width: var(--w, 360px); aspect-ratio: 1; border-radius: 32px; background: oklch(var(--wp-l) var(--wp-c) var(--h, 125)); opacity: var(--wp-a); filter: blur(80px); }
+.wallpaper i { position: absolute; left: var(--x, 0); top: var(--y, 0); width: var(--w, 360px); aspect-ratio: 1; border-radius: 32px; background: oklch(var(--wp-l) calc(var(--wp-c) * var(--s, 1)) var(--h, 125)); opacity: var(--wp-a); filter: blur(80px); }
 .wallpaper.dim i { opacity: calc(var(--wp-a) * 0.5); }
 [data-wallpaper="off"] .wallpaper { display: none; }
 
@@ -283,11 +283,13 @@ dialog h2, .dialog h2 { margin-top: 0; }
 /* <span class="app-icon" style="--hue:250"><svg viewBox="0 0 5 5">…5×5 rects…</svg></span>
    or <span class="app-icon" style="--hue:250">RL</span> for the monogram fallback. */
 .app-icon {
-  --size: 64px; --h: var(--hue, 260);
+  /* --s: saturation, a multiple of the tile's chroma (0–1.5). Below 0.25 the glyph turns to ink, so 0
+     is black or white on grey (a black-and-white brand). */
+  --size: 64px; --h: var(--hue, 260); --s: 1; --ink: clamp(0, calc(1 - var(--s) / 0.25), 1);
   position: relative; display: inline-grid; place-items: center; flex: none; width: var(--size); height: var(--size);
   border-radius: calc(var(--size) * 0.28); border: 1px solid var(--border); box-shadow: var(--hl), var(--shadow);
-  background: oklch(var(--tile-l) var(--tile-c) var(--h) / var(--tile-a));
-  color: oklch(var(--glyph-l) var(--glyph-c) var(--h));
+  background: oklch(var(--tile-l) calc(var(--tile-c) * var(--s)) var(--h) / var(--tile-a));
+  color: color-mix(in oklch, var(--text) calc(var(--ink) * 100%), oklch(var(--glyph-l) calc(var(--glyph-c) * var(--s)) var(--h)));
   font: 650 calc(var(--size) * 0.3)/1 var(--mono); letter-spacing: -0.02em;
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
 }
@@ -391,7 +393,7 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .setting .sub { font-size: var(--fs-sm); color: var(--text-2); }
 .app-icon.brand { background: var(--accent); color: var(--accent-text); border-color: transparent; box-shadow: var(--glow); }
 /* Building: tile desaturates, glyph fills pixel by pixel with progress; not openable (tap → build screen). */
-.app-icon.building { background: oklch(var(--tile-l) calc(var(--tile-c) * 0.3) var(--h) / calc(var(--tile-a) * 0.55)); }
+.app-icon.building { background: oklch(var(--tile-l) calc(var(--tile-c) * 0.3 * var(--s)) var(--h) / calc(var(--tile-a) * 0.55)); }
 /* Inline capability reference: <span class="cap-ref"><span class="app-icon">…</span>Running Log</span> */
 .cap-ref { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; vertical-align: middle; white-space: nowrap; }
 .cap-ref .app-icon { --size: 20px; vertical-align: top; }
@@ -433,6 +435,12 @@ input.bare, input.bare:focus { flex: 1; min-height: 44px; border: 0; background:
 .glyph-editor > button { width: 36px; min-height: 36px; padding: 0; border-radius: var(--radius-xs); background: var(--surface-2); border-color: var(--border); }
 .glyph-editor > button[aria-pressed="true"] { background: var(--text); border-color: transparent; }
 input[type=range].hue-range { width: 100%; accent-color: var(--accent); }
+/* A mark under a slider where its default is (Set icon's Saturation: 100%). --at: 0–1 along the
+   track, which runs from the thumb's centre at one end to the other (a native thumb is about 16px). */
+.range-mark { --thumb: 16px; --x: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--at)); position: relative; display: block; padding-bottom: 12px; }
+.range-mark > input { display: block; margin: 0; }
+.range-mark::before { content: ""; position: absolute; left: var(--x); bottom: 10px; width: 1px; height: 4px; background: var(--text-3); }
+.range-mark::after { content: attr(data-mark); position: absolute; left: var(--x); bottom: 0; transform: translateX(-50%); font: 500 10px/1 var(--mono); color: var(--text-3); }
 
 /* Text selection that shows on every surface, including accent fills. */
 ::selection { background: color-mix(in oklch, var(--accent-ink) 35%, transparent); }

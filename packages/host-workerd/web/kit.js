@@ -150,6 +150,10 @@ export function hueOf(cap) {
   for (const ch of cap?.id ?? "") hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return hash % 360;
 }
+/** Tile saturation as a multiple of the tile's chroma: the capability's percent / 100, else 1. */
+export const satOf = (cap) => (Number.isInteger(cap?.saturation) ? cap.saturation / 100 : 1);
+/** A capability's colour for the wallpaper: [hue, saturation]. */
+export const tintOf = (cap) => [hueOf(cap), satOf(cap)];
 const monogram = (name) =>
   (name ?? "?")
     .split(/\s+/)
@@ -218,7 +222,7 @@ export function glyphCells(cap) {
 export function appIcon(cap, { size = 64, badge, more, progress, waiting = false, cls = "" } = {}) {
   // `waiting`: building with no measurable progress yet (code being written): the glyph pulses dimly.
   const building = typeof progress === "number";
-  const el = h("span", { class: `app-icon ${building ? "building" : ""} ${building && waiting ? "waiting" : ""} ${cls}`.replace(/\s+/g, " ").trim(), style: { "--size": `${size}px`, "--hue": hueOf(cap) }, "aria-hidden": "true" });
+  const el = h("span", { class: `app-icon ${building ? "building" : ""} ${building && waiting ? "waiting" : ""} ${cls}`.replace(/\s+/g, " ").trim(), style: { "--size": `${size}px`, "--hue": hueOf(cap), "--s": satOf(cap) }, "aria-hidden": "true" });
   if (cap?.iconKind === "image") {
     el.append(h("img", { src: iconUrl(cap), alt: "", class: "icon-img" }));
   } else if (cap?.iconKind === "glyph") {
@@ -256,12 +260,17 @@ const SPOTS = [
   { x: "70%", y: "60%", w: "480px" },
   { x: "8%", y: "68%", w: "380px" },
 ];
-/** Soft pixels behind the glass, tinted with the owner's capability hues. */
+/** Soft pixels behind the glass, tinted with the owner's capability colours: hues, or [hue, saturation] (tintOf). */
 export function setWallpaper(hues, { dim = true } = {}) {
   const wp = document.getElementById("wallpaper");
   const list = (hues.length ? hues : [250, 125]).slice(0, 4);
   wp.className = `wallpaper ${dim ? "dim" : ""}`;
-  wp.replaceChildren(...list.map((hue, i) => h("i", { style: { "--h": hue, "--x": SPOTS[i].x, "--y": SPOTS[i].y, "--w": SPOTS[i].w } })));
+  wp.replaceChildren(
+    ...list.map((tint, i) => {
+      const [hue, s = 1] = Array.isArray(tint) ? tint : [tint];
+      return h("i", { style: { "--h": hue, "--s": s, "--x": SPOTS[i].x, "--y": SPOTS[i].y, "--w": SPOTS[i].w } });
+    }),
+  );
 }
 
 // ---------- toasts ----------
@@ -311,12 +320,15 @@ export function modal(build, { width = 440, cls = "" } = {}) {
     };
     dlg.addEventListener("close", () => (dlg.remove(), resolve(result)));
     // A click on the backdrop closes. A click on a disabled control inside also lands on the dialog
-    // element (the control can't take it), so the pointer has to be outside the box too.
-    dlg.addEventListener("click", (e) => {
-      if (e.target !== dlg) return;
+    // element (the control can't take it), so the pointer has to be outside the box too. And it has
+    // to have gone down there: a slider dragged past the edge and let go outside isn't a click out.
+    const outside = (e) => {
       const r = dlg.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
-    });
+      return e.target === dlg && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
+    };
+    let downOutside = false;
+    dlg.addEventListener("pointerdown", (e) => (downOutside = outside(e)));
+    dlg.addEventListener("click", (e) => downOutside && outside(e) && close());
     dlg.append(...[build(close, dlg)].flat(Infinity).filter(Boolean));
     document.body.append(dlg);
     dlg.showModal();

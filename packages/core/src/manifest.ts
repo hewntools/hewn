@@ -26,6 +26,7 @@ export const ABI_FEATURES: AbiFeature[] = [
   { name: '"config"', since: "2.1", used: (m) => m.config !== undefined || (m.requires?.hosts ?? []).some((h) => h.startsWith("config:")) },
   { name: '"requires.model"', since: "2.2", used: (m) => m.requires?.model !== undefined },
   { name: '"widgets"', since: "2.3", used: (m) => m.widgets !== undefined },
+  { name: '"saturation"', since: "2.4", used: (m) => m.saturation !== undefined },
 ];
 
 /** ctx members added after 2.0, each exposed only to code whose manifest declares at least `since`. */
