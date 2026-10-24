@@ -1,41 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The command palette (⌘K, "/"): tools, places and actions in one search.
-import { api, appIcon, caps, enc, fail, h, modal, pixelGlyph, rowCells, toast } from "../kit.js";
+import { api, appIcon, caps, enc, fail, h, modal, toast } from "../kit.js";
 import { addConnectionSheet } from "./accounts.js";
 import { jobPicker } from "./agents.js";
 import { applyTheme, isDark, THEME_KEY } from "./appearance.js";
 import { connectDialog } from "./connect.js";
 import { go, keyHandlers, put, settings, shortcutsDialog } from "./frame.js";
-import { BELL, closeInbox, toggleInbox } from "./inbox.js";
+import { glyphTile, PALETTE_GLYPHS } from "./glyphs.js";
+import { closeInbox, toggleInbox } from "./inbox.js";
 import { SECTIONS } from "./settings.js";
 import { openCapability, openChange } from "./tool-actions.js";
 import { addWidgetSheet } from "./widgets.js";
 
-export { commandPalette, glyphTile, PALETTE_GLYPHS };
+export { commandPalette };
 
 // ---------- the command palette (⌘K, "/"): tools, places and actions in one search ----------
-
-/** 5×5 glyphs for the palette's actions and places (Hewn's pixel style, no UI icon set). */
-const PALETTE_GLYPHS = {
-  plus: ["..#..", "..#..", "#####", "..#..", "..#.."],
-  widget: ["##.##", "##.##", ".....", "##.##", "##.##"],
-  edit: ["...##", "..###", ".###.", "###..", "#...."],
-  agent: [".###.", ".###.", ".....", "#####", "#####"],
-  link: ["##...", "#.#..", ".###.", "..#.#", "...##"],
-  hammer: ["#####", "#####", "..#..", "..#..", "..#.."],
-  ask: ["#####", "#...#", "#####", ".#...", "#...."],
-  backup: ["..#..", "..#..", "#.#.#", ".###.", "#####"],
-  appearance: [".###.", "###.#", "###.#", "###.#", ".###."],
-  keys: ["#####", "#.#.#", "#####", "#...#", "#####"],
-  home: ["..#..", ".###.", "#####", "##.##", "##.##"],
-  bell: BELL,
-  activity: ["#.###", ".....", "#.###", ".....", "#.###"],
-  key: [".###.", ".#.#.", ".###.", "..#..", "..##."],
-  settings: ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"],
-  chip: ["#####", "#...#", "#.#.#", "#...#", "#####"],
-};
-/** A small tile with a pixel glyph, for Hewn's own actions and places: ink on grey (saturation 0), like Home's New; colour is for tools. */
-const glyphTile = (rows, size) => h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 }, "aria-hidden": "true" }, pixelGlyph(rowCells(rows)));
 
 /**
  * Everything the palette offers: tools (open; Change… and Info when you type), connections, places

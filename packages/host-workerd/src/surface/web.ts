@@ -107,7 +107,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "glyphs", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {

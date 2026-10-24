@@ -5,6 +5,7 @@ import { api, appIcon, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from
 import { activityRow, groupItems } from "./activity.js";
 import { agentRequestSheet, agentTile, confirmationSheet } from "./agents.js";
 import { go, put } from "./frame.js";
+import { BELL } from "./glyphs.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { buildingLabel } from "./home.js";
 import { route } from "./router.js";
@@ -12,11 +13,10 @@ import { proposalSheet, schedulesSheet } from "./schedules.js";
 import { toolModelSheet } from "./tool-model.js";
 import { runnableOps } from "./tool.js";
 
-export { BELL, closeInbox, inboxBtn, inboxPanel, pollInbox, toggleInbox };
+export { closeInbox, inboxBtn, inboxPanel, pollInbox, toggleInbox };
 
 // ---------- the Inbox: Needs you + Activity (replaces the builds chip, the Agents dot and Home's notices) ----------
 
-const BELL = ["..#..", ".###.", ".###.", "#####", "..#.."];
 const inboxCount = h("span", { class: "inbox-count", hidden: true });
 const inboxBuilding = h("span", { class: "inbox-building", hidden: true, title: "Building" });
 const inboxBtn = h("button", { class: "inbox-btn", "aria-label": "Inbox", "aria-haspopup": "dialog", "aria-expanded": "false", title: "Inbox (i)" }, pixelGlyph(rowCells(BELL)), inboxCount, inboxBuilding);

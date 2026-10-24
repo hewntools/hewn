@@ -30,10 +30,10 @@ import {
 import { mmss } from "./build.js";
 import { connectDialog } from "./connect.js";
 import { brandTile, go, hewnMachine, hues, page, put, setSettings, settings } from "./frame.js";
+import { glyphTile, PALETTE_GLYPHS } from "./glyphs.js";
 import { buildsChosen, jobModelOf, modelWords, saveBuildModel } from "./home.js";
 import { pollInbox } from "./inbox.js";
 import { PROVIDERS } from "./models.js";
-import { glyphTile, PALETTE_GLYPHS } from "./palette.js";
 import { route } from "./router.js";
 
 export {
