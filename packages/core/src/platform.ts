@@ -572,7 +572,9 @@ export class Platform {
 
   /** Resolves when a build has finished (promoted, failed or cancelled). */
   async settle(buildId: string): Promise<BuildView> {
-    while (this.mustBuild(buildId).status === "waiting" && !this.running.has(buildId)) await new Promise((r) => this.events.once(`${buildId}:state`, r));
+    // Waiting, or started and still opening its workspace (its builder not running yet).
+    const before = (s: BuildRow["status"]) => s === "waiting" || s === "open";
+    while (before(this.mustBuild(buildId).status) && !this.running.has(buildId)) await new Promise((r) => this.events.once(`${buildId}:state`, r));
     await this.running.get(buildId);
     return this.buildView(this.mustBuild(buildId));
   }
@@ -1642,6 +1644,7 @@ export class Platform {
    */
   async setCapabilityModel(owner: Agent, capabilityId: string, to: { tier?: string; model?: string }): Promise<BuildView> {
     requireOwner(owner);
+    this.noChangeOnItsWay(capabilityId, "change its model");
     const cur = this.activeManifest(capabilityId).requires?.model;
     if (!cur) throw new PlatformError("invalid_request", `${capabilityId} doesn't use a model (that takes a change by the builder)`);
     if ((to.tier === undefined) === (to.model === undefined)) throw new PlatformError("invalid_request", 'give either "tier" or "model"');
@@ -1669,6 +1672,15 @@ export class Platform {
   replacePinnedModel(owner: Agent, capabilityId: string, model: string): Promise<BuildView> {
     if (!this.activeManifest(capabilityId).requires?.model?.model) throw new PlatformError("invalid_request", `${capabilityId} doesn't pin a model`);
     return this.setCapabilityModel(owner, capabilityId, { model });
+  }
+
+  /**
+   * A manifest-only change makes a new version at once: a change on its way would then fail at the
+   * end ("capability changed since this build started"), so it waits until that one is done.
+   */
+  private noChangeOnItsWay(capabilityId: string, what: string) {
+    const ahead = this.registry.unfinishedBuild(capabilityId);
+    if (ahead) throw new PlatformError("conflict", `a change to ${capabilityId} is on its way (build ${ahead.id}); ${what} once it's done`);
   }
 
   /**
@@ -2341,6 +2353,7 @@ export class Platform {
   async removeWidget(owner: Agent, capabilityId: string, name: string): Promise<BuildView> {
     requireOwner(owner);
     this.visibleActive(owner, capabilityId);
+    this.noChangeOnItsWay(capabilityId, "delete the widget");
     const w = widgetOf(this.activeManifest(capabilityId), name);
     if (!w) throw new PlatformError("not_found", `${capabilityId} has no widget ${name}`);
     const b = await this.manifestOnlyModify(owner, capabilityId, (m) => { const rest = (m.widgets ?? []).filter((x) => x.name !== name); if (rest.length) m.widgets = rest; else delete m.widgets; }, `delete the "${w.title}" widget`);
@@ -2963,6 +2976,8 @@ export class Platform {
   /** Open a create build's workspace (skeleton, or seeded files) and start its builder. */
   private async startCreate(buildId: string, seed?: Files) {
     const b = this.mustBuild(buildId);
+    // Started: no longer waiting (as in startModify).
+    this.registry.updateBuild(buildId, { status: "open" });
     const req = b.request as unknown as CreateRequest;
     const id = b.capabilityId;
     const connection = req.kind === "connection";
@@ -3064,6 +3079,8 @@ export class Platform {
       this.events.emit("changed");
       return;
     }
+    // Started: no longer waiting, so a second release skips it and the next change's turn waits for it.
+    this.registry.updateBuild(buildId, { status: "open" });
     const cap = this.registry.getCapability(b.capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${b.capabilityId} is no longer active`);
     const base = await this.loadVersion(cap.id, cap.activeVersion);
