@@ -85,7 +85,8 @@ export interface Shared {
  * The base of every domain: the ports (Platform's own), the event bus, the loaded versions, and the
  * lookups they all make. A domain calls another's public methods through the facade
  * (`this.platform.readiness()`), as Platform's own `this.readiness()` did, so a wrapper put on a
- * Platform method still sees every call; what Platform doesn't offer it reaches through `this.d`
+ * Platform method still sees every call from another domain (a domain's calls to its own methods
+ * stay inside it); what Platform doesn't offer it reaches through `this.d`
  * (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`,
  * `heartbeatMs` …) are read from the facade each time.
  */

@@ -158,7 +158,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "builds_get",
     scopes: ["create", "modify"],
-    description: "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn.",
+    description: "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn. queued: true while it waits its turn behind an earlier change to the same capability.",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
   },
   {

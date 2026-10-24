@@ -4,7 +4,7 @@ A tool is a small program its owner keeps: typed operations over its own private
 
 This page is for writing one by hand. On Hewn, a builder agent usually writes tools from a description; it gets the same contract as a prompt, [`builder-brief.md`](builder-brief.md). The concepts and invariants behind it are in [`capability-model.md`](capability-model.md). The exact types are in [`src/`](src) and the JSON Schemas in [`schemas/`](schemas).
 
-Everything here is [ABI](README.md#versions) 2.3. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
+Everything here is [ABI](README.md#versions) 2.4. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
 
 ## Layout
 
@@ -64,6 +64,7 @@ The `abi` field says which version of the contract the tool is written against. 
 | 2.1 | `kind` (connections) and `requires.secrets` (connections only), deprecated operations, `config`, `ctx.config`, `config:NAME` hosts |
 | 2.2 | `requires.model`, `ctx.model.generate` |
 | 2.3 | `widgets`, and the view models widget operations return |
+| 2.4 | `saturation` |
 
 Declare the lowest version whose features you use. The history is also in [`src/abi.ts`](src/abi.ts) (`ABI_HISTORY`).
 

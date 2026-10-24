@@ -4,7 +4,7 @@ This document defines Hewn's domain concepts and the invariants between them. It
 
 A **Capability** is what the rest of the spec, and Hewn's interface, call a **tool**. This document keeps the formal name. For the practical side, see [Writing a tool](tools.md) and [Connecting an agent](agents.md).
 
-[ABI](README.md#versions) 2.3 is current. Anything added after 2.0 is marked with the minor version that introduced it ("since 2.1"); see [Capability ABI](#capability-abi).
+[ABI](README.md#versions) 2.4 is current. Anything added after 2.0 is marked with the minor version that introduced it ("since 2.1"); see [Capability ABI](#capability-abi).
 
 ## Capability
 
@@ -379,6 +379,7 @@ A manifest's `abi` declares the lowest version the capability needs. Minor versi
 | 2.1 | `kind` (connections), `config`, `config:NAME` hosts and `ctx.config`, `deprecated` operations |
 | 2.2 | `requires.model` and `ctx.model.generate` |
 | 2.3 | `widgets` (and read-only runs) |
+| 2.4 | `saturation` |
 
 A manifest without `abi` is 2.0.
 

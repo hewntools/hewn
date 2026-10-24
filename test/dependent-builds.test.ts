@@ -233,6 +233,48 @@ describe("dependent builds", () => {
   });
 });
 
+describe("a queued change released while every build slot is taken", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(() => (t = setup({ maxRunningBuilds: 1 })));
+  afterEach(async () => {
+    await t.platform.drain();
+    t.cleanup();
+  });
+
+  test("it counts as started: the owner's answer to the review ahead of it doesn't start it again", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    let releaseA!: () => void;
+    let releaseX!: () => void;
+    const gateA = new Promise<void>((r) => (releaseA = r));
+    const gateX = new Promise<void>((r) => (releaseX = r));
+    let runsB = 0;
+    t.queue(
+      async () => void (await gateA),
+      async (ws, job) => (await gateX, writeConsumer(ws, job)),
+      () => void runsB++,
+    );
+    // A: an agent's change to the connection (it waits for review), building in the one slot.
+    const a = await t.platform.modify(t.claude, { capabilityId: "site-connection", request: "a" });
+    const b = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    assert.equal(b.queued, true);
+    // X takes the slot A gives up, so B, released when A goes to review, waits for a slot.
+    const x = await t.platform.create(t.claude, consumerReq);
+    releaseA();
+    assert.equal((await t.platform.settle(a.buildId)).status, "review");
+    for (let i = 0; i < 200 && !t.platform.getBuild(USER, b.buildId).log.length; i++) await new Promise((r) => setTimeout(r, 10));
+    const started = t.platform.getBuild(USER, b.buildId);
+    assert.equal(started.status, "open", "started, though no slot is free yet");
+    assert.equal(started.queued, undefined);
+    await t.platform.rejectBuild(USER, a.buildId);
+    releaseX();
+    assert.equal((await t.platform.settle(x.buildId)).status, "promoted");
+    const done = await t.platform.settle(b.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.equal(runsB, 1, "built once");
+  });
+});
+
 describe("dependent builds across a restart", () => {
   test("the interrupted dependency is retried, and the waiting build follows the retry", async () => {
     const t = setup();

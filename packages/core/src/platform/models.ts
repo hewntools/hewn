@@ -278,6 +278,7 @@ export class Models extends Domain {
    */
   async setCapabilityModel(owner: Agent, capabilityId: string, to: { tier?: string; model?: string }): Promise<BuildView> {
     requireOwner(owner);
+    this.d.builds.noChangeOnItsWay(capabilityId, "change its model");
     const cur = this.activeManifest(capabilityId).requires?.model;
     if (!cur) throw new PlatformError("invalid_request", `${capabilityId} doesn't use a model (that takes a change by the builder)`);
     if ((to.tier === undefined) === (to.model === undefined)) throw new PlatformError("invalid_request", 'give either "tier" or "model"');
