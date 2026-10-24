@@ -284,7 +284,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         return { lines: platform.logLines(id, n) };
       case "GET icon": {
         platform.get(owner, id);
-        const icon = await platform.icon(id);
+        // ?default=1: the builder's glyph, without the owner's (what Use default goes back to).
+        const icon = await platform.icon(id, { owner: url.searchParams.get("default") !== "1" });
         if (!icon) throw new PlatformError("not_found", "no icon");
         // Uploaded SVGs are untrusted: sandboxed, no scripts, even if opened directly on this origin.
         return new Response(body(icon.data), {
@@ -601,7 +602,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     // What the owner attached (the client sends refs): the bytes come from the store, for the intake to read.
     if (!Array.isArray(body.messages)) throw new PlatformError("invalid_request", "messages must be a list");
     const messages = await Promise.all(body.messages.map(async (m) => (m?.attachments?.length ? { ...m, attachments: await platform.attachmentsWithData(owner, m.attachments) } : { ...m })));
-    const request = { ...body, messages, catalog, current: currentManifest, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
+    // Changes on their way: this one lands after them, so the intake builds on them rather than repeating them.
+    const coming = currentManifest ? platform.changesComing(owner, body.capabilityId!).map((b) => b.request || `(${b.kind})`) : [];
+    const request = { ...body, messages, catalog, current: currentManifest, coming: coming.length ? coming : undefined, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
     const kept = (reply: IntakeReply): IntakeReply => {
       const { remember, forget, ...rest } = reply;
       const saved = platform.applyIntakeMemory(owner, body.capabilityId, remember, forget);

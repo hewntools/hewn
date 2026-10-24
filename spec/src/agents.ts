@@ -54,7 +54,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "capabilities_get",
     scopes: ["discover"],
-    description: "Get a capability's public manifest: purpose and every operation's input/output JSON Schema and side effect.",
+    description:
+      "Get a capability's public manifest: purpose and every operation's input/output JSON Schema and side effect. For an agent that can change it, also changesComing: its changes queued or building (oldest first), which a new change lands after.",
     inputSchema: obj({ capabilityId: str() }, ["capabilityId"]),
   },
   {
@@ -114,7 +115,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_modify",
     scopes: ["modify"],
     description:
-      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
+      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Changes to one capability take turns: one asked for while another is queued or building waits for it (status waiting) and is built on the version it makes. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
     inputSchema: obj({ capabilityId: str(), request: str("Desired change"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId", "request"]),
   },
   {

@@ -584,6 +584,8 @@ describe("web client (owner surface)", () => {
       assert.equal(rl.hue, 30);
       const svg = (await http("/api/capabilities/running-log/icon")).body;
       assert.equal(svg.match(/<rect /g)!.length, 15);
+      // ?default=1: the builder's glyph only (Use default's preview); this one has none.
+      assert.equal((await http("/api/capabilities/running-log/icon?default=1")).status, 404);
       // An SVG is accepted too, but only its cells survive.
       const hostile = '<svg viewBox="0 0 5 5"><script>alert(1)</script><rect x="0" y="0" width="5" height="1" onload="x()"/></svg>';
       assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { glyph: hostile } })).status, 200);

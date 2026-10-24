@@ -15,27 +15,27 @@ export { commandPalette };
 
 // ---------- the command palette (⌘K, "/"): tools, places and actions in one search ----------
 
-/** 5×5 glyphs for the palette's actions and places (Hewn's pixel style, no UI icon set): [hue, rows]. */
+/** 5×5 glyphs for the palette's actions and places (Hewn's pixel style, no UI icon set). */
 const PALETTE_GLYPHS = {
-  plus: [125, ["..#..", "..#..", "#####", "..#..", "..#.."]],
-  widget: [200, ["##.##", "##.##", ".....", "##.##", "##.##"]],
-  edit: [30, ["...##", "..###", ".###.", "###..", "#...."]],
-  agent: [300, [".###.", ".###.", ".....", "#####", "#####"]],
-  link: [180, ["##...", "#.#..", ".###.", "..#.#", "...##"]],
-  hammer: [55, ["#####", "#####", "..#..", "..#..", "..#.."]],
-  ask: [250, ["#####", "#...#", "#####", ".#...", "#...."]],
-  backup: [160, ["..#..", "..#..", "#.#.#", ".###.", "#####"]],
-  appearance: [270, [".###.", "###.#", "###.#", "###.#", ".###."]],
-  keys: [220, ["#####", "#.#.#", "#####", "#...#", "#####"]],
-  home: [125, ["..#..", ".###.", "#####", "##.##", "##.##"]],
-  bell: [40, BELL],
-  activity: [10, ["#.###", ".....", "#.###", ".....", "#.###"]],
-  key: [80, [".###.", ".#.#.", ".###.", "..#..", "..##."]],
-  settings: [210, ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"]],
-  chip: [190, ["#####", "#...#", "#.#.#", "#...#", "#####"]],
+  plus: ["..#..", "..#..", "#####", "..#..", "..#.."],
+  widget: ["##.##", "##.##", ".....", "##.##", "##.##"],
+  edit: ["...##", "..###", ".###.", "###..", "#...."],
+  agent: [".###.", ".###.", ".....", "#####", "#####"],
+  link: ["##...", "#.#..", ".###.", "..#.#", "...##"],
+  hammer: ["#####", "#####", "..#..", "..#..", "..#.."],
+  ask: ["#####", "#...#", "#####", ".#...", "#...."],
+  backup: ["..#..", "..#..", "#.#.#", ".###.", "#####"],
+  appearance: [".###.", "###.#", "###.#", "###.#", ".###."],
+  keys: ["#####", "#.#.#", "#####", "#...#", "#####"],
+  home: ["..#..", ".###.", "#####", "##.##", "##.##"],
+  bell: BELL,
+  activity: ["#.###", ".....", "#.###", ".....", "#.###"],
+  key: [".###.", ".#.#.", ".###.", "..#..", "..##."],
+  settings: ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"],
+  chip: ["#####", "#...#", "#.#.#", "#...#", "#####"],
 };
-/** A small tile with a pixel glyph, for things that aren't tools. */
-const glyphTile = ([hue, rows], size) => h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, pixelGlyph(rowCells(rows)));
+/** A small tile with a pixel glyph, for Hewn's own actions and places: ink on grey (saturation 0), like Home's New; colour is for tools. */
+const glyphTile = (rows, size) => h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 }, "aria-hidden": "true" }, pixelGlyph(rowCells(rows)));
 
 /**
  * Everything the palette offers: tools (open; Change… and Info when you type), connections, places

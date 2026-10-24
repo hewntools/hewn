@@ -65,10 +65,10 @@ export class Presentation extends Domain {
     return this.registry.getCapability(capabilityId)?.saturation ?? this.activeManifest(capabilityId).saturation ?? null;
   }
 
-  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. */
-  async icon(capabilityId: string): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
+  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. `owner: false`: the builder's only (Set icon's Use default). */
+  async icon(capabilityId: string, { owner = true }: { owner?: boolean } = {}): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
     const cap = this.registry.getCapability(capabilityId);
-    if (cap?.iconType) {
+    if (owner && cap?.iconType) {
       const data = await this.blobs.get(`icons/${capabilityId}`);
       const glyph = cap.iconType === "glyph";
       if (data) return { data, type: glyph ? "image/svg+xml" : cap.iconType, glyph };

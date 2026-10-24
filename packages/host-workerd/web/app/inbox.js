@@ -48,7 +48,7 @@ window.addEventListener("hashchange", () => closeInbox());
 function needIcon(n, all, size = 36) {
   if (n.capabilityId) return appIcon(all.get(n.capabilityId) ?? { id: n.capabilityId, name: n.title }, { size });
   if (n.kind === "agent") return agentTile(n.title, n.title, size);
-  return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": 125 } }, n.kind === "spend" ? "$" : "·");
+  return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 } }, n.kind === "spend" ? "$" : "·");
 }
 
 /** What a Needs-you row opens: its own sheet (or page). */
