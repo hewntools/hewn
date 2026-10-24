@@ -2,16 +2,13 @@
 // Platform: the one object every surface calls. A facade: each method hands its call to one of the
 // domains in ./platform/ (builds, models, grants …; context.ts says what they share).
 import { AgentStore, type AgentDetails, type PendingRequest } from "./agents.ts";
-import { type Agent, canSee, requireOwner, requireScope, type Scope, USER } from "./auth.ts";
-import { PlatformError } from "./errors.ts";
+import type { Agent, Scope } from "./auth.ts";
 import type { Cells } from "./glyph.ts";
 import type { Deadline } from "./deadline.ts";
-import { abiAtLeast, type CapabilityManifest, compileSchema, type ModelRequirement, opKey, refreshMs, schemaErrors, WIDGET_SIZES, type WidgetManifest, type WidgetSize, widgetOf } from "./manifest.ts";
-import { viewErrors, type WidgetOutput } from "./widgets.ts";
+import type { CapabilityManifest, ModelRequirement, WidgetManifest } from "./manifest.ts";
 import type { HostModels, ModelSettings } from "./models.ts";
 import type { Blobs, CapabilityRuntime, Files, SecretStore, Sql, Workbench } from "./ports.ts";
 import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildTurn, type Confirmation, Registry } from "./registry.ts";
-import { randomToken, sha256 } from "./sha256.ts";
 import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { type Schedule, ScheduleStore } from "./schedules.ts";
 import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
@@ -27,6 +24,8 @@ import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport } from "./platform/builds.ts";
 import { Validation } from "./platform/validation.ts";
+import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
+import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
 // What the domains define, importable from here as before.
@@ -37,6 +36,8 @@ export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
 export { MODEL_KEYS } from "./platform/models.ts";
 export { type ConnectionHealth, HEALTH_DEADLINE_MS, HEALTH_CACHE_MS } from "./platform/connections.ts";
 export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH } from "./platform/invocation.ts";
+export { WIDGET_DEADLINE_MS, type HomeEntry, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
+export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
 export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReportRow, type BuildReport, slugify, RESERVED_IDS } from "./platform/builds.ts";
 export { matches } from "./platform/validation.ts";
@@ -101,9 +102,6 @@ export class MemorySecretStore implements SecretStore {
   }
 }
 
-/** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
-export const LOG_RETENTION_DAYS = 14;
-
 export class Platform {
   registry: Registry;
   blobs: Blobs;
@@ -162,6 +160,7 @@ export class Platform {
     d.data = new Data(s);
     d.discovery = new Discovery(s);
     d.grants = new Grants(s);
+    d.housekeeping = new Housekeeping(s);
     d.instructions = new Instructions(s);
     d.invocation = new Invocation(s);
     d.models = new Models(s);
@@ -169,6 +168,7 @@ export class Platform {
     d.schedules = new Schedules(s, opts);
     d.sessions = new Sessions(s);
     d.validation = new Validation(s);
+    d.widgets = new Widgets(s);
   }
 
   close() {
@@ -282,6 +282,22 @@ export class Platform {
   recentFailures(owner: Agent, capabilityId: string) { return this.d.invocation.recentFailures(owner, capabilityId); }
   logLines(capabilityId: string, n: number): string[] { return this.d.invocation.logLines(capabilityId, n); }
 
+  // ---------- widgets and Home (platform/widgets.ts) ----------
+
+  widget(agent: Agent, capabilityId: string, name: string, input?: Record<string, unknown>): Promise<WidgetResult> { return this.d.widgets.widget(agent, capabilityId, name, input); }
+  cachedWidget(owner: Agent, capabilityId: string, name: string, input?: Record<string, unknown>) { return this.d.widgets.cachedWidget(owner, capabilityId, name, input); }
+  widgetGallery(agent: Agent): { capabilityId: string; name: string; widgets: (WidgetManifest & { inputSchema: Record<string, unknown> })[] }[] { return this.d.widgets.widgetGallery(agent); }
+  homeLayout(owner: Agent): HomeEntryView[] { return this.d.widgets.homeLayout(owner); }
+  setHomeLayout(owner: Agent, entries: unknown): HomeEntryView[] { return this.d.widgets.setHomeLayout(owner, entries); }
+  placeWidget(owner: Agent, entry: { id: string; widget: string; size: string; input?: Record<string, unknown> }): HomeEntryView[] { return this.d.widgets.placeWidget(owner, entry); }
+  removeWidget(owner: Agent, capabilityId: string, name: string): Promise<BuildView> { return this.d.widgets.removeWidget(owner, capabilityId, name); }
+  refreshHomeWidget(owner: Agent, key: string): Promise<{ view: unknown; at: string | null; error: string | null }> { return this.d.widgets.refreshHomeWidget(owner, key); }
+
+  // ---------- housekeeping (platform/housekeeping.ts) ----------
+
+  metrics(owner: Agent) { return this.d.housekeeping.metrics(owner); }
+  cleanup(now?: number): Promise<{ workspaces: number; transcripts: number; releasedIds: string[]; logs: number }> { return this.d.housekeeping.cleanup(now); }
+
   // ---------- schedules (platform/schedules.ts) ----------
 
   listSchedules(agent: Agent, capabilityId?: string): Schedule[] { return this.d.schedules.listSchedules(agent, capabilityId); }
@@ -329,308 +345,4 @@ export class Platform {
   instructions(owner: Agent, capabilityId?: string): string[] { return this.d.instructions.instructions(owner, capabilityId); }
   setInstructions(owner: Agent, capabilityId: string | undefined, lines: unknown): string[] { return this.d.instructions.setInstructions(owner, capabilityId, lines); }
   applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } { return this.d.instructions.applyIntakeMemory(owner, capabilityId, remember, forget); }
-
-  // ---------- the public URL and passkeys ----------
-
-  /**
-   * Aggregates for a host's metrics endpoint (HEWN_METRICS_PORT): counts and sums only, never what's in
-   * the tools. Calls come from the call logs, so they reach back as far as those are kept (14 days by default).
-   */
-  metrics(owner: Agent) {
-    requireOwner(owner);
-    const now = Date.now();
-    const iso = (ms: number) => new Date(now - ms).toISOString();
-    const snap = this.registry.metricsSnapshot(iso(86_400_000), iso(7 * 86_400_000), new Date(now).toISOString().slice(0, 7));
-    // A call-log entry: "<iso> <caller[ → caller…]> <operation> <ok | ERROR …> <n>ms". The first caller is the origin.
-    const parse = (e: string) => {
-      const rest = e.slice(e.indexOf(" ") + 1);
-      return { agent: rest.split(" ")[0] || "unknown", ok: !/ ERROR /.test(` ${rest} `) };
-    };
-    const tally = (entries: string[]) => {
-      const byAgent: Record<string, { ok: number; error: number }> = {};
-      for (const e of entries) {
-        const { agent, ok } = parse(e);
-        const t = (byAgent[agent] ??= { ok: 0, error: 0 });
-        ok ? t.ok++ : t.error++;
-      }
-      return byAgent;
-    };
-    const agents = this.agentStore.list();
-    const weekAgo = iso(7 * 86_400_000);
-    const schedules = this.listSchedules(owner);
-    return {
-      tools: { active: snap.tools.active ?? 0, archived: snap.tools.archived ?? 0, unversioned: snap.tools.unversioned ?? 0 },
-      builds: Object.fromEntries(snap.builds.map((b) => [b.status, b.n])),
-      buildSeconds7d: { count: snap.buildTime.n, sum: Math.round(snap.buildTime.seconds ?? 0) },
-      calls24h: tally(snap.calls24h),
-      calls7d: tally(snap.calls7d),
-      model: { month: new Date(now).toISOString().slice(0, 7), usd: snap.model.usd ?? 0, inputTokens: snap.model.input ?? 0, outputTokens: snap.model.output ?? 0, calls: snap.model.calls },
-      agents: { connected: agents.length, active7d: agents.filter((a) => a.lastUsedAt && a.lastUsedAt >= weekAgo).length },
-      schedules: schedules.reduce<Record<string, number>>((m, x) => ((m[x.status] = (m[x.status] ?? 0) + 1), m), {}),
-      schedulesFailing: schedules.filter((x) => (x.failures ?? 0) > 0).length,
-    };
-  }
-
-  // ---------- widgets (ABI 2.3) ----------
-
-  /**
-   * Run a widget: its read operation, read-only, without a model, and its output checked against
-   * the template it names. The owner's widgets (Home) run as the widget's own identity
-   * (`widget:<capability>/<name>`, that one operation only); an agent's run under its own grants.
-   * The view is cached per widget and input, so Home can draw the last one at once.
-   */
-  async widget(agent: Agent, capabilityId: string, name: string, input: Record<string, unknown> = {}): Promise<WidgetResult> {
-    requireScope(agent, "invoke");
-    this.visibleActive(agent, capabilityId);
-    const manifest = this.activeManifest(capabilityId);
-    const w = widgetOf(manifest, name);
-    if (!w || !abiAtLeast(manifest, "2.3")) throw new PlatformError("not_found", `${capabilityId} has no widget ${name}`);
-    const [op, v] = w.operation.split("@");
-    const principal: Agent = agent.kind === "user" ? { id: `widget:${capabilityId}/${name}`, kind: "widget", scopes: new Set(["invoke"]), capabilities: new Set([capabilityId]) } : agent;
-    const key = widgetKey(capabilityId, name, input);
-    try {
-      const r = await this.invoke(principal, { capabilityId, operation: op, operationVersion: Number(v), input }, [principal.id], Date.now() + WIDGET_DEADLINE_MS, { readOnly: true });
-      const problems = viewErrors(r.result);
-      if (problems.length) throw new PlatformError("invalid_output", `widget ${name} returned something no template can draw`, problems);
-      this.registry.putWidgetView(key, capabilityId, r.result);
-      return { capabilityId, widget: name, title: w.title, view: r.result as WidgetOutput, at: new Date().toISOString() };
-    } catch (e) {
-      this.registry.putWidgetError(key, capabilityId, (e as Error).message);
-      throw e;
-    }
-  }
-
-  /** The widget's last view for this input (and the last refresh's error, if it failed). */
-  cachedWidget(owner: Agent, capabilityId: string, name: string, input: Record<string, unknown> = {}) {
-    requireOwner(owner);
-    return this.registry.widgetCache(widgetKey(capabilityId, name, input));
-  }
-
-  /** Every visible capability's widgets, for the "Add widget" gallery and agents' discovery. */
-  widgetGallery(agent: Agent): { capabilityId: string; name: string; widgets: (WidgetManifest & { inputSchema: Record<string, unknown> })[] }[] {
-    return this.list(agent)
-      .map((c) => {
-        const m = this.activeManifest(c.id);
-        if (!abiAtLeast(m, "2.3")) return { capabilityId: c.id, name: c.name, widgets: [] };
-        return { capabilityId: c.id, name: c.name, widgets: (m.widgets ?? []).map((w) => ({ ...w, inputSchema: m.operations.find((o) => opKey(o.name, o.version) === w.operation)?.inputSchema ?? {} })) };
-      })
-      .filter((c) => c.widgets.length);
-  }
-
-  /**
-   * Home: an ordered layout of capability icons and placed widgets. Icons the layout doesn't name
-   * (new capabilities, or no layout yet) are left for the client to append; widgets whose
-   * capability is gone are dropped, and those whose widget is gone are kept as `missing`.
-   */
-  homeLayout(owner: Agent): HomeEntryView[] {
-    requireOwner(owner);
-    const visible = new Set(this.list(owner).filter((c) => c.kind !== "connection").map((c) => c.id));
-    const out: HomeEntryView[] = [];
-    for (const e of this.registry.getKv<HomeEntry[]>(HOME_LAYOUT) ?? []) {
-      if (!visible.has(e.id)) continue;
-      if (e.type === "icon") {
-        out.push(e);
-        continue;
-      }
-      const m = this.activeManifest(e.id);
-      const w = abiAtLeast(m, "2.3") ? widgetOf(m, e.widget) : undefined;
-      const cached = this.registry.widgetCache(widgetKey(e.id, e.widget, e.input ?? {}));
-      out.push({
-        ...e,
-        ...(w ? { title: w.title, sizes: w.sizes, refreshMs: refreshMs(w), ...(w.open ? { open: w.open } : {}) } : { missing: true }),
-        // A widget that no longer offers the placed size (a change made it large-only) shows at its biggest.
-        ...(w && !w.sizes.includes(e.size) ? { size: [...WIDGET_SIZES].reverse().find((s) => w.sizes.includes(s))! } : {}),
-        view: cached?.view ?? null,
-        at: cached?.at ?? null,
-        error: cached?.error ?? null,
-      });
-    }
-    return out;
-  }
-
-  setHomeLayout(owner: Agent, entries: unknown): HomeEntryView[] {
-    requireOwner(owner);
-    if (!Array.isArray(entries) || entries.length > 200) throw new PlatformError("invalid_request", "send { entries: [...] } (at most 200)");
-    const visible = new Set(this.list(owner).map((c) => c.id));
-    const keys = new Set<string>();
-    const clean: HomeEntry[] = [];
-    // Widgets already placed, by key: one whose options a later version no longer takes still saves
-    // (it shows its error until the owner sets new options), so it can't block moving everything else.
-    const placed = new Map((this.registry.getKv<HomeEntry[]>(HOME_LAYOUT) ?? []).flatMap((e) => (e.type === "widget" ? [[e.key, e] as const] : [])));
-    for (const raw of entries as Record<string, unknown>[]) {
-      const id = String(raw?.id ?? "");
-      if (!visible.has(id)) continue; // gone since the page loaded
-      if (raw.type === "icon") {
-        // hidden: off Home (Edit Home's ×); it still shows in search, and keeps its place.
-        if (!clean.some((e) => e.type === "icon" && e.id === id)) clean.push({ type: "icon", id, ...(raw.hidden === true ? { hidden: true as const } : {}) });
-        continue;
-      }
-      if (raw.type !== "widget") throw new PlatformError("invalid_request", 'each entry is { type: "icon", id, hidden? } or { type: "widget", key, id, widget, size, input? }');
-      const key = String(raw.key ?? "");
-      if (!/^[A-Za-z0-9_-]{1,40}$/.test(key) || keys.has(key)) throw new PlatformError("invalid_request", "each placed widget needs its own key");
-      keys.add(key);
-      const widget = String(raw.widget ?? "");
-      const m = this.activeManifest(id);
-      const w = widgetOf(m, widget);
-      const size = String(raw.size ?? "");
-      const input = raw.input === undefined ? undefined : raw.input;
-      if (input !== undefined && (typeof input !== "object" || input === null || Array.isArray(input))) throw new PlatformError("invalid_request", `widget ${id}/${widget}: input must be an object`);
-      if (w) {
-        if (!(w.sizes as string[]).includes(size)) throw new PlatformError("invalid_request", `widget ${id}/${widget} comes in ${w.sizes.join(", ")}, not ${size}`);
-        const op = m.operations.find((o) => opKey(o.name, o.version) === w.operation)!;
-        const check = compileSchema(op.inputSchema);
-        const prev = placed.get(key);
-        // Compared as JSON: what the client sends back is what it was given, in the same key order.
-        const unchanged = prev?.id === id && prev.widget === widget && JSON.stringify(prev.input ?? {}) === JSON.stringify(input ?? {});
-        if (!unchanged && !check(input ?? {})) throw new PlatformError("invalid_request", `widget ${id}/${widget}: input doesn't match ${w.operation}`, schemaErrors(check));
-      } else if (!(WIDGET_SIZES as readonly string[]).includes(size)) throw new PlatformError("invalid_request", `unknown size ${size}`);
-      // A widget that no longer exists may stay where it is (shown as missing) but can't be placed anew.
-      else if (!this.homeLayout(owner).some((e) => e.type === "widget" && e.key === key)) throw new PlatformError("not_found", `${id} has no widget ${widget}`);
-      clean.push({ type: "widget", key, id, widget, size: size as WidgetSize, ...(input ? { input: input as Record<string, unknown> } : {}) });
-    }
-    this.registry.setKv(HOME_LAYOUT, clean);
-    // Icons keep their place in the capability order too (search, agents' lists).
-    this.registry.setHomeOrder(clean.filter((e) => e.type === "icon").map((e) => e.id));
-    return this.homeLayout(owner);
-  }
-
-  /**
-   * Put one widget on Home, at the end. Without a stored layout yet, the icons are placed first in
-   * Home's current order, so the widget lands after them (next to "New").
-   */
-  placeWidget(owner: Agent, entry: { id: string; widget: string; size: string; input?: Record<string, unknown> }): HomeEntryView[] {
-    requireOwner(owner);
-    const stored = this.registry.getKv<HomeEntry[]>(HOME_LAYOUT);
-    const order = (id: string) => this.registry.getCapability(id)?.homeOrder ?? Number.MAX_SAFE_INTEGER;
-    const created = (id: string) => this.registry.getCapability(id)?.createdAt ?? "";
-    const icons = this.list(owner)
-      .filter((c) => c.kind !== "connection")
-      .sort((a, b) => order(a.id) - order(b.id) || created(a.id).localeCompare(created(b.id)))
-      .map((c) => ({ type: "icon" as const, id: c.id }));
-    const base: HomeEntry[] = stored ?? icons;
-    // Icons the layout doesn't name yet keep their place before the new widget.
-    const missing = icons.filter((i) => !base.some((e) => e.type === "icon" && e.id === i.id));
-    return this.setHomeLayout(owner, [...base, ...missing, { type: "widget", key: randomToken(6), ...entry }]);
-  }
-
-  /**
-   * Delete a widget: a new version without it (manifest only, no builder; its operation stays, an
-   * ordinary read), and it leaves Home now.
-   */
-  async removeWidget(owner: Agent, capabilityId: string, name: string): Promise<BuildView> {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    const w = widgetOf(this.activeManifest(capabilityId), name);
-    if (!w) throw new PlatformError("not_found", `${capabilityId} has no widget ${name}`);
-    const b = await this.d.builds.manifestOnlyModify(owner, capabilityId, (m) => { const rest = (m.widgets ?? []).filter((x) => x.name !== name); if (rest.length) m.widgets = rest; else delete m.widgets; }, `delete the "${w.title}" widget`);
-    const layout = this.registry.getKv<HomeEntry[]>(HOME_LAYOUT);
-    if (layout) this.registry.setKv(HOME_LAYOUT, layout.filter((e) => !(e.type === "widget" && e.id === capabilityId && e.widget === name)));
-    return b;
-  }
-
-  /** Run a placed widget (Home's refresh). Failures come back as values: Home keeps the last view. */
-  async refreshHomeWidget(owner: Agent, key: string): Promise<{ view: unknown; at: string | null; error: string | null }> {
-    const entry = this.homeLayout(owner).find((e) => e.type === "widget" && e.key === key) as Extract<HomeEntryView, { type: "widget" }> | undefined;
-    if (!entry) throw new PlatformError("not_found", "no such widget on Home");
-    try {
-      const r = await this.widget(owner, entry.id, entry.widget, entry.input ?? {});
-      return { view: r.view, at: r.at, error: null };
-    } catch (e) {
-      const c = this.registry.widgetCache(widgetKey(entry.id, entry.widget, entry.input ?? {}));
-      return { view: c?.view ?? null, at: c?.at ?? null, error: (e as Error).message };
-    }
-  }
-
-  // ---------- housekeeping ----------
-
-  /**
-   * Remove what abandoned builds leave behind: workspaces of finished builds (after a day, so a
-   * failure can still be looked at), transcripts (after 30 days), and capability ids that never got
-   * a version (after 7 days with no build running). Also: capability call logs after the owner's
-   * retention (14 days by default), and
-   * confirmations after a day. Call at start and daily.
-   */
-  async cleanup(now = Date.now()): Promise<{ workspaces: number; transcripts: number; releasedIds: string[]; logs: number }> {
-    const iso = (days: number) => new Date(now - days * 86400_000).toISOString();
-    let workspaces = 0;
-    let transcripts = 0;
-    for (const b of this.registry.finishedBuildsBefore(iso(1))) {
-      if (this.isRunning(b.id)) continue;
-      await this.workbench.remove(b.id).catch(() => {});
-      workspaces++;
-    }
-    // Attachments of conversations that never led to a build.
-    for (const ref of this.registry.staleAttachments(iso(1))) {
-      await this.blobs.delete(`attachments/${ref}`);
-      this.registry.deleteAttachment(ref);
-    }
-    for (const b of this.registry.finishedBuildsBefore(iso(30))) {
-      // Kept with the build before the workbench's copy goes (builds from before 0.4.6 are kept now too).
-      const key = `transcripts/${b.id}.log`;
-      const left = await this.workbench.transcript(b.id).catch(() => undefined);
-      if (left && !(await this.blobs.get(key))) await this.blobs.put(key, left);
-      await this.workbench.removeTranscript(b.id).catch(() => {});
-      transcripts++;
-    }
-    const releasedIds: string[] = [];
-    const stale = iso(7);
-    for (const id of this.registry.unpromotedCapabilities()) {
-      const builds = this.registry.buildIdsFor(id).map((b) => this.registry.getBuild(b)!);
-      if (builds.some((b) => this.isRunning(b.id) || !["failed", "cancelled"].includes(b.status) || b.updatedAt >= stale)) continue;
-      for (const b of builds) {
-        await this.workbench.remove(b.id).catch(() => {});
-        await this.workbench.removeTranscript(b.id).catch(() => {});
-        await this.blobs.delete(`transcripts/${b.id}.log`);
-      }
-      this.registry.purgeCapability(id);
-      releasedIds.push(id);
-    }
-    if (releasedIds.length) this.logger(`cleanup: released ids that never got a version: ${releasedIds.join(", ")}`);
-    this.agentStore.cleanup();
-    // Reservations a crash left open (an hour is far past any call's deadline).
-    this.registry.settleStaleModelSpend(new Date(now - 3600_000).toISOString());
-    // The model catalog: refreshed at start and daily; not awaited (a slow list never holds cleanup).
-    const fetched = this.registry.getKv<{ fetchedAt: string }>("models.catalog")?.fetchedAt;
-    if (this.modelFetch && (!fetched || now - Date.parse(fetched) > 20 * 3600_000)) void this.refreshModelCatalog();
-    // And what the active provider's key can use (models come and go).
-    const active = this.modelSettings_().provider;
-    const listed = active ? this.d.models.providerList(active)?.checkedAt : undefined;
-    if (this.modelFetch && active && (!listed || now - Date.parse(listed) > 20 * 3600_000)) void this.checkModelProvider(USER, active).catch(() => {});
-    const keep = this.logRetentionDays();
-    const logs = keep > 0 ? this.registry.pruneCapabilityLogs(iso(keep)) : 0;
-    this.registry.expireConfirmations(iso(1));
-    return { workspaces, transcripts, releasedIds, logs };
-  }
-
-  // ---------- helpers ----------
-
-  private visibleActive(agent: Agent, capabilityId: string) {
-    const cap = this.registry.getCapability(capabilityId);
-    if (!cap || cap.activeVersion === null || cap.archivedAt || !canSee(agent, cap.id)) {
-      throw new PlatformError("not_found", `no capability '${capabilityId}'`);
-    }
-    return cap;
-  }
 }
-
-/** How long a widget's operation may take (Home draws the cached view meanwhile). */
-export const WIDGET_DEADLINE_MS = 15_000;
-
-/** Home's stored layout (platform_kv). */
-const HOME_LAYOUT = "home:layout";
-
-export type HomeEntry = { type: "icon"; id: string; hidden?: true } | { type: "widget"; key: string; id: string; widget: string; size: WidgetSize; input?: Record<string, unknown> };
-/** A layout entry as Home draws it: placed widgets carry their title, sizes and last view. */
-export type HomeEntryView =
-  | { type: "icon"; id: string; hidden?: true }
-  | (Extract<HomeEntry, { type: "widget" }> & { title?: string; sizes?: WidgetSize[]; refreshMs?: number; open?: string; missing?: true; view: unknown; at: string | null; error: string | null });
-
-export interface WidgetResult {
-  capabilityId: string;
-  widget: string;
-  title: string;
-  view: WidgetOutput;
-  at: string;
-}
-
-const widgetKey = (capabilityId: string, name: string, input: Record<string, unknown>) => `${capabilityId}/${name}/${sha256(JSON.stringify(input)).slice(0, 16)}`;

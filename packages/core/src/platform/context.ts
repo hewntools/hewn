@@ -23,6 +23,8 @@ import type { Invocation } from "./invocation.ts";
 import type { Schedules } from "./schedules.ts";
 import type { Builds } from "./builds.ts";
 import type { Validation } from "./validation.ts";
+import type { Widgets } from "./widgets.ts";
+import type { Housekeeping } from "./housekeeping.ts";
 import type { Platform } from "../platform.ts";
 
 /** Minimal event emitter (no node:events in the core). */
@@ -58,6 +60,7 @@ export interface Domains {
   data: Data;
   discovery: Discovery;
   grants: Grants;
+  housekeeping: Housekeeping;
   instructions: Instructions;
   invocation: Invocation;
   models: Models;
@@ -65,6 +68,7 @@ export interface Domains {
   schedules: Schedules;
   sessions: Sessions;
   validation: Validation;
+  widgets: Widgets;
 }
 
 /** What Platform hands each domain. */
