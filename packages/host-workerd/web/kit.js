@@ -320,12 +320,15 @@ export function modal(build, { width = 440, cls = "" } = {}) {
     };
     dlg.addEventListener("close", () => (dlg.remove(), resolve(result)));
     // A click on the backdrop closes. A click on a disabled control inside also lands on the dialog
-    // element (the control can't take it), so the pointer has to be outside the box too.
-    dlg.addEventListener("click", (e) => {
-      if (e.target !== dlg) return;
+    // element (the control can't take it), so the pointer has to be outside the box too. And it has
+    // to have gone down there: a slider dragged past the edge and let go outside isn't a click out.
+    const outside = (e) => {
       const r = dlg.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
-    });
+      return e.target === dlg && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
+    };
+    let downOutside = false;
+    dlg.addEventListener("pointerdown", (e) => (downOutside = outside(e)));
+    dlg.addEventListener("click", (e) => downOutside && outside(e) && close());
     dlg.append(...[build(close, dlg)].flat(Infinity).filter(Boolean));
     document.body.append(dlg);
     dlg.showModal();
