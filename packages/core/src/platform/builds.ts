@@ -418,6 +418,16 @@ export class Builds extends Domain {
     return this.registry.unfinishedBuild(capabilityId)?.id;
   }
 
+  /**
+   * Changes to a capability on their way (queued or building), oldest first: a new
+   * change lands after them, so whoever drafts it (the intake, an agent) builds on them.
+   */
+  changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] {
+    requireScope(agent, "modify");
+    this.visibleActive(agent, capabilityId);
+    return this.registry.pendingChanges(capabilityId).map((b) => ({ buildId: b.id, kind: b.kind, status: b.status, request: String(b.request.request ?? "") }));
+  }
+
   /** Waiting its turn behind an earlier change to the same capability, not for a build it needs (`after`). */
   private queued(b: BuildRow): boolean {
     if (b.status !== "waiting" || !b.dependsOn) return false;

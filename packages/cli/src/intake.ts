@@ -190,6 +190,8 @@ export function intakeManifest(m: CapabilityManifest): string {
 /** How much of an earlier conversation the intake gets to continue from: the last turns, each cut short. */
 const EARLIER_TURNS = 30;
 const EARLIER_CHARS = 4000;
+/** Each change not live yet, as the intake sees it (the request, cut short). */
+const COMING_CHARS = 1500;
 
 /** The images attached across the conversation (with their bytes), newest last, for the intake to look at. */
 export const intakeImages = (req: IntakeRequest): IntakeAttachment[] => req.messages.flatMap((m) => (m.attachments ?? []).filter((a) => a.kind === "image" && !!a.data)).slice(-10);
@@ -222,6 +224,9 @@ export function intakePrompt(req: IntakeRequest, opts: { web?: boolean } = {}): 
     ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turnText(m, EARLIER_CHARS)).join("\n\n")}\n\n`
     : "";
   const focus = req.widget ? req.current?.widgets?.find((w) => w.name === req.widget) : undefined;
+  const coming = req.coming?.length
+    ? `Changes to it not live yet, oldest first (queued or building): the builder makes this change after them, on the version they produce. Build on them: don't draft what they already do, and don't tell the owner it's missing.\n${req.coming.map((r) => `- ${r.length > COMING_CHARS ? `${r.slice(0, COMING_CHARS)}…` : r}`).join("\n")}\n`
+    : "";
   const rules = req.instructions;
   const bullets = (l: string[]) => l.map((x) => `- ${x}`).join("\n");
   const instructions =
@@ -247,7 +252,7 @@ ${WIDGETS_GUIDE}
 
 The owner's existing capabilities:
 ${(req.catalog ?? []).map((c) => `- ${c.name} (${c.id})${c.kind === "connection" ? " [connection]" : ""}: ${c.purpose} [${c.operations.join(", ")}]`).join("\n") || "(none)"}
-${instructions}${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
+${instructions}${req.current ? `\nThe capability being modified (its operations, without output schemas):\n${intakeManifest(req.current)}\n${coming}` : ""}${focus ? `\nThe owner opened this from its widget "${focus.title}" (name ${focus.name}, operation ${focus.operation}, sizes ${focus.sizes.join("/")}): their messages are about that widget unless they say otherwise. A change to how it looks or what it shows is a widgets build that replaces it: one proposal with "replaces": "${focus.name}". If the change needs the capability itself changed, draft that instead, saying in the request that it changes widget ${focus.name}.\n` : ""}
 ${earlier}Conversation so far:
 ${convo}
 

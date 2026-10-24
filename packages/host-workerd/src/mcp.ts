@@ -65,7 +65,14 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
   // The tools themselves (names, scopes, descriptions, input schemas) are the spec's; these run them.
   const run: Record<string, Pick<Tool, "handler" | "format">> = {
     capabilities_list: { handler: (a) => grouped(platform.list(agent, a)) },
-    capabilities_get: { handler: (a) => platform.get(agent, a.capabilityId) },
+    capabilities_get: {
+      handler: (a) => {
+        const m = platform.get(agent, a.capabilityId);
+        // For an agent that can change it: the changes on their way, which a new one lands after.
+        const coming = agent.scopes.has("modify") ? platform.changesComing(agent, a.capabilityId) : [];
+        return coming.length ? { ...m, changesComing: coming } : m;
+      },
+    },
     capabilities_invoke: { handler: (a) => platform.invoke(agent, a as any) },
     widgets_show: {
       handler: async (a) => {

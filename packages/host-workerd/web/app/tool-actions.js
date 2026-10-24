@@ -301,37 +301,44 @@ async function iconDialog(c) {
   const id = enc(c.id);
   const cells = await (c.iconKind === "glyph" ? glyphCells(c) : Promise.resolve([]));
   const grid = SEEDS.map((r) => [...r].map(() => false));
-  for (const { x, y } of cells) if (grid[y]?.[x] !== undefined) grid[y][x] = true;
+  const setGrid = (lit) => {
+    for (const r of grid) r.fill(false);
+    for (const { x, y } of lit) if (grid[y]?.[x] !== undefined) grid[y][x] = true;
+  };
+  setGrid(cells);
   let hue = hueOf(c);
   let saturation = Number.isInteger(c.saturation) ? c.saturation : 100;
   let mode = c.iconKind === "image" ? "image" : "glyph";
+  // After Use default: the defaults are on screen, and Save clears the owner's icon, colour and
+  // saturation, keeping what was changed after it ("icon", "hue", "saturation"). null: not used.
+  let reset = null;
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
+  file.addEventListener("change", () => reset?.add("icon"));
   const status = h("p", { class: "small error" });
   const preview = h("span", { class: "icon-preview" });
   const rows = () => grid.map((r) => r.map((on) => (on ? "#" : ".")).join(""));
 
   const drawPreview = () => {
     const tile = h("span", { class: "app-icon", style: { "--size": "48px", "--hue": hue, "--s": saturation / 100 } });
-    if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
+    // The default without a builder's glyph is the monogram.
+    if (mode === "glyph" && reset && !reset.has("icon") && !grid.flat().some(Boolean)) tile.append(appIcon({ name: c.name }, { size: 48 }).firstChild);
+    else if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
     else tile.append(appIcon({ ...c, hue, saturation }, { size: 48 }).firstChild ?? "");
     put(preview, tile);
   };
-  const editor = h(
-    "div",
-    { class: "glyph-editor", role: "group", "aria-label": "Glyph, 5 by 5" },
-    grid.flatMap((r, y) =>
-      r.map((_, x) => {
-        const b = h("button", { type: "button", "aria-label": `Cell ${x + 1}, ${y + 1}`, "aria-pressed": String(grid[y][x]) });
-        b.addEventListener("click", () => ((grid[y][x] = !grid[y][x]), b.setAttribute("aria-pressed", String(grid[y][x])), drawPreview()));
-        return b;
-      }),
-    ),
+  const cellButtons = grid.map((r, y) =>
+    r.map((_, x) => {
+      const b = h("button", { type: "button", "aria-label": `Cell ${x + 1}, ${y + 1}`, "aria-pressed": String(grid[y][x]) });
+      b.addEventListener("click", () => ((grid[y][x] = !grid[y][x]), b.setAttribute("aria-pressed", String(grid[y][x])), reset?.add("icon"), drawPreview()));
+      return b;
+    }),
   );
+  const editor = h("div", { class: "glyph-editor", role: "group", "aria-label": "Glyph, 5 by 5" }, cellButtons);
   const hueInput = h("input", { type: "range", min: 0, max: 359, value: hue, class: "hue-range", "aria-label": "Colour" });
-  hueInput.addEventListener("input", () => ((hue = Number(hueInput.value)), drawPreview()));
+  hueInput.addEventListener("input", () => ((hue = Number(hueInput.value)), reset?.add("hue"), drawPreview()));
   // 0: black or white on grey (a black-and-white brand); 100 is the default; capped at 150 (more turns neon in dark mode).
   const satInput = h("input", { type: "range", min: 0, max: 150, step: 5, value: saturation, class: "hue-range", "aria-label": "Saturation" });
-  satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), drawPreview()));
+  satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), reset?.add("saturation"), drawPreview()));
   const panes = {
     glyph: h("div", { class: "stack-sm" }, editor, h("span", { class: "small faint" }, "7–17 lit cells, one simple idea.")),
     image: h("label", { class: "field" }, h("span", { class: "label" }, "Image"), file, h("span", { class: "hint" }, "PNG, JPEG, WebP or SVG, up to 256 KB")),
@@ -339,27 +346,52 @@ async function iconDialog(c) {
   const body = h("div", {});
   const seg = h("div", { class: "segmented self-start", role: "group", "aria-label": "Icon type" });
   const show = () => {
-    put(seg, ...[["glyph", "Draw"], ["image", "Image"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(k === mode), onclick: () => ((mode = k), show()) }, l)));
+    put(seg, ...[["glyph", "Draw"], ["image", "Image"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(k === mode), onclick: () => ((mode = k), reset?.add("icon"), show()) }, l)));
     put(body, panes[mode]);
     drawPreview();
+  };
+  /** Use default: the builder's glyph, colour and saturation in the preview; Save applies them. */
+  const useDefault = async () => {
+    try {
+      const [m, lit] = await Promise.all([api(`/capabilities/${id}`), glyphCells({ id: c.id, iconUrl: `/api/capabilities/${id}/icon?default=1` })]);
+      setGrid(lit);
+      cellButtons.forEach((r, y) => r.forEach((b, x) => b.setAttribute("aria-pressed", String(grid[y][x]))));
+      hue = hueOf({ id: c.id, hue: m.hue });
+      saturation = Number.isInteger(m.saturation) ? m.saturation : 100;
+      hueInput.value = hue;
+      satInput.value = saturation;
+      mode = "glyph";
+      reset = new Set();
+      status.textContent = "";
+      show();
+    } catch (e) {
+      status.textContent = e.message;
+    }
   };
   const done = (close) => (bumpIcons(), invalidateCaps(), close(), route());
   return modal((close) => {
     const save = async () => {
       try {
-        if (mode === "glyph") {
-          if (!grid.flat().some(Boolean)) return (status.textContent = "Light at least one cell.");
-          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { glyph: rows(), hue, saturation } });
-        } else {
-          if (!file.files[0]) return (status.textContent = "Choose an image.");
-          const dataUrl = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = () => res(r.result);
-            r.onerror = rej;
-            r.readAsDataURL(file.files[0]);
-          });
-          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { dataUrl, hue, saturation } });
-        }
+        const icon = !reset || reset.has("icon");
+        if (icon && mode === "glyph" && !grid.flat().some(Boolean)) return (status.textContent = "Light at least one cell.");
+        if (icon && mode === "image" && !file.files[0]) return (status.textContent = "Choose an image.");
+        const body = {
+          ...(!reset || reset.has("hue") ? { hue } : {}),
+          ...(!reset || reset.has("saturation") ? { saturation } : {}),
+          ...(icon && mode === "glyph" ? { glyph: rows() } : {}),
+          ...(icon && mode === "image"
+            ? {
+                dataUrl: await new Promise((res, rej) => {
+                  const r = new FileReader();
+                  r.onload = () => res(r.result);
+                  r.onerror = rej;
+                  r.readAsDataURL(file.files[0]);
+                }),
+              }
+            : {}),
+        };
+        if (reset) await api(`/capabilities/${id}/icon`, { method: "DELETE" });
+        if (Object.keys(body).length) await api(`/capabilities/${id}/icon`, { method: "PUT", body });
         done(close);
       } catch (e) {
         status.textContent = e.message;
@@ -371,12 +403,13 @@ async function iconDialog(c) {
       seg,
       body,
       h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), hueInput),
-      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), satInput),
+      // The mark under the slider: where the default (100%) is.
+      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), h("span", { class: "range-mark", style: { "--at": 100 / 150 }, "data-mark": "100%" }, satInput)),
       status,
       h(
         "div",
         { class: "actions flush between" },
-        h("button", { class: "ghost", onclick: () => api(`/capabilities/${id}/icon`, { method: "DELETE" }).then(() => done(close)).catch((e) => (status.textContent = e.message)) }, "Use default"),
+        h("button", { class: "ghost", onclick: useDefault }, "Use default"),
         h("span", { class: "row tight" }, h("button", { onclick: () => close() }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")),
       ),
     ];
