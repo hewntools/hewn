@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// Platform: the one object every surface calls. A facade: each method hands its call to one of the
+// domains in ./platform/ (builds, models, grants …; context.ts says what they share).
 import { AgentStore, type AgentDetails, type PendingRequest } from "./agents.ts";
 import { type Agent, canSee, requireOwner, requireScope, type Scope, USER, WEB_USER } from "./auth.ts";
 import { PlatformError } from "./errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "./failure.ts";
-import { bytes, contentHash, decodeVersion, encodeVersion, fromBase64, text, toBase64, versionFiles } from "./files.ts";
+import { bytes, contentHash, decodeVersion, encodeVersion, text, versionFiles } from "./files.ts";
 import { type Cells, cellsFromSvg, glyphSvg } from "./glyph.ts";
-import { Deadline, deadlineOf } from "./deadline.ts";
+import { type Deadline, deadlineOf } from "./deadline.ts";
 import {
   ABI,
   abiAtLeast,
@@ -44,7 +46,6 @@ import {
   type HostGenerateResult,
   type HostModels,
   inspectRequest,
-  checkImage,
   type ModelHandler,
   type ModelMessage,
   type ModelPrice,
@@ -66,28 +67,28 @@ import {
   structured,
 } from "./models.ts";
 import { EFFORT, MODEL_NAME } from "./build-models.ts";
-import { migrationProblems, migrationsOf, rollbackProblems } from "./migrations.ts";
+import { migrationProblems, migrationsOf } from "./migrations.ts";
 import type { Blobs, CallHandler, CapabilityRuntime, CodeRef, ExecutionTarget, Files, SecretStore, Sql, StateRef, Workbench } from "./ports.ts";
-import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry, type VersionRow } from "./registry.ts";
-import { randomToken, sha256, utf8 } from "./sha256.ts";
-import { type AssertionResponse, b64url, type RegistrationResponse, type StoredKey, SUPPORTED_ALGS, verifyAssertion, verifyRegistration } from "./webauthn.ts";
+import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildModel, type BuildReview, type BuildRow, type BuildTurn, type Confirmation, type GrantKind, Registry } from "./registry.ts";
+import { randomToken, sha256 } from "./sha256.ts";
+import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, ScheduleStore, toCron, parseCron } from "./schedules.ts";
 import type { TestCase } from "@hewntools/spec/cases.ts";
+import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
+import { Presentation, MAX_SATURATION } from "./platform/presentation.ts";
+import { Data } from "./platform/data.ts";
+import { Sessions } from "./platform/sessions.ts";
+import { Attachments, type AttachmentWithData, attachmentRefs } from "./platform/attachments.ts";
+import { Instructions, type Instruction } from "./platform/instructions.ts";
+import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 import spec from "@hewntools/spec/package.json" with { type: "json" };
 
-export interface CapabilitySummary {
-  id: string;
-  name: string;
-  purpose: string;
-  tags: string[];
-  operations: string[];
-  /** False until the user has provided required secrets and approved requested grants. */
-  ready: boolean;
-  /** Set for connections: they wrap an external service and hold its credentials. */
-  kind?: "connection";
-  /** Widget names (ABI 2.3), for widgets_show. */
-  widgets?: string[];
-}
+// What the domains define, importable from here as before.
+export { type CapabilitySummary } from "./platform/discovery.ts";
+export { MAX_SATURATION } from "./platform/presentation.ts";
+export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
+export { ATTACHMENT_LIMITS, type AttachmentWithData, attachmentRefs } from "./platform/attachments.ts";
+export { type InstructionScope, type Instruction } from "./platform/instructions.ts";
 
 /** What Accounts shows for a connection: its own health@1, or "needs_setup" when it isn't ready yet. */
 export interface ConnectionHealth {
@@ -190,7 +191,6 @@ type CreateRequest = {
   retryOf?: string;
 } & ModelAsk;
 
-
 export interface PlatformOptions {
   /** Platform metadata (registry, agents in the workerd host). */
   sql: Sql;
@@ -252,35 +252,8 @@ export class MemorySecretStore implements SecretStore {
   }
 }
 
-/** Minimal event emitter (no node:events in the core). */
-class Events {
-  private handlers = new Map<string, Set<(arg: any) => void>>();
-  on(name: string, fn: (arg: any) => void) {
-    if (!this.handlers.has(name)) this.handlers.set(name, new Set());
-    this.handlers.get(name)!.add(fn);
-  }
-  off(name: string, fn: (arg: any) => void) {
-    this.handlers.get(name)?.delete(fn);
-  }
-  once(name: string, fn: (arg: any) => void) {
-    const wrap = (arg: any) => (this.off(name, wrap), fn(arg));
-    this.on(name, wrap);
-  }
-  emit(name: string, arg?: unknown) {
-    for (const fn of [...(this.handlers.get(name) ?? [])]) fn(arg);
-  }
-}
-
-interface LoadedVersion {
-  row: VersionRow;
-  files: Files;
-  code: CodeRef;
-}
-
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
-/** Tile saturation cap, in percent of the design system's chroma: more turns neon in dark mode. */
-export const MAX_SATURATION = 150;
 
 /** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
 export type ModelAsk = {
@@ -323,72 +296,6 @@ export interface BuildReport {
   builds: BuildReportRow[];
 }
 
-/**
- * What the owner may attach in the intake's box: images (resized by the web client first) and
- * text files, per message and per conversation. The bytes are blobs; the builder gets copies.
- */
-export const ATTACHMENT_LIMITS = {
-  image: { bytes: 2 * 1024 * 1024, perMessage: 5, perConversation: 10 },
-  file: { bytes: 256 * 1024, perMessage: 10, perConversation: 20 },
-} as const;
-const MAX_ATTACHMENT_NAME = 120;
-const SESSION_ID = /^[\w-]{1,80}$/;
-/** A text file: a known text type, or bytes that read as text (no NUL). */
-const TEXT_MEDIA = /^(text\/.*|application\/(json|xml|x-yaml|yaml|toml|javascript|typescript|sql|csv|x-sh|x-httpd-php))$/;
-
-/** The owner's attachment with its bytes, as the intake gets it (base64) or the owner's browser fetches it. */
-export interface AttachmentWithData extends AttachmentRef {
-  data: string;
-}
-
-/** The refs of everything a conversation attached, in order, each once. */
-export const attachmentRefs = (turns: BuildTurn[]): string[] => [...new Set(turns.flatMap((t) => (t.attachments ?? []).map((a) => a.ref)))];
-
-/** A file name the workspace can take: the base name, safe characters only, short. */
-const safeName = (name: string) => {
-  const base = name.split(/[\\/]/).pop() ?? "file";
-  const clean = base.replace(/[^\w.-]+/g, "-").replace(/^[-.]+/, "").slice(0, 80);
-  return clean || "file";
-};
-
-/** The owner's instructions for building: at most this many lines per scope, each this long. */
-const MAX_INSTRUCTION_LINES = 50;
-const MAX_INSTRUCTION_CHARS = 500;
-
-/** Where an instruction applies: every tool the owner builds, or one tool. */
-export type InstructionScope = "global" | "tool";
-export interface Instruction {
-  scope: InstructionScope;
-  text: string;
-}
-
-/** Instructions as the owner gives them: lines, or a text to split into lines; trimmed, bullets dropped, no repeats. */
-function cleanInstructions(lines: unknown): string[] {
-  const raw = typeof lines === "string" ? lines.split("\n") : Array.isArray(lines) ? lines : undefined;
-  if (!raw) throw new PlatformError("invalid_request", "instructions: a text, one rule per line");
-  const out: string[] = [];
-  for (const l of raw) {
-    if (typeof l !== "string") throw new PlatformError("invalid_request", "instructions: each line must be text");
-    const t = l.trim().replace(/^[-*•]\s+/, "");
-    if (!t) continue;
-    if (t.length > MAX_INSTRUCTION_CHARS) throw new PlatformError("invalid_request", `instructions: each line at most ${MAX_INSTRUCTION_CHARS} characters`);
-    if (!out.includes(t)) out.push(t);
-  }
-  if (out.length > MAX_INSTRUCTION_LINES) throw new PlatformError("invalid_request", `instructions: at most ${MAX_INSTRUCTION_LINES} lines`);
-  return out;
-}
-
-/** What the intake asks to remember or drop, for one scope: well-formed entries only (the model wrote them: the rest is ignored, never an error). */
-function instructionEntries(list: unknown, scope: InstructionScope): string[] {
-  if (!Array.isArray(list)) return [];
-  const out: string[] = [];
-  for (const x of list) {
-    if (!x || x.scope !== scope || typeof x.text !== "string") continue;
-    const t = x.text.trim().replace(/^[-*•]\s+/, "");
-    if (t && t.length <= MAX_INSTRUCTION_CHARS && !out.includes(t)) out.push(t);
-  }
-  return out;
-}
 /** The longest structured reply kept with an intake turn (as JSON). */
 const MAX_REPLY_CHARS = 100_000;
 
@@ -444,10 +351,6 @@ export class Platform {
   >();
   /** Pipeline step of each in-flight build (see BuildStep). */
   private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number }>();
-  /** Last sliding-expiry write per web session hash. */
-  private webTouched = new Map<string, number>();
-  /** Outstanding WebAuthn challenges (in memory: a restart only cancels sign-ins in progress). */
-  private challenges = new Map<string, { kind: "create" | "get"; expires: number }>();
   /** Verified, decoded versions by content hash (immutable, so safe to keep). */
   private loaded = new Map<string, { files: Files; bundle: string }>();
   /** Last live health@1 result per connection version, for Accounts (dropped when its setup changes). */
@@ -458,6 +361,8 @@ export class Platform {
   interruptWaitMs = 10_000;
   /** Per-build live events: `${buildId}` → line; `${buildId}:done` → final view. */
   private events = new Events();
+  /** The domains (platform/) the methods below hand their calls to. */
+  private d: Domains;
 
   constructor(opts: PlatformOptions) {
     this.registry = new Registry(opts.sql);
@@ -487,7 +392,90 @@ export class Platform {
     this.logRetentionDays = opts.logRetentionDays ?? (() => LOG_RETENTION_DAYS);
     this.modelFetch = opts.modelFetch;
     this.hostModels = opts.hostModels;
+    // The domains share the facade, the ports and the event bus, and reach each other through `d`.
+    const d = (this.d = {} as Domains);
+    const s: Shared = { platform: this, events: this.events, loaded: this.loaded, d };
+    d.attachments = new Attachments(s);
+    d.data = new Data(s);
+    d.discovery = new Discovery(s);
+    d.instructions = new Instructions(s);
+    d.presentation = new Presentation(s);
+    d.sessions = new Sessions(s);
   }
+
+  close() {
+    this.registry.close();
+  }
+
+  /** Called when something agents can see may have changed. Returns an unsubscribe. */
+  onChange(fn: () => void): () => void {
+    this.events.on("changed", fn);
+    return () => this.events.off("changed", fn);
+  }
+
+  // ---------- discovery (platform/discovery.ts) ----------
+
+  list(agent: Agent, filter?: { name?: string; operation?: string; tag?: string }): CapabilitySummary[] { return this.d.discovery.list(agent, filter); }
+  get(agent: Agent, capabilityId: string): CapabilityManifest & { status: Readiness } { return this.d.discovery.get(agent, capabilityId); }
+  // The lookups every domain shares (platform/context.ts).
+  loadVersion(capabilityId: string, version: number): Promise<LoadedVersion> { return this.d.discovery.loadVersion(capabilityId, version); }
+  activeManifest(capabilityId: string): CapabilityManifest { return this.d.discovery.activeManifest(capabilityId); }
+
+  // ---------- owner presentation (platform/presentation.ts) ----------
+
+  rename(owner: Agent, capabilityId: string, name: string) { return this.d.presentation.rename(owner, capabilityId, name); }
+  setIcon(owner: Agent, capabilityId: string, icon: { glyph: Cells } | { type: string; data: Uint8Array } | null) { return this.d.presentation.setIcon(owner, capabilityId, icon); }
+  setHue(owner: Agent, capabilityId: string, hue: number | null) { return this.d.presentation.setHue(owner, capabilityId, hue); }
+  hueOf(capabilityId: string): number | null { return this.d.presentation.hueOf(capabilityId); }
+  setSaturation(owner: Agent, capabilityId: string, saturation: number | null) { return this.d.presentation.setSaturation(owner, capabilityId, saturation); }
+  saturationOf(capabilityId: string): number | null { return this.d.presentation.saturationOf(capabilityId); }
+  icon(capabilityId: string): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> { return this.d.presentation.icon(capabilityId); }
+
+  // ---------- data: archive, restore, rollback, purge, export, import (platform/data.ts) ----------
+
+  archive(owner: Agent, capabilityId: string) { return this.d.data.archive(owner, capabilityId); }
+  rollback(owner: Agent, capabilityId: string, version?: number): Promise<{ from: number; to: number }> { return this.d.data.rollback(owner, capabilityId, version); }
+  purge(owner: Agent, capabilityId: string, confirm: string) { return this.d.data.purge(owner, capabilityId, confirm); }
+  exportData(owner: Agent, capabilityId: string): Promise<{ capability: string; version: number; exportedAt: string; source: "operation" | "state"; data: unknown }> { return this.d.data.exportData(owner, capabilityId); }
+  importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> { return this.d.data.importData(owner, capabilityId, tables); }
+  archived(owner: Agent): { id: string; name: string; archivedAt: string }[] { return this.d.data.archived(owner); }
+  restore(owner: Agent, capabilityId: string) { return this.d.data.restore(owner, capabilityId); }
+
+  // ---------- tool UIs, web sessions, the public URL, passkeys (platform/sessions.ts) ----------
+
+  createUiTicket(capabilityId: string): string { return this.d.sessions.createUiTicket(capabilityId); }
+  redeemUiTicket(ticket: string, capabilityId: string): string | undefined { return this.d.sessions.redeemUiTicket(ticket, capabilityId); }
+  uiAgent(session: string | undefined, capabilityId: string): Agent | undefined { return this.d.sessions.uiAgent(session, capabilityId); }
+  createWebTicket(owner: Agent): string { return this.d.sessions.createWebTicket(owner); }
+  redeemWebTicket(ticket: string, userAgent?: string): string | undefined { return this.d.sessions.redeemWebTicket(ticket, userAgent); }
+  webPrincipal(session: string | undefined): Agent | undefined { return this.d.sessions.webPrincipal(session); }
+  webSessions(owner: Agent, currentSession?: string) { return this.d.sessions.webSessions(owner, currentSession); }
+  revokeWebSession(owner: Agent, id: string) { return this.d.sessions.revokeWebSession(owner, id); }
+  signOut(session: string) { return this.d.sessions.signOut(session); }
+  publicUrl(): string | undefined { return this.d.sessions.publicUrl(); }
+  setPublicUrl(owner: Agent, url: string | null): { url: string | null; passkeysElsewhere: number } { return this.d.sessions.setPublicUrl(owner, url); }
+  passkeyChallenge(kind: "create" | "get"): string { return this.d.sessions.passkeyChallenge(kind); }
+  passkeyCreateOptions(owner: Agent, rpId: string) { return this.d.sessions.passkeyCreateOptions(owner, rpId); }
+  addPasskey(owner: Agent, site: { origin: string; rpId: string }, body: { challenge: string; response: RegistrationResponse; name?: string }) { return this.d.sessions.addPasskey(owner, site, body); }
+  hasPasskeys(rpId: string): boolean { return this.d.sessions.hasPasskeys(rpId); }
+  passkeyGetOptions(rpId: string) { return this.d.sessions.passkeyGetOptions(rpId); }
+  passkeySignIn(site: { origin: string; rpId: string }, body: { challenge: string; response: AssertionResponse }, userAgent?: string): Promise<string> { return this.d.sessions.passkeySignIn(site, body, userAgent); }
+  passkeys(owner: Agent) { return this.d.sessions.passkeys(owner); }
+  removePasskey(owner: Agent, id: string) { return this.d.sessions.removePasskey(owner, id); }
+  uiFile(capabilityId: string, path: string): Promise<{ path: string; data: Uint8Array } | undefined> { return this.d.sessions.uiFile(capabilityId, path); }
+  uiKey(capabilityId: string): string | undefined { return this.d.sessions.uiKey(capabilityId); }
+
+  // ---------- attachments (platform/attachments.ts) ----------
+
+  addAttachment(owner: Agent, a: { session?: unknown; kind?: unknown; name?: unknown; mediaType?: unknown; data?: unknown }): Promise<AttachmentRef> { return this.d.attachments.addAttachment(owner, a); }
+  attachmentBytes(owner: Agent, ref: string): Promise<{ meta: AttachmentRef; bytes: Uint8Array }> { return this.d.attachments.attachmentBytes(owner, ref); }
+  attachmentsWithData(owner: Agent, refs: unknown): Promise<AttachmentWithData[]> { return this.d.attachments.attachmentsWithData(owner, refs); }
+
+  // ---------- instructions (platform/instructions.ts) ----------
+
+  instructions(owner: Agent, capabilityId?: string): string[] { return this.d.instructions.instructions(owner, capabilityId); }
+  setInstructions(owner: Agent, capabilityId: string | undefined, lines: unknown): string[] { return this.d.instructions.setInstructions(owner, capabilityId, lines); }
+  applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } { return this.d.instructions.applyIntakeMemory(owner, capabilityId, remember, forget); }
 
   /**
    * Call once at start: builds left mid-flight by a previous process are failed, and started
@@ -581,10 +569,6 @@ export class Platform {
     return this.running.has(buildId);
   }
 
-  close() {
-    this.registry.close();
-  }
-
   private setStep(buildId: string, capabilityId: string, step: BuildStep, tests?: { passed: number; total: number }) {
     this.steps.set(buildId, { capabilityId, step, tests, since: Date.now() });
     this.events.emit(`${buildId}:step`, this.stepState(buildId));
@@ -640,256 +624,6 @@ export class Platform {
     return out;
   }
 
-  // ---------- discovery ----------
-
-  list(agent: Agent, filter: { name?: string; operation?: string; tag?: string } = {}): CapabilitySummary[] {
-    requireScope(agent, "discover");
-    return this.registry
-      .listActiveCapabilities()
-      .filter((c) => canSee(agent, c.id))
-      .map((c) => this.summary(this.activeManifest(c.id)))
-      .filter(
-        (s) =>
-          (!filter.name || `${s.id} ${s.name}`.toLowerCase().includes(filter.name.toLowerCase())) &&
-          (!filter.operation || s.operations.some((o) => o.split("@")[0] === filter.operation)) &&
-          (!filter.tag || s.tags.includes(filter.tag)),
-      );
-  }
-
-  get(agent: Agent, capabilityId: string): CapabilityManifest & { status: Readiness } {
-    requireScope(agent, "discover");
-    const cap = this.visibleActive(agent, capabilityId);
-    const m = this.activeManifest(capabilityId);
-    return { ...m, name: cap.displayName ?? m.name, status: this.readiness(capabilityId) };
-  }
-
-  // ---------- versions (content-addressed blobs) ----------
-
-  /** A stored version, its integrity checked against the hash it was promoted with. */
-  async loadVersion(capabilityId: string, version: number): Promise<LoadedVersion> {
-    const row = this.registry.getVersion(capabilityId, version);
-    if (!row) throw new PlatformError("not_found", `${capabilityId} has no version ${version}`);
-    let v = this.loaded.get(row.contentHash);
-    if (!v) {
-      const raw = await this.blobs.get(`versions/${row.contentHash}.json`);
-      if (!raw) throw new PlatformError("operation_failed", `v${version} of ${capabilityId} is missing from storage`);
-      let decoded: { files: Files; bundle: string };
-      try {
-        decoded = decodeVersion(raw);
-      } catch {
-        throw new PlatformError("operation_failed", `v${version} of ${capabilityId} failed its integrity check`);
-      }
-      if (contentHash(decoded.files, decoded.bundle) !== row.contentHash) {
-        throw new PlatformError("operation_failed", `v${version} of ${capabilityId} failed its integrity check`);
-      }
-      this.loaded.set(row.contentHash, (v = decoded));
-    }
-    return { row, files: v.files, code: { hash: row.contentHash, js: v.bundle } };
-  }
-
-  // ---------- owner presentation & lifecycle (owner only) ----------
-
-  rename(owner: Agent, capabilityId: string, name: string) {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    const clean = name.trim();
-    if (!clean || clean.length > 60) throw new PlatformError("invalid_request", "name must be 1–60 characters");
-    this.registry.setOwnerPrefs(capabilityId, { displayName: clean });
-    this.logger(`${capabilityId} renamed to "${clean}" by ${owner.id} (id unchanged)`);
-  }
-
-  /** Owner icon: a 5×5 glyph, or an image (png/jpeg/webp/svg, ≤ 256 KB). null clears it. */
-  async setIcon(owner: Agent, capabilityId: string, icon: { glyph: Cells } | { type: string; data: Uint8Array } | null) {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    const key = `icons/${capabilityId}`;
-    if (!icon) {
-      await this.blobs.delete(key);
-      return this.registry.setOwnerPrefs(capabilityId, { iconType: null });
-    }
-    if ("glyph" in icon) {
-      if (!icon.glyph.length) throw new PlatformError("invalid_request", "a glyph needs at least one lit cell");
-      await this.blobs.put(key, glyphSvg(icon.glyph));
-      return this.registry.setOwnerPrefs(capabilityId, { iconType: "glyph" });
-    }
-    if (!ICON_TYPES.has(icon.type)) throw new PlatformError("invalid_request", `icon must be one of ${[...ICON_TYPES].join(", ")}`);
-    if (icon.data.length > 256 * 1024) throw new PlatformError("invalid_request", "icon must be at most 256 KB");
-    await this.blobs.put(key, icon.data);
-    this.registry.setOwnerPrefs(capabilityId, { iconType: icon.type });
-  }
-
-  /** Owner tile hue (0–359), or null to use the manifest's. Presentation only. */
-  setHue(owner: Agent, capabilityId: string, hue: number | null) {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    if (hue !== null && !(Number.isInteger(hue) && hue >= 0 && hue <= 359)) throw new PlatformError("invalid_request", "hue must be an integer 0–359");
-    this.registry.setOwnerPrefs(capabilityId, { hue });
-  }
-
-  /** Tile hue: the owner's, else the manifest's. */
-  hueOf(capabilityId: string): number | null {
-    return this.registry.getCapability(capabilityId)?.hue ?? this.activeManifest(capabilityId).hue ?? null;
-  }
-
-  /** Owner tile saturation (percent, 0–150), or null to use the manifest's. Presentation only. */
-  setSaturation(owner: Agent, capabilityId: string, saturation: number | null) {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    if (saturation !== null && !(Number.isInteger(saturation) && saturation >= 0 && saturation <= MAX_SATURATION)) throw new PlatformError("invalid_request", `saturation must be an integer 0–${MAX_SATURATION}`);
-    this.registry.setOwnerPrefs(capabilityId, { saturation });
-  }
-
-  /** Tile saturation in percent: the owner's, else the manifest's; null means the default (100). */
-  saturationOf(capabilityId: string): number | null {
-    return this.registry.getCapability(capabilityId)?.saturation ?? this.activeManifest(capabilityId).saturation ?? null;
-  }
-
-  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. */
-  async icon(capabilityId: string): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
-    const cap = this.registry.getCapability(capabilityId);
-    if (cap?.iconType) {
-      const data = await this.blobs.get(`icons/${capabilityId}`);
-      const glyph = cap.iconType === "glyph";
-      if (data) return { data, type: glyph ? "image/svg+xml" : cap.iconType, glyph };
-    }
-    // ui/icon.svg is the builder's glyph; it ships even without a UI, so look it up directly.
-    if (!cap?.activeVersion) return undefined;
-    const svg = (await this.loadVersion(capabilityId, cap.activeVersion)).files["ui/icon.svg"];
-    return svg ? { data: svg, type: "image/svg+xml", glyph: true } : undefined;
-  }
-
-  /**
-   * "Delete" archives: the capability disappears for the owner and every agent, its state and
-   * versions are kept, and the id stays reserved. `hewn restore <id>` brings it back.
-   */
-  archive(owner: Agent, capabilityId: string) {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    this.registry.setOwnerPrefs(capabilityId, { archivedAt: new Date().toISOString() });
-    this.registry.addLifecycleEvent(capabilityId, "delete", "", owner.id);
-    this.logger(`${capabilityId} deleted (archived, data kept) by ${owner.id}`);
-  }
-
-  /**
-   * Make an earlier version active again (default: the one before the active version). Refused if
-   * the newer migrations aren't safe for older code, or if a capability that uses this one relies
-   * on an operation the target version doesn't have. State is kept as is (migrations are additive).
-   */
-  async rollback(owner: Agent, capabilityId: string, version?: number): Promise<{ from: number; to: number }> {
-    requireOwner(owner);
-    const cap = this.visibleActive(owner, capabilityId);
-    const from = cap.activeVersion!;
-    const to = version ?? from - 1;
-    if (!this.registry.getVersion(capabilityId, to)) throw new PlatformError("not_found", `${capabilityId} has no version ${to}`);
-    if (to === from) throw new PlatformError("conflict", `v${to} is already active`);
-    const target = await this.loadVersion(capabilityId, to);
-    const current = await this.loadVersion(capabilityId, from);
-    const applied = new Set(migrationsOf(target.files).map((m) => m.name));
-    const later = migrationsOf(current.files).filter((m) => !applied.has(m.name));
-    const problems = rollbackProblems(later);
-    const offered = new Set(target.row.manifest.operations.map((o) => opKey(o.name, o.version)));
-    for (const u of this.usedBy(capabilityId)) for (const op of u.operations) if (!offered.has(op)) problems.push(`${u.name} calls ${op}, which v${to} doesn't have`);
-    if (problems.length) throw new PlatformError("conflict", `can't roll back to v${to}: ${problems.join("; ")}`, { problems });
-    this.registry.activate(capabilityId, to);
-    this.registry.addLifecycleEvent(capabilityId, "rollback", `v${from} → v${to}`, owner.id);
-    this.logger(`${capabilityId} rolled back v${from} → v${to} by ${owner.id}`);
-    return { from, to };
-  }
-
-  /**
-   * Permanently delete an archived capability: code, versions, state, logs, grants, builds and
-   * secrets. Owner only, with the id typed as confirmation. The id becomes free again.
-   */
-  async purge(owner: Agent, capabilityId: string, confirm: string) {
-    requireOwner(owner);
-    const cap = this.registry.getCapability(capabilityId);
-    if (!cap?.archivedAt) throw new PlatformError("conflict", `${capabilityId} isn't deleted; delete it first (purge only removes deleted capabilities)`);
-    if (confirm !== capabilityId) throw new PlatformError("invalid_request", `type the id '${capabilityId}' to confirm`);
-    const secrets = new Set<string>();
-    const hashes = new Set<string>();
-    for (let v = 1; v <= this.registry.latestVersionNumber(capabilityId); v++) {
-      const row = this.registry.getVersion(capabilityId, v);
-      if (!row) continue;
-      hashes.add(row.contentHash);
-      for (const s of row.manifest.requires?.secrets ?? []) secrets.add(s.name);
-    }
-    for (const s of secrets) this.secrets.delete(capabilityId, s);
-    const builds = this.registry.buildIdsFor(capabilityId);
-    // Its attachments go, unless a sibling build from the same conversation (an ideas draft that became several tools) still shows them.
-    for (const ref of this.registry.releaseAttachments(builds)) await this.blobs.delete(`attachments/${ref}`);
-    for (const b of builds) {
-      await this.workbench.remove(b).catch(() => {});
-      await this.workbench.removeTranscript(b).catch(() => {});
-      await this.blobs.delete(`transcripts/${b}.log`);
-      await this.blobs.delete(`screenshots/${b}.png`);
-      await this.blobs.delete(`screenshots/${b}-dark.png`);
-    }
-    for (const h of hashes) await this.blobs.delete(`versions/${h}.json`);
-    await this.blobs.delete(`icons/${capabilityId}`);
-    this.schedules.deleteFor(capabilityId);
-    this.registry.dropWidgetCache(capabilityId);
-    for (const name of await this.runtime.listStates(capabilityId, "")) await this.runtime.dropState({ capabilityId, scratch: name });
-    await this.runtime.dropState({ capabilityId });
-    // Others' grants to call it go too: a new capability under the same id starts with none.
-    for (const [holder, grant] of this.registry.grantsTo(capabilityId)) {
-      this.registry.revokeGrant(holder, "capability", grant.slice("capability:".length));
-      this.registry.addGrantEvent(holder, "revoke", grant, owner.id);
-    }
-    this.registry.purgeCapability(capabilityId);
-    this.registry.addLifecycleEvent(capabilityId, "purge", "", owner.id);
-    this.logger(`${capabilityId} permanently deleted by ${owner.id}`);
-  }
-
-  /**
-   * The owner's data, as JSON: the capability's own `export` operation (read) if it has one,
-   * otherwise a platform dump of its state tables.
-   */
-  async exportData(owner: Agent, capabilityId: string): Promise<{ capability: string; version: number; exportedAt: string; source: "operation" | "state"; data: unknown }> {
-    requireOwner(owner);
-    const cap = this.visibleActive(owner, capabilityId);
-    const op = latestOp(this.activeManifest(capabilityId), "export");
-    const base = { capability: capabilityId, version: cap.activeVersion!, exportedAt: new Date().toISOString() };
-    if (op && op.sideEffect === "read" && this.readiness(capabilityId).ready) {
-      const r = await this.invoke(owner, { capabilityId, operation: "export", operationVersion: op.version, input: {} });
-      return { ...base, source: "operation", data: r.result };
-    }
-    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
-    return { ...base, source: "state", data: await this.runtime.dumpState({ capabilityId }, active.code) };
-  }
-
-  /**
-   * Load exported data into a capability's live state (owner only): the inverse of exportData's
-   * state dump. Its tables must exist (migrations applied) and be empty.
-   */
-  async importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> {
-    requireOwner(owner);
-    const cap = this.visibleActive(owner, capabilityId);
-    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
-    try {
-      const rows = await this.runtime.loadState({ capabilityId }, tables, active.code);
-      this.logger(`${capabilityId}: imported ${rows} rows by ${owner.id}`);
-      return { rows };
-    } catch (e) {
-      throw new PlatformError("conflict", `import into ${capabilityId} failed: ${(e as Error).message}`);
-    }
-  }
-
-  /** Deleted (archived) capabilities, newest first: what the owner can restore. */
-  archived(owner: Agent): { id: string; name: string; archivedAt: string }[] {
-    requireOwner(owner);
-    return this.registry
-      .listArchivedCapabilities()
-      .map((c) => ({ id: c.id, name: c.displayName ?? c.name, archivedAt: c.archivedAt! }));
-  }
-
-  restore(owner: Agent, capabilityId: string) {
-    requireOwner(owner);
-    if (!this.registry.getCapability(capabilityId)?.archivedAt) throw new PlatformError("not_found", `${capabilityId} is not archived`);
-    this.registry.setOwnerPrefs(capabilityId, { archivedAt: null });
-    this.registry.addLifecycleEvent(capabilityId, "restore", "", owner.id);
-    this.logger(`${capabilityId} restored by ${owner.id}`);
-  }
-
   // ---------- grants & secrets (user only: no agent-facing API) ----------
 
   readiness(capabilityId: string): Readiness {
@@ -932,211 +666,7 @@ export class Platform {
     };
   }
 
-  // ---------- UI as a client ----------
-
-  /** One-time ticket for `hewn open` (user only). Exchanged by the browser for a session. */
-  createUiTicket(capabilityId: string): string {
-    const m = this.activeManifest(capabilityId);
-    if (!m.ui?.available) throw new PlatformError("not_found", `${capabilityId} has no UI`);
-    const ticket = randomToken();
-    this.registry.insertUiToken(sha256(ticket), capabilityId, "ticket", Date.now() + 120_000);
-    return ticket;
-  }
-
-  /** Exchange a ticket for a 12h session bound to that one capability. */
-  redeemUiTicket(ticket: string, capabilityId: string): string | undefined {
-    const bound = this.registry.useUiToken(sha256(ticket), "ticket");
-    if (bound !== capabilityId) return undefined;
-    const session = randomToken();
-    this.registry.insertUiToken(sha256(session), capabilityId, "session", Date.now() + 12 * 3600_000);
-    return session;
-  }
-
-  /**
-   * The UI acts on behalf of the user, with authority attenuated to its own capability:
-   * discover + invoke on that capability only. No grants, secrets, builds or other capabilities.
-   */
-  uiAgent(session: string | undefined, capabilityId: string): Agent | undefined {
-    if (!session || this.registry.useUiToken(sha256(session), "session") !== capabilityId) return undefined;
-    return { id: `ui:${capabilityId}`, kind: "ui", scopes: new Set(["discover", "invoke"]), capabilities: new Set([capabilityId]) };
-  }
-
-  /** One-time ticket for the owner's web client (`hewn open`, CLI = owner). */
-  createWebTicket(owner: Agent): string {
-    requireOwner(owner);
-    const ticket = randomToken();
-    this.registry.insertWebToken(sha256(ticket), "ticket", Date.now() + 120_000);
-    return ticket;
-  }
-
-  /** Exchange a web ticket for a session: 30 days, sliding (every use pushes it out again). */
-  redeemWebTicket(ticket: string, userAgent?: string): string | undefined {
-    if (!this.registry.useWebToken(sha256(ticket), "ticket")) return undefined;
-    return this.newWebSession(userAgent);
-  }
-
-  private newWebSession(userAgent?: string): string {
-    const session = randomToken();
-    this.registry.insertWebToken(sha256(session), "session", Date.now() + WEB_SESSION_MS, userAgent);
-    return session;
-  }
-
-  webPrincipal(session: string | undefined): Agent | undefined {
-    if (!session || !this.registry.useWebToken(sha256(session), "session")) return undefined;
-    // Sliding expiry, written at most once a minute per session.
-    const hash = sha256(session);
-    const last = this.webTouched.get(hash) ?? 0;
-    if (Date.now() - last > 60_000) {
-      this.webTouched.set(hash, Date.now());
-      this.registry.touchWebSession(hash, Date.now() + WEB_SESSION_MS);
-    }
-    return WEB_USER;
-  }
-
-  /** Signed-in browsers (owner only). `id` is a short, non-secret handle; `current` marks the caller's. */
-  webSessions(owner: Agent, currentSession?: string) {
-    requireOwner(owner);
-    const current = currentSession ? sha256(currentSession) : undefined;
-    return this.registry.webSessions().map((s) => ({ id: s.hash.slice(0, 16), createdAt: s.createdAt, lastSeenAt: s.lastSeenAt, userAgent: s.userAgent, expiresAt: new Date(s.expiresAt).toISOString(), current: s.hash === current }));
-  }
-
-  revokeWebSession(owner: Agent, id: string) {
-    requireOwner(owner);
-    const s = this.registry.webSessions().find((x) => x.hash.startsWith(id) && id.length >= 16);
-    if (!s) throw new PlatformError("not_found", "no such session");
-    this.registry.deleteWebSession(s.hash);
-    this.logger(`web session ${id} revoked by ${owner.id}`);
-  }
-
-  /** Sign this browser out (the session behind the cookie). */
-  signOut(session: string) {
-    this.registry.deleteWebSession(sha256(session));
-  }
-
   // ---------- the public URL and passkeys ----------
-
-  /** Where the owner reaches Hewn from anywhere (https://hewn.example.com), if set. */
-  publicUrl(): string | undefined {
-    return this.registry.getKv<string>("web.publicUrl") ?? undefined;
-  }
-
-  /** Set (or clear, with null) the public URL. Passkeys work only on the host they were made for. */
-  setPublicUrl(owner: Agent, url: string | null): { url: string | null; passkeysElsewhere: number } {
-    requireOwner(owner);
-    const next = url === null ? null : normalizePublicUrl(url);
-    this.registry.setKv("web.publicUrl", next);
-    this.registry.addAuthorityEvent({ actor: owner.id, action: "public_url_set", subject: next ?? "none" });
-    const host = next ? new URL(next).hostname : undefined;
-    return { url: next, passkeysElsewhere: this.registry.passkeys().filter((p) => p.rpId !== host).length };
-  }
-
-  /** A single-use WebAuthn challenge, good for two minutes. */
-  passkeyChallenge(kind: "create" | "get"): string {
-    const now = Date.now();
-    for (const [c, x] of this.challenges) if (x.expires < now) this.challenges.delete(c);
-    if (this.challenges.size > 200) throw new PlatformError("conflict", "too many sign-ins in progress; try again in a minute");
-    const challenge = randomToken(32);
-    this.challenges.set(challenge, { kind, expires: now + 120_000 });
-    return challenge;
-  }
-
-  private takeChallenge(challenge: string, kind: "create" | "get") {
-    const c = this.challenges.get(challenge);
-    this.challenges.delete(challenge);
-    if (!c || c.kind !== kind || c.expires < Date.now()) throw new PlatformError("unauthenticated", "this sign-in took too long or was already used; try again");
-  }
-
-  /** The owner's passkeys and the WebAuthn options for adding one on `rpId` (signed in only). */
-  passkeyCreateOptions(owner: Agent, rpId: string) {
-    requireOwner(owner);
-    return {
-      challenge: this.passkeyChallenge("create"),
-      rp: { id: rpId, name: "Hewn" },
-      // One owner: a fixed user handle, so a device keeps one Hewn passkey per host.
-      user: { id: b64url(utf8("owner")), name: "owner", displayName: "Hewn owner" },
-      pubKeyCredParams: SUPPORTED_ALGS.map((alg) => ({ type: "public-key", alg })),
-      authenticatorSelection: { residentKey: "required", userVerification: "required" },
-      attestation: "none",
-      excludeCredentials: this.registry.passkeys().filter((p) => p.rpId === rpId).map((p) => ({ type: "public-key", id: p.credentialId })),
-      timeout: 120_000,
-    };
-  }
-
-  async addPasskey(owner: Agent, site: { origin: string; rpId: string }, body: { challenge: string; response: RegistrationResponse; name?: string }) {
-    requireOwner(owner);
-    this.takeChallenge(String(body.challenge ?? ""), "create");
-    let r: Awaited<ReturnType<typeof verifyRegistration>>;
-    try {
-      r = await verifyRegistration(body.response, { challenge: body.challenge, origin: site.origin, rpId: site.rpId });
-    } catch (e) {
-      throw new PlatformError("invalid_request", `passkey not added: ${(e as Error).message}`);
-    }
-    if (this.registry.passkey(r.credentialId)) throw new PlatformError("conflict", "that passkey is already added");
-    const name = String(body.name ?? "").trim().slice(0, 60) || "Passkey";
-    this.registry.insertPasskey({ credentialId: r.credentialId, rpId: site.rpId, publicKey: JSON.stringify(r.key), signCount: r.signCount, name });
-    this.registry.addAuthorityEvent({ actor: owner.id, action: "passkey_added", subject: name, detail: site.rpId });
-    this.logger(`passkey "${name}" added for ${site.rpId}`);
-    return { id: r.credentialId, name };
-  }
-
-  /** Whether any passkey was made for `rpId` (the sign-in page offers them only then). */
-  hasPasskeys(rpId: string): boolean {
-    return this.registry.passkeys().some((p) => p.rpId === rpId);
-  }
-
-  /** WebAuthn options for signing in on `rpId` (no session needed; the device offers its passkey). */
-  passkeyGetOptions(rpId: string) {
-    return { challenge: this.passkeyChallenge("get"), rpId, userVerification: "required", timeout: 120_000, allowCredentials: [] };
-  }
-
-  /** Verify a passkey sign-in; returns a new web session. */
-  async passkeySignIn(site: { origin: string; rpId: string }, body: { challenge: string; response: AssertionResponse }, userAgent?: string): Promise<string> {
-    this.takeChallenge(String(body.challenge ?? ""), "get");
-    const stored = this.registry.passkey(String(body.response?.id ?? ""));
-    if (!stored || stored.rpId !== site.rpId) throw new PlatformError("unauthenticated", "this passkey isn't one of Hewn's (it may have been removed): sign in another way, then add a new one");
-    try {
-      const { signCount } = await verifyAssertion(body.response, { challenge: body.challenge, origin: site.origin, rpId: site.rpId }, { key: JSON.parse(stored.publicKey) as StoredKey, signCount: stored.signCount });
-      this.registry.usePasskey(stored.credentialId, signCount);
-    } catch (e) {
-      throw new PlatformError("unauthenticated", `passkey sign-in failed: ${(e as Error).message}`);
-    }
-    this.logger(`signed in with passkey "${stored.name}"`);
-    return this.newWebSession(userAgent);
-  }
-
-  passkeys(owner: Agent) {
-    requireOwner(owner);
-    const host = this.publicUrl() ? new URL(this.publicUrl()!).hostname : undefined;
-    return this.registry.passkeys().map((p) => ({ id: p.credentialId, name: p.name, host: p.rpId, works: p.rpId === host, createdAt: p.createdAt, lastUsedAt: p.lastUsedAt }));
-  }
-
-  removePasskey(owner: Agent, id: string) {
-    requireOwner(owner);
-    const p = this.registry.passkey(id);
-    if (!p) throw new PlatformError("not_found", "no such passkey");
-    this.registry.deletePasskey(id);
-    this.registry.addAuthorityEvent({ actor: owner.id, action: "passkey_removed", subject: p.name, detail: p.rpId });
-  }
-
-  /** A file from the active version's ui/ directory (index.html for "/"), or undefined (incl. traversal attempts). */
-  async uiFile(capabilityId: string, path: string): Promise<{ path: string; data: Uint8Array } | undefined> {
-    const cap = this.registry.getCapability(capabilityId);
-    if (!cap?.activeVersion || cap.archivedAt || !this.activeManifest(capabilityId).ui?.available) return undefined;
-    const rel = path === "/" || path === "" ? "index.html" : path.replace(/^\/+/, "");
-    if (rel.split("/").some((part) => part === ".." || part === "." || part === "")) return undefined;
-    const data = (await this.loadVersion(capabilityId, cap.activeVersion)).files[`ui/${rel}`];
-    return data ? { path: rel, data } : undefined;
-  }
-
-  /**
-   * The secret path segment a capability's UI is served under (`/tools/<id>/~<key>/`): its files are
-   * code, not data, but which tools exist and how they work is the owner's business. Only the
-   * signed-in web client and `hewn open` (through a UI ticket) lead there. Undefined for an
-   * unknown capability.
-   */
-  uiKey(capabilityId: string): string | undefined {
-    return this.registry.getCapability(capabilityId) ? this.registry.uiKey(capabilityId, () => randomToken(16)) : undefined;
-  }
 
   /** Whether an active, non-archived capability offers `name@version`. */
   private offers(capabilityId: string, opRef: string): boolean {
@@ -1272,12 +802,6 @@ export class Platform {
       this.registry.addGrantEvent(holder, "revoke", grant, owner.id);
       this.logger(`grant ${grant} revoked for ${holder}: ${capabilityId} was disconnected`);
     }
-  }
-
-  /** Called when something agents can see may have changed. Returns an unsubscribe. */
-  onChange(fn: () => void): () => void {
-    this.events.on("changed", fn);
-    return () => this.events.off("changed", fn);
   }
 
   /** Delegated agents (owner only). */
@@ -2621,7 +2145,7 @@ export class Platform {
 
   /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
   private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
-    const instructions = this.instructionsForBuild(capabilityId);
+    const instructions = this.d.instructions.instructionsForBuild(capabilityId);
     return { brief: this.briefId, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
   }
 
@@ -2644,7 +2168,7 @@ export class Platform {
       if (!t || (t.role !== "user" && t.role !== "intake") || typeof t.content !== "string" || t.content.length > MAX_TURN_CHARS) {
         throw new PlatformError("invalid_request", `each turn of the conversation needs a role ("user" or "intake") and content of at most ${MAX_TURN_CHARS} characters`);
       }
-      const attachments = t.attachments === undefined ? undefined : this.resolveAttachments(t.attachments);
+      const attachments = t.attachments === undefined ? undefined : this.d.attachments.resolveAttachments(t.attachments);
       // An intake turn may carry its structured reply, for showing the proposal as it was; kept as is, within reason.
       const reply = t.role === "intake" && t.reply && typeof t.reply === "object" && JSON.stringify(t.reply).length <= MAX_REPLY_CHARS ? t.reply : undefined;
       return { role: t.role, content: t.content, ...(attachments?.length ? { attachments } : {}), ...(reply ? { reply } : {}) };
@@ -2652,111 +2176,6 @@ export class Platform {
   }
 
   // ---------- Attachments: images and files the owner attaches in the intake's box ----------
-
-  /**
-   * Keep an image or file the owner attached (the web client uploads each as it's added): checked
-   * (type, size, an image's pixels), stored as a blob, and remembered under the conversation. It
-   * goes to a build when the conversation leads to one; otherwise it's dropped after a day.
-   */
-  async addAttachment(owner: Agent, a: { session?: unknown; kind?: unknown; name?: unknown; mediaType?: unknown; data?: unknown }): Promise<AttachmentRef> {
-    requireOwner(owner);
-    if (typeof a.session !== "string" || !SESSION_ID.test(a.session)) throw new PlatformError("invalid_request", "session must be a short id");
-    if (a.kind !== "image" && a.kind !== "file") throw new PlatformError("invalid_request", 'kind must be "image" or "file"');
-    if (typeof a.name !== "string" || !a.name.trim() || a.name.length > MAX_ATTACHMENT_NAME) throw new PlatformError("invalid_request", `name: up to ${MAX_ATTACHMENT_NAME} characters`);
-    if (typeof a.mediaType !== "string" || !/^[\w.+-]+\/[\w.+-]+$/.test(a.mediaType)) throw new PlatformError("invalid_request", "mediaType must be a media type");
-    if (typeof a.data !== "string") throw new PlatformError("invalid_request", "data must be base64");
-    const limits = ATTACHMENT_LIMITS[a.kind];
-    const invalid = (message: string) => new PlatformError("invalid_request", message);
-    let bytes: Uint8Array;
-    let size: { width: number; height: number } | undefined;
-    if (a.kind === "image") {
-      // The same check a tool's model call gets: type, bytes, pixels (a 2 MB image can still be 20000 px wide).
-      ({ bytes, ...size } = checkImage(a.data, a.mediaType, limits.bytes, invalid));
-    } else {
-      try {
-        bytes = fromBase64(a.data);
-      } catch {
-        throw invalid("data must be base64");
-      }
-      if (!bytes.length) throw invalid("the attachment is empty");
-      if (bytes.length > limits.bytes) throw invalid(`a file may be at most ${Math.round(limits.bytes / 1024)} KB`);
-      if (!TEXT_MEDIA.test(a.mediaType) || bytes.subarray(0, 4096).includes(0)) throw invalid("files must be text (a script, notes, CSV, JSON…)");
-    }
-    const have = this.registry.attachmentsOf(a.session).filter((x) => x.kind === a.kind).length;
-    if (have >= limits.perConversation) throw invalid(`at most ${limits.perConversation} ${a.kind}s in one conversation`);
-    const ref = `at-${randomToken(9)}`;
-    await this.blobs.put(`attachments/${ref}`, bytes);
-    const row: AttachmentRef & { session: string } = { ref, session: a.session, kind: a.kind, name: safeName(a.name), mediaType: a.mediaType, bytes: bytes.length, ...(size ?? {}) };
-    this.registry.insertAttachment(row);
-    const { session: _s, ...meta } = row;
-    return meta;
-  }
-
-  /** An attachment's bytes, for the owner's browser (a thumbnail, a file) and the intake. */
-  async attachmentBytes(owner: Agent, ref: string): Promise<{ meta: AttachmentRef; bytes: Uint8Array }> {
-    requireOwner(owner);
-    const a = typeof ref === "string" ? this.registry.attachment(ref) : undefined;
-    const bytes = a ? await this.blobs.get(`attachments/${ref}`) : undefined;
-    if (!a || !bytes) throw new PlatformError("not_found", `no attachment ${ref}`);
-    const { session: _s, buildId: _b, createdAt: _c, ...meta } = a;
-    return { meta, bytes };
-  }
-
-  /** The owner's attachments behind one message's refs (what they are, from the store), in order, each once; within the per-message limits. */
-  private resolveAttachments(refs: unknown): AttachmentRef[] {
-    if (!Array.isArray(refs) || refs.length > ATTACHMENT_LIMITS.file.perMessage + ATTACHMENT_LIMITS.image.perMessage) throw new PlatformError("invalid_request", "attachments: a short list of refs");
-    const out: AttachmentRef[] = [];
-    for (const x of refs) {
-      const ref = typeof x === "string" ? x : x && typeof x.ref === "string" ? x.ref : undefined;
-      if (!ref) throw new PlatformError("invalid_request", "each attachment needs a ref");
-      const a = this.registry.attachment(ref);
-      if (!a) throw new PlatformError("not_found", `no attachment ${ref}`);
-      if (out.some((o) => o.ref === ref)) continue;
-      const { session: _s, buildId: _b, createdAt: _c, ...meta } = a;
-      out.push(meta);
-    }
-    for (const kind of ["image", "file"] as const) {
-      const max = ATTACHMENT_LIMITS[kind].perMessage;
-      if (out.filter((a) => a.kind === kind).length > max) throw new PlatformError("invalid_request", `at most ${max} ${kind}s in one message`);
-    }
-    return out;
-  }
-
-  /** Attachments with their bytes (base64), for the intake to read. Owner only. */
-  async attachmentsWithData(owner: Agent, refs: unknown): Promise<AttachmentWithData[]> {
-    requireOwner(owner);
-    const out: AttachmentWithData[] = [];
-    for (const meta of this.resolveAttachments(refs)) {
-      const bytes = await this.blobs.get(`attachments/${meta.ref}`);
-      if (bytes) out.push({ ...meta, data: toBase64(bytes) });
-    }
-    return out;
-  }
-
-  /**
-   * The owner's attachments for the builder: copied into the workspace under `attachments/`
-   * (never part of a version) and listed in the request, so the builder reads a screenshot of the
-   * screen to change, or a script to port, as part of what was asked.
-   */
-  private async attachmentsForBuild(buildId: string): Promise<{ files: Files; note: string }> {
-    const turns = this.registry.buildContext(buildId)?.conversation ?? [];
-    const files: Files = {};
-    const lines: string[] = [];
-    const seen = new Set<string>();
-    for (const turn of turns) {
-      for (const a of turn.attachments ?? []) {
-        if (seen.has(a.ref)) continue;
-        seen.add(a.ref);
-        const bytes = await this.blobs.get(`attachments/${a.ref}`);
-        if (!bytes) continue;
-        const path = `attachments/${seen.size}-${safeName(a.name)}`;
-        files[path] = bytes;
-        lines.push(`- \`${path}\`: ${a.kind === "image" ? `an image, ${a.width}×${a.height}` : `a text file, ${Math.max(1, Math.round(a.bytes / 1024))} KB`}, attached with: "${turn.content.slice(0, 120).replace(/\s+/g, " ")}${turn.content.length > 120 ? "…" : ""}"`);
-      }
-    }
-    if (!lines.length) return { files, note: "" };
-    return { files, note: `\n\nThe owner attached these, in this workspace (read them as part of the request: a screenshot shows the screen or the look they mean, a file is reference material such as a script to port or data to import):\n${lines.join("\n")}` };
-  }
 
   /**
    * Schedules the owner approved with a build (on the intake's card): the owner's own, so only the
@@ -2958,7 +2377,7 @@ export class Platform {
     const connection = req.kind === "connection";
     // kind is an ABI 2.1 field.
     const skeleton: CapabilityManifest = { id, name: req.name, purpose: req.purpose, abi: connection ? "2.1" : DEFAULT_ABI, ...(connection ? { kind: "connection" as const } : {}), operations: [] };
-    const attached = await this.attachmentsForBuild(buildId);
+    const attached = await this.d.attachments.attachmentsForBuild(buildId);
     await this.workbench.open(buildId, {
       ...(seed ? versionFiles(seed) : {
         "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
@@ -3059,7 +2478,7 @@ export class Platform {
     const base = await this.loadVersion(cap.id, cap.activeVersion);
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
-    const attached = await this.attachmentsForBuild(buildId);
+    const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
     await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
@@ -3230,80 +2649,6 @@ export class Platform {
   }
 
   // ---------- Instructions: the owner's standing rules for building, read by the intake and the builder ----------
-
-  private instructionsKey = (capabilityId?: string) => (capabilityId ? `instructions:${capabilityId}` : "instructions:global");
-
-  private instructionLines(capabilityId?: string): string[] {
-    return this.registry.getKv<string[]>(this.instructionsKey(capabilityId)) ?? [];
-  }
-
-  private mustCapabilityForInstructions(capabilityId: string) {
-    const cap = this.registry.getCapability(capabilityId);
-    if (!cap || cap.archivedAt) throw new PlatformError("not_found", `no capability ${capabilityId}`);
-  }
-
-  /** The owner's instructions, one per line: for every tool (no id), or for one tool. Owner only. */
-  instructions(owner: Agent, capabilityId?: string): string[] {
-    requireOwner(owner);
-    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
-    return this.instructionLines(capabilityId);
-  }
-
-  /** Replace the owner's instructions for a scope with the list as edited (a text, one per line, or lines). */
-  setInstructions(owner: Agent, capabilityId: string | undefined, lines: unknown): string[] {
-    requireOwner(owner);
-    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
-    const list = cleanInstructions(lines);
-    this.registry.setKv(this.instructionsKey(capabilityId), list);
-    this.logger(`instructions for ${capabilityId ?? "every tool"}: ${list.length} line(s), set by ${owner.id}`);
-    return list;
-  }
-
-  /**
-   * What the intake remembered or dropped in one turn, applied: a remembered rule goes at the end of
-   * its scope (never twice, never past the limit); a dropped one must match a line. Creating, there is
-   * no tool yet, so only rules for every tool are kept. Returns what changed, for the owner to see and undo.
-   */
-  applyIntakeMemory(owner: Agent, capabilityId: string | undefined, remember: unknown, forget: unknown): { remember: Instruction[]; forget: Instruction[] } {
-    requireOwner(owner);
-    if (capabilityId) this.mustCapabilityForInstructions(capabilityId);
-    const out: { remember: Instruction[]; forget: Instruction[] } = { remember: [], forget: [] };
-    for (const scope of ["global", "tool"] as const) {
-      const id = scope === "tool" ? capabilityId : undefined;
-      if (scope === "tool" && !id) continue;
-      const add = instructionEntries(remember, scope);
-      const drop = instructionEntries(forget, scope);
-      if (!add.length && !drop.length) continue;
-      let list = this.instructionLines(id);
-      const dropped: string[] = [];
-      const added: string[] = [];
-      for (const t of drop) {
-        if (!list.includes(t)) continue;
-        list = list.filter((x) => x !== t);
-        dropped.push(t);
-      }
-      for (const t of add) {
-        if (list.includes(t) || list.length >= MAX_INSTRUCTION_LINES) continue;
-        list.push(t);
-        added.push(t);
-      }
-      if (!added.length && !dropped.length) continue;
-      out.forget.push(...dropped.map((text) => ({ scope, text })));
-      out.remember.push(...added.map((text) => ({ scope, text })));
-      this.registry.setKv(this.instructionsKey(id), list);
-      this.logger(`instructions for ${id ?? "every tool"}: the intake remembered ${added.length}, dropped ${dropped.length}`);
-    }
-    return out;
-  }
-
-  /** The "Owner's instructions" section of BUILDER.md: the rules for every tool, then this tool's. Empty when there are none. */
-  private instructionsForBuild(capabilityId: string): string {
-    const global = this.instructionLines();
-    const tool = this.instructionLines(capabilityId);
-    if (!global.length && !tool.length) return "";
-    const bullets = (l: string[]) => l.map((x) => `- ${x}`).join("\n");
-    return `## Owner's instructions\n\nThe owner's standing rules for how their tools are built. Follow them wherever they apply; the contract below still holds.\n${global.length ? `\nFor every tool:\n${bullets(global)}\n` : ""}${tool.length ? `\nFor this tool:\n${bullets(tool)}\n` : ""}`;
-  }
 
   /** The transcript goes with the build for the capability's life (the workbench's copy goes with cleanup). Best-effort. */
   private async keepTranscript(buildId: string) {
@@ -3873,24 +3218,6 @@ export class Platform {
     return cap;
   }
 
-  activeManifest(capabilityId: string): CapabilityManifest {
-    const cap = this.registry.getCapability(capabilityId)!;
-    return this.registry.getVersion(capabilityId, cap.activeVersion!)!.manifest;
-  }
-
-  private summary(m: CapabilityManifest): CapabilitySummary {
-    return {
-      id: m.id,
-      name: this.registry.getCapability(m.id)?.displayName ?? m.name,
-      purpose: m.purpose,
-      tags: m.tags ?? [],
-      operations: m.operations.map((o) => `${opKey(o.name, o.version)}${o.deprecated ? ` (deprecated${o.deprecated.replacement ? ` → ${o.deprecated.replacement}` : ""})` : ""}`),
-      ready: this.readiness(m.id).ready,
-      ...(isConnection(m) ? { kind: "connection" as const } : {}),
-      ...(m.widgets?.length && abiAtLeast(m, "2.3") ? { widgets: m.widgets.map((w) => w.name) } : {}),
-    };
-  }
-
   private mustBuild(buildId: string): BuildRow {
     const build = this.registry.getBuild(buildId);
     if (!build) throw new PlatformError("not_found", `no build '${buildId}'`);
@@ -4012,8 +3339,6 @@ export function resolveHosts(m: CapabilityManifest, config: Record<string, strin
   });
 }
 
-const latestOp = (m: CapabilityManifest, name: string) => m.operations.filter((o) => o.name === name).sort((a, b) => b.version - a.version)[0];
-
 function resolveOperation(m: CapabilityManifest, name: string, version?: number): OperationManifest {
   const candidates = m.operations.filter((o) => o.name === name);
   const op = version === undefined ? candidates.sort((a, b) => b.version - a.version)[0] : candidates.find((o) => o.version === version);
@@ -4062,8 +3387,6 @@ const fmtDuration = (s: number) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${
 
 /** Ids that would collide with platform origins (e.g. http://hewn.localhost). */
 export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
-
-const ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
 
 /** How long a whole call chain may take (an agent's call and every capability call it causes). */
 export const CALL_DEADLINE_MS = 30_000;
@@ -4119,26 +3442,6 @@ export interface WidgetResult {
 
 const widgetKey = (capabilityId: string, name: string, input: Record<string, unknown>) => `${capabilityId}/${name}/${sha256(JSON.stringify(input)).slice(0, 16)}`;
 
-/** Web sessions last 30 days from last use. */
-export const WEB_SESSION_MS = 30 * 86400_000;
-
-/**
- * The public URL as Hewn stores it: https, a host name (passkeys can't be made for an IP
- * address), optionally a port, nothing else. Capability UIs are on <id>.<host>.
- */
-export function normalizePublicUrl(raw: string): string {
-  let u: URL;
-  try {
-    u = new URL(String(raw).trim());
-  } catch {
-    throw new PlatformError("invalid_request", "the public URL must look like https://hewn.example.com");
-  }
-  if (u.protocol !== "https:") throw new PlatformError("invalid_request", "the public URL must be https:// (passkeys and secure cookies need it; your reverse proxy or tunnel provides the certificate)");
-  if (u.pathname !== "/" || u.search || u.hash || u.username || u.password) throw new PlatformError("invalid_request", "the public URL is just the address, e.g. https://hewn.example.com (no path)");
-  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(u.hostname) || /^[0-9.]+$/.test(u.hostname)) throw new PlatformError("invalid_request", "the public URL needs a domain name, not an IP address (e.g. https://hewn.example.com)");
-  return u.origin;
-}
-
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";
 
@@ -4164,7 +3467,6 @@ function secretNeedles(value: string): string[] {
   walk(parsed);
   return out;
 }
-
 
 /** Every grant a manifest asks for ("secret:NAME", "host:…", "capability:id/op@v", "model:…"). */
 function wantedGrants(manifest: CapabilityManifest): string[] {
