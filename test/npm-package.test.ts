@@ -30,6 +30,7 @@ describe("the npm packages", () => {
     const list = packed(CLI);
     for (const f of list) assert.match(f, /^(dist\/(cli\.js|host\/(worker\.js|capability-runtime\.js|builder-brief\.md)|web\/.+|platform-ui\/.+)|README\.md|LICENSE|LICENSING\.md|CHANGELOG\.md|package\.json)$/, f);
     for (const f of ["dist/cli.js", "dist/host/worker.js", "dist/web/index.html", "dist/platform-ui/session.js", "dist/platform-ui/LICENSE", "LICENSE"]) assert.ok(list.includes(f), f);
+    for (const f of files(join(ROOT, "packages", "host-workerd", "web"))) assert.ok(list.includes(`dist/web/${f}`), `the web client's ${f}`);
   });
 
   test("no paths from the machine it was built on", () => {
