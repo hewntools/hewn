@@ -11,7 +11,7 @@ import { SECTIONS } from "./settings.js";
 import { openCapability, openChange } from "./tool-actions.js";
 import { addWidgetSheet } from "./widgets.js";
 
-export { commandPalette };
+export { commandPalette, glyphTile, PALETTE_GLYPHS };
 
 // ---------- the command palette (⌘K, "/"): tools, places and actions in one search ----------
 

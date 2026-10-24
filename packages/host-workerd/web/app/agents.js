@@ -33,6 +33,7 @@ import { brandTile, go, hewnMachine, hues, page, put, setSettings, settings } fr
 import { buildsChosen, jobModelOf, modelWords, saveBuildModel } from "./home.js";
 import { pollInbox } from "./inbox.js";
 import { PROVIDERS } from "./models.js";
+import { glyphTile, PALETTE_GLYPHS } from "./palette.js";
 import { route } from "./router.js";
 
 export {
@@ -462,19 +463,19 @@ async function confirmationSheet(c) {
 async function addSheet() {
   const next = await modal(
     (close) => {
-      // Hewn's own choices: ink on grey, as in the palette (colour is for tools and brands).
+      // Hewn's own choices: the palette's glyphs for the same places, ink on grey (colour is for tools and brands).
       const choice = (glyph, title, sub, fn) =>
-        h("li", { class: "link add-choice", tabindex: 0, onclick: () => close(fn), onkeydown: (e) => e.key === "Enter" && close(fn) }, h("span", { class: "app-icon md", style: { "--s": 0 } }, glyph), h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub" }, sub)));
+        h("li", { class: "link add-choice", tabindex: 0, onclick: () => close(fn), onkeydown: (e) => e.key === "Enter" && close(fn) }, glyphTile(PALETTE_GLYPHS[glyph], 44), h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub" }, sub)));
       return [
         h("h2", { class: "flush" }, "Add"),
         h(
           "ul",
           { class: "list" },
-          choice("↘", "An agent that uses your tools", "Claude Code, Codex, OpenCode, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
+          choice("agent", "An agent that uses your tools", "Claude Code, Codex, OpenCode, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
           // Hosted: the host builds; there are no agents on the machine to work for Hewn.
-          !settings?.hosted && choice("↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
+          !settings?.hosted && choice("hammer", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
           // Hosted: tools that think run on the host's models.
-          !settings?.hosted && choice("$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
+          !settings?.hosted && choice("chip", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
       ];
