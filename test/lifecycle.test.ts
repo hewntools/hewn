@@ -192,8 +192,11 @@ describe("modification lifecycle", () => {
     assert.equal(second.queued, true);
     assert.match(second.instructions!, /the change to the same capability before it/);
     assert.equal(third.dependsOn, second.buildId, "in the order asked");
+    // What a new change would land after, for the intake and agents.
+    assert.deepEqual(t.platform.changesComing(t.claude, "running-log").map((c) => [c.buildId, c.request]), [[first.buildId, "a"], [second.buildId, "b"], [third.buildId, "c"]]);
     release();
     for (const b of [first, second, third]) assert.equal((await t.platform.settle(b.buildId)).status, "promoted");
+    assert.deepEqual(t.platform.changesComing(t.claude, "running-log"), []);
     assert.equal(t.platform.registry.getBuild(third.buildId)!.resultVersion, 4);
     assert.match(seen[2], /\/\/ first\n\/\/ second$/, "the third built on the first two");
   });

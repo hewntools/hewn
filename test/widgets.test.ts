@@ -133,6 +133,10 @@ describe("widget proposals (intake)", () => {
       ],
     });
     // Opened from a widget's Change…: about that widget; a proposal may replace it (only an existing one).
+    // Changes on their way: the new one lands after them, so the intake builds on them.
+    assert.doesNotMatch(prompt, /Changes to it not live yet/);
+    const coming = intakePrompt({ mode: "modify", capabilityId: "x", current, coming: ["add a pace column", "y".repeat(2000)], messages: [{ role: "user", content: "and a chart" }] });
+    assert.match(coming, /Changes to it not live yet, oldest first[^\n]*\n- add a pace column\n- y{1500}…\n/);
     const focused = intakePrompt({ mode: "modify", capabilityId: "x", widget: "today", current, messages: [{ role: "user", content: "large only" }] });
     assert.match(focused, /opened this from its widget "Today" \(name today, operation widget_today@1, sizes small\)/);
     assert.match(focused, /"replaces": "today"/);

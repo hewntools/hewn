@@ -744,10 +744,10 @@ export class Platform {
     return this.registry.getCapability(capabilityId)?.saturation ?? this.activeManifest(capabilityId).saturation ?? null;
   }
 
-  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. */
-  async icon(capabilityId: string): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
+  /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. `owner: false`: the builder's only (Set icon's Use default). */
+  async icon(capabilityId: string, { owner = true }: { owner?: boolean } = {}): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
     const cap = this.registry.getCapability(capabilityId);
-    if (cap?.iconType) {
+    if (owner && cap?.iconType) {
       const data = await this.blobs.get(`icons/${capabilityId}`);
       const glyph = cap.iconType === "glyph";
       if (data) return { data, type: glyph ? "image/svg+xml" : cap.iconType, glyph };
@@ -2825,6 +2825,16 @@ export class Platform {
   private queueBehind(capabilityId: string, req: object): string | undefined {
     if ("autoRetryOf" in req) return undefined;
     return this.registry.unfinishedBuild(capabilityId)?.id;
+  }
+
+  /**
+   * Changes to a capability on their way (queued or building), oldest first: a new
+   * change lands after them, so whoever drafts it (the intake, an agent) builds on them.
+   */
+  changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] {
+    requireScope(agent, "modify");
+    this.visibleActive(agent, capabilityId);
+    return this.registry.pendingChanges(capabilityId).map((b) => ({ buildId: b.id, kind: b.kind, status: b.status, request: String(b.request.request ?? "") }));
   }
 
   /** Waiting its turn behind an earlier change to the same capability, not for a build it needs (`after`). */

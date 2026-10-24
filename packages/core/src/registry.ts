@@ -858,6 +858,17 @@ export class Registry {
     return row ? toBuild(row as Row) : undefined;
   }
 
+  /**
+   * A capability's changes on their way (modify and widgets builds), oldest first: waiting, running
+   * or validating. Not one in review: a new change doesn't wait for it (see unfinishedBuild).
+   */
+  pendingChanges(capabilityId: string): BuildRow[] {
+    return this.db
+      .prepare("SELECT * FROM builds WHERE capability_id = ? AND kind IN ('modify', 'widgets') AND status IN ('waiting', 'open', 'building', 'validating') ORDER BY rowid")
+      .all(capabilityId)
+      .map((r) => toBuild(r as Row));
+  }
+
   /** The newest retry of a build ("retryOf" in its request), if any. */
   retryOf(buildId: string): string | undefined {
     const rows = this.db.prepare("SELECT id, request FROM builds WHERE created_at >= (SELECT created_at FROM builds WHERE id = ?) ORDER BY created_at DESC").all(buildId);

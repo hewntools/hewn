@@ -235,7 +235,7 @@ window.addEventListener("hashchange", () => closeInbox());
 function needIcon(n, all, size = 36) {
   if (n.capabilityId) return appIcon(all.get(n.capabilityId) ?? { id: n.capabilityId, name: n.title }, { size });
   if (n.kind === "agent") return agentTile(n.title, n.title, size);
-  return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": 125 } }, n.kind === "spend" ? "$" : "·");
+  return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 } }, n.kind === "spend" ? "$" : "·");
 }
 
 /** What a Needs-you row opens: its own sheet (or page). */
@@ -350,27 +350,27 @@ window.refreshInbox = pollInbox;
 
 // ---------- the command palette (⌘K, "/"): tools, places and actions in one search ----------
 
-/** 5×5 glyphs for the palette's actions and places (Hewn's pixel style, no UI icon set): [hue, rows]. */
+/** 5×5 glyphs for the palette's actions and places (Hewn's pixel style, no UI icon set). */
 const PALETTE_GLYPHS = {
-  plus: [125, ["..#..", "..#..", "#####", "..#..", "..#.."]],
-  widget: [200, ["##.##", "##.##", ".....", "##.##", "##.##"]],
-  edit: [30, ["...##", "..###", ".###.", "###..", "#...."]],
-  agent: [300, [".###.", ".###.", ".....", "#####", "#####"]],
-  link: [180, ["##...", "#.#..", ".###.", "..#.#", "...##"]],
-  hammer: [55, ["#####", "#####", "..#..", "..#..", "..#.."]],
-  ask: [250, ["#####", "#...#", "#####", ".#...", "#...."]],
-  backup: [160, ["..#..", "..#..", "#.#.#", ".###.", "#####"]],
-  appearance: [270, [".###.", "###.#", "###.#", "###.#", ".###."]],
-  keys: [220, ["#####", "#.#.#", "#####", "#...#", "#####"]],
-  home: [125, ["..#..", ".###.", "#####", "##.##", "##.##"]],
-  bell: [40, BELL],
-  activity: [10, ["#.###", ".....", "#.###", ".....", "#.###"]],
-  key: [80, [".###.", ".#.#.", ".###.", "..#..", "..##."]],
-  settings: [210, ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"]],
-  chip: [190, ["#####", "#...#", "#.#.#", "#...#", "#####"]],
+  plus: ["..#..", "..#..", "#####", "..#..", "..#.."],
+  widget: ["##.##", "##.##", ".....", "##.##", "##.##"],
+  edit: ["...##", "..###", ".###.", "###..", "#...."],
+  agent: [".###.", ".###.", ".....", "#####", "#####"],
+  link: ["##...", "#.#..", ".###.", "..#.#", "...##"],
+  hammer: ["#####", "#####", "..#..", "..#..", "..#.."],
+  ask: ["#####", "#...#", "#####", ".#...", "#...."],
+  backup: ["..#..", "..#..", "#.#.#", ".###.", "#####"],
+  appearance: [".###.", "###.#", "###.#", "###.#", ".###."],
+  keys: ["#####", "#.#.#", "#####", "#...#", "#####"],
+  home: ["..#..", ".###.", "#####", "##.##", "##.##"],
+  bell: BELL,
+  activity: ["#.###", ".....", "#.###", ".....", "#.###"],
+  key: [".###.", ".#.#.", ".###.", "..#..", "..##."],
+  settings: ["#.#.#", ".###.", "##.##", ".###.", "#.#.#"],
+  chip: ["#####", "#...#", "#.#.#", "#...#", "#####"],
 };
-/** A small tile with a pixel glyph, for things that aren't tools. */
-const glyphTile = ([hue, rows], size) => h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue }, "aria-hidden": "true" }, pixelGlyph(rowCells(rows)));
+/** A small tile with a pixel glyph, for Hewn's own actions and places: ink on grey (saturation 0), like Home's New; colour is for tools. */
+const glyphTile = (rows, size) => h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 }, "aria-hidden": "true" }, pixelGlyph(rowCells(rows)));
 
 /**
  * Everything the palette offers: tools (open; Change… and Info when you type), connections, places
@@ -736,37 +736,44 @@ async function iconDialog(c) {
   const id = enc(c.id);
   const cells = await (c.iconKind === "glyph" ? glyphCells(c) : Promise.resolve([]));
   const grid = SEEDS.map((r) => [...r].map(() => false));
-  for (const { x, y } of cells) if (grid[y]?.[x] !== undefined) grid[y][x] = true;
+  const setGrid = (lit) => {
+    for (const r of grid) r.fill(false);
+    for (const { x, y } of lit) if (grid[y]?.[x] !== undefined) grid[y][x] = true;
+  };
+  setGrid(cells);
   let hue = hueOf(c);
   let saturation = Number.isInteger(c.saturation) ? c.saturation : 100;
   let mode = c.iconKind === "image" ? "image" : "glyph";
+  // After Use default: the defaults are on screen, and Save clears the owner's icon, colour and
+  // saturation, keeping what was changed after it ("icon", "hue", "saturation"). null: not used.
+  let reset = null;
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
+  file.addEventListener("change", () => reset?.add("icon"));
   const status = h("p", { class: "small error" });
   const preview = h("span", { class: "icon-preview" });
   const rows = () => grid.map((r) => r.map((on) => (on ? "#" : ".")).join(""));
 
   const drawPreview = () => {
     const tile = h("span", { class: "app-icon", style: { "--size": "48px", "--hue": hue, "--s": saturation / 100 } });
-    if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
+    // The default without a builder's glyph is the monogram.
+    if (mode === "glyph" && reset && !reset.has("icon") && !grid.flat().some(Boolean)) tile.append(appIcon({ name: c.name }, { size: 48 }).firstChild);
+    else if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
     else tile.append(appIcon({ ...c, hue, saturation }, { size: 48 }).firstChild ?? "");
     put(preview, tile);
   };
-  const editor = h(
-    "div",
-    { class: "glyph-editor", role: "group", "aria-label": "Glyph, 5 by 5" },
-    grid.flatMap((r, y) =>
-      r.map((_, x) => {
-        const b = h("button", { type: "button", "aria-label": `Cell ${x + 1}, ${y + 1}`, "aria-pressed": String(grid[y][x]) });
-        b.addEventListener("click", () => ((grid[y][x] = !grid[y][x]), b.setAttribute("aria-pressed", String(grid[y][x])), drawPreview()));
-        return b;
-      }),
-    ),
+  const cellButtons = grid.map((r, y) =>
+    r.map((_, x) => {
+      const b = h("button", { type: "button", "aria-label": `Cell ${x + 1}, ${y + 1}`, "aria-pressed": String(grid[y][x]) });
+      b.addEventListener("click", () => ((grid[y][x] = !grid[y][x]), b.setAttribute("aria-pressed", String(grid[y][x])), reset?.add("icon"), drawPreview()));
+      return b;
+    }),
   );
+  const editor = h("div", { class: "glyph-editor", role: "group", "aria-label": "Glyph, 5 by 5" }, cellButtons);
   const hueInput = h("input", { type: "range", min: 0, max: 359, value: hue, class: "hue-range", "aria-label": "Colour" });
-  hueInput.addEventListener("input", () => ((hue = Number(hueInput.value)), drawPreview()));
+  hueInput.addEventListener("input", () => ((hue = Number(hueInput.value)), reset?.add("hue"), drawPreview()));
   // 0: black or white on grey (a black-and-white brand); 100 is the default; capped at 150 (more turns neon in dark mode).
   const satInput = h("input", { type: "range", min: 0, max: 150, step: 5, value: saturation, class: "hue-range", "aria-label": "Saturation" });
-  satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), drawPreview()));
+  satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), reset?.add("saturation"), drawPreview()));
   const panes = {
     glyph: h("div", { class: "stack-sm" }, editor, h("span", { class: "small faint" }, "7–17 lit cells, one simple idea.")),
     image: h("label", { class: "field" }, h("span", { class: "label" }, "Image"), file, h("span", { class: "hint" }, "PNG, JPEG, WebP or SVG, up to 256 KB")),
@@ -774,27 +781,52 @@ async function iconDialog(c) {
   const body = h("div", {});
   const seg = h("div", { class: "segmented self-start", role: "group", "aria-label": "Icon type" });
   const show = () => {
-    put(seg, ...[["glyph", "Draw"], ["image", "Image"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(k === mode), onclick: () => ((mode = k), show()) }, l)));
+    put(seg, ...[["glyph", "Draw"], ["image", "Image"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(k === mode), onclick: () => ((mode = k), reset?.add("icon"), show()) }, l)));
     put(body, panes[mode]);
     drawPreview();
+  };
+  /** Use default: the builder's glyph, colour and saturation in the preview; Save applies them. */
+  const useDefault = async () => {
+    try {
+      const [m, lit] = await Promise.all([api(`/capabilities/${id}`), glyphCells({ id: c.id, iconUrl: `/api/capabilities/${id}/icon?default=1` })]);
+      setGrid(lit);
+      cellButtons.forEach((r, y) => r.forEach((b, x) => b.setAttribute("aria-pressed", String(grid[y][x]))));
+      hue = hueOf({ id: c.id, hue: m.hue });
+      saturation = Number.isInteger(m.saturation) ? m.saturation : 100;
+      hueInput.value = hue;
+      satInput.value = saturation;
+      mode = "glyph";
+      reset = new Set();
+      status.textContent = "";
+      show();
+    } catch (e) {
+      status.textContent = e.message;
+    }
   };
   const done = (close) => (bumpIcons(), invalidateCaps(), close(), route());
   return modal((close) => {
     const save = async () => {
       try {
-        if (mode === "glyph") {
-          if (!grid.flat().some(Boolean)) return (status.textContent = "Light at least one cell.");
-          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { glyph: rows(), hue, saturation } });
-        } else {
-          if (!file.files[0]) return (status.textContent = "Choose an image.");
-          const dataUrl = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = () => res(r.result);
-            r.onerror = rej;
-            r.readAsDataURL(file.files[0]);
-          });
-          await api(`/capabilities/${id}/icon`, { method: "PUT", body: { dataUrl, hue, saturation } });
-        }
+        const icon = !reset || reset.has("icon");
+        if (icon && mode === "glyph" && !grid.flat().some(Boolean)) return (status.textContent = "Light at least one cell.");
+        if (icon && mode === "image" && !file.files[0]) return (status.textContent = "Choose an image.");
+        const body = {
+          ...(!reset || reset.has("hue") ? { hue } : {}),
+          ...(!reset || reset.has("saturation") ? { saturation } : {}),
+          ...(icon && mode === "glyph" ? { glyph: rows() } : {}),
+          ...(icon && mode === "image"
+            ? {
+                dataUrl: await new Promise((res, rej) => {
+                  const r = new FileReader();
+                  r.onload = () => res(r.result);
+                  r.onerror = rej;
+                  r.readAsDataURL(file.files[0]);
+                }),
+              }
+            : {}),
+        };
+        if (reset) await api(`/capabilities/${id}/icon`, { method: "DELETE" });
+        if (Object.keys(body).length) await api(`/capabilities/${id}/icon`, { method: "PUT", body });
         done(close);
       } catch (e) {
         status.textContent = e.message;
@@ -806,12 +838,13 @@ async function iconDialog(c) {
       seg,
       body,
       h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), hueInput),
-      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), satInput),
+      // The mark under the slider: where the default (100%) is.
+      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), h("span", { class: "range-mark", style: { "--at": 100 / 150 }, "data-mark": "100%" }, satInput)),
       status,
       h(
         "div",
         { class: "actions flush between" },
-        h("button", { class: "ghost", onclick: () => api(`/capabilities/${id}/icon`, { method: "DELETE" }).then(() => done(close)).catch((e) => (status.textContent = e.message)) }, "Use default"),
+        h("button", { class: "ghost", onclick: useDefault }, "Use default"),
         h("span", { class: "row tight" }, h("button", { onclick: () => close() }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")),
       ),
     ];
@@ -4658,18 +4691,19 @@ async function confirmationSheet(c) {
 async function addSheet() {
   const next = await modal(
     (close) => {
-      const choice = (hue, glyph, title, sub, fn) =>
-        h("li", { class: "link add-choice", tabindex: 0, onclick: () => close(fn), onkeydown: (e) => e.key === "Enter" && close(fn) }, h("span", { class: "app-icon md", style: { "--hue": hue } }, glyph), h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub" }, sub)));
+      // Hewn's own choices: ink on grey, as in the palette (colour is for tools and brands).
+      const choice = (glyph, title, sub, fn) =>
+        h("li", { class: "link add-choice", tabindex: 0, onclick: () => close(fn), onkeydown: (e) => e.key === "Enter" && close(fn) }, h("span", { class: "app-icon md", style: { "--s": 0 } }, glyph), h("div", { class: "grow" }, h("span", { class: "strong" }, title), h("span", { class: "sub" }, sub)));
       return [
         h("h2", { class: "flush" }, "Add"),
         h(
           "ul",
           { class: "list" },
-          choice(30, "↘", "An agent that uses your tools", "Claude Code, Codex, OpenCode, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
+          choice("↘", "An agent that uses your tools", "Claude Code, Codex, OpenCode, claude.ai, ChatGPT, any MCP client", () => connectDialog()),
           // Hosted: the host builds; there are no agents on the machine to work for Hewn.
-          !settings?.hosted && choice(125, "↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
+          !settings?.hosted && choice("↗", "An agent that works for Hewn", "Builds tools · runs on this machine", () => hewnAgentsSheet()),
           // Hosted: tools that think run on the host's models.
-          !settings?.hosted && choice(200, "$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
+          !settings?.hosted && choice("$", "A model provider", "Anthropic, OpenAI, OpenRouter · for tools that think", () => go("#/settings/ai/models")),
         ),
         sheetActions(h("button", { onclick: () => close() }, "Close")),
       ];
