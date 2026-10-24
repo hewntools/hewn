@@ -60,6 +60,12 @@ export async function readDocs(asset: (path: string) => Promise<Uint8Array | und
   return pages.filter((p): p is DocPage => !!p);
 }
 
+/** `readDocs` once, kept for the host's life; read again next time if some pages were missing (a host still starting). */
+export function docsReader(asset: (path: string) => Promise<Uint8Array | undefined>): () => Promise<DocPage[]> {
+  let docs: Promise<DocPage[]> | undefined;
+  return () => (docs ??= readDocs(asset).then((pages) => (pages.length < DOC_PAGES.length && (docs = undefined), pages)));
+}
+
 /** A heading's anchor, as GitHub makes it: "Widgets (since 2.3)" → "widgets-since-23". */
 export const slug = (heading: string) =>
   heading
@@ -81,8 +87,16 @@ export function docSections(page: DocPage): DocSection[] {
   });
   const title = (heads.find((h) => h.level === 1) ?? heads[0])?.heading ?? page.name;
   const starts = [{ line: 0, level: 0, heading: "" }, ...heads];
+  // A heading repeated on the page gets "-1", "-2" … after its anchor, as on GitHub.
+  const seen = new Map<string, number>();
+  const anchor = (heading: string) => {
+    const s = slug(heading);
+    const n = seen.get(s) ?? 0;
+    seen.set(s, n + 1);
+    return n ? `${s}-${n}` : s;
+  };
   return starts
-    .map((h, i) => ({ page: page.name, title, heading: h.heading || title, level: h.level, slug: slug(h.heading), text: lines.slice(h.line, starts[i + 1]?.line ?? lines.length).join("\n").trim() }))
+    .map((h, i) => ({ page: page.name, title, heading: h.heading || title, level: h.level, slug: anchor(h.heading), text: lines.slice(h.line, starts[i + 1]?.line ?? lines.length).join("\n").trim() }))
     .filter((s, i) => i > 0 || s.text);
 }
 
@@ -97,8 +111,8 @@ export function findPage(pages: DocPage[], name: string): DocPage | undefined {
   return same.length === 1 ? same[0] : undefined;
 }
 
-/** One section of a page with the sections under it, by its anchor or heading text (its anchor, and the text); undefined if it has none such. */
-export function sectionText(page: DocPage, heading: string): { slug: string; text: string } | undefined {
+/** One section of a page with the sections under it, by its anchor or heading text (its anchor, the text, and the anchors in it); undefined if it has none such. */
+export function sectionText(page: DocPage, heading: string): { slug: string; text: string; slugs: Set<string> } | undefined {
   const all = docSections(page);
   const want = slug(heading);
   let i = all.findIndex((s) => s.level > 0 && s.slug === want);
@@ -112,6 +126,7 @@ export function sectionText(page: DocPage, heading: string): { slug: string; tex
       .slice(i, end)
       .map((s) => s.text)
       .join("\n\n"),
+    slugs: new Set(all.slice(i, end).map((s) => s.slug)),
   };
 }
 
@@ -179,13 +194,16 @@ export function searchDocs(pages: DocPage[], query: string, limit = 5): DocSecti
 const ref = (s: DocSection) => (s.level ? `${s.page}#${s.slug}` : s.page);
 const label = (s: DocSection) => `--- ${ref(s)} (${s.level > 1 ? `${s.title} › ${s.heading}` : s.title}) ---`;
 
+/** How many sections a prompt's excerpts take at most. */
+const EXCERPT_SECTIONS = 6;
+
 /**
  * The best sections for `query` as one text of at most `maxChars`, for a prompt: each under a line
  * naming its page and heading. Empty when nothing matches.
  */
-export function docExcerpts(pages: DocPage[], query: string, maxChars: number, limit = 6): string {
+export function docExcerpts(pages: DocPage[], query: string, maxChars: number): string {
   let out = "";
-  for (const s of searchDocs(pages, query, limit)) {
+  for (const s of searchDocs(pages, query, EXCERPT_SECTIONS)) {
     // Two line breaks before it, one after its label, and "…" if it is cut.
     const room = maxChars - out.length - label(s).length - 4;
     if (room < 200) break;
@@ -199,8 +217,8 @@ const SECTION_CHARS = 4000;
 
 /**
  * What `hewn_docs` answers, as text for a model: without input the pages and their sections; with
- * `query` the best sections (within `page`, if given too); with `page` that page, or one section of
- * it ("docs/concepts.md#grants").
+ * `query` the best sections (within `page`, or its section, if given too); with `page` that page, or
+ * one section of it ("docs/concepts.md#grants").
  */
 export function docsText(pages: DocPage[], input: { query?: string; page?: string }): string {
   if (!pages.length) throw new PlatformError("not_found", "Hewn's docs aren't available on this host");
@@ -208,23 +226,27 @@ export function docsText(pages: DocPage[], input: { query?: string; page?: strin
   const pageRef = input.page?.trim();
   const names = pages.map((p) => p.name).join(", ");
   let scope = pages;
+  let within: Set<string> | undefined;
   if (pageRef) {
     const hash = pageRef.indexOf("#");
     const name = hash < 0 ? pageRef : pageRef.slice(0, hash);
     const page = findPage(pages, name);
     if (!page) throw new PlatformError("not_found", `No page "${name}" in Hewn's docs. The pages: ${names}.`);
-    if (!query) {
-      if (hash < 0 || !pageRef.slice(hash + 1).trim()) return `${page.name}\n\n${page.text.trim()}`;
-      const heading = pageRef.slice(hash + 1);
+    const heading = hash < 0 ? "" : pageRef.slice(hash + 1).trim();
+    if (!heading) {
+      if (!query) return `${page.name}\n\n${page.text.trim()}`;
+      scope = [page];
+    } else {
       const section = sectionText(page, heading);
       if (!section) throw new PlatformError("not_found", `No section "${heading}" in ${page.name}. Its sections: ${docSections(page).filter((s) => s.level > 1).map((s) => `#${s.slug}`).join(", ")}.`);
-      return `${page.name}#${section.slug}\n\n${section.text}`;
+      if (!query) return `${page.name}#${section.slug}\n\n${section.text}`;
+      scope = [page];
+      within = section.slugs;
     }
-    scope = [page];
   }
   if (query) {
-    const hits = searchDocs(scope, query);
-    if (!hits.length) return `Nothing in Hewn's docs${pageRef ? ` (${scope[0].name})` : ""} matches "${query}". Try other words, or read a page: ${names}.`;
+    const hits = within ? searchDocs(scope, query, Infinity).filter((s) => within.has(s.slug)).slice(0, 5) : searchDocs(scope, query);
+    if (!hits.length) return `Nothing in Hewn's docs${pageRef ? ` (${pageRef})` : ""} matches "${query}". Try other words, or read a page: ${names}.`;
     const shown = hits.map((s) => `${label(s)}\n${s.text.length > SECTION_CHARS ? `${s.text.slice(0, SECTION_CHARS)}…\n(cut here; the whole section: hewn_docs { page: "${ref(s)}" })` : s.text}`);
     return [`The sections of Hewn's docs that best match "${query}". For a whole page or section: hewn_docs { page: "<page>" } or { page: "<page>#<section>" }.`, ...shown].join("\n\n");
   }

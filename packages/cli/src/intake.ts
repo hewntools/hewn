@@ -205,10 +205,13 @@ const FILE_CHARS = 100_000;
 const DOCS_CHARS = 9000;
 
 /**
- * Whether the owner's message reads like a question (a "?", or a question word first): only then
- * does the prompt carry excerpts of Hewn's docs, so an ordinary request doesn't pay for them.
+ * Whether the owner's message reads like a question (a "?", a question word first, or "I don't get
+ * …"): only then does the prompt carry excerpts of Hewn's docs, so an ordinary request doesn't pay
+ * for them.
  */
-export const looksLikeQuestion = (text: string) => text.includes("?") || /^\s*(how|what|why|when|where|which|who|whose|can|could|does|do|did|is|are|was|should|would|will|may|might|must|explain|tell me)\b/i.test(text);
+export const looksLikeQuestion = (text: string) =>
+  text.includes("?") ||
+  /^\s*(how|what|why|when|where|which|who|whose|can|could|does|do|did|is|are|was|should|would|will|may|might|must|explain|tell me|help me understand|wondering|i (?:don't|do not|can't|cannot) (?:get|understand|see|find|figure)|i(?:'m| am) (?:confused|not sure|unsure|wondering))\b/i.test(text);
 
 /**
  * One turn as the prompt shows it. What the owner attached is listed under the message; a text
@@ -232,8 +235,10 @@ function turnText(m: { role: string; content: string; attachments?: IntakeAttach
 /** `docs`: Hewn's docs, for excerpts when the owner's latest message is a question (kind "answer"). */
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean; docs?: DocPage[] } = {}): string {
   const convo = req.messages.map((m) => turnText(m)).join("\n\n");
-  const latest = req.messages.findLast((m) => m.role === "user")?.content ?? "";
-  const excerpts = opts.docs && looksLikeQuestion(latest) ? docExcerpts(opts.docs, latest, DOCS_CHARS) : "";
+  const asked = req.messages.filter((m) => m.role === "user").map((m) => m.content);
+  const latest = asked.at(-1) ?? "";
+  // A follow-up ("and on my phone?") is searched with the message before it.
+  const excerpts = opts.docs && looksLikeQuestion(latest) ? docExcerpts(opts.docs, asked.slice(-2).join("\n"), DOCS_CHARS) : "";
   const earlier = req.earlier?.messages?.length
     ? `An earlier conversation, which led to ${req.earlier.version ? `version ${req.earlier.version} of this capability` : "an earlier build"} (context only: the conversation below comes after it and may change what was agreed then):\n${req.earlier.messages.slice(-EARLIER_TURNS).map((m) => turnText(m, EARLIER_CHARS)).join("\n\n")}\n\n`
     : "";
@@ -317,8 +322,9 @@ function memoryOf(j: Record<string, unknown>): IntakeMemory {
 function replyOf(j: any, mode: IntakeRequest["mode"], current?: CapabilityManifest): IntakeReply {
   const message = typeof j.message === "string" ? j.message : "";
   if (j.kind === "answer") {
-    if (!message.trim()) throw new Error("intake answer is empty");
-    return { kind: "answer", message };
+    if (message.trim()) return { kind: "answer", message };
+    // No answer, but questions back: ask them.
+    if (!(Array.isArray(j.questions) && j.questions.length)) throw new Error("intake answer is empty");
   }
   if (mode === "modify" && j.kind === "widgets") return { kind: "widgets", message, proposals: proposals(j.proposals, current) };
   if (mode === "modify" && j.kind === "schedules") {
@@ -328,7 +334,7 @@ function replyOf(j: any, mode: IntakeRequest["mode"], current?: CapabilityManife
     if (!list.length) throw new Error("intake schedules name no operation the capability has");
     return { kind: "schedules", message, schedules: list };
   }
-  if (j.kind === "questions" && Array.isArray(j.questions) && j.questions.length) {
+  if ((j.kind === "questions" || j.kind === "answer") && Array.isArray(j.questions) && j.questions.length) {
     return { kind: "questions", message, questions: j.questions.slice(0, 3).map(String) };
   }
   if (mode === "create" && j.kind === "ideas") {

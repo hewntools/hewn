@@ -134,7 +134,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
   const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
-  const say = (who, text, attachments) => thread.append(who === "them" ? them(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
+  const say = (who, text, attachments) => thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
   syncSend();
@@ -198,7 +198,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (p.activity) activity.textContent = `${p.activity}…`;
       if (p.message === undefined && p.questions === undefined) return;
       activity.textContent = "";
-      put(live, p.message || p.questions?.length ? them(chatText(p.message, p.questions)) : null);
+      put(live, p.message || p.questions?.length ? themBubble(chatText(p.message, p.questions)) : null);
     };
     try {
       let reply = null;
@@ -275,7 +275,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
 /** The intake's message and its questions as one chat message: paragraphs, the questions numbered. */
 const chatText = (message, questions) => [message, ...(questions ?? []).filter(Boolean).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n");
 /** The intake's side of the chat: its text as light Markdown (bold, lists, code); the owner's stays as typed. */
-const them = (text, attachments) => h("div", { class: "bubble them md" }, markdown(text), attachmentsView(attachments));
+const themBubble = (text, attachments) => h("div", { class: "bubble them md" }, markdown(text), attachmentsView(attachments));
 
 /** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
 const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
@@ -562,14 +562,14 @@ const conversationNodes = (turns, ctx = {}) =>
   turns.map((t) => {
     // A turn kept as text only (from before replies were kept) is read back into the reply it was.
     const r = t.role === "intake" ? (t.reply ?? legacyReply(t.content, ctx.mode)) : null;
-    if (r?.kind === "questions") return them(chatText(r.message, r.questions));
+    if (r?.kind === "questions") return themBubble(chatText(r.message, r.questions));
     const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
     if (list?.length && "cap" in ctx) {
       const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
       const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, nextVersion: ctx.version, readOnly: true })[0];
-      return [r.message && them(r.message), card];
+      return [r.message && themBubble(r.message), card];
     }
-    return t.role === "user" ? h("div", { class: "bubble me" }, t.content, attachmentsView(t.attachments)) : them(t.content, t.attachments);
+    return t.role === "user" ? h("div", { class: "bubble me" }, t.content, attachmentsView(t.attachments)) : themBubble(t.content, t.attachments);
   });
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */

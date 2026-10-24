@@ -4,7 +4,7 @@
 // intake); in the npm package, their copies under dist/.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOC_NAME, type DocPage, readDocs } from "@hewntools/core/docs.ts";
+import { DOC_NAME, docsReader } from "@hewntools/core/docs.ts";
 import { assetDirs } from "./supervisor/bundle.ts";
 
 /** A web client (`web/…`), UI kit (`platform-ui/…`) or docs page (`docs/<page>.md`, `spec/<page>.md`) file, or undefined. */
@@ -21,6 +21,5 @@ export async function sourceAsset(path: string): Promise<Uint8Array | undefined>
   return file.startsWith(dir + "/") && existsSync(file) ? new Uint8Array(readFileSync(file)) : undefined;
 }
 
-let docs: Promise<DocPage[]> | undefined;
-/** Hewn's docs pages as this Hewn has them (read once). */
-export const hewnDocs = () => (docs ??= readDocs(sourceAsset));
+/** Hewn's docs pages as this Hewn has them. */
+export const hewnDocs = docsReader(sourceAsset);

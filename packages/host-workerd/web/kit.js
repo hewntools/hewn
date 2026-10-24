@@ -137,12 +137,21 @@ export function markdown(text) {
       out.push(h("pre", {}, h("code", {}, code.join("\n"))));
       continue;
     }
-    const item = /^\s*(?:[-*•]|(\d{1,3})[.)])\s+(.*)$/.exec(line);
+    const item = /^(\s*)(?:[-*•]|(\d{1,3})[.)])\s+(.*)$/.exec(line);
     if (item) {
       endPara();
-      const tag = item[1] ? "ol" : "ul";
-      if (list?.tag !== tag) (endList(), (list = { tag, el: h(tag, item[1] && item[1] !== "1" ? { start: item[1] } : {}) }));
-      list.el.append(h("li", {}, inline(item[2])));
+      const [, indent, num, body] = item;
+      const tag = num ? "ol" : "ul";
+      // Indented under an item: a list inside that item (one level deep).
+      if (indent && list) {
+        const li = list.el.lastChild;
+        let sub = li.lastChild;
+        if (sub?.tagName !== tag.toUpperCase()) li.append((sub = h(tag)));
+        sub.append(h("li", {}, inline(body)));
+        continue;
+      }
+      if (list?.tag !== tag) (endList(), (list = { tag, el: h(tag, num && num !== "1" ? { start: num } : {}) }));
+      list.el.append(h("li", {}, inline(body)));
       continue;
     }
     // A blank line ends a paragraph; between items it keeps one list.
@@ -164,8 +173,9 @@ export function markdown(text) {
   endList();
   return out;
 }
-// `code`, **bold**, *italic* (not _italic_: ids have underscores) and [label](url).
-const INLINE = /`([^`\n]+)`|\*\*(.+?)\*\*|\*(\S(?:[^*\n]*\S)?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+// `code`, **bold** (code inside it whole), *italic* (not _italic_: ids have underscores) and
+// [label](url) (a url may hold one level of brackets: Wikipedia's "Foo_(bar)").
+const INLINE = /`([^`\n]+)`|\*\*((?:`[^`\n]+`|[^`\n])+?)\*\*|\*(\S(?:[^*\n]*\S)?)\*|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
 function inline(text) {
   const out = [];
   let at = 0;

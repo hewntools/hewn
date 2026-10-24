@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { DOC_PAGES, type DocPage, docExcerpts, docSections, docsText, findPage, readDocs, searchDocs, sectionText, slug } from "@hewntools/core/docs.ts";
+import { DOC_PAGES, type DocPage, docExcerpts, docSections, docsReader, docsText, findPage, readDocs, searchDocs, sectionText, slug } from "@hewntools/core/docs.ts";
 import { hewnDocs, sourceAsset } from "@hewntools/cli/assets.ts";
 import { intakePrompt, looksLikeQuestion, parseIntake, SCHEMA } from "@hewntools/cli/intake.ts";
 import { serverUrl } from "@hewntools/test-host/server.ts";
@@ -39,6 +39,18 @@ describe("docs: the pages", () => {
     const pages = await readDocs(async (p) => (p === "spec/agents.md" || p === "docs/README.md" ? new TextEncoder().encode(`# ${p}`) : undefined));
     assert.deepEqual(pages, [{ name: "docs/README.md", text: "# docs/README.md" }, { name: "spec/agents.md", text: "# spec/agents.md" }]);
   });
+
+  test("docsReader: read once; again next time while pages are missing", async () => {
+    let reads = 0;
+    let all = false;
+    const docs = docsReader(async (p) => (reads++, all || p === "docs/README.md" ? new TextEncoder().encode(`# ${p}`) : undefined));
+    assert.equal((await docs()).length, 1);
+    all = true;
+    assert.equal((await docs()).length, DOC_PAGES.length, "read again: one was missing");
+    const after = reads;
+    await docs();
+    assert.equal(reads, after, "then kept");
+  });
 });
 
 describe("docs: sections and search", () => {
@@ -51,6 +63,10 @@ describe("docs: sections and search", () => {
     assert.equal(slug("Hewn's two jobs"), "hewns-two-jobs");
     // Text before the first heading is a section of its own, under the page's title.
     assert.deepEqual(docSections({ name: "x.md", text: "Intro.\n\n## A\n\nb" }).map((x) => [x.heading, x.level]), [["A", 0], ["A", 2]]);
+    // A heading repeated on a page gets "-1" … after its anchor, and reads as that one.
+    const twice = { name: "x.md", text: "# T\n\n## State\n\na\n\n## ABI\n\n### State\n\nb" };
+    assert.deepEqual(docSections(twice).map((x) => x.slug), ["t", "state", "abi", "state-1"]);
+    assert.equal(sectionText(twice, "state-1")?.text, "### State\n\nb");
   });
 
   test("search: the best sections first, a heading above a mention; no match, or only stop words: nothing", () => {
@@ -103,8 +119,10 @@ describe("docs: hewn_docs", () => {
     assert.equal(docsText(PAGES, { page: "spec/tools.md" }), `spec/tools.md\n\n${PAGES[1].text.trim()}`);
     assert.match(docsText(PAGES, { page: "garden#watering" }), /^docs\/garden\.md#watering\n\n## Watering[^]*### Rain/);
     assert.match(docsText(PAGES, { page: "spec/tools.md#Widgets" }), /^spec\/tools\.md#widgets-since-23\n/);
-    // Both: search that page only.
+    // Both: search that page only, or that section.
     assert.doesNotMatch(docsText(PAGES, { page: "spec/tools.md", query: "plants" }), /garden/);
+    assert.match(docsText(PAGES, { page: "garden#watering", query: "rain" }), /--- docs\/garden\.md#rain /);
+    assert.match(docsText(PAGES, { page: "garden#compost", query: "rain" }), /^Nothing in Hewn's docs \(garden#compost\) matches "rain"/);
     assert.throws(() => docsText(PAGES, { page: "nope.md" }), (e: any) => e.code === "not_found" && /The pages: docs\/garden\.md, spec\/tools\.md/.test(e.message));
     assert.throws(() => docsText(PAGES, { page: "garden#pruning" }), (e: any) => e.code === "not_found" && /Its sections: #watering, #rain, #compost/.test(e.message));
     assert.throws(() => docsText([], {}), (e: any) => e.code === "not_found");
@@ -154,8 +172,8 @@ describe("docs: hewn_docs", () => {
 });
 
 describe("docs: the intake answers questions about Hewn", () => {
-  test("a question reads like one: a ?, or a question word first", () => {
-    for (const q of ["how do grants work", "Can a tool read my calendar", "what is a connection?", "a habit tracker? with streaks", "Is there a dark mode"]) assert.ok(looksLikeQuestion(q), q);
+  test("a question reads like one: a ?, a question word first, or \"I don't get …\"", () => {
+    for (const q of ["how do grants work", "Can a tool read my calendar", "what is a connection?", "a habit tracker? with streaks", "Is there a dark mode", "I don't get how grants work", "I'm not sure what a connection is"]) assert.ok(looksLikeQuestion(q), q);
     for (const r of ["a habit tracker with streaks", "track my coffee", "Show pace per km", "Isolation please"]) assert.ok(!looksLikeQuestion(r), r);
   });
 
@@ -174,6 +192,9 @@ describe("docs: the intake answers questions about Hewn", () => {
       assert.equal(plain, intakePrompt({ mode, ...(mode === "modify" ? { capabilityId: "x" } : {}), messages: [{ role: "user", content: "a coffee log" }, { role: "intake", content: "Daily?" }, { role: "user", content: "ok, and a weekly chart" }] }), "no docs, no question: the same prompt");
     }
     assert.match(ask("modify", "can it read my calendar?"), /a change to this one would do what they asked about/);
+    // A follow-up is searched with the question before it.
+    const followUp = intakePrompt({ mode: "create", messages: [{ role: "user", content: "how do I connect Claude Desktop?" }, { role: "intake", content: "Add Hewn as a connector." }, { role: "user", content: "and on my phone?" }] }, { docs });
+    assert.match(followUp, /--- docs\/agents\.md#claudeai-claude-desktop-and-chatgpt /);
   });
 
   test("it sticks to Hewn: trivia gets a line, not an answer; a Claude skill gets the nearest tool", () => {
@@ -192,5 +213,7 @@ describe("docs: the intake answers questions about Hewn", () => {
     }
     assert.deepEqual(parseIntake(JSON.stringify({ kind: "answer", message: "Yes.", remember: [{ scope: "global", text: "Swedish copy" }] }), "create"), { kind: "answer", message: "Yes.", remember: [{ scope: "global", text: "Swedish copy" }] });
     assert.throws(() => parseIntake(JSON.stringify({ kind: "answer", message: " " }), "create"), /answer is empty/);
+    // No answer but questions back: they're asked.
+    assert.deepEqual(parseIntake(JSON.stringify({ kind: "answer", message: "", questions: ["Which calendar?"] }), "create"), { kind: "questions", message: "", questions: ["Which calendar?"] });
   });
 });

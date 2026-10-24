@@ -7,7 +7,7 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Agent } from "@hewntools/core/auth.ts";
-import { DOC_PAGES, type DocPage, readDocs } from "@hewntools/core/docs.ts";
+import { type DocPage, docsReader } from "@hewntools/core/docs.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { randomToken } from "@hewntools/core/sha256.ts";
 import { createMcpServer, toolSignature } from "../mcp.ts";
@@ -45,8 +45,7 @@ export class McpSessions {
     if (asset) {
       let html: Promise<string> | undefined;
       this.widgetHtml = () => (html ??= widgetAppHtml(asset).catch((e) => ((html = undefined), Promise.reject(e))));
-      let docs: Promise<DocPage[]> | undefined;
-      this.docs = () => (docs ??= readDocs(asset).then((pages) => (pages.length < DOC_PAGES.length && (docs = undefined), pages)));
+      this.docs = docsReader(asset);
     }
     this.unsubscribe = platform.onChange(() => {
       // Debounced: a build promotion logs several lines in a row.

@@ -28,7 +28,7 @@ export const operations = {
 
 ## Versions
 
-The spec is versioned by the **ABI**, never by Hewn's releases. One version covers the whole contract: the manifest format, `ctx` and [grant](capability-model.md#grant) kinds.
+The spec is versioned by the **ABI**, never by Hewn's releases. One version covers the whole contract: the manifest format, `ctx` and [grant](capability-model.md#grant) kinds. The agent tools ([`agents.md`](agents.md)) aren't part of it: a tool never sees them, and a host offers the list in the `@hewntools/spec` it ships with.
 
 - A tool declares the lowest ABI it needs in `capability.json` (`"abi": "2.2"`; none means 2.0). A host implements one major and runs every minor up to its own; it refuses a manifest that uses something newer than it declares.
 - **Minor versions only add.** So this document, at 2.3, describes all of 2.x: every addition is marked with the minor that introduced it ("since 2.2"), here, in the types, and in `src/abi.ts` (`ABI_HISTORY`, `CTX_MEMBERS`).
