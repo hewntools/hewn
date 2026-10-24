@@ -55,6 +55,8 @@ export async function buildHost(dir: string): Promise<void> {
   for (const [name, text] of Object.entries(await buildHostFiles())) writeFileSync(join(dir, name), text);
 }
 
-/** The web client's and the UI kit's static files. */
+/** The web client's and the UI kit's static files, and the docs pages (the user docs, the spec's). */
 export const assetDirs = () =>
-  BUNDLED ? { web: join(APP_DIR, "dist", "web"), ui: join(APP_DIR, "dist", "platform-ui") } : { web: join(packageDir("@hewntools/host-workerd"), "web"), ui: join(packageDir("@hewntools/ui"), "src") };
+  BUNDLED
+    ? { web: join(APP_DIR, "dist", "web"), ui: join(APP_DIR, "dist", "platform-ui"), docs: join(APP_DIR, "dist", "docs"), spec: join(APP_DIR, "dist", "docs", "spec") }
+    : { web: join(packageDir("@hewntools/host-workerd"), "web"), ui: join(packageDir("@hewntools/ui"), "src"), docs: join(APP_DIR, "docs"), spec: packageDir("@hewntools/spec") };

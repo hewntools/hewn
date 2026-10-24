@@ -79,6 +79,6 @@ Your data, backups, Hewn itself (`npm uninstall -g @hewntools/cli`) and the secr
 
 - [Concepts](concepts.md): tools, agents, Hewn's two jobs, grants.
 - [The web client](using-hewn.md) and [Building tools](building-tools.md).
-- [Connecting agents](agents.md): Claude Code, Codex, OpenCode, claude.ai, ChatGPT.
+- [Connecting agents](agents.md): Claude Code, Codex, OpenCode, claude.ai and Claude Desktop, ChatGPT.
 - [Using Hewn from anywhere](remote-access.md): your phone and other computers, on an always-on machine.
 - [All the docs](README.md).
