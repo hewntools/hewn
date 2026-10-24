@@ -305,6 +305,15 @@ dialog h2, .dialog h2 { margin-top: 0; }
 .bubble.them { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 6px; }
 .bubble.me { align-self: flex-end; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 6px; }
 .bubble.typing { color: var(--text-3); font-family: var(--mono); letter-spacing: .2em; animation: ws-pulse 1.2s var(--ease) infinite; }
+/* The intake's replies as light Markdown (the web client's markdown()): paragraphs, lists, code. */
+.bubble.md > * { margin: 0; }
+.bubble.md > * + * { margin-top: var(--s2); }
+.bubble.md ul, .bubble.md ol { padding-left: 1.4em; }
+.bubble.md li + li { margin-top: 2px; }
+.bubble.md code { background: var(--surface-2); border-radius: 4px; padding: 1px 4px; }
+.bubble.md pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--s2) var(--s3); overflow-x: auto; white-space: pre; overflow-wrap: normal; font-size: var(--fs-xs); line-height: 1.6; }
+.bubble.md pre code { background: none; padding: 0; font-size: inherit; }
+.bubble.md a { color: inherit; text-decoration: underline; }
 
 .log { margin: 0; padding: var(--s3) var(--s4); max-height: 360px; overflow: auto; background: var(--log-bg); color: var(--log-text); border: 1px solid var(--border); border-radius: var(--radius); font: var(--fs-xs)/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .log .t { color: oklch(from var(--log-text) l c h / 0.5); }

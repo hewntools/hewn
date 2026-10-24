@@ -113,6 +113,76 @@ export const skeleton = (...widths) =>
   h("div", { class: "stack", "aria-busy": "true", "aria-label": "Loading" }, (widths.length ? widths : ["40%", "70%", "55%"]).map((w) => h("span", { class: "skeleton", style: { width: w, height: "18px" } })));
 export const empty = (title, text) => h("div", { class: "empty" }, h("strong", {}, title), text && h("span", {}, text));
 
+// ---------- a model's text as light Markdown ----------
+
+/**
+ * A model's text (the intake's replies) as light Markdown, built as nodes (never parsed as HTML):
+ * paragraphs (a single newline stays a line break), "- " and "1." lists, ``` code blocks, `code`,
+ * **bold**, *italic*, # headings (a bold line) and http(s) links. Anything else stays as written.
+ */
+export function markdown(text) {
+  const out = [];
+  let para = [];
+  let list = null;
+  const endPara = () => para.length && (out.push(h("p", {}, inline(para.join("\n")))), (para = []));
+  const endList = () => list && (out.push(list.el), (list = null));
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      endPara();
+      endList();
+      const code = [];
+      while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+      out.push(h("pre", {}, h("code", {}, code.join("\n"))));
+      continue;
+    }
+    const item = /^\s*(?:[-*•]|(\d{1,3})[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      endPara();
+      const tag = item[1] ? "ol" : "ul";
+      if (list?.tag !== tag) (endList(), (list = { tag, el: h(tag, item[1] && item[1] !== "1" ? { start: item[1] } : {}) }));
+      list.el.append(h("li", {}, inline(item[2])));
+      continue;
+    }
+    // A blank line ends a paragraph; between items it keeps one list.
+    if (!line.trim()) {
+      endPara();
+      continue;
+    }
+    // An indented line goes on with the item above it.
+    if (list && /^\s+\S/.test(line)) {
+      list.el.lastChild.append("\n", ...inline(line.trim()));
+      continue;
+    }
+    endList();
+    const head = /^#{1,6}\s+(.*)$/.exec(line);
+    if (head) (endPara(), out.push(h("p", {}, h("strong", {}, inline(head[1])))));
+    else para.push(line);
+  }
+  endPara();
+  endList();
+  return out;
+}
+// `code`, **bold**, *italic* (not _italic_: ids have underscores) and [label](url).
+const INLINE = /`([^`\n]+)`|\*\*(.+?)\*\*|\*(\S(?:[^*\n]*\S)?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+function inline(text) {
+  const out = [];
+  let at = 0;
+  for (const m of text.matchAll(INLINE)) {
+    const [all, code, bold, em, label, href] = m;
+    out.push(text.slice(at, m.index));
+    if (code !== undefined) out.push(h("code", {}, code));
+    else if (bold !== undefined) out.push(h("strong", {}, inline(bold)));
+    else if (em !== undefined) out.push(h("em", {}, inline(em)));
+    // Only web links: anything else (a relative path, javascript:) stays its label.
+    else out.push(/^https?:\/\//i.test(href) ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, label) : label);
+    at = m.index + all.length;
+  }
+  out.push(text.slice(at));
+  return out;
+}
+
 // ---------- agents and actors ----------
 
 const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
