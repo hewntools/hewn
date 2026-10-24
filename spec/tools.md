@@ -4,7 +4,7 @@ A tool is a small program its owner keeps: typed operations over its own private
 
 This page is for writing one by hand. On Hewn, a builder agent usually writes tools from a description; it gets the same contract as a prompt, [`builder-brief.md`](builder-brief.md). The concepts and invariants behind it are in [`capability-model.md`](capability-model.md). The exact types are in [`src/`](src) and the JSON Schemas in [`schemas/`](schemas).
 
-Everything here is [ABI](README.md#versions) 2.3. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
+Everything here is [ABI](README.md#versions) 2.4. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
 
 ## Layout
 
@@ -37,6 +37,7 @@ Widgets have no files of their own: they are declared in the manifest and backed
 | `config` | no | 2.1 | Non-secret settings the owner fills in: `[{ name, description }]`. See [Config](#config-since-21). |
 | `runtime` | no | 2.0 | Leave it out. The only profile is `"isolate"`. |
 | `hue` | no | 2.0 | Tile colour for the icon: an OKLCH hue, integer 0–359. |
+| `saturation` | no | 2.4 | How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. `0` draws the icon black or white on grey (for a black-and-white brand). |
 | `tags` | no | 2.0 | Strings agents can filter on. |
 | `requires` | no | 2.0 | Authority the code needs: `secrets`, `hosts`, `capabilities`, and `model` (since 2.2). See [Grants](#grants). |
 | `operations` | yes | 2.0 | At least one. See [Operations](#operations). |
@@ -55,7 +56,7 @@ Some rules can't be expressed in the schema. The host also checks that:
 
 ## Versions
 
-The `abi` field says which version of the contract the tool is written against. A host implements one major version and runs every minor up to its own; it refuses a manifest that declares a version it doesn't implement, or that uses a field newer than the version it declares. Minor versions only add, so a tool written for 2.0 runs unchanged on a 2.3 host.
+The `abi` field says which version of the contract the tool is written against. A host implements one major version and runs every minor up to its own; it refuses a manifest that declares a version it doesn't implement, or that uses a field newer than the version it declares. Minor versions only add, so a tool written for 2.0 runs unchanged on a 2.4 host.
 
 | ABI | Added |
 | --- | --- |
@@ -63,6 +64,7 @@ The `abi` field says which version of the contract the tool is written against. 
 | 2.1 | `kind` (connections) and `requires.secrets` (connections only), deprecated operations, `config`, `ctx.config`, `config:NAME` hosts |
 | 2.2 | `requires.model`, `ctx.model.generate` |
 | 2.3 | `widgets`, and the view models widget operations return |
+| 2.4 | `saturation` |
 
 Declare the lowest version whose features you use. The history is also in [`src/abi.ts`](src/abi.ts) (`ABI_HISTORY`).
 

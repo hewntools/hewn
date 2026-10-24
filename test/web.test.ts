@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { appendFileSync, cpSync, readFileSync } from "node:fs";
+import { appendFileSync, cpSync, readdirSync, readFileSync } from "node:fs";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
@@ -10,9 +10,13 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { IntakeRequest } from "@hewntools/cli/intake.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { WEB_CODE } from "@hewntools/host-workerd/surface/web.ts";
 import { installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
+/** The web client's JavaScript: app.js, the kit, and its modules in app/. */
+const WEB = resolve(import.meta.dirname, "../packages/host-workerd/web");
+const webJs = () => readdirSync(WEB, { recursive: true }).map(String).filter((f) => f.endsWith(".js"));
 
 interface Res {
   status: number;
@@ -81,6 +85,8 @@ describe("web client (owner surface)", () => {
         // A rule stated in passing is remembered (global, or for the tool when modifying); "forget" drops one.
         const last = req.messages.at(-1)?.content ?? "";
         const memory = /always Swedish/.test(last) ? { remember: [{ scope: "global" as const, text: "Swedish copy in every screen" }, { scope: "tool" as const, text: "One screen only" }] } : /drop the Swedish rule/.test(last) ? { forget: [{ scope: "global" as const, text: "Swedish copy in every screen" }] } : {};
+        // A question about Hewn itself is answered: nothing to build.
+        if (/^how .*\?$/i.test(last)) return { kind: "answer", message: "Through a connection: it holds the sign-in." };
         if (req.mode === "modify") return { kind: "widgets", message: "", proposals: [{ title: "Runs this week", shows: "How far you ran.", template: "stat", sizes: ["small"] }], ...memory };
         if (memory.remember) return { kind: "questions", message: "", questions: ["Noted. Anything else?"], ...memory };
         return {
@@ -137,7 +143,7 @@ describe("web client (owner surface)", () => {
       assert.doesNotMatch(page.body, /<script/);
       assert.equal((await http("/auth?ticket=nope", { cookie: "" })).status, 401);
       for (const f of ["/manifest.webmanifest", "/icons/hewn-192.png", "/hewn-mark.svg", "/app.css"]) assert.equal((await http(f, { cookie: "" })).status, 200, f);
-      assert.equal((await http("/app.js", { cookie: "" })).status, 401, "the app itself needs a session");
+      for (const f of ["/app.js", "/app/router.js"]) assert.equal((await http(f, { cookie: "" })).status, 401, `${f}: the app itself needs a session`);
       assert.equal(JSON.parse((await http("/manifest.webmanifest", { cookie: "" })).body).display, "standalone");
     });
 
@@ -203,6 +209,8 @@ describe("web client (owner surface)", () => {
       const b = await http("/api/settings", { headers: { "x-hewn-ui": "1" } });
       assert.match(String(a.headers["x-hewn-web"]), /^[0-9a-f]{16}$/);
       assert.equal(a.headers["x-hewn-web"], b.headers["x-hewn-web"]);
+      // It covers all of the client's code: a module left out of WEB_CODE could change unnoticed.
+      assert.deepEqual([...WEB_CODE].sort(), [...webJs(), "index.html", "app.css"].sort());
       const bad = await api("/capabilities/running-log/invoke", { method: "POST", body: { operation: "record_run", input: {} } });
       assert.equal(bad.status, 400);
       assert.match(bad.json.message, /inputSchema \(missing [a-zA-Z, ]+\)/, "names the missing fields");
@@ -213,8 +221,14 @@ describe("web client (owner surface)", () => {
       const csp = String(r.headers["content-security-policy"]);
       assert.match(csp, /script-src 'self'/);
       assert.doesNotMatch(csp, /unsafe-inline'[^;]*;?\s*$|script-src[^;]*unsafe-inline/);
-      for (const file of ["app.js", "kit.js", "passkey.js"]) {
-        const js = readFileSync(resolve(import.meta.dirname, "../packages/host-workerd/web", file), "utf8").replace(/^\/\/.*$/gm, "");
+      const mod = await http("/app/router.js");
+      assert.equal(mod.status, 200, "the client's modules, from app/");
+      assert.match(String(mod.headers["content-type"]), /^text\/javascript/);
+      assert.equal(mod.headers["content-security-policy"], r.headers["content-security-policy"]);
+      const files = webJs();
+      assert.ok(files.includes("app.js") && files.includes("app/router.js"), "the modules in app/ too");
+      for (const file of files) {
+        const js = readFileSync(resolve(WEB, file), "utf8").replace(/^\/\/.*$/gm, "");
         assert.doesNotMatch(js, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, file);
         // Dialogs, inline edits and toasts instead of browser built-ins.
         assert.doesNotMatch(js, /(?<![\w.])(alert|confirm|prompt)\(/, file);
@@ -364,6 +378,13 @@ describe("web client (owner surface)", () => {
       assert.equal(r.json.proposals[0].title, "Runs this week");
       assert.equal(intakeCalls.at(-1)!.current?.id, "running-log");
       assert.equal((await api("/intake", { method: "POST", body: { mode: "modify", messages: [] } })).status, 400);
+    });
+
+    test("a question about Hewn gets an answer, in either mode", async () => {
+      const c = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "How does a tool use my Todoist account?" }] } });
+      assert.deepEqual(c.json, { kind: "answer", message: "Through a connection: it holds the sign-in." });
+      const m = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "How do I see its old versions?" }] } });
+      assert.equal(m.json.kind, "answer");
     });
 
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {
@@ -563,6 +584,8 @@ describe("web client (owner surface)", () => {
       assert.equal(rl.hue, 30);
       const svg = (await http("/api/capabilities/running-log/icon")).body;
       assert.equal(svg.match(/<rect /g)!.length, 15);
+      // ?default=1: the builder's glyph only (Use default's preview); this one has none.
+      assert.equal((await http("/api/capabilities/running-log/icon?default=1")).status, 404);
       // An SVG is accepted too, but only its cells survive.
       const hostile = '<svg viewBox="0 0 5 5"><script>alert(1)</script><rect x="0" y="0" width="5" height="1" onload="x()"/></svg>';
       assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { glyph: hostile } })).status, 200);
@@ -571,10 +594,17 @@ describe("web client (owner surface)", () => {
       assert.equal(clean.match(/<rect /g)!.length, 5);
       assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { glyph: ["#"] } })).status, 400);
       assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { hue: 400 } })).status, 400);
+      // Saturation: 0 (black or white on grey) to 150; the cap keeps tiles from turning neon.
+      assert.equal(rl.saturation, null, "the default");
+      assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { saturation: 0 } })).status, 200);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "running-log").saturation, 0);
+      assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { saturation: 151 } })).status, 400);
+      assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { saturation: 12.5 } })).status, 400);
       await api("/capabilities/running-log/icon", { method: "DELETE" });
       rl = (await api("/capabilities")).json.find((c: any) => c.id === "running-log");
       assert.equal(rl.iconKind, null);
       assert.equal(rl.hue, null, "back to the manifest's (none)");
+      assert.equal(rl.saturation, null);
     });
 
     test("cancel from the web", async () => {

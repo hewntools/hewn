@@ -10,6 +10,7 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { type Agent, USER } from "@hewntools/core/auth.ts";
 import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
+import { DOC_NAME } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
@@ -34,6 +35,9 @@ interface Env {
   BLOBS: Fetcher;
   ASSETS_WEB: Fetcher;
   ASSETS_UI: Fetcher;
+  /** Hewn's docs pages (hewn_docs): the user docs, and the spec's. */
+  ASSETS_DOCS: Fetcher;
+  ASSETS_SPEC: Fetcher;
   SUPERVISOR: Fetcher;
   /** Authenticates the supervisor → workerd admin channel. */
   ADMIN_TOKEN: string;
@@ -431,8 +435,10 @@ export class HewnDO extends DurableObject<Env> {
       log: (line) => console.log(`[${new Date().toISOString()}] ${line}`),
       async asset(path) {
         const [kind, ...rest] = path.split("/");
-        const svc = kind === "web" ? env.ASSETS_WEB : kind === "platform-ui" ? env.ASSETS_UI : undefined;
+        const svc = kind === "web" ? env.ASSETS_WEB : kind === "platform-ui" ? env.ASSETS_UI : kind === "docs" ? env.ASSETS_DOCS : kind === "spec" ? env.ASSETS_SPEC : undefined;
         if (!svc || rest.some((p) => p === ".." || p === "")) return undefined;
+        // Of the docs, only the pages themselves: not docs/internal/ or the spec's sources.
+        if ((kind === "docs" || kind === "spec") && !DOC_NAME.test(rest.join("/"))) return undefined;
         const res = await svc.fetch(`http://assets/${rest.join("/")}`);
         return res.ok && res.headers.get("content-type") !== "application/json" ? new Uint8Array(await res.arrayBuffer()) : undefined;
       },

@@ -7,6 +7,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { before, describe, test } from "node:test";
 import { newestInLine, publishedTags } from "@hewntools/cli/upgrade.ts";
+import { DOC_PAGES } from "@hewntools/core/docs.ts";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const CLI = join(ROOT, "build", "npm", "cli");
@@ -20,7 +21,7 @@ describe("the npm packages", () => {
     assert.equal(r.status, 0, r.stderr);
   });
 
-  test("@hewntools/cli ships the bundle, the prebuilt host, the web client, the UI kit and the licences; nothing else", () => {
+  test("@hewntools/cli ships the bundle, the prebuilt host, the web client, the UI kit, the docs pages and the licences; nothing else", () => {
     const pkg = JSON.parse(readFileSync(join(CLI, "package.json"), "utf8"));
     assert.equal(pkg.name, "@hewntools/cli");
     assert.equal(pkg.version, JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version);
@@ -28,8 +29,15 @@ describe("the npm packages", () => {
     assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["esbuild", "workerd"]);
     assert.equal(pkg.private, undefined);
     const list = packed(CLI);
-    for (const f of list) assert.match(f, /^(dist\/(cli\.js|host\/(worker\.js|capability-runtime\.js|builder-brief\.md)|web\/.+|platform-ui\/.+)|README\.md|LICENSE|LICENSING\.md|CHANGELOG\.md|package\.json)$/, f);
-    for (const f of ["dist/cli.js", "dist/host/worker.js", "dist/web/index.html", "dist/platform-ui/session.js", "dist/platform-ui/LICENSE", "LICENSE"]) assert.ok(list.includes(f), f);
+    for (const f of list) assert.match(f, /^(dist\/(cli\.js|host\/(worker\.js|capability-runtime\.js|builder-brief\.md)|web\/.+|platform-ui\/.+|docs\/(spec\/)?([\w-]+\.md|LICENSE))|README\.md|LICENSE|LICENSING\.md|CHANGELOG\.md|package\.json)$/, f);
+    for (const f of ["dist/cli.js", "dist/host/worker.js", "dist/web/index.html", "dist/platform-ui/session.js", "dist/platform-ui/LICENSE", "dist/docs/spec/LICENSE", "LICENSE"]) assert.ok(list.includes(f), f);
+    for (const f of files(join(ROOT, "packages", "host-workerd", "web"))) assert.ok(list.includes(`dist/web/${f}`), `the web client's ${f}`);
+    // The docs hewn_docs and the intake read, where assetDirs() looks for them: docs/x.md in dist/docs/, spec/x.md in dist/docs/spec/.
+    for (const page of DOC_PAGES) {
+      const f = `dist/docs/${page.replace(/^docs\//, "")}`;
+      assert.ok(list.includes(f), f);
+      assert.equal(readFileSync(join(CLI, f), "utf8"), readFileSync(join(ROOT, page), "utf8"), f);
+    }
   });
 
   test("no paths from the machine it was built on", () => {

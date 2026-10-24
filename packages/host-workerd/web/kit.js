@@ -113,6 +113,86 @@ export const skeleton = (...widths) =>
   h("div", { class: "stack", "aria-busy": "true", "aria-label": "Loading" }, (widths.length ? widths : ["40%", "70%", "55%"]).map((w) => h("span", { class: "skeleton", style: { width: w, height: "18px" } })));
 export const empty = (title, text) => h("div", { class: "empty" }, h("strong", {}, title), text && h("span", {}, text));
 
+// ---------- a model's text as light Markdown ----------
+
+/**
+ * A model's text (the intake's replies) as light Markdown, built as nodes (never parsed as HTML):
+ * paragraphs (a single newline stays a line break), "- " and "1." lists, ``` code blocks, `code`,
+ * **bold**, *italic*, # headings (a bold line) and http(s) links. Anything else stays as written.
+ */
+export function markdown(text) {
+  const out = [];
+  let para = [];
+  let list = null;
+  const endPara = () => para.length && (out.push(h("p", {}, inline(para.join("\n")))), (para = []));
+  const endList = () => list && (out.push(list.el), (list = null));
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      endPara();
+      endList();
+      const code = [];
+      while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+      out.push(h("pre", {}, h("code", {}, code.join("\n"))));
+      continue;
+    }
+    const item = /^(\s*)(?:[-*•]|(\d{1,3})[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      endPara();
+      const [, indent, num, body] = item;
+      const tag = num ? "ol" : "ul";
+      // Indented under an item: a list inside that item (one level deep).
+      if (indent && list) {
+        const li = list.el.lastChild;
+        let sub = li.lastChild;
+        if (sub?.tagName !== tag.toUpperCase()) li.append((sub = h(tag)));
+        sub.append(h("li", {}, inline(body)));
+        continue;
+      }
+      if (list?.tag !== tag) (endList(), (list = { tag, el: h(tag, num && num !== "1" ? { start: num } : {}) }));
+      list.el.append(h("li", {}, inline(body)));
+      continue;
+    }
+    // A blank line ends a paragraph; between items it keeps one list.
+    if (!line.trim()) {
+      endPara();
+      continue;
+    }
+    // An indented line goes on with the item above it.
+    if (list && /^\s+\S/.test(line)) {
+      list.el.lastChild.append("\n", ...inline(line.trim()));
+      continue;
+    }
+    endList();
+    const head = /^#{1,6}\s+(.*)$/.exec(line);
+    if (head) (endPara(), out.push(h("p", {}, h("strong", {}, inline(head[1])))));
+    else para.push(line);
+  }
+  endPara();
+  endList();
+  return out;
+}
+// `code`, **bold** (code inside it whole), *italic* (not _italic_: ids have underscores) and
+// [label](url) (a url may hold one level of brackets: Wikipedia's "Foo_(bar)").
+const INLINE = /`([^`\n]+)`|\*\*((?:`[^`\n]+`|[^`\n])+?)\*\*|\*(\S(?:[^*\n]*\S)?)\*|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
+function inline(text) {
+  const out = [];
+  let at = 0;
+  for (const m of text.matchAll(INLINE)) {
+    const [all, code, bold, em, label, href] = m;
+    out.push(text.slice(at, m.index));
+    if (code !== undefined) out.push(h("code", {}, code));
+    else if (bold !== undefined) out.push(h("strong", {}, inline(bold)));
+    else if (em !== undefined) out.push(h("em", {}, inline(em)));
+    // Only web links: anything else (a relative path, javascript:) stays its label.
+    else out.push(/^https?:\/\//i.test(href) ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, label) : label);
+    at = m.index + all.length;
+  }
+  out.push(text.slice(at));
+  return out;
+}
+
 // ---------- agents and actors ----------
 
 const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
@@ -150,6 +230,10 @@ export function hueOf(cap) {
   for (const ch of cap?.id ?? "") hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return hash % 360;
 }
+/** Tile saturation as a multiple of the tile's chroma: the capability's percent / 100, else 1. */
+export const satOf = (cap) => (Number.isInteger(cap?.saturation) ? cap.saturation / 100 : 1);
+/** A capability's colour for the wallpaper: [hue, saturation]. */
+export const tintOf = (cap) => [hueOf(cap), satOf(cap)];
 const monogram = (name) =>
   (name ?? "?")
     .split(/\s+/)
@@ -218,7 +302,7 @@ export function glyphCells(cap) {
 export function appIcon(cap, { size = 64, badge, more, progress, waiting = false, cls = "" } = {}) {
   // `waiting`: building with no measurable progress yet (code being written): the glyph pulses dimly.
   const building = typeof progress === "number";
-  const el = h("span", { class: `app-icon ${building ? "building" : ""} ${building && waiting ? "waiting" : ""} ${cls}`.replace(/\s+/g, " ").trim(), style: { "--size": `${size}px`, "--hue": hueOf(cap) }, "aria-hidden": "true" });
+  const el = h("span", { class: `app-icon ${building ? "building" : ""} ${building && waiting ? "waiting" : ""} ${cls}`.replace(/\s+/g, " ").trim(), style: { "--size": `${size}px`, "--hue": hueOf(cap), "--s": satOf(cap) }, "aria-hidden": "true" });
   if (cap?.iconKind === "image") {
     el.append(h("img", { src: iconUrl(cap), alt: "", class: "icon-img" }));
   } else if (cap?.iconKind === "glyph") {
@@ -256,12 +340,17 @@ const SPOTS = [
   { x: "70%", y: "60%", w: "480px" },
   { x: "8%", y: "68%", w: "380px" },
 ];
-/** Soft pixels behind the glass, tinted with the owner's capability hues. */
+/** Soft pixels behind the glass, tinted with the owner's capability colours: hues, or [hue, saturation] (tintOf). */
 export function setWallpaper(hues, { dim = true } = {}) {
   const wp = document.getElementById("wallpaper");
   const list = (hues.length ? hues : [250, 125]).slice(0, 4);
   wp.className = `wallpaper ${dim ? "dim" : ""}`;
-  wp.replaceChildren(...list.map((hue, i) => h("i", { style: { "--h": hue, "--x": SPOTS[i].x, "--y": SPOTS[i].y, "--w": SPOTS[i].w } })));
+  wp.replaceChildren(
+    ...list.map((tint, i) => {
+      const [hue, s = 1] = Array.isArray(tint) ? tint : [tint];
+      return h("i", { style: { "--h": hue, "--s": s, "--x": SPOTS[i].x, "--y": SPOTS[i].y, "--w": SPOTS[i].w } });
+    }),
+  );
 }
 
 // ---------- toasts ----------
@@ -311,12 +400,15 @@ export function modal(build, { width = 440, cls = "" } = {}) {
     };
     dlg.addEventListener("close", () => (dlg.remove(), resolve(result)));
     // A click on the backdrop closes. A click on a disabled control inside also lands on the dialog
-    // element (the control can't take it), so the pointer has to be outside the box too.
-    dlg.addEventListener("click", (e) => {
-      if (e.target !== dlg) return;
+    // element (the control can't take it), so the pointer has to be outside the box too. And it has
+    // to have gone down there: a slider dragged past the edge and let go outside isn't a click out.
+    const outside = (e) => {
       const r = dlg.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) close();
-    });
+      return e.target === dlg && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom);
+    };
+    let downOutside = false;
+    dlg.addEventListener("pointerdown", (e) => (downOutside = outside(e)));
+    dlg.addEventListener("click", (e) => downOutside && outside(e) && close());
     dlg.append(...[build(close, dlg)].flat(Infinity).filter(Boolean));
     document.body.append(dlg);
     dlg.showModal();

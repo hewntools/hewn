@@ -38,6 +38,11 @@ Set `"hue"` (integer 0–359) to colour the app icon's tile: pick one that suits
 (e.g. 30 for running, 250 for reading, 350 for health). The design system derives the tile and glyph
 shades from it in light and dark mode.
 
+`"saturation"` (ABI 2.4; integer 0–150, default 100) says how colourful the tile is. Leave it out
+unless the tool stands for a brand: a connection to a black-and-white service (Ghost, Notion, the
+BBC) gets `0` (black or white on grey), a muted brand 30–60, a loud brand colour (Todoist red) up to
+150, with the brand's hue.
+
 ### Icon (required, and first)
 
 **Write `ui/icon.svg` and set `"hue"` in capability.json before anything else.** The owner's home

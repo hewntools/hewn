@@ -3,6 +3,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
 import { CallToolRequestSchema, ErrorCode, ListResourcesRequestSchema, ListToolsRequestSchema, McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Agent, Scope } from "@hewntools/core/auth.ts";
+import { type DocPage, docsText } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { JSONSchema } from "@hewntools/core/manifest.ts";
 import type { CapabilitySummary, Platform } from "@hewntools/core/platform.ts";
@@ -56,15 +57,26 @@ const grouped = (caps: CapabilitySummary[]) => ({ capabilities: caps.filter((c) 
 async function widgetIcon(platform: Platform, id: string) {
   const file = await platform.icon(id).catch(() => undefined);
   const src = file && file.data.byteLength <= 32_768 ? { kind: file.glyph ? "glyph" : "image", src: `data:${file.type};base64,${btoa(Array.from(file.data, (b) => String.fromCharCode(b)).join(""))}` } : {};
-  return { id, name: platform.activeManifest(id).name, hue: platform.hueOf(id), ...src };
+  const saturation = platform.saturationOf(id);
+  return { id, name: platform.activeManifest(id).name, hue: platform.hueOf(id), ...(saturation === null ? {} : { saturation }), ...src };
 }
 
-function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[]): Tool[] {
+/** Hewn's docs, from the host (its assets); undefined where it has none. */
+type Docs = () => Promise<DocPage[]>;
+
+function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs): Tool[] {
   const known = `\n\n${catalog(caps)}`;
   // The tools themselves (names, scopes, descriptions, input schemas) are the spec's; these run them.
   const run: Record<string, Pick<Tool, "handler" | "format">> = {
     capabilities_list: { handler: (a) => grouped(platform.list(agent, a)) },
-    capabilities_get: { handler: (a) => platform.get(agent, a.capabilityId) },
+    capabilities_get: {
+      handler: (a) => {
+        const m = platform.get(agent, a.capabilityId);
+        // For an agent that can change it: the changes on their way, which a new one lands after.
+        const coming = agent.scopes.has("modify") ? platform.changesComing(agent, a.capabilityId) : [];
+        return coming.length ? { ...m, changesComing: coming } : m;
+      },
+    },
     capabilities_invoke: { handler: (a) => platform.invoke(agent, a as any) },
     widgets_show: {
       handler: async (a) => {
@@ -91,6 +103,10 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     },
     builds_retry: { handler: (a) => platform.retryBuild(agent, a.buildId) },
     builds_cancel: { handler: (a) => platform.cancelBuild(agent, a.buildId) },
+    hewn_docs: {
+      handler: async (a) => docsText(docs ? await docs() : [], { query: a.query, page: a.page }),
+      format: (text: string) => ({ content: [{ type: "text", text }] }),
+    },
   };
   // Build tools say which models this agent may ask for (the owner ticks them in Settings › AI).
   const models = `\n\nModels you may ask for (model): ${platform.agentModelChoices().join(", ")}.`;
@@ -110,9 +126,9 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
 }
 
 /** The agent's tools right now: filtered by scope, with its visible capabilities in the descriptions. */
-export function toolsFor(platform: Platform, agent: Agent): Tool[] {
+export function toolsFor(platform: Platform, agent: Agent, docs?: Docs): Tool[] {
   const caps = agent.scopes.has("discover") ? platform.list(agent) : [];
-  return platformTools(platform, agent, caps).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
+  return platformTools(platform, agent, caps, docs).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
 }
 
 /** What the agent's tool list looks like: when it changes, the session gets tools/list_changed. */
@@ -122,7 +138,7 @@ export const toolSignature = (platform: Platform, agent: Agent) => JSON.stringif
  * One MCP server per session, for the authenticated agent. `agent()` is read per request, so
  * scope changes apply mid-session; tools are listed fresh each time.
  */
-export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string> } = {}): Server {
+export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs } = {}): Server {
   const caps = agent().scopes.has("discover") ? platform.list(agent()) : [];
   const instructions = `${SERVER_INSTRUCTIONS}\n\n${catalog(caps)}`;
   // cfworker validation: no eval, so the same server runs on workerd.
@@ -151,7 +167,7 @@ export function createMcpServer(platform: Platform, agent: () => Agent, log: (li
     const { name, arguments: args = {} } = req.params;
     const who = agent();
     log(`[${new Date().toISOString()}] ${who.id} ${name} ${JSON.stringify(args)}`);
-    const tool = toolsFor(platform, who).find((t) => t.name === name);
+    const tool = toolsFor(platform, who, opts.docs).find((t) => t.name === name);
     try {
       if (!tool) throw new PlatformError("not_found", `unknown tool ${name}`);
       const token = req.params._meta?.progressToken;

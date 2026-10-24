@@ -56,11 +56,12 @@ describe("Hewn over MCP", () => {
       "capabilities_list",
       "capabilities_modify",
       "capabilities_request_access",
+      "hewn_docs",
       "schedules_list",
       "schedules_propose",
       "widgets_show",
     ]);
-    assert.deepEqual(await names(codex), ["capabilities_get", "capabilities_invoke", "capabilities_list", "capabilities_request_access", "schedules_list", "schedules_propose", "widgets_show"]);
+    assert.deepEqual(await names(codex), ["capabilities_get", "capabilities_invoke", "capabilities_list", "capabilities_request_access", "hewn_docs", "schedules_list", "schedules_propose", "widgets_show"]);
     await claude.close();
     await codex.close();
   });
@@ -80,6 +81,23 @@ describe("Hewn over MCP", () => {
     assert.deepEqual(list.connections, []);
     const summary = parse(await codex.callTool({ name: "capabilities_invoke", arguments: { capabilityId: "running-log", operation: "get_summary" } }));
     assert.equal(summary.result.runCount, 1);
+    await codex.close();
+  });
+
+  test("capabilities_get shows an agent that can change a tool the changes on their way", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(() => gate);
+    const b = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "add a pace column" });
+    const claude = await connect(url, TOKENS.claude);
+    const codex = await connect(url, TOKENS.codex);
+    const got = parse(await claude.callTool({ name: "capabilities_get", arguments: { capabilityId: "running-log" } }));
+    assert.deepEqual(got.changesComing.map((c: any) => [c.buildId, c.kind, c.request]), [[b.buildId, "modify", "add a pace column"]]);
+    assert.equal(parse(await codex.callTool({ name: "capabilities_get", arguments: { capabilityId: "running-log" } })).changesComing, undefined, "not for an agent that can't change it");
+    release();
+    await t.platform.settle(b.buildId);
+    assert.equal(parse(await claude.callTool({ name: "capabilities_get", arguments: { capabilityId: "running-log" } })).changesComing, undefined, "none once it's live");
+    await claude.close();
     await codex.close();
   });
 

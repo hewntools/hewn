@@ -120,7 +120,7 @@ const workerd = () => {
 };
 
 /** workerd's config (capnp) for this home. Exported for tests. */
-export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string } }) {
+export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string; docs: string; spec: string } }) {
   return `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
@@ -129,6 +129,8 @@ const config :Workerd.Config = (
     (name = "do-storage", disk = (path = "${o.data}/do", writable = true)),
     (name = "assets-web", disk = (path = "${o.assets.web}")),
     (name = "assets-ui", disk = (path = "${o.assets.ui}")),
+    (name = "assets-docs", disk = (path = "${o.assets.docs}")),
+    (name = "assets-spec", disk = (path = "${o.assets.spec}")),
     (name = "supervisor", external = (address = "127.0.0.1:${o.supervisorPort}", http = ())),
     (name = "internet", network = (allow = ["public"], tlsOptions = (trustBrowserCas = true))),
   ],
@@ -156,6 +158,8 @@ const hewn :Workerd.Worker = (
     (name = "BLOBS", service = "blobs"),
     (name = "ASSETS_WEB", service = "assets-web"),
     (name = "ASSETS_UI", service = "assets-ui"),
+    (name = "ASSETS_DOCS", service = "assets-docs"),
+    (name = "ASSETS_SPEC", service = "assets-spec"),
     (name = "SUPERVISOR", service = "supervisor"),
     (name = "ADMIN_TOKEN", fromEnvironment = "HEWN_ADMIN_TOKEN"),
     (name = "SUPERVISOR_TOKEN", fromEnvironment = "HEWN_SUPERVISOR_TOKEN"),

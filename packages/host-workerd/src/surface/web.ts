@@ -101,9 +101,14 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
 
 /**
  * A fingerprint of the web client's code, sent on every API response (x-hewn-web) so a page that
- * stays open across an upgrade notices it is running old code and offers a reload.
+ * stays open across an upgrade notices it is running old code and offers a reload. The host can't
+ * list its files, so every one is named here, the client's modules in app/ too (`test/web.test.ts`
+ * checks none is missing).
  */
-const WEB_CODE = ["index.html", "app.js", "kit.js", "passkey.js", "app.css"];
+export const WEB_CODE = [
+  ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "glyphs", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "widgets"].map((m) => `app/${m}.js`),
+];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
   return (webBuild ??= (async () => {
@@ -279,7 +284,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         return { lines: platform.logLines(id, n) };
       case "GET icon": {
         platform.get(owner, id);
-        const icon = await platform.icon(id);
+        // ?default=1: the builder's glyph, without the owner's (what Use default goes back to).
+        const icon = await platform.icon(id, { owner: url.searchParams.get("default") !== "1" });
         if (!icon) throw new PlatformError("not_found", "no icon");
         // Uploaded SVGs are untrusted: sandboxed, no scripts, even if opened directly on this origin.
         return new Response(body(icon.data), {
@@ -290,6 +296,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "PUT icon": {
         const body = await readJson(req);
         if (body.hue !== undefined) platform.setHue(owner, id, body.hue);
+        if (body.saturation !== undefined) platform.setSaturation(owner, id, body.saturation);
         if (body.glyph !== undefined) {
           const cells = typeof body.glyph === "string" ? cellsFromSvg(body.glyph) : cellsFromRows(body.glyph);
           if (!cells) throw new PlatformError("invalid_request", 'glyph must be five rows like ".##.." or a 5×5 SVG');
@@ -305,6 +312,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "DELETE icon":
         await platform.setIcon(owner, id, null);
         platform.setHue(owner, id, null);
+        platform.setSaturation(owner, id, null);
         return { ok: true };
       case "POST rename":
         platform.rename(owner, id, String((await readJson(req)).name ?? ""));
@@ -582,7 +590,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const started = Date.now();
     const finish = (reply?: IntakeReply, error?: string) => {
       const turn = body.messages.filter((m) => m.role === "user").length;
-      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : "draft";
+      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : reply.kind === "answer" ? "answer" : "draft";
       host.log(
         `web intake ${body.mode}${body.capabilityId ? ` ${body.capabilityId}` : ""} turn ${turn} → ${outcome} (${Math.round((Date.now() - started) / 1000)}s)`,
       );
@@ -594,7 +602,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     // What the owner attached (the client sends refs): the bytes come from the store, for the intake to read.
     if (!Array.isArray(body.messages)) throw new PlatformError("invalid_request", "messages must be a list");
     const messages = await Promise.all(body.messages.map(async (m) => (m?.attachments?.length ? { ...m, attachments: await platform.attachmentsWithData(owner, m.attachments) } : { ...m })));
-    const request = { ...body, messages, catalog, current: currentManifest, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
+    // Changes on their way: this one lands after them, so the intake builds on them rather than repeating them.
+    const coming = currentManifest ? platform.changesComing(owner, body.capabilityId!).map((b) => b.request || `(${b.kind})`) : [];
+    const request = { ...body, messages, catalog, current: currentManifest, coming: coming.length ? coming : undefined, instructions, ...(earlier ? { earlier } : {}) } as IntakeRequest;
     const kept = (reply: IntakeReply): IntakeReply => {
       const { remember, forget, ...rest } = reply;
       const saved = platform.applyIntakeMemory(owner, body.capabilityId, remember, forget);
@@ -687,6 +697,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       // "image": an owner upload (shown as is); "glyph": a 5×5 glyph, the owner's or the builder's ui/icon.svg (tinted by the tile).
       iconKind: !icon ? null : icon.glyph ? "glyph" : "image",
       hue: platform.hueOf(c.id),
+      saturation: platform.saturationOf(c.id),
       ui: !!m.ui?.available,
       version: row?.activeVersion ?? null,
       requests: platform.registry.accessRequests(c.id).length,
@@ -709,6 +720,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       iconKind: glyph ? "glyph" : null,
       iconUrl: glyph ? `/api/builds/${b.buildId}/icon` : null,
       hue: glyph?.hue ?? null,
+      saturation: glyph?.saturation ?? null,
       ui: false,
       version: null,
       requests: 0,

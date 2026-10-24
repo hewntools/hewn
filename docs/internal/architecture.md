@@ -34,8 +34,8 @@ A [capability](../../spec/capability-model.md#capability) is called a tool in ev
 | Package | What | Licence |
 | --- | --- | --- |
 | `spec/` (`@hewntools/spec`) | The contract as types, JSON Schemas and docs: the manifest, `ctx`, the [ABI](../../spec/README.md#versions) version and its history, the MCP tools agents get. No runtime code. | Apache-2.0 |
-| `packages/core` | The platform logic: `Platform`, the registry, manifest and contract checks, migrations rules, auth, OAuth, schedules, widgets, the model port. Pure: no Node, no workerd. | AGPL |
-| `packages/host-workerd` | What runs inside workerd: the Worker and its Durable Objects, the capability runtime wrapper, the HTTP and MCP surface, the web client (`web/`). | AGPL |
+| `packages/core` | The platform logic: `Platform` and its domains (`src/platform/`), the registry, manifest and contract checks, migrations rules, auth, OAuth, schedules, widgets, the model port. Pure: no Node, no workerd. | AGPL |
+| `packages/host-workerd` | What runs inside workerd: the Worker and its Durable Objects, the capability runtime wrapper, the HTTP and MCP surface, the web client (`web/`: `app.js`, one module per section in `web/app/`, the shared `kit.js`). | AGPL |
 | `packages/ui` | The UI kit tool UIs load from `/_platform/`: `ui.css`, `session.js`, `widgets.js`, `chart.js`, `ascii.js`. | Apache-2.0 |
 | `packages/cli` | `hewn`: the CLI, the supervisor, setup, builders, the intake, backups, the visual check. The only package published to npm. | AGPL |
 | `packages/test-host` | The core on Node for fast tests: `node:sqlite`, a blob directory, capability code run in-process with no isolation. Never shipped. | AGPL |
@@ -55,6 +55,30 @@ Integration tests are in `test/`. Example tools are in `seeds/`.
 | `SecretStore` | capability secrets and model keys | AES-256-GCM rows in the owner's database | memory |
 
 Every authority check happens in the core, not in the MCP or HTTP layer, so every way in gets the same answer.
+
+`Platform` is a facade: each public method hands its call to a domain in `packages/core/src/platform/`, one module each.
+
+| Module | What |
+| --- | --- |
+| `discovery.ts` | `list` and `get`: the capabilities a principal can see |
+| `presentation.ts` | a tool's name, icon, hue and saturation as the owner sets them |
+| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import |
+| `grants.ts` | readiness, grants, secrets and config, delegated agents, the owner's confirmation of agents' destructive calls |
+| `connections.ts` | Accounts: a connection's sign-in step and health |
+| `sessions.ts` | tool UI tickets and sessions, web sessions, the public URL, passkeys |
+| `models.ts` | the owner's providers, tiers, budget and prices, and the model port |
+| `invocation.ts` | `invoke` through the contract, and the call log |
+| `widgets.ts` | running widgets, and Home's layout |
+| `schedules.ts` | schedules, and the ones the owner approves with a build |
+| `builds.ts` | builds: requests, the order they run in, the builder's attempts, retries, cancels, the owner's review, what a build keeps |
+| `validation.ts` | `validateAndPromote` ([Builds](#builds)) and promotion |
+| `attachments.ts` | what the owner attaches in the intake's box |
+| `instructions.ts` | the owner's instructions for building |
+| `housekeeping.ts` | the cleanup at start and daily, and the metrics aggregates |
+
+Each extends `Domain` (`context.ts`): the ports, the event bus, the cache of loaded versions, and the lookups every domain makes (`activeManifest`, `loadVersion` …). A domain calls another domain's public methods through the facade (`this.platform.readiness()`), so a wrapper on a `Platform` method sees every call from another domain (a domain's calls to its own methods stay inside it), and reaches what `Platform` doesn't offer through `this.d` (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`, `logRetentionDays` …) stay on `Platform` and are read from it each time.
+
+The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store), `docs.ts` (Hewn's docs for `hewn_docs` and the intake: sections and search) and the rest. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
 
 Principals (`auth.ts`): `user` (the owner, from the web client or the CLI), `agent` (an MCP client), `ui` (a tool's own UI, limited to that tool), `capability` (a `ctx.call`), `schedule` and `widget`.
 
@@ -90,7 +114,9 @@ Both directions are token-authenticated (`HEWN_ADMIN_TOKEN` into workerd, `HEWN_
 Every change to a capability is a build, run by a platform builder: Claude Code or Codex, chosen by the owner, or the host's own builder (`remote`, below). An agent asks (`capabilities_create`, `capabilities_modify`, `capabilities_add_widgets`) or the owner does from the web client; nobody hands in code directly. `hewn install <dir>` is a build with a copy builder.
 
 ```text
-request → build row ("waiting" while its `after` build hasn't promoted)
+request → build row ("waiting" while its `after` build hasn't promoted, or, for a change or widgets build,
+                     while an earlier change to the same capability is open or building: it starts when that
+                     one ends, however it ends, or goes to review; `queued` in the build view)
   → workspace: a skeleton or the active version, plus BUILDER.md (the brief) and PLATFORM_UI.css
   → up to maxBuildAttempts (default 3): run the builder, then validate;
     a failed validation goes back to the builder as feedback
@@ -108,7 +134,7 @@ What led to a build stays with it for the capability's life: `build_context` hol
 
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
-`validateAndPromote` (`platform.ts`), in order:
+`validateAndPromote` (`platform/validation.ts`), in order:
 
 1. the manifest: schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
 2. bundle `src/index.ts` with its npm dependencies; the bundle exports every declared `name@version`
@@ -137,11 +163,11 @@ A refreshed login is copied back. Versions never keep builder configuration (dot
 
 ## Intake
 
-The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back (until the request is clear: the prompt names what it must know before drafting, per mode, and each question carries a default; there is no cap on rounds, the owner's "Draft now" in the web client is the stop), a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. It is Claude Code, Codex or OpenCode, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP (Claude Code with `--restricted` and the web tools only; OpenCode with `webfetch` only), returning strict JSON (Codex through `--output-schema`; the others as the reply's text, which `parseIntake` reads leniently). Attached images reach Claude Code as image blocks in a stream-json user message on stdin, Codex as `-i` files and OpenCode as `-f` files next to the prompt, and the host's intake as `attachments`; attached text files are in the prompt itself, under the message they came with. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
+The intake (`packages/cli/src/intake.ts`) is the first half of the job the web client calls "Builds tools" (settings: `intake`; one agent does both halves in the web client). It turns the owner's rough request into a draft: questions back (until the request is clear: the prompt names what it must know before drafting, per mode, and each question carries a default; there is no cap on rounds, the owner's "Draft now" in the web client is the stop), a create or modify draft with a presentation-only spec, widget proposals, suggested schedules, or up to 5 ideas to pick from. A question about Hewn itself gets an `answer` instead, nothing to build: when the owner's latest message reads like a question (a `?`, or a question word first), the prompt carries the best sections of Hewn's docs for it (`docExcerpts`, about 9 KB), and the web client keeps the answer in the conversation like a question round. It is Claude Code, Codex or OpenCode, run headless by the supervisor in the builder sandbox with a throwaway workspace and no MCP (Claude Code with `--restricted` and the web tools only; OpenCode with `webfetch` only), returning strict JSON (Codex through `--output-schema`; the others as the reply's text, which `parseIntake` reads leniently). Attached images reach Claude Code as image blocks in a stream-json user message on stdin, Codex as `-i` files and OpenCode as `-f` files next to the prompt, and the host's intake as `attachments`; attached text files are in the prompt itself, under the message they came with. Agents don't use it: they structure their own requests. A draft may start with a connection, which the web client builds first and then builds the draft `after` it.
 
 ## Models for building, and the cap
 
-A build runs on a model and effort: what the requester asked for, else the owner's setting for that builder (`jobModels` in the settings, per job and per agent). The owner may ask for anything; an agent only for names the owner ticked (`agentModels`), checked in the core (`Platform.modelFor`). The builder passes them to its CLI (`--model`/`--effort`, `-m`/`model_reasoning_effort`, `-m provider/model`/`--variant`), reports the model it ran on when its CLI says (Claude Code's `init` event; OpenCode's events don't name it, so a build on Default records no model there), and when the CLI won't run the model, fails the build at once (`modelUnavailable`: "Model not available", no retries) instead of building on another. The lists in Settings › AI come from the CLIs (`packages/cli/src/builders/models.ts`: `codex debug models`, `opencode models --verbose` in the owner's own OpenCode, Claude Code's families). At most 5 builds run at once (`MAX_RUNNING_BUILDS`); the rest wait in order.
+A build runs on a model and effort: what the requester asked for, else the owner's setting for that builder (`jobModels` in the settings, per job and per agent). The owner may ask for anything; an agent only for names the owner ticked (`agentModels`), checked in the core (`modelFor`, `platform/builds.ts`). The builder passes them to its CLI (`--model`/`--effort`, `-m`/`model_reasoning_effort`, `-m provider/model`/`--variant`), reports the model it ran on when its CLI says (Claude Code's `init` event; OpenCode's events don't name it, so a build on Default records no model there), and when the CLI won't run the model, fails the build at once (`modelUnavailable`: "Model not available", no retries) instead of building on another. The lists in Settings › AI come from the CLIs (`packages/cli/src/builders/models.ts`: `codex debug models`, `opencode models --verbose` in the owner's own OpenCode, Claude Code's families). At most 5 builds run at once (`MAX_RUNNING_BUILDS`); the rest wait in order.
 
 ## The host's builder (`remote`)
 
@@ -163,6 +189,7 @@ The web client (`packages/host-workerd/web/`) is plain ES modules and DOM APIs w
 
 - **Sign-in:** `hewn open` hands the browser a single-use ticket that becomes an HttpOnly, `SameSite=Strict` session cookie (`web_sessions`, hashed, sliding 30 days). On the public URL the cookie is `__Host-` and `Secure`, and the owner can add passkeys (WebAuthn, verified in the core: `webauthn.ts`).
 - **API:** JSON under `/api/*` (`surface/web.ts`). It refuses cross-site requests and requires `X-Hewn-UI` on writes. Build progress streams as SSE. The Inbox (`/api/inbox`) gathers what needs the owner.
+- **Code:** native ES modules, no bundler or build step. `index.html` loads `app.js`, which loads the router (`app/router.js`); the router imports the pages. Each section of the client is one module in `app/` (the page frame, the Inbox, the command palette, Home, a tool's page, the intake, a build, Activity, Agents, Settings…); `kit.js` is the toolkit they share. Modules import each other's functions freely: the cycles are safe because no module's top level reads another app module's binding (a top level defines things; the theme, the page frame and the Inbox also set up their own elements and listeners). Hewn's own pixel glyphs (`glyphs.js`: the Inbox's bell, the palette's actions and places) import only the kit, so the modules sharing them can use them anywhere. The router starts the client at its end, once every module has loaded. State shared between modules has one owner that exports it: the page frame owns the platform `settings` (the others assign it through `setSettings`: an import is read-only), the current screen's cleanups (`leaving`) and its shortcuts (`keyHandlers`); `inbox.js` owns the Inbox's button and panel. `WEB_CODE` (`surface/web.ts`) names every file, for the fingerprint an open page uses to notice an upgrade.
 
 A tool UI is served at `/tools/<id>/~<key>/` on the same host, where the key is random per capability; any other path under `/tools/<id>/` answers 404 (`surface/ui.ts`). Every response carries a CSP `sandbox` without `allow-same-origin`, so the page runs on an opaque origin with no cookies or storage. The owner opens it with a ticket; the page gets a token bound to that one capability in its URL fragment, which `session.js` keeps for the tab and attaches to the UI's own API calls. The UI calls `POST api/invoke` as `ui:<id>`, limited to its own capability.
 
@@ -173,6 +200,7 @@ The MCP server (`packages/host-workerd/src/mcp.ts`) offers exactly the tools in 
 - **Sign-in:** Hewn is its own OAuth 2.1 server (`core/agents.ts`, `surface/oauth.ts`): dynamic client registration, PKCE S256 only, rotating refresh tokens, revocation. Every token is stored as a SHA-256 hash. The owner approves each agent in the web client or with `hewn agents approve <code>`, and may narrow its scopes and limit it to some capabilities.
 - **Sessions** (`surface/mcp-sessions.ts`) are stateful and held in memory by `HewnDO`. When an agent's tool list changes (capabilities, readiness, its scopes), its sessions get `tools/list_changed`. A restart drops them, and clients initialize again.
 - **Discovery:** the server instructions and the descriptions of `capabilities_list` and `capabilities_invoke` carry a catalog of the capabilities the agent can see. Agents never see source, state, schemas of the state, version numbers or build workspaces.
+- **Hewn's docs:** `hewn_docs` (any scope) lists, searches and reads the user docs and the spec (`docs/*.md`, `spec/*.md`; the list is `DOC_PAGES` in `core/docs.ts`, which also cuts pages into sections and scores them by term). The host serves the pages like the web client's files, as assets (`docs/<page>.md`, `spec/<page>.md`: the `assets-docs` and `assets-spec` disk services on workerd, `sourceAsset` on Node; only top-level pages, never `docs/internal/`); a checkout reads them from the repo, the npm package from `dist/docs/`. Each host reads them once (`docsReader`), and again next time if some were missing.
 - **Local agents** are connected by `packages/cli/src/setup/`: it registers the MCP address with the agent's CLI, runs the CLI's own OAuth sign-in, and adds a one-line pointer to the agent's instruction file, since some agents don't look at MCP servers unprompted.
 
 Destructive operations called by an agent wait for the owner's confirmation (`confirmations`), up to 60 seconds, then return `awaiting_confirmation`.
@@ -202,7 +230,7 @@ A widget is a read operation whose output is a view model for one of five templa
 
 ## Models
 
-The model port (`core/models.ts`, and the models section of `platform.ts`) runs language models for capabilities that declare `requires.model`. Capability code never holds a key or a provider host: it calls `ctx.model.generate`, and the core checks the request, reserves budget, calls the provider from the host, and settles the cost.
+The model port (`core/models.ts`, and `core/platform/models.ts`) runs language models for capabilities that declare `requires.model`. Capability code never holds a key or a provider host: it calls `ctx.model.generate`, and the core checks the request, reserves budget, calls the provider from the host, and settles the cost.
 
 - Providers: Anthropic, OpenAI, OpenRouter. The owner's API keys are secrets (`hewn:models`); the owner maps tiers (`light`, `standard`, `strong`, `max`) to models and sets a monthly budget, overall and per capability.
 - Prices and image support come from the provider's model list and the OpenRouter catalog. Every call is logged in `model_calls`.

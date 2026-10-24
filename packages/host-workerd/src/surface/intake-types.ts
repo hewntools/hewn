@@ -36,6 +36,8 @@ export interface IntakeRequest {
   /** Filled in by the platform: the owner's capabilities, and the current manifest when modifying. */
   catalog?: { id: string; name: string; purpose: string; operations: string[]; kind?: "connection" }[];
   current?: CapabilityManifest;
+  /** Filled in by the platform when modifying: the requests of its changes not live yet (queued or building), oldest first. */
+  coming?: string[];
   /** One id per conversation, so a host that runs the intake can keep one session for all its turns. */
   session?: string;
   /**
@@ -126,6 +128,8 @@ export const MAX_IDEAS = 5;
 /** `message`: what the intake wants to say first (findings, assumptions, caveats); may be empty. */
 export type IntakeReply = (
   | { kind: "questions"; message: string; questions: string[] }
+  /** A question about Hewn itself, answered (from its docs): nothing to build. */
+  | { kind: "answer"; message: string }
   | { kind: "widgets"; message: string; proposals: WidgetProposal[] }
   /** Creating: several separate new capabilities, each a full draft; the owner ticks which to build (in parallel). */
   | { kind: "ideas"; message: string; ideas: CreateDraft[] }

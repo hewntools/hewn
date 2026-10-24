@@ -51,6 +51,7 @@ There are four scopes. The web client shows them as See, Use, Make and Change. A
 | `builds_wait` | | | yes | yes |
 | `builds_retry` | | | yes | yes |
 | `builds_cancel` | | | yes | yes |
+| `hewn_docs` | yes | yes | yes | yes |
 
 Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent limited to some tools gets `not_found` for the others.
 
@@ -60,7 +61,7 @@ The agent learns about the owner's tools in three places:
 
 - **Server instructions:** `SERVER_INSTRUCTIONS` from `src/agents.ts`, followed by a catalog of the tools the agent can see, sent once in the `initialize` response.
 - **MCP tool descriptions:** `capabilities_list` and `capabilities_invoke` (`catalog: true` in `src/agents.ts`) carry the same catalog after their description, so clients that drop server instructions still see it.
-- **`capabilities_list` and `capabilities_get`:** the list returns `{ capabilities, connections }`, each entry with `id`, `name`, `purpose`, `tags`, `operations` (`name@version`), `widgets` and `ready`. It filters by `name` (substring of id or name), `operation` and `tag`. `capabilities_get` returns the full manifest (every operation's schemas and side effect, the widgets) plus its readiness as `status`.
+- **`capabilities_list` and `capabilities_get`:** the list returns `{ capabilities, connections }`, each entry with `id`, `name`, `purpose`, `tags`, `operations` (`name@version`), `widgets` and `ready`. It filters by `name` (substring of id or name), `operation` and `tag`. `capabilities_get` returns the full manifest (every operation's schemas and side effect, the widgets) plus its readiness as `status`; for an agent with `modify`, also `changesComing`: the tool's changes queued or building, oldest first (`buildId`, `kind`, `status`, `request`).
 
 A catalog line looks like this; connections are listed apart, and a tool that isn't ready says so:
 
@@ -96,11 +97,11 @@ A failed call is an MCP tool result with `isError: true` and JSON text `{ error,
 An agent with `create` or `modify` asks the host's builder for a new tool or a change. It never writes the code itself, and it can't promote anything: the host validates every result (see [tools.md](tools.md#tests-and-promotion)).
 
 - **`capabilities_create`** `{ name, purpose, requirements, kind?, after?, widgets?, model?, effort? }` starts a build. The tool's id is derived from `name`. `kind: "connection"` builds a [connection](capability-model.md#connection); only connections hold credentials, so a tool that needs a service with a login is built on one. `after: <buildId>` makes the build wait (status `waiting`) until that build promotes, for example the connection it will call. `widgets: true` also queues a widgets build after it, returned as `widgetsBuildId`.
-- **`capabilities_modify`** `{ capabilityId, request, after?, model?, effort? }` asks for a change to an existing tool. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status `review`).
+- **`capabilities_modify`** `{ capabilityId, request, after?, model?, effort? }` asks for a change to an existing tool. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status `review`). Changes to one tool take turns: one asked for while another is queued or building waits for it (status `waiting`) and is built on the version it makes; one in review doesn't hold it up.
 - **`capabilities_add_widgets`** `{ capabilityId, request?, after?, model?, effort? }` asks for a build that adds widgets and changes nothing else.
 - **`model` and `effort`** on those three choose what the build runs on: a model name the owner's builder takes (`default` for its own, a family such as `fable`, or a full name) and an effort (`low`, `medium`, `high`, more on some models). Leave them out to use the owner's choice. The owner decides which names agents may use; the tools' descriptions list them ("Models you may ask for"), and any other is an `invalid_request` naming the allowed ones, as is an effort the model doesn't take (naming its levels). A build's `model` says what it ran on (`ran`). A model the builder can't run fails the build at once ("Model not available"); it never runs on another one instead.
 - **`builds_wait`** `{ buildId, timeoutSeconds? }` follows a build until it is promoted, fails, or waits for the owner's review. If the request carries a `progressToken`, each builder action and validation step arrives as a `notifications/progress` message. After `timeoutSeconds` (default 600, at most 1800) it returns the current state with `waitTimedOut: true`; call it again to keep following.
-- **`builds_get`** returns a build's state: `status` (`waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted`, `cancelled`), its log, and `resultVersion` once promoted. **`builds_retry`** re-runs a failed or cancelled build. **`builds_cancel`** cancels a build the agent requested (the owner can cancel any), except while it's being validated.
+- **`builds_get`** returns a build's state: `status` (`waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted`, `cancelled`), its log, and `resultVersion` once promoted. A change waiting its turn behind an earlier change to the same tool has `queued: true`. **`builds_retry`** re-runs a failed or cancelled build. **`builds_cancel`** cancels a build the agent requested (the owner can cancel any), except while it's being validated.
 
 A promoted tool may still be not ready: if it asks for hosts, secrets, other tools' operations or a model, the owner approves those first. `capabilities_get` shows what's missing.
 
@@ -124,6 +125,16 @@ An agent with `invoke` can propose running an operation on a timetable: `schedul
 - **Size:** `small`, `medium` or `large`; by default `medium` if the widget offers it, else its first size.
 
 `capabilities_get` lists a tool's widgets; a widget's input is its operation's `inputSchema`.
+
+## Hewn's docs
+
+`hewn_docs` `{ query?, page? }` reads Hewn's own documentation, so an agent asked how Hewn works answers from it instead of guessing (the server instructions say so). Every agent has it, whatever its scopes. The pages are the user docs (`docs/*.md`) and this spec (`spec/*.md`), named by their paths in the repo (`docs/concepts.md`), as the links between them are written. The result is plain text:
+
+- **No input:** the pages, each with its title and its sections.
+- **`query`:** the five sections that best match its words (a word in a heading counts more than a mention), each under a line naming its page, anchor and heading: `--- docs/concepts.md#grants (Concepts › Grants) ---`. A long section is cut, with the call that reads it whole.
+- **`page`:** that page's markdown, or with `page#section` (the anchor, as links write it, or the heading) one section and the ones under it. With `query` too: the search, within that page.
+
+An unknown page or section is `not_found`, naming the ones there are.
 
 ## For host implementers
 

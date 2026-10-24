@@ -29,6 +29,7 @@ export const MANIFEST_SCHEMA: JSONSchema = {
     },
     runtime: { enum: [...RUNTIME_PROFILES] },
     hue: { type: "integer", minimum: 0, maximum: 359 },
+    saturation: { type: "integer", minimum: 0, maximum: 150 },
     requires: {
       type: "object",
       additionalProperties: false,

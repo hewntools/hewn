@@ -14,7 +14,9 @@ capabilities. Each has private persistent state and typed operations.
 Anything you record here persists and is visible to the user's other agents.
 When the user asks about their own data, activities or tools, check capabilities_list first.
 Use capabilities_get to read operation schemas, then capabilities_invoke. Raw storage is not
-accessible. Everything goes through operations.`;
+accessible. Everything goes through operations.
+For how Hewn itself works (concepts, building tools, connections, grants, the manifest and the ABI),
+read hewn_docs instead of guessing.`;
 
 /** The MCP Apps resource that draws a widget in the chat (`widgets_show`). */
 export const WIDGET_APP_URI = "ui://hewn/widget";
@@ -52,7 +54,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "capabilities_get",
     scopes: ["discover"],
-    description: "Get a capability's public manifest: purpose and every operation's input/output JSON Schema and side effect.",
+    description:
+      "Get a capability's public manifest: purpose and every operation's input/output JSON Schema and side effect. For an agent that can change it, also changesComing: its changes queued or building (oldest first), which a new change lands after.",
     inputSchema: obj({ capabilityId: str() }, ["capabilityId"]),
   },
   {
@@ -112,7 +115,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_modify",
     scopes: ["modify"],
     description:
-      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
+      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Changes to one capability take turns: one asked for while another is queued or building waits for it (status waiting) and is built on the version it makes. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
     inputSchema: obj({ capabilityId: str(), request: str("Desired change"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId", "request"]),
   },
   {
@@ -155,7 +158,7 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "builds_get",
     scopes: ["create", "modify"],
-    description: "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn.",
+    description: "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn. queued: true while it waits its turn behind an earlier change to the same capability.",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
   },
   {
@@ -176,5 +179,15 @@ export const AGENT_TOOLS: AgentTool[] = [
     scopes: ["create", "modify"],
     description: "Cancel a build you requested (the owner can cancel any). The builder stops and nothing is promoted. A candidate already being validated finishes first.",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
+  },
+  {
+    name: "hewn_docs",
+    scopes: ["discover", "invoke", "create", "modify"],
+    description:
+      "Hewn's own documentation: what Hewn is and how it works (tools, connections, grants, building and changing tools, agents and scopes, models, schedules, widgets, data and backups, remote access, troubleshooting), and the spec for tools and agents (the manifest, operations, ctx, the ABI, these MCP tools). Read it when the user asks how Hewn works or what it can do, instead of guessing. No input: the pages and their sections. query: the sections that best match. page: one page's markdown, or one section of it (\"docs/concepts.md#grants\"). Read-only.",
+    inputSchema: obj({
+      query: str("Words to look for, e.g. 'connection sign-in' or 'widget sizes'"),
+      page: str("A page from the list, e.g. 'docs/connections.md', or 'page#section' for one section. With query: search only that page."),
+    }),
   },
 ];
