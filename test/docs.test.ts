@@ -174,6 +174,14 @@ describe("docs: the intake answers questions about Hewn", () => {
     assert.match(ask("modify", "can it read my calendar?"), /a change to this one would do what they asked about/);
   });
 
+  test("it sticks to Hewn: trivia gets a line, not an answer; a Claude skill gets the nearest tool", () => {
+    for (const mode of ["create", "modify"] as const) {
+      const p = intakePrompt({ mode, ...(mode === "modify" ? { capabilityId: "x" } : {}), messages: [{ role: "user", content: "How many r's are there in strawberry" }] });
+      assert.match(p, /about neither Hewn nor a tool \(general knowledge, trivia[^)]*\), don't answer it: reply kind "answer", one line/);
+      assert.match(p, /something Hewn doesn't build \(a Claude skill[^)]*\), reply kind "answer": Hewn builds tools that live in Hewn[^\n]*Offer the nearest tool/);
+    }
+  });
+
   test("the reply: kind answer in both modes, its message the answer; an empty answer is no reply", () => {
     assert.ok((SCHEMA.properties.kind.enum as string[]).includes("answer"));
     for (const mode of ["create", "modify"] as const) {

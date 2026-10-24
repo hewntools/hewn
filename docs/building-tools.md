@@ -14,7 +14,7 @@ The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI)
 
 ![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool; the box below has Attach](images/spec-proposal.png)
 
-You can ask the box about Hewn too ("can a tool read my calendar?", "how do I undo a change?"): it answers from Hewn's docs instead of drafting, and says so when they don't cover it. Reply to carry on ("ok, draft one").
+You can ask the box about Hewn too ("can a tool read my calendar?", "how do I undo a change?"): it answers from Hewn's docs instead of drafting, and says so when they don't cover it. Reply to carry on ("ok, draft one"). It sticks to Hewn: trivia, or something Hewn doesn't build (a Claude skill, a browser extension), gets a line saying so, and a tool if one would do.
 
 You can also ask an agent ("make me a reading list in Hewn"), if you allowed it to make tools ([scopes](agents.md#what-agents-can-do)). It shows up the same way.
 
