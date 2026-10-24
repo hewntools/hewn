@@ -2,8 +2,8 @@
 // Discovery: the capabilities an agent (or the owner) can see, and what each offers.
 import { type Agent, canSee, requireScope } from "../auth.ts";
 import { abiAtLeast, type CapabilityManifest, isConnection, opKey } from "../manifest.ts";
+import type { Readiness } from "./grants.ts";
 import { Domain } from "./context.ts";
-import type { Readiness } from "../platform.ts";
 
 export interface CapabilitySummary {
   id: string;

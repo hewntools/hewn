@@ -16,6 +16,8 @@ import type { Data } from "./data.ts";
 import type { Sessions } from "./sessions.ts";
 import type { Attachments } from "./attachments.ts";
 import type { Instructions } from "./instructions.ts";
+import type { Grants } from "./grants.ts";
+import type { Connections } from "./connections.ts";
 import type { Platform } from "../platform.ts";
 
 /** Minimal event emitter (no node:events in the core). */
@@ -46,8 +48,10 @@ export interface LoadedVersion {
 /** One of each domain, set up by Platform's constructor. */
 export interface Domains {
   attachments: Attachments;
+  connections: Connections;
   data: Data;
   discovery: Discovery;
+  grants: Grants;
   instructions: Instructions;
   presentation: Presentation;
   sessions: Sessions;
