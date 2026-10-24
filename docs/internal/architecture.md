@@ -34,7 +34,7 @@ A [capability](../../spec/capability-model.md#capability) is called a tool in ev
 | Package | What | Licence |
 | --- | --- | --- |
 | `spec/` (`@hewntools/spec`) | The contract as types, JSON Schemas and docs: the manifest, `ctx`, the [ABI](../../spec/README.md#versions) version and its history, the MCP tools agents get. No runtime code. | Apache-2.0 |
-| `packages/core` | The platform logic: `Platform`, the registry, manifest and contract checks, migrations rules, auth, OAuth, schedules, widgets, the model port. Pure: no Node, no workerd. | AGPL |
+| `packages/core` | The platform logic: `Platform` and its domains (`src/platform/`), the registry, manifest and contract checks, migrations rules, auth, OAuth, schedules, widgets, the model port. Pure: no Node, no workerd. | AGPL |
 | `packages/host-workerd` | What runs inside workerd: the Worker and its Durable Objects, the capability runtime wrapper, the HTTP and MCP surface, the web client (`web/`). | AGPL |
 | `packages/ui` | The UI kit tool UIs load from `/_platform/`: `ui.css`, `session.js`, `widgets.js`, `chart.js`, `ascii.js`. | Apache-2.0 |
 | `packages/cli` | `hewn`: the CLI, the supervisor, setup, builders, the intake, backups, the visual check. The only package published to npm. | AGPL |
@@ -55,6 +55,30 @@ Integration tests are in `test/`. Example tools are in `seeds/`.
 | `SecretStore` | capability secrets and model keys | AES-256-GCM rows in the owner's database | memory |
 
 Every authority check happens in the core, not in the MCP or HTTP layer, so every way in gets the same answer.
+
+`Platform` is a facade: each public method hands its call to a domain in `packages/core/src/platform/`, one module each.
+
+| Module | What |
+| --- | --- |
+| `discovery.ts` | `list` and `get`: the capabilities a principal can see |
+| `presentation.ts` | a tool's name, icon, hue and saturation as the owner sets them |
+| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import |
+| `grants.ts` | readiness, grants, secrets and config, delegated agents, the owner's confirmation of agents' destructive calls |
+| `connections.ts` | Accounts: a connection's sign-in step and health |
+| `sessions.ts` | tool UI tickets and sessions, web sessions, the public URL, passkeys |
+| `models.ts` | the owner's providers, tiers, budget and prices, and the model port |
+| `invocation.ts` | `invoke` through the contract, and the call log |
+| `widgets.ts` | running widgets, and Home's layout |
+| `schedules.ts` | schedules, and the ones the owner approves with a build |
+| `builds.ts` | builds: requests, the order they run in, the builder's attempts, retries, cancels, the owner's review, what a build keeps |
+| `validation.ts` | `validateAndPromote` ([Builds](#builds)) and promotion |
+| `attachments.ts` | what the owner attaches in the intake's box |
+| `instructions.ts` | the owner's instructions for building |
+| `housekeeping.ts` | the cleanup at start and daily, and the metrics aggregates |
+
+Each extends `Domain` (`context.ts`): the ports, the event bus, the cache of loaded versions, and the lookups every domain makes (`activeManifest`, `loadVersion` …). A domain calls another domain's public methods through the facade (`this.platform.readiness()`), so a wrapper on a `Platform` method sees every call, and reaches what `Platform` doesn't offer through `this.d` (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`, `logRetentionDays` …) stay on `Platform` and are read from it each time.
+
+The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store) and the rest. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
 
 Principals (`auth.ts`): `user` (the owner, from the web client or the CLI), `agent` (an MCP client), `ui` (a tool's own UI, limited to that tool), `capability` (a `ctx.call`), `schedule` and `widget`.
 
@@ -108,7 +132,7 @@ What led to a build stays with it for the capability's life: `build_context` hol
 
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
-`validateAndPromote` (`platform.ts`), in order:
+`validateAndPromote` (`platform/validation.ts`), in order:
 
 1. the manifest: schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
 2. bundle `src/index.ts` with its npm dependencies; the bundle exports every declared `name@version`
@@ -141,7 +165,7 @@ The intake (`packages/cli/src/intake.ts`) is the first half of the job the web c
 
 ## Models for building, and the cap
 
-A build runs on a model and effort: what the requester asked for, else the owner's setting for that builder (`jobModels` in the settings, per job and per agent). The owner may ask for anything; an agent only for names the owner ticked (`agentModels`), checked in the core (`Platform.modelFor`). The builder passes them to its CLI (`--model`/`--effort`, `-m`/`model_reasoning_effort`, `-m provider/model`/`--variant`), reports the model it ran on when its CLI says (Claude Code's `init` event; OpenCode's events don't name it, so a build on Default records no model there), and when the CLI won't run the model, fails the build at once (`modelUnavailable`: "Model not available", no retries) instead of building on another. The lists in Settings › AI come from the CLIs (`packages/cli/src/builders/models.ts`: `codex debug models`, `opencode models --verbose` in the owner's own OpenCode, Claude Code's families). At most 5 builds run at once (`MAX_RUNNING_BUILDS`); the rest wait in order.
+A build runs on a model and effort: what the requester asked for, else the owner's setting for that builder (`jobModels` in the settings, per job and per agent). The owner may ask for anything; an agent only for names the owner ticked (`agentModels`), checked in the core (`modelFor`, `platform/builds.ts`). The builder passes them to its CLI (`--model`/`--effort`, `-m`/`model_reasoning_effort`, `-m provider/model`/`--variant`), reports the model it ran on when its CLI says (Claude Code's `init` event; OpenCode's events don't name it, so a build on Default records no model there), and when the CLI won't run the model, fails the build at once (`modelUnavailable`: "Model not available", no retries) instead of building on another. The lists in Settings › AI come from the CLIs (`packages/cli/src/builders/models.ts`: `codex debug models`, `opencode models --verbose` in the owner's own OpenCode, Claude Code's families). At most 5 builds run at once (`MAX_RUNNING_BUILDS`); the rest wait in order.
 
 ## The host's builder (`remote`)
 
@@ -202,7 +226,7 @@ A widget is a read operation whose output is a view model for one of five templa
 
 ## Models
 
-The model port (`core/models.ts`, and the models section of `platform.ts`) runs language models for capabilities that declare `requires.model`. Capability code never holds a key or a provider host: it calls `ctx.model.generate`, and the core checks the request, reserves budget, calls the provider from the host, and settles the cost.
+The model port (`core/models.ts`, and `core/platform/models.ts`) runs language models for capabilities that declare `requires.model`. Capability code never holds a key or a provider host: it calls `ctx.model.generate`, and the core checks the request, reserves budget, calls the provider from the host, and settles the cost.
 
 - Providers: Anthropic, OpenAI, OpenRouter. The owner's API keys are secrets (`hewn:models`); the owner maps tiers (`light`, `standard`, `strong`, `max`) to models and sets a monthly budget, overall and per capability.
 - Prices and image support come from the provider's model list and the OpenRouter catalog. Every call is logged in `model_calls`.
