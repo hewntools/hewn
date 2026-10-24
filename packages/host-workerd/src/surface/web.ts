@@ -590,7 +590,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const started = Date.now();
     const finish = (reply?: IntakeReply, error?: string) => {
       const turn = body.messages.filter((m) => m.role === "user").length;
-      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : "draft";
+      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : reply.kind === "answer" ? "answer" : "draft";
       host.log(
         `web intake ${body.mode}${body.capabilityId ? ` ${body.capabilityId}` : ""} turn ${turn} → ${outcome} (${Math.round((Date.now() - started) / 1000)}s)`,
       );

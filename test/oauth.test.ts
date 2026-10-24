@@ -260,7 +260,7 @@ describe("OAuth over HTTP: a real MCP client signs in", () => {
     const client = await a.connect();
     assert.equal(agentId, "sdk-agent");
     const tools = (await client.listTools()).tools.map((x) => x.name).sort();
-    assert.deepEqual(tools, ["capabilities_get", "capabilities_list", "schedules_list"]);
+    assert.deepEqual(tools, ["capabilities_get", "capabilities_list", "hewn_docs", "schedules_list"]);
     const listed = await client.callTool({ name: "capabilities_list", arguments: {} });
     assert.match((listed.content as any)[0].text, /running-log/);
     await client.close();

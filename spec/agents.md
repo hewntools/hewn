@@ -51,6 +51,7 @@ There are four scopes. The web client shows them as See, Use, Make and Change. A
 | `builds_wait` | | | yes | yes |
 | `builds_retry` | | | yes | yes |
 | `builds_cancel` | | | yes | yes |
+| `hewn_docs` | yes | yes | yes | yes |
 
 Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent limited to some tools gets `not_found` for the others.
 
@@ -124,6 +125,16 @@ An agent with `invoke` can propose running an operation on a timetable: `schedul
 - **Size:** `small`, `medium` or `large`; by default `medium` if the widget offers it, else its first size.
 
 `capabilities_get` lists a tool's widgets; a widget's input is its operation's `inputSchema`.
+
+## Hewn's docs
+
+`hewn_docs` `{ query?, page? }` reads Hewn's own documentation, so an agent asked how Hewn works answers from it instead of guessing (the server instructions say so). Every agent has it, whatever its scopes. The pages are the user docs (`docs/*.md`) and this spec (`spec/*.md`), named by their paths in the repo (`docs/concepts.md`), as the links between them are written. The result is plain text:
+
+- **No input:** the pages, each with its title and its sections.
+- **`query`:** the five sections that best match its words (a word in a heading counts more than a mention), each under a line naming its page, anchor and heading: `--- docs/concepts.md#grants (Concepts › Grants) ---`. A long section is cut, with the call that reads it whole.
+- **`page`:** that page's markdown, or with `page#section` (the anchor, as links write it, or the heading) one section and the ones under it. With `query` too: the search, within that page.
+
+An unknown page or section is `not_found`, naming the ones there are.
 
 ## For host implementers
 

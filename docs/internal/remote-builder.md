@@ -68,6 +68,7 @@ One request per turn of the conversation; `session` is the same for every turn o
 ```
 
 - `prompt` is Hewn's intake prompt with the conversation in it; `schema` is the JSON Schema the reply must follow. The service may give the model web search and fetching (the owner reviews every draft before anything is built).
+- The reply's `kind` may be `answer` (since 0.4.8): the owner asked about Hewn itself, and `message` is the answer, with nothing to build. When the owner's message reads like a question, the prompt carries excerpts of Hewn's docs to answer from. Hewn reads the reply as it reads any other; the service passes it through.
 - `attachments` (only when there are any): the images the owner attached in the conversation so far (at most 10, each at most 2 MB; `image/png`, `image/jpeg`, `image/webp` or `image/gif`), for the model to look at next to the prompt, which names each under the message it came with (`[attached: screen.png (image 1200×800)]`). Attached text files are already in the prompt, each cut at 100,000 characters.
 
 Events: `{ "text": "<delta>" }` as the reply is written (Hewn shows its message and questions as they arrive), `{ "activity": "Searching the web" }` (and `{ "activity": "Thinking" }` while the model thinks before it writes, so the owner sees more than the typing dots), then `{ "result": "<the reply: JSON text following the schema>" }`. Or `refused` / `error` (`unavailable` as above). A `{ "charge": { "amount": 4, "unit": "Credits" } }` event, as for builds, counts the turn in "used this month" (not shown in the chat).

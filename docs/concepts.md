@@ -13,7 +13,7 @@ Tools are **versioned**. Each change is a new version, tested before it becomes 
 
 ## Agents
 
-**Agents** are the AI assistants you use: Claude Code, Codex, OpenCode, claude.ai, ChatGPT, or any MCP client. They connect to Hewn over MCP.
+**Agents** are the AI assistants you use: Claude Code, Codex, OpenCode, claude.ai and Claude Desktop, ChatGPT, or any MCP client. They connect to Hewn over MCP.
 - **Approval:** they sign in with OAuth, and you approve each one in Hewn.
 - **Scopes:** they get only what you approve: *see* your tools, *use* them, *make* new ones, *change* existing ones. Optionally, only some tools.
 - **Owner-only actions:** agents can't approve anything for themselves: grants, secrets, schedules, other agents.

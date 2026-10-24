@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
-import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, postStream, setWallpaper, toast } from "../kit.js";
+import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
 import { backBar, go, hues, moment, onLeave, put, settings, view } from "./frame.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
 import { cadenceText } from "./schedules.js";
@@ -134,7 +134,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
   const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
-  const say = (who, text, attachments) => thread.append(h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
+  const say = (who, text, attachments) => thread.append(who === "them" ? them(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
   syncSend();
@@ -198,7 +198,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (p.activity) activity.textContent = `${p.activity}…`;
       if (p.message === undefined && p.questions === undefined) return;
       activity.textContent = "";
-      put(live, p.message || p.questions?.length ? h("div", { class: "bubble them" }, chatText(p.message, p.questions)) : null);
+      put(live, p.message || p.questions?.length ? them(chatText(p.message, p.questions)) : null);
     };
     try {
       let reply = null;
@@ -218,6 +218,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (reply.kind === "questions") {
         messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
         say("them", chatText(reply.message, reply.questions));
+      } else if (reply.kind === "answer") {
+        // A question about Hewn, answered above (no card): remembered, so "ok, build that" follows on.
+        messages.push({ role: "intake", content: reply.message, reply });
       } else if (reply.kind === "widgets") {
         // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
         messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
@@ -271,6 +274,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
 
 /** The intake's message and its questions as one chat message: paragraphs, the questions numbered. */
 const chatText = (message, questions) => [message, ...(questions ?? []).filter(Boolean).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n");
+/** The intake's side of the chat: its text as light Markdown (bold, lists, code); the owner's stays as typed. */
+const them = (text, attachments) => h("div", { class: "bubble them md" }, markdown(text), attachmentsView(attachments));
 
 /** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
 const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
@@ -557,14 +562,14 @@ const conversationNodes = (turns, ctx = {}) =>
   turns.map((t) => {
     // A turn kept as text only (from before replies were kept) is read back into the reply it was.
     const r = t.role === "intake" ? (t.reply ?? legacyReply(t.content, ctx.mode)) : null;
-    if (r?.kind === "questions") return h("div", { class: "bubble them" }, [r.message, ...(r.questions ?? []).map((q, i) => `${i + 1}. ${q}`)].filter(Boolean).join("\n\n"));
+    if (r?.kind === "questions") return them(chatText(r.message, r.questions));
     const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
     if (list?.length && "cap" in ctx) {
       const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
       const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, nextVersion: ctx.version, readOnly: true })[0];
-      return [r.message && h("div", { class: "bubble them" }, r.message), card];
+      return [r.message && them(r.message), card];
     }
-    return h("div", { class: `bubble ${t.role === "user" ? "me" : "them"}` }, t.content, attachmentsView(t.attachments));
+    return t.role === "user" ? h("div", { class: "bubble me" }, t.content, attachmentsView(t.attachments)) : them(t.content, t.attachments);
   });
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */

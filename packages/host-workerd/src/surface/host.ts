@@ -113,7 +113,7 @@ export interface SurfaceHost {
   /** Port the browser uses (the web client is http://hewn.localhost:<port>). */
   port: number;
   log(line: string): void;
-  /** Static files: web client (`web/<path>`) and the design system (`platform-ui/<name>`). */
+  /** Static files: web client (`web/<path>`), the design system (`platform-ui/<name>`), and Hewn's docs (`docs/<page>.md`, `spec/<page>.md`). */
   asset(path: string): Promise<Uint8Array | undefined>;
   settings: {
     read(): Promise<Settings>;

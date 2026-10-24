@@ -128,6 +128,8 @@ export const MAX_IDEAS = 5;
 /** `message`: what the intake wants to say first (findings, assumptions, caveats); may be empty. */
 export type IntakeReply = (
   | { kind: "questions"; message: string; questions: string[] }
+  /** A question about Hewn itself, answered (from its docs): nothing to build. */
+  | { kind: "answer"; message: string }
   | { kind: "widgets"; message: string; proposals: WidgetProposal[] }
   /** Creating: several separate new capabilities, each a full draft; the owner ticks which to build (in parallel). */
   | { kind: "ideas"; message: string; ideas: CreateDraft[] }

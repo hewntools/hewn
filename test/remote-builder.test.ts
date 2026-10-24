@@ -184,6 +184,16 @@ describe("remote builder and intake", () => {
     await assert.rejects(remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "x" }] }), (e: Error & { unavailable?: boolean }) => !e.unavailable && /timed out/.test(e.message));
   });
 
+  test("the intake: a question about Hewn goes with excerpts of its docs, and the host's answer comes back as one", async () => {
+    const answer = { kind: "answer", message: "Through a connection: it holds the sign-in, and tools call its operations." };
+    handle = (_b, _r, res) => ndjson(res, [{ result: JSON.stringify(answer) }]);
+    const got = await remoteIntake(remote)({ mode: "create", messages: [{ role: "user", content: "How does a tool use my Todoist account?" }] });
+    assert.deepEqual(got, answer);
+    const sent = seen.at(-1)!.body;
+    assert.ok(sent.schema.properties.kind.enum.includes("answer"));
+    assert.match(sent.prompt, /Excerpts from Hewn's docs that match the owner's latest message[^]*--- docs\/connections\.md/);
+  });
+
   test("tools' model calls (hosted): the request goes as JSON; refusals, a bad token and a charged failure", async () => {
     const req = { capabilityId: "word-explainer", tier: "light" as const, messages: [{ role: "user" as const, content: "gruntled" }], maxTokens: 300 };
     const signal = new AbortController().signal;

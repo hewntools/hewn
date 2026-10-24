@@ -14,7 +14,9 @@ capabilities. Each has private persistent state and typed operations.
 Anything you record here persists and is visible to the user's other agents.
 When the user asks about their own data, activities or tools, check capabilities_list first.
 Use capabilities_get to read operation schemas, then capabilities_invoke. Raw storage is not
-accessible. Everything goes through operations.`;
+accessible. Everything goes through operations.
+For how Hewn itself works (concepts, building tools, connections, grants, the manifest and the ABI),
+read hewn_docs instead of guessing.`;
 
 /** The MCP Apps resource that draws a widget in the chat (`widgets_show`). */
 export const WIDGET_APP_URI = "ui://hewn/widget";
@@ -177,5 +179,15 @@ export const AGENT_TOOLS: AgentTool[] = [
     scopes: ["create", "modify"],
     description: "Cancel a build you requested (the owner can cancel any). The builder stops and nothing is promoted. A candidate already being validated finishes first.",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
+  },
+  {
+    name: "hewn_docs",
+    scopes: ["discover", "invoke", "create", "modify"],
+    description:
+      "Hewn's own documentation: what Hewn is and how it works (tools, connections, grants, building and changing tools, agents and scopes, models, schedules, widgets, data and backups, remote access, troubleshooting), and the spec for tools and agents (the manifest, operations, ctx, the ABI, these MCP tools). Read it when the user asks how Hewn works or what it can do, instead of guessing. No input: the pages and their sections. query: the sections that best match. page: one page's markdown, or one section of it (\"docs/concepts.md#grants\"). Read-only.",
+    inputSchema: obj({
+      query: str("Words to look for, e.g. 'connection sign-in' or 'widget sizes'"),
+      page: str("A page from the list, e.g. 'docs/connections.md', or 'page#section' for one section. With query: search only that page."),
+    }),
   },
 ];
