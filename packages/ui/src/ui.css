@@ -607,6 +607,8 @@ body.resizing iframe { pointer-events: none; }
 @media (max-width: 760px) { .settings-layout { flex-direction: column; } .settings-layout > .side-list { width: 100%; flex-direction: row; overflow-x: auto; position: static; } }
 
 /* ---------- Small parts ---------- */
+.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.ico { flex: none; display: block; }
 .role-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .milestones { display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .sheet-steps { display: flex; gap: 6px; }

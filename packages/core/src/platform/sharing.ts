@@ -28,6 +28,8 @@ export interface ShareCheck {
   files: number;
   findings: Finding[];
   sample: { calls: number } | null;
+  /** A connection: it shares without sample data. */
+  connection: boolean;
   /** Why it can't be shared: one of the owner's own values in it, or no sample data. */
   blocked: { kind: "secret"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
 }
@@ -80,6 +82,8 @@ export class Sharing extends Domain {
       sample = null;
     }
     const secret = findings.find((f) => f.kind === "secret");
+    // A connection has no data of its own to show (its sign-in never travels), so it shares without sample data.
+    const connection = isConnection(this.registry.getVersion(capabilityId, v)!.manifest);
     return {
       id: capabilityId,
       name: cap.displayName ?? cap.name,
@@ -88,7 +92,8 @@ export class Sharing extends Domain {
       files: Object.keys(files).length,
       findings,
       sample: sample ? { calls: sample.length } : null,
-      blocked: secret ? { kind: "secret", file: secret.file, line: secret.line, label: secret.label } : !sample ? { kind: "no-sample" } : null,
+      connection,
+      blocked: secret ? { kind: "secret", file: secret.file, line: secret.line, label: secret.label } : !sample && !connection ? { kind: "no-sample" } : null,
     };
   }
 

@@ -19,7 +19,7 @@ A shared tool is one file, `<tool>.hewn.zip`, with one version's files as they a
 Two things stop a share:
 
 - **One of your own stored values is in the code:** a key or a setting you gave any of your tools, or a model provider's key. Share… says which file and line, and **Change…** asks the builder to take it out. Share again once the new version is live.
-- **No sample data.** **Ask builder** adds it (the usual way: it writes made-up entries that fit the tool), or **Write it yourself**.
+- **No sample data.** **Ask builder** adds it (the usual way: it writes made-up entries that fit the tool), or **Write it yourself**. A connection shares without it: it has no data of its own to show, and its sign-in never travels (whoever installs it signs in with their own account).
 
 From the terminal: `hewn share <id> [--version N] [--out file]` prints the same findings and writes the file unless something stops it.
 
@@ -27,7 +27,7 @@ From the terminal: `hewn share <id> [--version N] [--out file]` prints the same 
 
 Sample data is what a tool looks like in use: a list of calls to its operations (`sample/calls.json`) that fill an empty tool with made-up entries. Whoever installs your tool can start with it instead of a blank screen, and screenshots of the tool use it. It holds made-up names and places, never yours.
 
-Builders write sample data when they create a tool, and keep it working when a change reshapes the operations. For a tool from before that, **Ask builder** in Share… adds some. **Write it yourself** opens `sample/calls.json` in an editor: saving makes a new version, which goes live only if every call runs without an error on an empty tool. The calls run before the tool is allowed anything, so they're plain writes: no network, no other tools, no model. The format is in [the tool spec](../spec/tools.md#sample-data-since-25).
+Builders write sample data when they create a tool, and keep it working when a change reshapes the operations. For a tool from before that, **Ask builder** in Share… adds some. **Write it yourself** opens `sample/calls.json` in an editor, with the format and what each operation takes beside it (**+ Add** puts in a call with its required fields): saving makes a new version, which goes live only if every call runs without an error on an empty tool. The calls run before the tool is allowed anything, so they're plain writes: no network, no other tools, no model. The format is in [the tool spec](../spec/tools.md#sample-data-since-25).
 
 ## Installing a tool someone shared
 

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { MAX_BUNDLE_BYTES, packBundle, readZip, scanFiles, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
-import { editJson, installSeed, setup } from "./helpers.ts";
+import { editJson, installFrom, installSeed, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([
   { operation: "record_run", input: { distanceKm: 5.2, durationSeconds: 1700, date: "2026-10-01", notes: "Easy loop by the river" } },
@@ -15,6 +15,8 @@ const SAMPLE = JSON.stringify([
 ]);
 
 const runs = async (t: ReturnType<typeof setup>, id = "running-log") => ((await t.platform.invoke(USER, { capabilityId: id, operation: "list_runs", input: {} })).result as { runs: unknown[] }).runs.length;
+
+const FIX = resolve(import.meta.dirname, "fixtures");
 
 describe("bundles: the zip and the scan", () => {
   test("a store-only zip round-trips; a deflated entry (another tool's zip) is refused with the reason", () => {
@@ -102,6 +104,25 @@ describe("sharing: a tool as a file", () => {
     const check = await t.platform.shareCheck(USER, "running-log");
     assert.deepEqual(check.blocked, { kind: "secret", file: "capability.json", line: check.blocked!.kind === "secret" ? check.blocked!.line : 0, label: "your Running Log setting SITE" });
     await assert.rejects(t.platform.shareBundle(USER, "running-log"), /capability\.json:\d+ is your Running Log setting SITE\. Remove it/);
+  });
+
+  test("a connection shares without sample data, and installs signed out", async () => {
+    await installFrom(t.platform, resolve(FIX, "site-connection"));
+    t.platform.setConfig(USER, "site-connection", "SITE_URL", "https://my-site.example");
+    const check = await t.platform.shareCheck(USER, "site-connection");
+    assert.equal(check.connection, true);
+    assert.equal(check.sample, null);
+    assert.equal(check.blocked, null, "no sample data needed");
+    const { bundle } = await t.platform.shareBundle(USER, "site-connection");
+    other = setup();
+    const preview = await other.platform.stageBundle(USER, bundle);
+    assert.equal(preview.kind, "connection");
+    const done = await other.platform.settle((await other.platform.installBundle(USER, preview.token, { name: preview.suggestedName, sample: true })).buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    const st = other.platform.readiness("site-connection");
+    assert.equal(st.ready, false);
+    assert.deepEqual(st.missingConfig, ["SITE_URL"], "the owner's settings never travel");
+    assert.deepEqual(st.missingSecrets, ["API_KEY"]);
   });
 
   test("round trip: share, then install on another Hewn with its sample data; source is set and stays", async () => {

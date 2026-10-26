@@ -12,7 +12,7 @@ import { addScheduleSheet, scheduleRow } from "./schedules.js";
 import { changeHref, download, inlineRename, openCapability, openChange, toolActions } from "./tool-actions.js";
 import { modelSpend, ownCap, quickModelChange, saveOwnCap, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
-import { shareSheet } from "./share.js";
+import { shareButton } from "./share.js";
 import { madeBy, versionRow } from "./versions.js";
 import { addWidgetSheet, segmented, SIZE_LETTER, widgetPreview } from "./widgets.js";
 
@@ -413,7 +413,7 @@ async function infoPage(id) {
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
-    backBar("Home", "#/", toolActions(c, { rename: () => inlineRename(c, name), extra: h("button", { onclick: () => shareSheet(c).catch(fail) }, "Share…") })),
+    backBar("Home", "#/", toolActions(c, { rename: () => inlineRename(c, name), extra: shareButton(c) })),
     sandboxNotice(),
     h(
       "main",
@@ -465,7 +465,7 @@ async function connectionPage(c, cap, all) {
   });
   const needsSetup = !cap.status.ready && (cap.status.pendingGrants.length || cap.status.missingConfig.length);
   view(
-    backBar("Accounts", "#/accounts", toolActions(c, { rename: () => inlineRename(c, name) })),
+    backBar("Accounts", "#/accounts", toolActions(c, { rename: () => inlineRename(c, name), extra: shareButton(c) })),
     sandboxNotice(),
     h(
       "main",

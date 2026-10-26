@@ -90,7 +90,7 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
     "-",
     rename && ["Rename", rename],
     ["Set icon…", () => iconDialog(c).catch(fail)],
-    !connection && ["Share…", () => shareSheet(c).catch(fail)],
+    ["Share…", () => shareSheet(c).catch(fail)],
     ["Export data", () => download(`/api/capabilities/${id}/export`)],
     hidden && show && ["Show on Home", show],
     editHome && ["Edit Home", editHome],
