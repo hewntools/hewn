@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Client-side checks that mirror the operations' input limits, so the form can say what's wrong
 // before saving. No DOM access, so they can be unit-tested (tests/validate.test.mjs).
 // Each check returns an error message, or null when the value is fine.

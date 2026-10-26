@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { MAX_BUNDLE_BYTES, packBundle, readZip, scanFiles, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
-import { editJson, installSeed, setup } from "./helpers.ts";
+import { editJson, installFrom, SEED, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([
   { operation: "record_run", input: { distanceKm: 5.2, durationSeconds: 1700, date: "2026-10-01", notes: "Easy loop by the river" } },
@@ -57,9 +59,17 @@ describe("bundles: the zip and the scan", () => {
 describe("sharing: a tool as a file", () => {
   let t: ReturnType<typeof setup>;
   let other: ReturnType<typeof setup> | undefined;
+  // Running Log as a tool from before builders wrote sample data: the seed without sample/.
+  let seed: string;
+  before(() => {
+    seed = mkdtempSync(join(tmpdir(), "hewn-seed-"));
+    cpSync(SEED, seed, { recursive: true });
+    rmSync(join(seed, "sample"), { recursive: true });
+  });
+  after(() => rmSync(seed, { recursive: true, force: true }));
   beforeEach(async () => {
     t = setup();
-    await installSeed(t.platform);
+    await installFrom(t.platform, seed);
   });
   afterEach(() => (t.cleanup(), other?.cleanup(), (other = undefined)));
 

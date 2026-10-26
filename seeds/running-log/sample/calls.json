@@ -1,8 +1,8 @@
 [
-  {"operation": "record_run", "input": {"distanceKm": 5.2, "durationSeconds": 1720, "date": "2026-10-03", "notes": "Easy loop by the river"}},
-  {"operation": "record_run", "input": {"distanceKm": 8.0, "durationSeconds": 2790, "date": "2026-10-06"}},
-  {"operation": "record_run", "input": {"distanceKm": 6.4, "durationSeconds": 2050, "date": "2026-10-09", "notes": "Hill repeats, 6 × 200 m"}},
-  {"operation": "record_run", "input": {"distanceKm": 12.1, "durationSeconds": 4380, "date": "2026-10-12", "notes": "Long and slow"}},
-  {"operation": "record_run", "input": {"distanceKm": 5.0, "durationSeconds": 1580}},
-  {"operation": "record_run", "input": {"distanceKm": 7.3, "durationSeconds": 2410, "notes": "Felt fast today"}}
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.2, "durationSeconds": 1720, "date": "2026-10-03", "notes": "Easy loop by the river"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 8.0, "durationSeconds": 2790, "date": "2026-10-06"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 6.4, "durationSeconds": 2050, "date": "2026-10-09", "notes": "Hill repeats, 6 × 200 m"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 12.1, "durationSeconds": 4380, "date": "2026-10-12", "notes": "Long and slow"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.0, "durationSeconds": 1580}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 7.3, "durationSeconds": 2410, "notes": "Felt fast today"}}
 ]

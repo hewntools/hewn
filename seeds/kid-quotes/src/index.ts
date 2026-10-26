@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 type Db = {
   exec(sql: string): void;
   prepare(sql: string): { run(...p: unknown[]): { changes: number; lastInsertRowid: number }; all(...p: unknown[]): any[]; get(...p: unknown[]): any };

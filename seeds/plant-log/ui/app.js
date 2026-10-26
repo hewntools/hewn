@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Plant Log UI: what needs water today, then every plant by window.
 
 const app = document.getElementById("app");

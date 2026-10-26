@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // In-memory stand-in for the idea operations, used only when the page is opened with
 // ?preview=demo (sample ideas in every status, with and without optional fields, and max-length
 // text), ?preview=empty (no ideas) or ?preview=error (every call fails, as when Jig is unreachable). Mirrors the latest contract versions closely enough to

@@ -21,7 +21,7 @@
         "title": "Sends a person's notes and gift history to the model for suggestions",
         "detail": "When you ask for suggestions, and when it prepares them for an occasion coming up.",
         "file": "src/index.ts",
-        "line": 597
+        "line": 598
       },
       {
         "kind": "ok",

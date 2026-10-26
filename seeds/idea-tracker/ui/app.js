@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { emptyStateMessage, hiddenClosedFooter } from "./empty-state.js";
 import { STATUSES, OPEN, CLOSED, PILL, LABEL, groupIdeas } from "./statuses.js";
 import { LIMITS, checkTitle, checkPitch, checkUrl, checkNote, splitTags, checkTag, checkTags } from "./validate.js";

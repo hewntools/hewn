@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Plant Log: houseplants per window, when each was last watered, fed and repotted,
 // and which ones need water today.
 

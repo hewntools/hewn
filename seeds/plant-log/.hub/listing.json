@@ -21,7 +21,7 @@
         "title": "Sends a photo to the model when you ask it to name a plant",
         "detail": "Only that photo, and only then.",
         "file": "src/index.ts",
-        "line": 650
+        "line": 651
       },
       {
         "kind": "ok",
