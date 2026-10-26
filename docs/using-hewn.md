@@ -55,7 +55,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 - **Schedules:** a switch each, and **+ Add schedule**
 - **Widgets:** the widgets themselves, and **Add to Home**
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
-- **Versions:** the last two, and **All versions** ([Building tools](building-tools.md#versions))
+- **Versions:** the last two, and **All versions**; a version's **Details** has its conversation, spec, log and code ([Building tools](building-tools.md#versions))
 
 Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. A section with nothing in it yet folds into one line at the bottom ("Not set up: Schedules · Widgets"); click one to add it. In a wide window the sections sit in two columns.
 

@@ -42,7 +42,7 @@ async function route() {
     if (p === "app") return await appPage(id, q);
     if (p === "run") return await runPage(id, q);
     if (p === "c" && sub === "versions") return await versionsPage(id);
-    if (p === "c" && sub === "v") return await versionPage(id, Number(arg));
+    if (p === "c" && sub === "v") return await versionPage(id, Number(arg), q);
     if (p === "c") return await infoPage(id);
     if (p === "new") return await intakePage(q);
     if (p === "b") return await buildPage(id);

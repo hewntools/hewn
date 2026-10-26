@@ -71,7 +71,7 @@ If the builder itself can't work (signed out, out of usage), Hewn stops instead 
 
 Every change is a new version. Your data stays and moves forward with each one. Info shows the last two; **All versions** (or **Versions** in the tool's menu) lists every one. **Details** opens a version; **Restore** there makes it active again, with the data kept. Restoring is refused if a newer version changed the data in a way the older code can't read.
 
-A version's page shows what led to it: the conversation with the intake, the spec and the builder's log, one tab each. **Continue from here** opens a change with that conversation on top, so you pick up where you left off instead of explaining the tool again; opening **Change…** on a tool offers the same ("Continue from the last conversation?").
+A version's page shows what led to it: the conversation with the intake, the spec and the builder's log, one tab each. **Files** shows its code: **Changes** lists what changed since the version before, each file as a diff (added lines green, removed lines red, with both line numbers), and **Source** shows every file as it is. **Continue from here** opens a change with that conversation on top, so you pick up where you left off instead of explaining the tool again; opening **Change…** on a tool offers the same ("Continue from the last conversation?").
 
 Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@2` next to the old one, so agents and other tools that use `@1` keep working.
 

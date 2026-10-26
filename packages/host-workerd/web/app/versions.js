@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool's versions (U3) and one version (U4): what led to it, kept for the tool's life (the
-// conversation with the intake, the spec the builder worked from, the builder's log), Continue
-// from here and Restore.
+// conversation with the intake, the spec the builder worked from, the builder's log), its files
+// in the code browser, Continue from here and Restore.
 import { actorLabel, ago, api, appIcon, builderLabel, caps, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { buildModelWords } from "./build.js";
+import { codeBrowser, versionSource } from "./files.js";
 import { backBar, go, hues, put, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
 import { changeHref, rollbackTo } from "./tool-actions.js";
@@ -55,9 +56,9 @@ async function versionsPage(id) {
   );
 }
 
-/** U4 One version: Conversation · Spec · Log as tabs on one page, Continue from here and Restore in the bar. */
-async function versionPage(id, n) {
-  view(backBar("Info", `#/c/${enc(id)}`), h("main", { class: "column", style: { "--w": "860px" } }, skeleton("40%", "30%", "90%", "70%")));
+/** U4 One version: Conversation · Spec · Log · Files as tabs on one page, Continue from here and Restore in the bar. */
+async function versionPage(id, n, q) {
+  view(backBar("Info", `#/c/${enc(id)}`), h("main", { class: "column", style: { "--w": "1100px" } }, skeleton("40%", "30%", "90%", "70%")));
   const { cap, all, c, active } = await load(id);
   const v = cap.versions.find((x) => x.version === n);
   if (!v) throw new Error(`${cap.name} has no version ${n}`);
@@ -77,7 +78,9 @@ async function versionPage(id, n) {
       const t = v.buildId ? await api(`/builds/${enc(v.buildId)}/transcript`) : null;
       return t?.text ? h("pre", { class: "log version-log" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "muted" }, "No log was kept.");
     },
+    files: async () => codeBrowser(versionSource(id, v.version)),
   };
+  const first = tabs[q?.get("tab")] ? q.get("tab") : "conversation";
   const show = async (tab) => {
     put(body, skeleton("60%", "40%"));
     try {
@@ -93,18 +96,17 @@ async function versionPage(id, n) {
     backBar(cap.name, `#/c/${enc(id)}`, (restore || resume) && h("div", { class: "glass-bar" }, resume, restore)),
     h(
       "main",
-      { class: "column info", style: { "--w": "860px" } },
+      { class: "column info version-page", style: { "--w": "1100px" } },
       h(
         "div",
         { class: "info-head" },
-        appIcon(c, { size: 48 }),
-        h("div", { class: "grow col" }, h("h1", { class: "title-lg clip-1" }, [`v${v.version}`, changed(v)].filter(Boolean).join(" · ")), h("span", { class: "muted small" }, made)),
-        v.version === active && h("span", { class: "pill ok with-dot" }, "live"),
+        appIcon(c, { size: 44 }),
+        h("div", { class: "grow col" }, h("h1", { class: "title-lg clip-1" }, [`v${v.version}`, changed(v)].filter(Boolean).join(" · ")), h("span", { class: "muted small row tight" }, made, v.version === active && h("span", { class: "pill ok with-dot" }, "live"))),
+        segmented([["conversation", "Conversation"], ["spec", "Spec"], ["log", "Log"], ["files", "Files"]], first, (tab) => show(tab), { label: "Show" }),
       ),
-      segmented([["conversation", "Conversation"], ["spec", "Spec"], ["log", "Log"]], "conversation", (tab) => show(tab), { label: "Show" }),
       body,
       restore && h("div", { class: "small faint" }, "Restoring keeps the data. It's refused if a newer version changed the data in a way older code can't read."),
     ),
   );
-  show("conversation");
+  show(first);
 }
