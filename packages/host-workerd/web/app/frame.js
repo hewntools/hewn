@@ -15,6 +15,7 @@ export {
   glassBack,
   go,
   hewnMachine,
+  holdFirstDraw,
   hues,
   keyHandlers,
   leaving,
@@ -24,6 +25,7 @@ export {
   onLeave,
   page,
   put,
+  releaseHeld,
   sandboxNotice,
   setSettings,
   settings,
@@ -81,7 +83,28 @@ const onLeave = (fn) => leaving.push(fn);
 
 /** replaceChildren, skipping the false/null/"" that conditional children produce. */
 const put = (el, ...nodes) => el.replaceChildren(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false && n !== ""));
-const view = (...nodes) => put(app, ...nodes);
+/**
+ * A page drawn again where it is (the same address, after an action) stays as it was until its new
+ * content is ready: its first draw, if it's a loading one, is held back, and drawn only if nothing
+ * follows it. Otherwise each refresh blanked the page to a skeleton and built it again downwards.
+ */
+let holding = false;
+let held = null;
+const isBusy = (n) => n instanceof Element && (n.matches('[aria-busy="true"]') || !!n.querySelector('[aria-busy="true"]'));
+const view = (...nodes) => {
+  if (holding) {
+    holding = false;
+    if (nodes.flat(Infinity).some(isBusy)) return void (held = nodes);
+  }
+  held = null;
+  put(app, ...nodes);
+};
+const holdFirstDraw = (on) => ((holding = on), (held = null));
+const releaseHeld = () => {
+  holding = false;
+  if (held) put(app, ...held);
+  held = null;
+};
 
 /** Platform settings: the persistent "sandbox off" notice, the owner's time zone and jobs. */
 let settings = null;

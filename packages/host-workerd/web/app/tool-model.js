@@ -6,9 +6,24 @@ import { perCall, tierModel, TIERS } from "./grants.js";
 import { pollInbox } from "./inbox.js";
 import { modelPicker, TIER_TEXT, titleCase, usd } from "./models.js";
 
-export { modelSpend, toolModelSheet };
+export { modelSpend, quickModelChange, toolModelSheet };
 
 // ---------- J3: a tool's model (tier or a pinned model, and its own cap) ----------
+
+/**
+ * A quick change of a tool's model (a new version with only the manifest changed, no builder),
+ * waited for: it resolves once the version is live, so a refresh shows it; it rejects with why not.
+ */
+async function quickModelChange(c, body) {
+  const b = await api(`/capabilities/${enc(c.id)}/model`, { method: "POST", body });
+  for (let i = 0; i < 150; i++) {
+    const x = await api(`/builds/${enc(b.buildId)}`);
+    if (x.status === "promoted") return x;
+    if (["failed", "cancelled", "review"].includes(x.status)) throw new Error(x.status === "review" ? "The change waits for review in the Inbox" : (x.failure?.title ?? "The change didn't go through"));
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error("The change is taking longer than it should; Activity has it");
+}
 
 /** This month's spend on a tool's model calls: dollars, or (hosted) the host's unit. */
 function modelSpend(m, id) {

@@ -121,14 +121,12 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     }
   };
   picker.addEventListener("change", () => (addFiles([...picker.files]), (picker.value = "")));
-  // V4 "Ask builder to fix this": the failure comes along as a file (open it, or drop it); the box has one line.
+  // "Ask builder to fix this": what failed goes in the box as text, as other pre-fills do; nothing sends until Send.
   const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
   if (failure) {
     sessionStorage.removeItem(`hewn.fix.${capId}`);
-    const { name, text } = JSON.parse(failure);
-    uploadAttachment(new File([text], name, { type: "text/plain" }), session)
-      .then((a) => (pending.push(a), syncChips()))
-      .catch(() => ((input.value = `${text}\n\n${input.value}`), requestAnimationFrame(growWhenShown)));
+    input.value = JSON.parse(failure).text;
+    requestAnimationFrame(growWhenShown);
   }
   input.addEventListener("paste", (e) => {
     const files = [...(e.clipboardData?.files ?? [])];
@@ -138,11 +136,11 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
   composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
   composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
-  composer.prepend(offer);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
+  // Continue the last conversation? sits above the box, not in it.
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer));
   const say = (who, text, attachments) => thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);

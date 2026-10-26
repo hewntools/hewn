@@ -5,6 +5,7 @@ import { HEALTH } from "./accounts.js";
 import { put } from "./frame.js";
 import { PROVIDERS, titleCase, usd } from "./models.js";
 import { changeHref } from "./tool-actions.js";
+import { quickModelChange } from "./tool-model.js";
 
 export { grantsSheet, grantText, kindPill, perCall, signInDialog, tierModel, TIERS };
 
@@ -137,12 +138,18 @@ async function grantsSheet(capId) {
           else for (const i of pending) if (!i.approved && !left.includes(i.grant) && !(otherTier && i.grant === modelGrant)) await api(`/capabilities/${id}/grants/approve`, { method: "POST", body: { grant: i.grant } });
           for (const g of left) if (!declined.has(g)) await api(`/capabilities/${id}/grants/decline`, { method: "POST", body: { grant: g } });
           if (otherTier) {
-            await api(`/capabilities/${id}/model`, { method: "POST", body: { tier } });
+            await quickModelChange(c, { tier });
             toast(`${c.name} will use the ${tier} tier`);
           }
           invalidateCaps();
           const now = await api(`/capabilities/${id}`);
-          if (!otherTier) toast(now.status.ready ? `${c.name} is ready` : "Authorized");
+          // What was said: a switch left off is a no, so "Authorized" only when something was.
+          const yes = pending.filter((i) => !i.approved && !left.includes(i.grant)).length;
+          if (!otherTier)
+            toast(
+              now.status.ready ? `${c.name} is ready` : !yes && left.length ? `Said no to ${left.length === 1 ? "it" : `${left.length} things`}. ${c.name} won't run until you allow ${left.length === 1 ? "it" : "them"}.` : left.length ? `Authorized. Said no to ${left.length === 1 ? "one thing" : `${left.length} things`}.` : "Authorized",
+              { dot: yes ? "ok" : "" },
+            );
           close(now.status.ready);
         } catch (e) {
           fail(e);

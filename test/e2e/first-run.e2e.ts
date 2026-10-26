@@ -168,9 +168,9 @@ try {
     await page.screenshot({ path: "/tmp/e2e-fr-home.png" });
   });
 
-  await step("schedules: Info › Not set up › Schedules, add one daily, see the next run, pause it", async () => {
+  await step("schedules: Info › Schedules › + Add schedule, add one daily, see the next run, pause it", async () => {
     await page.goto(`${web}/#/c/reading-list`);
-    await page.locator(".info-missing").getByRole("button", { name: "Schedules" }).click();
+    await page.locator(".info-section", { hasText: "Schedules" }).getByRole("button", { name: "+ Add schedule" }).click();
     const sheet = page.locator("dialog[open]", { hasText: "New schedule · Reading List" });
     // A read operation (list…/get…) needs no input; others may require some.
     const ops = await sheet.getByLabel("Operation", { exact: true }).locator("option").evaluateAll((els: HTMLOptionElement[]) => els.map((e) => e.value));

@@ -49,19 +49,19 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 ## A tool's page
 
 **Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
-- **Operations:** each with **Run**, which opens it as a form and shows the result
-- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for (a no is kept until its next version; it can't run without it, so Info offers **Ask builder to work without it**), **Revoke** what it has, and move it to another model tier from the menu on the model's row, with what it spent this month ([Models](models.md))
+- **Operations:** each with **Run**, which opens it as a form and shows the result; the first five, then **Show all**
+- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for (a no is kept until its next version; it can't run without it, so Info offers **Ask builder to work without it**), **Revoke** what it has. The model's row has its tier (or **A specific model…**) in a menu, what it spent this month, and its own monthly cap ([Models](models.md))
 - **Data:** how many rows it keeps, when it last wrote, and **Export**
-- **Schedules:** a switch each, and **+ Add schedule**
-- **Widgets:** the widgets themselves, and **Add to Home**
+- **Schedules:** a switch each, **+ Add schedule**, and **Try again** on a failed run (one run now, as the schedule runs)
+- **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
 - **Versions:** the last two, and **All versions** ([Building tools](building-tools.md#versions))
 
-Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. A section with nothing in it yet folds into one line at the bottom ("Not set up: Schedules · Widgets"); click one to add it. In a wide window the sections sit in two columns.
+Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)).
 
-**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed attached as a file (the operation, the error, its input and the last log lines) and "Fix it so this works." in the box. Open the file to read it, add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
+**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed in the box (the operation, the error, its input and the last log lines) and "Fix it so this works." Add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 
 ![Running Log's Info page: its status and version, the Change it box, then Operations, Allowed to and Data on the left, and Schedules, Instructions and Versions on the right](images/tool-info.png)
 

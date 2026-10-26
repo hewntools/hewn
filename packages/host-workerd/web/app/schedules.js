@@ -68,11 +68,32 @@ function scheduleRow(c, x, after, leave = () => {}) {
         : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
   // Why the last run failed, and when: the tool's own words, without the call's prefixes.
   const why = failed && expandable(`Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`, "sub danger-text");
-  const fix = failed && h("button", { class: "link sm self-start", type: "button", onclick: () => (leave(), askFixLatest(c, (f) => f.caller === `schedule:${x.id}`, { caller: `schedule:${x.id}`, operation: x.operation, error: runFailure(x.lastOutcome, x.operation), input: JSON.stringify(x.input ?? {}) }).catch(fail)) }, "Ask builder to fix this");
+  const fix = failed && h("button", { class: "link sm", type: "button", onclick: () => (leave(), askFixLatest(c, (f) => f.caller === `schedule:${x.id}`, { caller: `schedule:${x.id}`, operation: x.operation, error: runFailure(x.lastOutcome, x.operation), input: JSON.stringify(x.input ?? {}) }).catch(fail)) }, "Ask builder to fix this");
+  // Try again: one run now, as the schedule runs, to see if it was a passing problem or a fix worked.
+  const retry =
+    failed &&
+    h("button", {
+      class: "link sm",
+      type: "button",
+      onclick: async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        b.textContent = "Running…";
+        try {
+          const r = await api(`/schedules/${enc(x.id)}/run`, { method: "POST" });
+          toast(r.ok ? `${x.operation.split("@")[0]} ran without an error` : `Failed again: ${runFailure(r.outcome, x.operation)}`, r.ok ? {} : { dot: "danger" });
+          after();
+        } catch (err) {
+          b.disabled = false;
+          b.textContent = "Try again";
+          fail(err);
+        }
+      },
+    }, "Try again");
   return h(
     "li",
     {},
-    h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why, fix),
+    h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why, failed && h("div", { class: "row tight schedule-fixes" }, retry, fix)),
     x.status === "proposed" ? h("button", { class: "sm primary", onclick: act({ status: "active" }, "Schedule enabled") }, "Enable") : x.status === "paused" && x.pausedReason ? h("button", { class: "sm", onclick: act({ status: "active" }, "Resumed") }, "Resume") : sw,
     h("button", { class: "ghost sm icon-only", "aria-label": "Delete schedule", onclick: act(null, "Schedule deleted") }, "×"),
   );

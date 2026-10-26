@@ -307,6 +307,7 @@ export class Platform {
   proposeSchedule(agent: Agent, req: { capabilityId: string; operation: string; operationVersion?: number; input?: unknown; cadence: string; note?: string }): Schedule { return this.d.schedules.proposeSchedule(agent, req); }
   updateSchedule(owner: Agent, id: string, change: { status?: "active" | "paused"; cadence?: string; input?: unknown }): Schedule { return this.d.schedules.updateSchedule(owner, id, change); }
   deleteSchedule(owner: Agent, id: string) { return this.d.schedules.deleteSchedule(owner, id); }
+  runScheduleNow(owner: Agent, id: string): Promise<{ ok: boolean; outcome: string }> { return this.d.schedules.runScheduleNow(owner, id); }
   nextScheduleAt(): number | null { return this.d.schedules.nextScheduleAt(); }
   runDueSchedules(now?: number): Promise<{ id: string; ok: boolean }[]> { return this.d.schedules.runDueSchedules(now); }
 

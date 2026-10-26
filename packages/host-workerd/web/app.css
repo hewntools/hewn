@@ -161,7 +161,13 @@ body.app-mode #app { height: 100vh; }
 .info-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: 40px; padding-top: 6px; }
 .info-section .list > li { min-height: 52px; }
 .info-section .list > li > .pill { flex: none; }
-.info-widgets { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 0 8px; }
+.info-widgets { display: flex; flex-wrap: wrap; gap: 16px 12px; padding: 10px 0 8px; }
+.info-widget-foot { width: 100%; padding: 0 2px; }
+.info-widget-foot .segmented { flex: none; padding: 2px; }
+.info-widget-foot .segmented button { min-height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
+.list > li.list-more { min-height: 40px; }
+.model-cap-row .model-cap { width: 84px; }
+.schedule-fixes { gap: var(--s3); flex-wrap: wrap; }
 .info-widget { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .info-widget .widget-preview-stage { min-height: 0; padding: 0; background: none; }
 .info-rule { padding: 6px 0 4px; }
@@ -171,7 +177,17 @@ body.app-mode #app { height: 100vh; }
 .info-used-by { padding: 6px 0 10px; }
 .info-missing:empty { display: none; }
 .info-missing button.link { padding: 0; }
-.version-log { max-height: 70vh; }
+/* U3/U4 versions: under the main top bar, the left menu (as Settings), each part in a panel */
+.back-link { padding: 0; min-height: 0; }
+.version-layout { width: min(960px, calc(100% - var(--s5))); padding-top: var(--s4); }
+.version-layout.wide { width: min(1280px, calc(100% - var(--s5))); }
+.version-head { align-items: flex-start; }
+.version-what { margin: 2px 0 4px; color: var(--text-2); overflow-wrap: anywhere; }
+.version-actions { flex: none; }
+.card.version-panel { margin: 0; padding: 20px; }
+.version-panel[aria-busy] { opacity: .6; transition: opacity .15s var(--ease); }
+.version-panel .thread.kept { max-height: none; overflow: visible; margin-top: 0; }
+.version-log { max-height: none; }
 .list-card { padding: var(--s2) 18px; }
 .list-card > .eyebrow { padding: 10px 0 var(--s1); }
 

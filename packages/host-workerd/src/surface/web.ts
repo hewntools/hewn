@@ -439,6 +439,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (!id) return platform.listSchedules(owner);
     if (method === "PUT") return platform.updateSchedule(owner, id, pick(await readJson(req), ["status", "cadence", "input"]) as any);
     if (method === "DELETE") return platform.deleteSchedule(owner, id), { ok: true };
+    if (method === "POST" && sub === "run") return platform.runScheduleNow(owner, id);
   }
 
   if (resource === "confirmations") {

@@ -7,7 +7,6 @@ import {
   bumpIcons,
   capRef,
   caps,
-  confirmDialog,
   enc,
   fail,
   glyphCells,
@@ -61,8 +60,8 @@ const fixText = (f) => {
 };
 const askFix = (c, f) => {
   // The box picks it up (once) from here: too long for the address.
-  sessionStorage.setItem(`hewn.fix.${c.id}`, JSON.stringify({ name: `${String(f.operation).split("@")[0]} failed.txt`, text: fixText(f) }));
-  openChange(c, { m: "Fix it so this works.", fix: "1" });
+  sessionStorage.setItem(`hewn.fix.${c.id}`, JSON.stringify({ text: `${fixText(f)}\n\nFix it so this works.` }));
+  openChange(c, { fix: "1" });
 };
 /** The newest recorded failure that matches (Hewn keeps the last ten per tool), else what's known here. */
 const askFixLatest = async (c, match, fallback) => askFix(c, (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find(match) ?? fallback);
@@ -199,14 +198,29 @@ function inlineRename(c, labelEl, { onSaved } = {}) {
 async function deleteDialog(c) {
   const [detail, all] = await Promise.all([api(`/capabilities/${enc(c.id)}`).catch(() => ({ usedBy: [] })), caps()]);
   const usedBy = detail.usedBy ?? [];
-  const ok = await confirmDialog({
-    title: h("span", { class: "title-ref" }, "Delete", h("span", { class: "ref-end" }, capRef(all.get(c.id) ?? c, c.id, { size: 24 }), "?")),
-    body: usedBy.length
-      ? [usedBy.map((u, i) => [i ? ", " : "", capRef(all.get(u.id), u.id)]), usedBy.length > 1 ? " use it and will stop working. " : " uses it and will stop working. ", "Its data is kept, so you can restore it later."]
-      : "Its data is kept, so you can restore it later.",
-    confirm: "Delete",
-    danger: true,
-  });
+  // The id typed to confirm, as Start over and Delete forever ask.
+  const ok = await modal(
+    (close) => {
+      const typed = h("input", { type: "text", autocomplete: "off", placeholder: c.id, "aria-label": `Type ${c.id} to confirm` });
+      const yes = h("button", { class: "danger solid", disabled: true, onclick: () => close(true) }, "Delete");
+      typed.addEventListener("input", () => (yes.disabled = typed.value.trim() !== c.id));
+      typed.addEventListener("keydown", (e) => e.key === "Enter" && !yes.disabled && close(true));
+      setTimeout(() => typed.focus());
+      return [
+        h("h2", {}, h("span", { class: "title-ref" }, "Delete", h("span", { class: "ref-end" }, capRef(all.get(c.id) ?? c, c.id, { size: 24 }), "?"))),
+        h(
+          "div",
+          { class: "muted dialog-body" },
+          usedBy.length
+            ? [usedBy.map((u, i) => [i ? ", " : "", capRef(all.get(u.id), u.id)]), usedBy.length > 1 ? " use it and will stop working. " : " uses it and will stop working. ", "Its data is kept, so you can restore it later."]
+            : "Its data is kept, so you can restore it later.",
+        ),
+        h("label", { class: "field flush" }, h("span", { class: "label" }, "Type ", h("b", {}, c.id), " to confirm"), typed),
+        h("div", { class: "actions" }, h("button", { onclick: () => close(false) }, "Cancel"), yes),
+      ];
+    },
+    { width: 440 },
+  ).then(Boolean);
   if (!ok) return;
   try {
     await api(`/capabilities/${enc(c.id)}`, { method: "DELETE", body: { confirm: c.id } });

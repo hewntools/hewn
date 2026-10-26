@@ -6,14 +6,14 @@ import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
 import { buildingLabel } from "./home.js";
 import { plural } from "./intake.js";
-import { titleCase } from "./models.js";
+import { modelPicker, titleCase } from "./models.js";
 import { route } from "./router.js";
 import { addScheduleSheet, scheduleRow } from "./schedules.js";
 import { capabilityMenu, changeHref, download, inlineRename, openCapability, openChange } from "./tool-actions.js";
-import { modelSpend, toolModelSheet } from "./tool-model.js";
+import { modelSpend, quickModelChange, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
 import { madeBy, versionRow } from "./versions.js";
-import { addWidgetSheet, SIZE_LETTER, widgetPreview } from "./widgets.js";
+import { addWidgetSheet, segmented, SIZE_LETTER, widgetPreview } from "./widgets.js";
 
 export { infoPage };
 
@@ -29,6 +29,9 @@ function richText(text, all, self) {
     return c ? capRef(c) : part;
   });
 }
+
+/** Operations shown before Show all. */
+const OPS_SHOWN = 5;
 
 /** A tool's status as pills: needs you, building or a failed build, the version, what built it, when. */
 function statusPills(c, cap, all) {
@@ -77,9 +80,7 @@ async function infoPage(id) {
   const version = c.version ?? cap.versions[0]?.version;
   const mine = scheds.filter((x) => x.capabilityId === id);
   const widgets = home.gallery.find((g) => g.capabilityId === id)?.widgets ?? [];
-  const placed = (w) => home.layout.some((e) => e.type === "widget" && e.id === id && e.widget === w.name);
   let rules = instr.lines;
-  let addingRule = false;
 
   // What still needs the owner. A model with no provider key, a secret without its value or a
   // setting without one goes through the grants sheet (it has the fields); a host or another tool is one tap.
@@ -149,11 +150,18 @@ async function infoPage(id) {
 
   // ---- the sections, each the thing itself with its actions inline ----
 
-  const operations = section(
-    `Operations · ${ops.length}`,
-    h("ul", { class: "list" }, ops.length ? ops.map((op) => h("li", {}, h("div", { class: "grow" }, h("span", { class: "mono" }, op.name), op.description && h("span", { class: "sub clip-1" }, op.description)), h("button", { class: "sm", onclick: () => go(`#/run/${enc(id)}?op=${enc(op.name)}`) }, "Run"))) : h("li", {}, h("span", { class: "grow muted" }, "Nothing to run by hand."))),
-    { order: 1 },
-  );
+  // The first few operations; the rest behind Show all, so a big tool still fits on one page.
+  const opRow = (op) => h("li", {}, h("div", { class: "grow" }, h("span", { class: "mono" }, op.name), op.description && h("span", { class: "sub clip-1" }, op.description)), h("button", { class: "sm", onclick: () => go(`#/run/${enc(id)}?op=${enc(op.name)}`) }, "Run"));
+  let allOps = false;
+  const opList = h("ul", { class: "list" });
+  const drawOps = () =>
+    put(
+      opList,
+      ops.length ? (allOps ? ops : ops.slice(0, OPS_SHOWN)).map(opRow) : h("li", {}, h("span", { class: "grow muted" }, "Nothing to run by hand.")),
+      ops.length > OPS_SHOWN && h("li", { class: "list-more" }, h("button", { class: "link sm", onclick: () => ((allOps = !allOps), drawOps()) }, allOps ? "Show fewer" : `Show all ${ops.length}`)),
+    );
+  drawOps();
+  const operations = section(`Operations · ${ops.length}`, opList, { order: 1 });
 
   const grantRow = (i) => {
     const isPending = pending.includes(i);
@@ -192,33 +200,81 @@ async function infoPage(id) {
     btn.remove();
     input.focus();
   };
-  // The model as a tier select with this month's spend; a pinned model, a cap or a missing key go through its sheet.
+  // The model, right here: a tier or one specific model from the menu (a quick change, waited for
+  // until it's live), this month's spend, and its own monthly cap. A missing key goes through the sheet.
   const modelRow = (i, isPending) => {
     const spend = m && modelSpend(m, id);
     const sub = [req.tier ? null : req.model, spend && `${spend.text(spend)} this month`].filter(Boolean).join(" · ");
+    const subEl = h("span", { class: "sub" }, sub);
     let control;
     if (isPending && needsKey) control = h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set up…");
     else if (isPending) control = [!denied(i) && h("button", { class: "sm ghost", onclick: () => deny(i) }, "Deny"), h("button", { class: "sm primary", onclick: () => authorize(i) }, "Authorize")];
-    else if (req.tier) {
-      const MORE = "more";
-      const select = h("select", { class: "tier-select", "aria-label": "Model tier" }, (m?.tierNames ?? TIERS).map((t) => h("option", { value: t, selected: t === req.tier }, `${titleCase(t)} tier`)), h("option", { value: MORE }, "Pin a model, set a cap…"));
+    else {
+      const PIN = "pin";
+      const prov = m?.providers?.find((p) => p.id === m.provider);
+      const current = req.tier ?? req.model;
+      const select = h(
+        "select",
+        { class: "tier-select", "aria-label": "Model" },
+        (m?.tierNames ?? TIERS).map((t) => h("option", { value: t, selected: t === req.tier }, `${titleCase(t)} tier`)),
+        req.model && h("option", { value: req.model, selected: true }, req.model.split("/").at(-1)),
+        // Hosted: tiers only (the host runs what each tier names).
+        !m?.host && prov && h("option", { value: PIN }, "A specific model…"),
+      );
       select.addEventListener("change", async () => {
-        if (select.value === MORE) return toolModelSheet(c).then((ok) => (ok ? refresh() : (select.value = req.tier)));
+        let body;
+        if (select.value === PIN) {
+          const picked = await modelPicker({ title: "Pin a model", sub: `${cap.name} always uses this model, whatever the tiers say.`, prov, current: req.model?.slice(prov.id.length + 1), suggested: null });
+          if (!picked) return void (select.value = current);
+          body = { model: `${prov.id}/${picked}` };
+        } else body = { tier: select.value };
+        const what = body.tier ? `the ${body.tier} tier` : body.model;
+        select.disabled = true;
+        subEl.textContent = `Changing to ${what}…`;
         try {
-          select.disabled = true;
-          // A quick change: a new version with the other tier, no builder.
-          await api(`/capabilities/${enc(id)}/model`, { method: "POST", body: { tier: select.value } });
-          toast(`${cap.name} will use the ${select.value} tier`);
+          await quickModelChange(c, body);
+          toast(`${cap.name} uses ${what}`);
           refresh();
         } catch (e) {
           select.disabled = false;
-          select.value = req.tier;
+          select.value = current;
+          subEl.textContent = sub;
           fail(e);
         }
       });
       control = select;
-    } else control = h("button", { class: "sm ghost", onclick: () => toolModelSheet(c).then((ok) => ok && refresh()) }, "Change…");
-    return h("li", {}, isPending && !denied(i) && h("span", { class: "dot warn" }), kindPill(i), h("div", { class: "grow" }, h("span", {}, "Use a model"), sub && h("span", { class: "sub" }, sub)), control);
+    }
+    const row = h("li", {}, isPending && !denied(i) && h("span", { class: "dot warn" }), kindPill(i), h("div", { class: "grow" }, h("span", {}, "Use a model"), subEl), control);
+    return [row, !isPending && m && capRow()];
+  };
+  // Its own monthly cap, besides the one for all tools: blank is none.
+  const capRow = () => {
+    const capsKey = m.host ? "capabilityCapsHost" : "capabilityCapsUsd";
+    const own = m[capsKey]?.[id];
+    const unit = modelSpend(m, id).unit;
+    const input = h("input", { type: "number", min: 0, step: 1, value: own ?? "", placeholder: "None", class: "model-cap", "aria-label": m.host ? `Monthly cap in ${unit}` : "Monthly cap in USD" });
+    const save = h("button", { class: "sm", disabled: true }, "Save");
+    input.addEventListener("input", () => (save.disabled = input.value.trim() === String(own ?? "")));
+    save.addEventListener("click", async () => {
+      const caps = { ...m[capsKey] };
+      if (input.value.trim() === "") delete caps[id];
+      else caps[id] = Number(input.value);
+      try {
+        save.disabled = true;
+        await api("/models", { method: "PUT", body: { [capsKey]: caps } });
+        toast(input.value.trim() === "" ? `${cap.name}: no cap of its own` : m.host ? `${cap.name}: at most ${Number(input.value)} ${unit} a month` : `${cap.name}: at most $${Number(input.value)} a month`);
+        refresh();
+      } catch (e) {
+        save.disabled = false;
+        fail(e);
+      }
+    });
+    return h(
+      "li",
+      { class: "model-cap-row" },
+      h("div", { class: "grow" }, h("span", {}, "Monthly cap"), h("span", { class: "sub" }, "Its own, besides the cap for all tools")),
+      h("span", { class: "row tight nowrap" }, !m.host && h("span", { class: "small faint" }, "$"), input, m.host && h("span", { class: "small faint" }, unit), save),
+    );
   };
   const allowed = section(
     "Allowed to",
@@ -250,17 +306,32 @@ async function infoPage(id) {
 
   const runnable = ops.filter((o) => o.sideEffect !== "destructive");
   const addSchedule = () => addScheduleSheet(c, ops).then((added) => added && route());
-  const schedules =
-    mine.length > 0 &&
-    section("Schedules", h("ul", { class: "list" }, mine.map((x) => scheduleRow(c, x, route))), { order: 3, action: runnable.length > 0 && h("button", { class: "link sm", onclick: addSchedule }, "+ Add schedule") });
+  const schedules = section(
+    "Schedules",
+    h("ul", { class: "list" }, mine.length ? mine.map((x) => scheduleRow(c, x, route)) : h("li", {}, h("span", { class: "grow muted" }, runnable.length ? "Nothing runs on a timetable yet." : "Nothing it does can run on a timetable."))),
+    { order: 3, action: runnable.length > 0 && h("button", { class: "link sm", onclick: addSchedule }, "+ Add schedule") },
+  );
 
-  // The widgets themselves (S/M, drawn by the platform), each on Home or with Add to Home.
+  // The widgets themselves, drawn by the platform at the size they're meant for: the one on Home,
+  // else the largest it offers; S/M/L shows the others. Each on Home, or Add to Home.
+  const SIZES = ["small", "medium", "large"];
   const widgetCard = (w) => {
-    const size = w.sizes.includes("medium") ? "medium" : w.sizes[0];
+    const onHome = home.layout.find((e) => e.type === "widget" && e.id === id && e.widget === w.name);
+    let size = onHome?.size && w.sizes.includes(onHome.size) ? onHome.size : SIZES.filter((x) => w.sizes.includes(x)).at(-1);
     const preview = widgetPreview(c, id, w, { size });
-    return h("div", { class: "info-widget" }, preview.el, placed(w) ? h("span", { class: "small faint" }, `${SIZE_LETTER[size]} · on Home`) : h("button", { class: "link sm", onclick: () => addWidgetSheet({ capabilityId: id, widget: w.name, onAdded: route }).then(() => route()) }, "Add to Home"));
+    const sizes = w.sizes.length > 1 && segmented(SIZES.filter((x) => w.sizes.includes(x)).map((x) => [x, SIZE_LETTER[x]]), size, (x) => ((size = x), preview.draw(x)), { label: `${w.title} size` });
+    return h(
+      "div",
+      { class: "info-widget" },
+      preview.el,
+      h("div", { class: "row tight info-widget-foot" }, onHome ? h("span", { class: "small faint grow" }, `${SIZE_LETTER[onHome.size] ?? ""} on Home`) : h("button", { class: "link sm grow", onclick: () => addWidgetSheet({ capabilityId: id, widget: w.name, onAdded: route }).then(() => route()) }, "Add to Home"), sizes),
+    );
   };
-  const widgetSection = widgets.length > 0 && section(`Widgets · ${widgets.length}`, h("div", { class: "info-widgets" }, widgets.map(widgetCard)), { order: 4 });
+  const widgetSection = section(
+    widgets.length ? `Widgets · ${widgets.length}` : "Widgets",
+    widgets.length ? h("div", { class: "info-widgets" }, widgets.map(widgetCard)) : h("ul", { class: "list" }, h("li", {}, h("span", { class: "grow muted" }, "None yet: a widget shows it on Home."))),
+    { order: 4, action: h("button", { class: "link sm", onclick: () => openChange(c, { widget: "new" }) }, widgets.length ? "+ Another" : "+ Ask for one") },
+  );
 
   // The owner's rules for building this tool: one per line, removed or added right here.
   const saveRules = async (next, message, undo) => {
@@ -287,22 +358,8 @@ async function infoPage(id) {
     action: cap.versions.length > 2 && h("a", { class: "btn link sm", href: `#/c/${enc(id)}/versions` }, `All ${cap.versions.length} versions ›`),
   });
 
-  // Empty sections fold into one line at the foot, each a link that adds one.
-  const missing = h("div", { class: "small muted info-missing" });
-  const columns = h("div", { class: "info-sections" });
-  const draw = () => {
-    const showRules = rules.length > 0 || addingRule;
-    const left = [operations, allowed, dataSection];
-    const right = [schedules, widgetSection, showRules && instructions, versions].filter(Boolean);
-    put(columns, h("div", { class: "info-col" }, left), h("div", { class: "info-col" }, right));
-    const links = [
-      !schedules && runnable.length > 0 && h("button", { class: "link sm", onclick: addSchedule }, "Schedules"),
-      !widgetSection && h("button", { class: "link sm", onclick: () => openChange(c, { widget: "new" }) }, "Widgets"),
-      !showRules && h("button", { class: "link sm", onclick: () => ((addingRule = true), draw(), ruleInput.focus()) }, "Instructions"),
-    ].filter(Boolean);
-    put(missing, links.length ? ["Not set up: ", links.flatMap((l, n) => (n ? [h("span", { class: "faint" }, " · "), l] : [l]))] : null);
-  };
-  draw();
+  // Every section, empty or not, each with its way to add one.
+  const columns = h("div", { class: "info-sections" }, h("div", { class: "info-col" }, operations, allowed, dataSection), h("div", { class: "info-col" }, widgetSection, schedules, instructions, versions));
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
@@ -327,7 +384,6 @@ async function infoPage(id) {
       notices,
       composer,
       columns,
-      missing,
     ),
   );
 }

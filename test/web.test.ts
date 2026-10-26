@@ -542,10 +542,11 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/settings", { method: "PUT", body: { firstRunDone: true } })).json.firstRunDone, true);
     });
 
-    test("schedules from the web: create, pause, list", async () => {
+    test("schedules from the web: create, run now, pause, list", async () => {
       const made = await api("/schedules", { method: "POST", body: { capabilityId: "ui-counter", operation: "increment", cadence: "daily 07:00" } });
       assert.equal(made.status, 200, JSON.stringify(made.json));
       assert.equal(made.json.status, "active");
+      assert.deepEqual((await api(`/schedules/${made.json.id}/run`, { method: "POST" })).json, { ok: true, outcome: "ok" });
       assert.equal((await api(`/schedules/${made.json.id}`, { method: "PUT", body: { status: "paused" } })).json.status, "paused");
       assert.ok((await api("/schedules")).json.some((x: any) => x.id === made.json.id && x.status === "paused"));
       assert.equal((await api("/schedules", { method: "POST", body: { capabilityId: "ui-counter", operation: "increment", cadence: "every second" } })).status, 400);
