@@ -55,6 +55,17 @@ export const ARMS: Arm[] = [
     from: "design-forward",
     critique: true,
   },
+  {
+    name: "distinct",
+    about: "design-forward, plus three directions and a written colour/type plan before code, and the common AI looks named as ones to avoid.",
+    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("distinct.md")),
+  },
+  {
+    name: "distinct+critique",
+    about: "distinct, then the design-review pass on screenshots.",
+    from: "distinct",
+    critique: true,
+  },
 ];
 
 export function armNamed(name: string, arms: Arm[] = ARMS): Arm {
