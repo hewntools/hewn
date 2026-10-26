@@ -23,6 +23,8 @@ Two things stop a share:
 
 From the terminal: `hewn share <id> [--version N] [--out file]` prints the same findings and writes the file unless something stops it.
 
+![Share Running Log: a version picker, what's in it (its sample data, always included), what's never in it, and Download](images/share.png)
+
 ## Sample data
 
 Sample data is what a tool looks like in use: a list of calls to its operations (`sample/calls.json`) that fill an empty tool with made-up entries. Whoever installs your tool can start with it instead of a blank screen, and screenshots of the tool use it. It holds made-up names and places, never yours.
@@ -41,6 +43,8 @@ Then one sheet shows:
 - **It will ask for:** the hosts it reaches, a model, other tools, keys or settings. This is a preview: nothing is granted by installing. The tool asks once it's installed, as any new tool does.
 - **Name:** its own, or "Plant Log 2" if you already have a Plant Log. The tool's id comes from the name.
 - **Start with sample data**, ticked when it has some.
+
+![Install Plant Log from Hub: what it does, a warning that it sends a photo to the model when asked, Source code, what it will ask for, its name and Start with sample data](images/install.png)
 
 Installing runs the tool's own tests, as for any build, but no builder: the code is the file's. Then the tool opens and asks for what it needs.
 

@@ -59,6 +59,8 @@ Three small tools in the repo's [`seeds/`](../seeds) are meant to be read and co
 
 From a checkout of the repo: `hewn install seeds/habits`.
 
+**Sample data** (`sample/calls.json`) is the tool in use: calls to its operations that fill an empty tool with made-up entries. Hewn replays it when someone installs the tool with sample data, and before every version goes live, and needs it to share the tool. See [the tool spec](../spec/tools.md#sample-data-since-25).
+
 ## Reference
 
 The manifest and the ABI (the module, `ctx`, environment, versions) are described in full in [capability-model.md](../spec/capability-model.md#capability-manifest). Hewn implements ABI 2.4. A capability declares the lowest version it needs in `"abi"`; minor versions only add, so a capability built for 2.0 keeps running.

@@ -338,6 +338,15 @@ The platform still owns:
 
 An authorization engine answers relationship questions; it does not replace product-level authority semantics.
 
+## Code from outside (a shared tool)
+
+A tool installed from a file or from the Hub runs through the same validation and sandbox as a builder's: its manifest, its code bundled and loaded, its tests, its migrations, its UI rendered. Nothing in a bundle can grant itself anything: what its manifest asks for (hosts, a model, other tools' operations, secrets for a connection) is asked of the owner after install, one grant at a time, as for any new tool. A bundle never holds state, secrets, config values, the build's conversation or logs, and says nothing about whose Hewn it came from.
+
+- **The reading is advisory.** The intake's summary (Hewn's for an Official tool, the owner's own builder's for a file) says what the code does with the owner's data and where it differs from what it says. It isn't a gate: the code is what runs, and the owner can read all of it before installing.
+- **`source` is the platform's.** Where a tool came from is the capability's record; validation writes it into every version's manifest, replacing whatever a builder wrote, so a later change can't claim another origin.
+- **Sample data runs with nothing granted.** Replayed after install (on the owner's request) and before every promotion, each call goes through the contract with no hosts, no other tools and no model.
+- **Sharing scans first.** Before a tool is shared, its files are scanned: personal data and key shapes warn; an exact match of one of the owner's own stored values (any tool's secrets and settings, the model providers' keys) blocks the share.
+
 ## Security invariants
 
 1. The user is the root authority.

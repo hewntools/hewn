@@ -50,7 +50,7 @@ Integration tests are in `test/`. Example tools are in `seeds/`.
 | --- | --- | --- | --- |
 | `Sql` | the owner's database, synchronous | DO `storage.sql` | `node:sqlite` |
 | `Blobs` | versions, owner icons, screenshots | the `disk` service | a directory |
-| `CapabilityRuntime` | invoke, describe, migrate, copy and drop state | CapabilityHost + facets | in-process |
+| `CapabilityRuntime` | invoke, describe, migrate, copy and drop state, dump and count it | CapabilityHost + facets | in-process |
 | `Workbench` | build workspaces: open, run a builder, bundle, read back, visual check | the supervisor | local (`packages/cli/src/workbench.ts`) |
 | `SecretStore` | capability secrets and model keys | AES-256-GCM rows in the owner's database | memory |
 
@@ -62,7 +62,8 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | --- | --- |
 | `discovery.ts` | `list` and `get`: the capabilities a principal can see |
 | `presentation.ts` | a tool's name, icon, hue and saturation as the owner sets them |
-| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import |
+| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import, Start over, its rows per table, and its versions' files for the code browser |
+| `sharing.ts` | a tool as a file: the share check (the scan) and the bundle, staging and installing a file, the owner's reading of it (the intake's summary), the Official shelf, sample data |
 | `grants.ts` | readiness, grants, secrets and config, delegated agents, the owner's confirmation of agents' destructive calls |
 | `connections.ts` | Accounts: a connection's sign-in step and health |
 | `sessions.ts` | tool UI tickets and sessions, web sessions, the public URL, passkeys |
@@ -78,7 +79,11 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 
 Each extends `Domain` (`context.ts`): the ports, the event bus, the cache of loaded versions, and the lookups every domain makes (`activeManifest`, `loadVersion` …). A domain calls another domain's public methods through the facade (`this.platform.readiness()`), so a wrapper on a `Platform` method sees every call from another domain (a domain's calls to its own methods stay inside it), and reaches what `Platform` doesn't offer through `this.d` (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`, `logRetentionDays` …) stay on `Platform` and are read from it each time.
 
-The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store), `docs.ts` (Hewn's docs for `hewn_docs` and the intake: sections and search) and the rest. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
+The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store), `docs.ts` (Hewn's docs for `hewn_docs` and the intake: sections and search), `bundle.ts` (a tool as a file: a store-only zip with CRC32, the `hewn-bundle.json` sidecar, `sample/calls.json`, and the scan before sharing), `diff.ts` (the line diff and hunks the code browser shows) and the rest.
+
+**A tool as a file.** `<id>.hewn.zip` holds one version's files (what `versionFiles` keeps) and the sidecar: the format, the Hewn and ABI that made it, the tool and version it came from (`{ id, version, hash }`) and, from Hewn's own shelf, Hewn's reading. Installing one stages it first (`bundles/<token>.zip` in the blobs, a day at most) so the owner can read its code and have the intake summarize it (mode `summarize`), then runs a create build whose builder is `bundle` (no builder runs) through the normal validation. The manifest's `source` (ABI 2.5) comes from the capability's record (`capabilities.source`, or the install's request for its first version); validation stamps it on every version, so a builder can't change or drop it. Sample data replays after an install with sample data, or a Start over, through `Validation.replayCall`: the contract, with no hosts, no other tools and no model.
+
+**The Official shelf** is `seeds/` (`shelf.json`, and each tool's `.hub/` folder with its listing and card images, which never becomes part of a version). The supervisor reads it (`cli/src/shelf.ts`) and serves it to workerd (`/shelf/tools`, `/shelf/image`); the npm package carries it in `dist/seeds/`. `test/e2e/hub-shots.ts` makes the card images. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
 
 Principals (`auth.ts`): `user` (the owner, from the web client or the CLI), `agent` (an MCP client), `ui` (a tool's own UI, limited to that tool), `capability` (a `ctx.call`), `schedule` and `widget`.
 
