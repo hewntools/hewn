@@ -36,6 +36,7 @@ export const MANIFEST_SCHEMA: JSONSchema = {
       additionalProperties: false,
       properties: {
         id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
+        name: { type: "string", minLength: 1 },
         version: { type: "integer", minimum: 1 },
         hash: { type: "string", pattern: "^[0-9a-f]{64}$" },
         from: { enum: ["file", "link", "hub"] },

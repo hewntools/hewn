@@ -33,6 +33,8 @@ export interface OperationManifest {
 export interface ToolSource {
   /** The tool's id where it was exported. */
   id: string;
+  /** Its name there. */
+  name?: string;
   /** Its version there. */
   version: number;
   /** That version's content hash. */
