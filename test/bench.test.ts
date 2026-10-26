@@ -8,13 +8,13 @@ import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
-import { ARMS, briefFor, replaceSection, runOrder } from "../bench/lib/arms.ts";
+import { ARMS, briefFor, othersNote, replaceSection, runOrder } from "../bench/lib/arms.ts";
 import { DESKTOP, PHONE, clickThrough, launchBrowser, overflowX } from "../bench/lib/browser.ts";
 import { idOf, loadCases, seedKit } from "../bench/lib/cases.ts";
 import { parseJson, total } from "../bench/lib/judge.ts";
 import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle } from "../bench/lib/platform.ts";
-import { checkOut, cleanEnv } from "../bench/lib/run.ts";
+import { checkOut, cleanEnv, otherTools } from "../bench/lib/run.ts";
 import { summarize } from "../bench/lib/summary.ts";
 import { startUiServer } from "../bench/lib/ui-server.ts";
 
@@ -35,6 +35,27 @@ describe("bench arms", () => {
   test("a section that isn't there is an error, not a silent no-op", () => {
     assert.throws(() => replaceSection(BRIEF, "#### No such heading", "### UI", "x"), /no "#### No such heading"/);
     assert.equal(replaceSection("# a\nold\n# b\nrest", "# a", "# b", "# a\nnew"), "# a\nnew\n\n# b\nrest");
+  });
+
+  test("a sequential arm's build is told the earlier tools' names, hues and looks", () => {
+    const run = mkdtempSync(join(tmpdir(), "bench-others-"));
+    const tool = (c: string, manifest: object, look?: object, status = "done") => {
+      const dir = join(run, c);
+      mkdirSync(join(dir, "version", "ui"), { recursive: true });
+      writeFileSync(join(dir, "result.json"), JSON.stringify({ status }));
+      writeFileSync(join(dir, "version", "capability.json"), JSON.stringify(manifest));
+      if (look) writeFileSync(join(dir, "version", "ui", "look.json"), JSON.stringify(look));
+      return dir;
+    };
+    const dirs = [tool("a", { name: "Plant Log", hue: 130 }, { mood: "greenhouse" }), tool("b", { name: "Spending", hue: 40, saturation: 80 }), tool("c", { name: "Broken" }, undefined, "failed")];
+    const tools = otherTools(dirs);
+    assert.deepEqual(tools, [{ name: "Plant Log", hue: 130, look: { mood: "greenhouse" } }, { name: "Spending", hue: 40, saturation: 80, look: undefined }]);
+    const note = othersNote(tools);
+    assert.match(note, /THE OWNER'S OTHER TOOLS/);
+    assert.match(note, /- Plant Log \(hue 130\): \{"mood":"greenhouse"\}/);
+    assert.match(note, /- Spending \(hue 40, saturation 80\): no look recorded/);
+    assert.equal(othersNote([]), "");
+    rmSync(run, { recursive: true, force: true });
   });
 
   test("an arm that starts from another runs after it", () => {

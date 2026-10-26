@@ -20,6 +20,11 @@ export interface Arm {
   from?: string;
   /** After the build: hand the builder screenshots of its own UI with the seeded data, and let it improve the UI. */
   critique?: boolean;
+  /**
+   * Build the cases one after another, each told how this arm's earlier tools look (name, hue and
+   * their ui/look.json), as an owner's Home fills up over time.
+   */
+  sequential?: boolean;
 }
 
 const ARMS_DIR = join(import.meta.dirname, "..", "arms");
@@ -66,7 +71,27 @@ export const ARMS: Arm[] = [
     from: "distinct",
     critique: true,
   },
+  {
+    name: "identity",
+    about: "distinct, but each tool anchors on its icon's hue, is told how the owner's other tools look and must differ, and picks the least typical of its three directions. Cases built in order.",
+    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("identity.md")),
+    sequential: true,
+  },
+  {
+    name: "identity+critique",
+    about: "identity, then the design-review pass (told the other tools' looks too).",
+    from: "identity",
+    critique: true,
+    sequential: true,
+  },
 ];
+
+/** What a build is told about the owner's other tools (the arm's earlier results): name, hue, look. */
+export function othersNote(tools: { name: string; hue?: number; saturation?: number; look?: unknown }[]): string {
+  if (!tools.length) return "";
+  const line = (t: (typeof tools)[number]) => `- ${t.name}${t.hue !== undefined ? ` (hue ${t.hue}${t.saturation !== undefined ? `, saturation ${t.saturation}` : ""})` : ""}: ${t.look ? JSON.stringify(t.look).slice(0, 700) : "no look recorded"}`;
+  return `\n\nTHE OWNER'S OTHER TOOLS (on their Home already; this one must look clearly different from each)\n${tools.map(line).join("\n")}`;
+}
 
 export function armNamed(name: string, arms: Arm[] = ARMS): Arm {
   const arm = arms.find((a) => a.name === name);

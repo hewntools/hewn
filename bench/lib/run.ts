@@ -7,7 +7,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { join, resolve } from "node:path";
 import { USER } from "@hewntools/core/auth.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
-import { ARMS, briefFor, CRITIQUE_REQUEST, runOrder, type Arm } from "./arms.ts";
+import { ARMS, briefFor, CRITIQUE_REQUEST, othersNote, runOrder, type Arm } from "./arms.ts";
 import { DESKTOP, launchBrowser, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
 import { builderUsage, uiMetrics, type BuilderUsage, type UiMetrics } from "./metrics.ts";
@@ -28,6 +28,8 @@ export interface Job {
   critique?: boolean;
   /** The result this one starts from (its built, seeded tool). */
   from?: string;
+  /** Results whose tools count as the owner's other tools (a sequential arm's earlier cases). */
+  others?: string[];
   sandbox: boolean;
 }
 
@@ -122,16 +124,20 @@ export async function runBench(o: RunOptions): Promise<string> {
   interface Planned {
     dir: string;
     job: Job;
-    after?: string;
+    /** Results that must be done first: the base it starts from, and a sequential arm's earlier cases. */
+    after: string[];
   }
   const planned: Planned[] = [];
+  const resultDir = (arm: string, c: string, rep: number) => join(runDir, "results", arm, c, `r${rep}`);
   for (const arm of arms)
-    for (const c of cases)
-      for (let rep = 1; rep <= o.reps; rep++) {
-        const dir = join(runDir, "results", arm.name, c.id, `r${rep}`);
-        const after = arm.from ? join(runDir, "results", arm.from, c.id, `r${rep}`) : undefined;
-        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, from: after, sandbox: o.sandbox } });
-      }
+    for (let rep = 1; rep <= o.reps; rep++)
+      cases.forEach((c, i) => {
+        const dir = resultDir(arm.name, c.id, rep);
+        const from = arm.from ? resultDir(arm.from, c.id, rep) : undefined;
+        const others = arm.sequential ? cases.slice(0, i).map((e) => resultDir(arm.name, e.id, rep)) : undefined;
+        const after = [...(from ? [from] : []), ...(others?.length ? [others.at(-1)!] : [])];
+        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, from, ...(others ? { others } : {}), sandbox: o.sandbox } });
+      });
   const todo = planned.filter((p) => readResult(p.dir)?.status !== "done");
   log(`${planned.length} results, ${planned.length - todo.length} already done; running ${todo.length}, ${o.concurrency} at a time → ${runDir}`);
 
@@ -140,12 +146,13 @@ export async function runBench(o: RunOptions): Promise<string> {
   const waiting = [...todo];
   const label = (p: Planned) => `${p.job.arm} / ${p.job.case} / r${p.job.rep}`;
   while (waiting.length || running.size) {
-    const ready = waiting.findIndex((p) => !p.after || finished.has(p.after) || !planned.some((q) => q.dir === p.after));
+    const ready = waiting.findIndex((p) => p.after.every((a) => finished.has(a) || !planned.some((q) => q.dir === a)));
     if (ready >= 0 && running.size < o.concurrency) {
       const [p] = waiting.splice(ready, 1);
-      if (p.after && readResult(p.after)?.status !== "done") {
+      // A sequential arm goes on past an earlier case that failed (it's just not among the others); a missing base stops it.
+      if (p.job.from && readResult(p.job.from)?.status !== "done") {
         mkdirSync(p.dir, { recursive: true });
-        writeFileSync(resultFile(p.dir), JSON.stringify({ arm: p.job.arm, case: p.job.case, rep: p.job.rep, status: "failed", error: `its base (${p.after}) didn't finish`, builds: [], startedAt: new Date().toISOString() } satisfies Result, null, 2));
+        writeFileSync(resultFile(p.dir), JSON.stringify({ arm: p.job.arm, case: p.job.case, rep: p.job.rep, status: "failed", error: `its base (${p.job.from}) didn't finish`, builds: [], startedAt: new Date().toISOString() } satisfies Result, null, 2));
         finished.add(p.dir);
         log(`skip ${label(p)}: its base failed`);
         continue;
@@ -199,6 +206,23 @@ function runChild(dir: string, job: Job): Promise<Result | undefined> {
 
 // --- the child: one result -----------------------------------------------------------------------
 
+/** The finished tools among `dirs`: name, hue and saturation from the manifest, and the look the builder recorded. */
+export function otherTools(dirs: string[] = []): { name: string; hue?: number; saturation?: number; look?: unknown }[] {
+  const read = (f: string) => {
+    try {
+      return JSON.parse(readFileSync(f, "utf8"));
+    } catch {
+      return undefined;
+    }
+  };
+  return dirs
+    .filter((d) => readResult(d)?.status === "done" && existsSync(join(d, "version", "capability.json")))
+    .map((d) => {
+      const m = read(join(d, "version", "capability.json"));
+      return { name: m?.name ?? d, ...(Number.isInteger(m?.hue) ? { hue: m.hue } : {}), ...(Number.isInteger(m?.saturation) ? { saturation: m.saturation } : {}), look: read(join(d, "version", "ui", "look.json")) };
+    });
+}
+
 const buildSummary = (v: BuildView, transcripts: string) => ({
   buildId: v.buildId,
   kind: v.kind,
@@ -227,13 +251,13 @@ export async function runOne(dir: string): Promise<void> {
         for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
           if (existsSync(join(job.from, "shots", `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(job.from, "shots", `${f}.png`);
         }
-        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: CRITIQUE_REQUEST });
+        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: CRITIQUE_REQUEST + othersNote(otherTools(job.others)) });
         build = await settle(bp.platform, started.buildId);
       } else {
         throw new Error(`arm ${job.arm} starts from ${job.from} but does nothing to it`);
       }
     } else {
-      const started = await bp.platform.create(USER, { name: c.name, purpose: c.purpose, requirements: c.requirements });
+      const started = await bp.platform.create(USER, { name: c.name, purpose: c.purpose, requirements: c.requirements + othersNote(otherTools(job.others)) });
       result.capabilityId = started.capabilityId;
       build = await settle(bp.platform, started.buildId);
     }
