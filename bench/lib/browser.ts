@@ -154,8 +154,33 @@ export async function launchBrowser(binary = process.env.HEWN_BROWSER ?? findBro
   };
 }
 
-/** Whether the page is wider than the viewport (something sticks out sideways on a phone). */
-export const overflowX = (page: Page) => page.eval<number>("Math.max(0, document.documentElement.scrollWidth - window.innerWidth)");
+/**
+ * How far (CSS px) anything sticks out past the right edge on this screen: the page itself, or an
+ * element that's cut off because the page hides what overflows. Elements inside a deliberate
+ * scroller or clipping box (a carousel, a table-wrap) don't count.
+ */
+export const overflowX = (page: Page, screenWidth?: number) =>
+  page.eval<number>(`(() => {
+    // A phone widens its layout viewport to fit content that overflows: measure against the screen.
+    const vw = ${screenWidth ?? "window.innerWidth"};
+    let worst = Math.max(0, document.documentElement.scrollWidth - vw);
+    const contained = (el) => {
+      for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+        const o = getComputedStyle(a).overflowX;
+        if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") return true;
+      }
+      return false;
+    };
+    for (const el of document.body.querySelectorAll("*")) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      const st = getComputedStyle(el);
+      if (st.visibility === "hidden" || st.position === "fixed") continue;
+      const out = r.right - vw;
+      if (out > worst && !contained(el)) worst = out;
+    }
+    return Math.round(worst);
+  })()`);
 
 /** What the bench clicks: visible, enabled controls that don't delete, archive or reset anything. */
 const CLICKABLES = `(() => {
@@ -197,7 +222,7 @@ export async function clickThrough(page: Page, url: string, limit = 20): Promise
     await page.goto(url, 1000);
     page.clear();
     // The click runs after this call returns, so a dialog it opens can't block the call itself.
-    const clicked = await page.eval<boolean>(`(() => { const c = ${CLICKABLES}[${i}]; if (!c) return false; c.el.scrollIntoView({ block: "center" }); setTimeout(() => c.el.click()); return true; })()`);
+    const clicked = await page.eval<boolean>(`(() => { const c = ${CLICKABLES}[${i}]; if (!c) return false; c.el.scrollIntoView({ block: "center" }); setTimeout(() => (typeof c.el.click === "function" ? c.el.click() : c.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })))); return true; })()`);
     if (!clicked) continue;
     out.clicked++;
     await new Promise((r) => setTimeout(r, 700));

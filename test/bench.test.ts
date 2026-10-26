@@ -240,7 +240,15 @@ describe("bench runs", () => {
       assert.deepEqual(asked.failures, []);
       const phone = await b.page(PHONE);
       await phone.goto(url);
-      assert.equal(await overflowX(phone), 0);
+      assert.equal(await overflowX(phone, PHONE.width), 0);
+      // An SVG control (no .click() of its own) is clicked like any other.
+      writeFileSync(page, readFileSync(page, "utf8").replace("</main>", `<svg width="40" height="40"><rect id="dot" role="button" aria-label="Dot" width="40" height="40" onclick="document.title = 'dot'"/></svg></main>`));
+      const svg = await clickThrough(desktop, url);
+      assert.ok(!svg.failures.some((f) => f.label === "Dot"), JSON.stringify(svg.failures));
+      // Something cut off at the right edge by a page that hides what overflows still counts.
+      writeFileSync(page, readFileSync(page, "utf8").replace("</main>", `<div style="width: 600px; height: 20px">wide</div></main><style>body { overflow-x: hidden }</style>`));
+      await phone.goto(url);
+      assert.ok((await overflowX(phone, PHONE.width)) >= 200, "clipped overflow not caught");
     } finally {
       await b.close();
       await server.close();

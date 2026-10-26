@@ -8,10 +8,10 @@ import { parseArgs } from "node:util";
 import { ARMS } from "./lib/arms.ts";
 import { loadCases } from "./lib/cases.ts";
 import { judgeRun } from "./lib/judge.ts";
-import { runBench, runOne } from "./lib/run.ts";
+import { recheck, runBench, runOne } from "./lib/run.ts";
 import { serveRun } from "./lib/serve.ts";
 import { summaryMarkdown } from "./lib/summary.ts";
-import { setHidden } from "./lib/view.ts";
+import { setHidden, visibleResults } from "./lib/view.ts";
 
 const USAGE = `usage: npm run bench -- <command>
 
@@ -21,6 +21,7 @@ const USAGE = `usage: npm run bench -- <command>
   judge <run> [--model M] [--again]    score the screenshots with a model (and each arm's sameness)
   serve <run> [--port N]               the gallery, live tools, the blind vote and the summary
   report <run>                         write <run>/summary.md
+  recheck <run>                        redo the phone-overflow check and the click-through on finished, visible results
   hide <run> a,b  |  show <run> a,b     take arms out of (or back into) the gallery, vote, score page, summary and judge
   list                                 arms and cases
 
@@ -76,6 +77,13 @@ try {
     const dir = runDir(arg);
     writeFileSync(join(dir, "summary.md"), summaryMarkdown(dir));
     console.log(summaryMarkdown(dir));
+  } else if (command === "recheck") {
+    const dir = runDir(arg);
+    for (const r of visibleResults(dir).filter((x) => x.result?.status === "done")) {
+      const after = await recheck(r.dir);
+      console.log(`${r.result!.arm} / ${r.result!.case} / r${r.result!.rep}: phone overflow ${r.result!.overflowMobile ?? "–"} → ${after?.overflowMobile}px, broken clicks ${r.result!.clicks?.failures.length ?? "–"} → ${after?.clicks?.failures.length}`);
+    }
+    writeFileSync(join(dir, "summary.md"), summaryMarkdown(dir));
   } else if (command === "hide" || command === "show") {
     const arms = list(positionals[2]);
     if (!arms?.length) throw new Error(`which arms? npm run bench -- ${command} <run> a,b`);

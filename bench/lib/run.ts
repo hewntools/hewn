@@ -367,7 +367,7 @@ async function capture(dir: string, bp: BenchPlatform, capabilityId: string, res
         await page.scheme(scheme);
         await page.goto(server.url("r", capabilityId));
         writeFileSync(join(dir, "shots", `${v.name}-${scheme}.png`), await page.shot());
-        if (v === PHONE && scheme === "light") result.overflowMobile = await overflowX(page);
+        if (v === PHONE && scheme === "light") result.overflowMobile = await overflowX(page, v.width);
       }
       result.pageErrors[v.name] = [...new Set(page.errors)];
       result.apiErrors[v.name] = [...new Set(page.apiErrors)];
@@ -377,6 +377,36 @@ async function capture(dir: string, bp: BenchPlatform, capabilityId: string, res
     await browser.close();
     await server.close();
   }
+}
+
+/** Redo the checks that need no build (phone overflow, the click-through) on a finished result, on a copy of its state. */
+export async function recheck(dir: string): Promise<Result | undefined> {
+  const result = readResult(dir);
+  if (result?.status !== "done" || !result.capabilityId) return result;
+  const scratch = join(dir, "home-clicks");
+  rmSync(scratch, { recursive: true, force: true });
+  cpSync(join(dir, "home"), scratch, { recursive: true });
+  const sp = benchPlatform(scratch);
+  try {
+    const s = served(sp.platform, result.capabilityId, join(dir, "version"));
+    const server = await startUiServer((k) => (k === "r" ? s : undefined));
+    const browser = await launchBrowser();
+    try {
+      const phone = await browser.page(PHONE);
+      await phone.goto(server.url("r", s.id));
+      result.overflowMobile = await overflowX(phone, PHONE.width);
+      await phone.close();
+      result.clicks = await clickThrough(await browser.page(DESKTOP), server.url("r", s.id));
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  } finally {
+    sp.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  writeFileSync(resultFile(dir), JSON.stringify(result, null, 2));
+  return result;
 }
 
 /** Every result in a run directory. */
