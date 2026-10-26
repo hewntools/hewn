@@ -6,7 +6,7 @@ import { PlatformError } from "../errors.ts";
 import { diffLines, diffStats, type Hunk, splitLines, toHunks } from "../diff.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
-import { Domain } from "./context.ts";
+import { Domain, type Domains } from "./context.ts";
 
 export class Data extends Domain {
   /**
@@ -166,6 +166,34 @@ export class Data extends Domain {
     const v = await this.loadVersion(capabilityId, version);
     const base = version > 1 && this.registry.getVersion(capabilityId, version - 1) ? await this.loadVersion(capabilityId, version - 1) : null;
     return codeText(path, v.files, base?.files ?? null);
+  }
+
+  /**
+   * Start over (U2): empty a tool's data and keep the tool. The live state is copied to a
+   * `backup:start-over-<time>` state first (the newest three are kept, like the ones a promote
+   * keeps), then dropped and migrated again from scratch. Owner only, confirmed with the id.
+   * `sample`: replay its sample data after.
+   */
+  async startOver(owner: Agent, capabilityId: string, req: { confirm: string; sample?: boolean }): Promise<{ backup: string | null; sample: Awaited<ReturnType<Domains["sharing"]["replaySample"]>> | null }> {
+    requireOwner(owner);
+    const cap = this.visibleActive(owner, capabilityId);
+    if (req.confirm !== capabilityId) throw new PlatformError("invalid_request", `type the id '${capabilityId}' to confirm`);
+    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
+    const live = { capabilityId };
+    let backup: string | null = null;
+    if (await this.runtime.hasState(live)) {
+      backup = `backup:start-over-${Date.now()}`;
+      await this.runtime.copyState(live, { capabilityId, scratch: backup });
+      const old = (await this.runtime.listStates(capabilityId, "backup:start-over-")).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)));
+      for (const name of old.slice(3)) await this.runtime.dropState({ capabilityId, scratch: name });
+    }
+    await this.runtime.dropState(live);
+    await this.runtime.migrate(live, migrationsOf(active.files), active.code);
+    this.registry.dropWidgetCache(capabilityId);
+    this.registry.addLifecycleEvent(capabilityId, "start-over", backup ? `data emptied; kept as ${backup}` : "data emptied", owner.id);
+    this.logger(`${capabilityId}: started over by ${owner.id}${backup ? ` (backup ${backup})` : ""}`);
+    const sample = req.sample ? await this.d.sharing.replaySample(capabilityId, owner.id) : null;
+    return { backup, sample };
   }
 
   /** Deleted (archived) capabilities, newest first: what the owner can restore. */
