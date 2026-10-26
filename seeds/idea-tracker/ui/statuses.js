@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Status model shared by the UI. No DOM access, so it can be unit-tested (tests/statuses.test.mjs).
 
 // Lifecycle order, used for pickers, chips and sorting.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Pure helpers for the list's empty state and hidden-closed footer.
 // No DOM access, so they can be unit-tested (tests/empty-state.test.mjs).
 

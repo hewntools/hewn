@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 type Statement = {
   run(...p: unknown[]): { changes: number; lastInsertRowid: number };
   all(...p: unknown[]): any[];

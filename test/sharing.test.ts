@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { USER } from "@hewntools/core/auth.ts";
 import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
@@ -163,9 +163,17 @@ describe("bundles: the zip and the scan", () => {
 describe("sharing: a tool as a file", () => {
   let t: ReturnType<typeof setup>;
   let other: ReturnType<typeof setup> | undefined;
+  // Running Log as a tool from before builders wrote sample data: the seed without sample/.
+  let seed: string;
+  before(() => {
+    seed = mkdtempSync(join(tmpdir(), "hewn-seed-"));
+    cpSync(SEED, seed, { recursive: true });
+    rmSync(join(seed, "sample"), { recursive: true });
+  });
+  after(() => rmSync(seed, { recursive: true, force: true }));
   beforeEach(async () => {
     t = setup();
-    await installSeed(t.platform);
+    await installFrom(t.platform, seed);
   });
   afterEach(() => (t.cleanup(), other?.cleanup(), (other = undefined)));
 

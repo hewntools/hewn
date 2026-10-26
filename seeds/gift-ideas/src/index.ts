@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Gift Ideas: people, gift ideas per occasion, upcoming birthdays/Christmas and model suggestions.
 // See BUILDER.md for the implementation contract.
 

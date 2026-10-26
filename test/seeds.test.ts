@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { readSample, scanFiles } from "@hewntools/core/bundle.ts";
+import { text } from "@hewntools/core/files.ts";
 import { readShelf } from "@hewntools/cli/shelf.ts";
 import { installFrom, setup } from "./helpers.ts";
 
@@ -34,6 +35,8 @@ describe("seeds", () => {
     for (const t of shelf.tools) {
       assert.ok(readSample(t.files)?.length, `${t.id}: sample data`);
       assert.ok(t.listing.line && t.listing.summary.message && t.listing.versions.length, `${t.id}: listing`);
+      // Show opens the code at a finding's line: the file is the tool's, and the line is in it.
+      for (const f of (t.listing.summary.findings ?? []).filter((f) => f.file)) assert.ok(t.files[f.file!] && text(t.files[f.file!]).split("\n").length >= (f.line ?? 1), `${t.id}: ${f.file}:${f.line}`);
       assert.ok(t.images.includes("screen"), `${t.id}: a screen`);
       assert.ok(!Object.keys(t.files).some((p) => p.startsWith(".hub/")), `${t.id}: .hub/ isn't the tool's`);
       assert.equal(scanFiles(t.files).filter((f) => f.kind !== "key").length, 0, `${t.id}: nothing personal-looking in it`);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Gift ideas UI: upcoming occasions, quick "Add idea", people and a person sheet.
 
 const WINDOW_DAYS = 90;

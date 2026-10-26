@@ -526,13 +526,13 @@ describe("web client (owner surface)", () => {
       const code = await api("/hub/plant-log/code");
       assert.ok(code.json.files.some((f: any) => f.path === "sample/calls.json"));
       assert.ok(!code.json.files.some((f: any) => f.path.startsWith(".hub/")), "the listing never travels with the tool");
-      const preview = await api("/hub/kid-quotes/stage", { method: "POST" });
+      const preview = await api("/hub/idea-tracker/stage", { method: "POST" });
       assert.equal(preview.json.summaryBy, "hewn");
       assert.equal(preview.json.from, "hub");
       const done = await platform.settle((await api(`/bundles/${preview.json.token}/install`, { method: "POST", body: { name: preview.json.suggestedName, sample: true } })).json.buildId);
       assert.equal(done.status, "promoted", done.log.join("\n"));
-      assert.equal((await api("/capabilities/kid-quotes")).json.source.from, "hub");
-      assert.equal((await api("/hub")).json.tools.find((t: any) => t.id === "kid-quotes").installed, true);
+      assert.equal((await api("/capabilities/idea-tracker")).json.source.from, "hub");
+      assert.equal((await api("/hub")).json.tools.find((t: any) => t.id === "idea-tracker").installed, true);
       assert.equal((await api("/hub/nope")).status, 404);
     });
 
