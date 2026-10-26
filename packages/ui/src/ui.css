@@ -427,6 +427,25 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .side-list > button:hover { background: var(--surface-2); color: var(--text); }
 .side-list > button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
 .side-list > .spacer { flex: 1; }
+
+/* The code browser (design pass 3, U4 and Q5): files on the left, the file on the right, as Changes
+   (a git-style unified diff: @@ headers, both line numbers, + and − lines tinted) or Source (one gutter). */
+.code-browser { display: flex; gap: var(--s4); align-items: flex-start; min-height: 0; }
+.code-files > button { font-size: var(--fs-sm); }
+.code-files .add-n { color: var(--ok); }
+.code-files .del-n { color: var(--danger); }
+.code-pane { flex: 1; min-width: 0; margin: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.code-head { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.code-body { max-height: 72vh; overflow: auto; padding: 6px 0; font: 12.5px/1.75 var(--mono); background: var(--log-bg); color: var(--log-text); }
+.code-line { display: grid; grid-template-columns: 44px 44px minmax(0, 1fr); }
+.code-body.source .code-line { grid-template-columns: 48px minmax(0, 1fr); }
+.code-line > .no { text-align: right; padding-right: 10px; color: oklch(from var(--log-text) l c h / 0.45); user-select: none; }
+.code-line > .t { padding: 0 12px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-line.add { background: oklch(from var(--ok) l c h / 0.18); }
+.code-line.del { background: oklch(from var(--danger) l c h / 0.18); }
+.code-line.hunk { display: block; padding: 0 12px; background: oklch(from var(--info) l c h / 0.16); color: oklch(from var(--info) 0.8 c h); }
+.code-empty { padding: var(--s4); color: oklch(from var(--log-text) l c h / 0.6); font-family: var(--font); }
+@media (max-width: 760px) { .code-browser { flex-direction: column; } .code-browser > .side-list { width: 100%; } }
 .side-list .side-foot { padding: 0 var(--s3); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.45; }
 .side-list .side-foot button.link { padding: 0; font-size: var(--fs-sm); }
 

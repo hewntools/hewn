@@ -88,6 +88,26 @@ describe("trust: rollback, export, purge", () => {
     await assert.rejects(t.platform.dataSummary(t.claude, "running-log"), /cannot perform owner actions/);
   });
 
+  test("code browser: a version's files with what changed since the one before, owner only", async () => {
+    await modifySeed(t, "ALTER TABLE runs ADD COLUMN heart_rate INTEGER;");
+    const v1 = await t.platform.versionCode(USER, "running-log", 1);
+    assert.equal(v1.base, null);
+    assert.ok(v1.files.every((f) => f.status === "same"));
+    const v2 = await t.platform.versionCode(USER, "running-log", 2);
+    assert.equal(v2.base, 1);
+    const changed = v2.files.filter((f) => f.status !== "same");
+    assert.deepEqual(changed.map((f) => [f.path, f.status]), [["capability.json", "changed"], ["migrations/002_more.sql", "added"]], "changed first");
+    assert.deepEqual([changed[1].added, changed[1].removed], [1, 0]);
+    assert.ok(!v2.files.some((f) => f.path === "BUILDER.md"), "workspace-only files never in a version");
+    const manifest = await t.platform.versionFile(USER, "running-log", 2, "capability.json");
+    assert.equal(manifest.status, "changed");
+    assert.ok(manifest.hunks.length >= 1);
+    assert.ok(manifest.hunks[0].lines.some((l) => l.type === "+" && l.text.includes('"v2"')));
+    assert.equal((await t.platform.versionFile(USER, "running-log", 1, "capability.json")).hunks.length, 0);
+    await assert.rejects(t.platform.versionFile(USER, "running-log", 2, "nope.ts"), /no file/);
+    await assert.rejects(t.platform.versionCode(t.claude, "running-log", 2), /cannot perform owner actions/);
+  });
+
   test("purge: only deleted capabilities, with the id typed; everything goes and the id is free", async () => {
     await assert.rejects(t.platform.purge(USER, "running-log", "running-log"), /isn't deleted/);
     t.platform.archive(USER, "running-log");
