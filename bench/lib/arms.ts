@@ -105,6 +105,9 @@ export const ARMS: Arm[] = [
     from: "character+critique",
     craft: true,
   },
+  ...["design-forward", "distinct", "identity"].map(
+    (base): Arm => ({ name: `${base}+critique+craft`, about: `${base}+critique, then the same craft pass.`, from: `${base}+critique`, craft: true }),
+  ),
   {
     name: "character+critique",
     about: "character, then the design-review pass (told the other tools' looks too).",
