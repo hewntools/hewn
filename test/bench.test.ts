@@ -115,6 +115,8 @@ describe("bench metrics and judging", () => {
     };
     result("current", 2);
     result("design-forward", 3);
+    // The judge's view of an arm as a set sits beside its cases.
+    writeFileSync(join(run, "results", "design-forward", "sameness-r1.json"), JSON.stringify({ sameness: 6, shared_traits: [], tells: [] }));
     const vote = (winner: string) => JSON.stringify({ at: "", case: "plant-log", left: { arm: "current", key: "k1" }, right: { arm: "design-forward", key: "k2" }, winner, daily: { right: true } });
     writeFileSync(join(run, "votes.jsonl"), [vote("right"), vote("right"), vote("tie")].join("\n") + "\n");
     const s = summarize(run);
@@ -123,6 +125,7 @@ describe("bench metrics and judging", () => {
     assert.equal(s.find((a) => a.arm === "current")!.votes!.winRate, 17);
     assert.equal(df.usd, 3);
     assert.equal(df.judge!.total, 30);
+    assert.equal(df.sameness, 6);
     assert.deepEqual(df.tells, [["pills and badges on everything", 1]]);
     rmSync(run, { recursive: true, force: true });
   });

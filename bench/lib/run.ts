@@ -332,9 +332,10 @@ export function listResults(runDir: string): { dir: string; key: string; result?
   const root = join(runDir, "results");
   if (!existsSync(root)) return [];
   const out: { dir: string; key: string; result?: Result; job?: Job }[] = [];
-  for (const arm of readdirSync(root))
-    for (const c of readdirSync(join(root, arm)))
-      for (const rep of readdirSync(join(root, arm, c))) {
+  const dirs = (d: string) => readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  for (const arm of dirs(root))
+    for (const c of dirs(join(root, arm)))
+      for (const rep of dirs(join(root, arm, c))) {
         const dir = join(root, arm, c, rep);
         const job = existsSync(join(dir, "job.json")) ? (JSON.parse(readFileSync(join(dir, "job.json"), "utf8")) as Job) : undefined;
         out.push({ dir, key: createHash("sha256").update(`${arm}/${c}/${rep}`).digest("hex").slice(0, 10), result: readResult(dir), job });
