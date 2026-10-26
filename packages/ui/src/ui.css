@@ -405,6 +405,8 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .setting > .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .setting .sub { font-size: var(--fs-sm); color: var(--text-2); }
 .app-icon.brand { background: var(--accent); color: var(--accent-text); border-color: transparent; box-shadow: var(--glow); }
+/* A small mark (a pill's, a chip's) has no glow: the glow is as big as the tile. */
+.app-icon.brand.mini { box-shadow: none; }
 /* Building: tile desaturates, glyph fills pixel by pixel with progress; not openable (tap → build screen). */
 .app-icon.building { background: oklch(var(--tile-l) calc(var(--tile-c) * 0.3 * var(--s)) var(--h) / calc(var(--tile-a) * 0.55)); }
 /* Inline capability reference: <span class="cap-ref"><span class="app-icon">…</span>Running Log</span> */

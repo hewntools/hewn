@@ -56,12 +56,12 @@ async function paletteItems() {
     place("Accounts", "#/accounts", "connections", "key"),
     ...SECTIONS.map(([k, label]) => place(`Settings › ${label}`, `#/settings/${k}`)),
     place("Settings › AI › Models", "#/settings/ai/models", "provider key budget spend tier", "chip"),
-    // The Hub comes last: Hewn's own tools you don't have yet (Install opens the sheet, never installs at once).
+    // The Hub comes last: Hewn's own tools you don't have yet, each with Install (to its Hub page; nothing installs at once).
     place("Hub", "#/hub", "official install tools shelf", "plus"),
-    ...hub.tools.filter((t) => !t.installed).map((t) => [t.name, "Hub", () => go(`#/hub/${enc(t.id)}`), appIcon({ id: t.id, name: t.name, hue: t.icon?.hue ?? undefined, saturation: t.icon?.saturation ?? undefined }, { size: 24 }), `${t.line} ${t.tags.join(" ")} hub official install`, true]),
+    ...hub.tools.filter((t) => !t.installed).map((t) => [t.name, "Hub", () => go(`#/hub/${enc(t.id)}`), appIcon({ id: t.id, name: t.name, hue: t.icon?.hue ?? undefined, saturation: t.icon?.saturation ?? undefined }, { size: 24 }), `${t.line} ${t.tags.join(" ")} hub official install`, true, h("span", { class: "btn sm palette-tail" }, "Install")]),
   ]
     .filter(Boolean)
-    .map(([label, group, run, icon, words = "", more = false]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more }));
+    .map(([label, group, run, icon, words = "", more = false, tail = null]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more, tail }));
 }
 
 /** ⌘K: one search over tools, places and actions. Arrows move, Enter runs, Esc closes. */
@@ -88,7 +88,7 @@ async function commandPalette() {
           list,
           shown.flatMap((it, i) => [
             it.group !== group && ((group = it.group), h("li", { class: "eyebrow palette-group", role: "presentation" }, it.group)),
-            h("li", { class: `palette-item ${i === at ? "active" : ""}`, role: "option", "aria-selected": String(i === at), onclick: () => run(it), onmousemove: () => i !== at && ((at = i), render()) }, it.icon ?? h("span", { class: "palette-dot" }), h("span", { class: "grow" }, it.label)),
+            h("li", { class: `palette-item ${i === at ? "active" : ""}`, role: "option", "aria-selected": String(i === at), onclick: () => run(it), onmousemove: () => i !== at && ((at = i), render()) }, it.icon ?? h("span", { class: "palette-dot" }), h("span", { class: "grow" }, it.label), it.tail),
           ]),
           !shown.length && h("li", { class: "muted small palette-empty" }, "Nothing matches."),
         );

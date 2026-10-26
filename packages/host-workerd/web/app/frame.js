@@ -138,7 +138,7 @@ const sandboxNotice = () =>
 
 const GLYPH = ["##..#", ".#..#", ".####", ".#..#", ".#..#"];
 const brandGlyph = () => pixelGlyph(rowCells(GLYPH));
-const brandTile = (size = 28) => h("span", { class: "app-icon brand", style: { "--size": `${size}px` } }, brandGlyph());
+const brandTile = (size = 28) => h("span", { class: `app-icon brand${size < 24 ? " mini" : ""}`, style: { "--size": `${size}px` } }, brandGlyph());
 const brand = () => h("a", { class: "brand-link", href: "#/" }, brandTile(), h("span", { class: "brand-name" }, BRAND));
 
 const NAV = [

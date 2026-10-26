@@ -17,7 +17,7 @@ import { settingsPage } from "./settings.js";
 import { appPage, runPage } from "./tool.js";
 import { samplePage } from "./share.js";
 import { versionPage, versionsPage } from "./versions.js";
-import { hubPage, hubSourcePage, hubToolPage } from "./hub.js";
+import { hubPage, hubToolPage } from "./hub.js";
 
 export { route };
 
@@ -59,7 +59,6 @@ async function route() {
     if (p === "") return await home();
     if (p === "app") return await appPage(id, q);
     if (p === "run") return await runPage(id, q);
-    if (p === "hub" && id && sub === "source") return await hubSourcePage(id);
     if (p === "hub" && id) return await hubToolPage(id);
     if (p === "hub") return await hubPage(q);
     if (p === "c" && sub === "versions") return await versionsPage(id);

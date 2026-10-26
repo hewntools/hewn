@@ -18,6 +18,8 @@ const t = setup({ modelFetch: async () => new Response(JSON.stringify({ data: []
 const server = await serve(t.platform, t.home);
 const web = `http://hewn.localhost:${(server.address() as AddressInfo).port}`;
 const browser = await pw.chromium.launch({ executablePath: findBrowser() });
+// The card's frame is 16:9: screens are taken at that size, at 1.5× for sharpness.
+const SCREEN = { width: 960, height: 540 };
 const page = await browser.newPage({ viewport: { width: 1100, height: 760 }, deviceScaleFactor: 1.5 });
 const api = (path: string, method = "GET", body?: unknown) =>
   page.evaluate(
@@ -49,9 +51,10 @@ try {
     if (!status.ready) console.log(`  ${id} isn't ready:`, JSON.stringify(status));
     const manifest = JSON.parse(readFileSync(join(SEEDS, id, "capability.json"), "utf8"));
     const out = (name: string) => join(SEEDS, id, ".hub", `${name}.png`);
-    // A widget, drawn as Info shows it (with the sample data).
+    // A widget, drawn as Info shows it (with the sample data), at the size it's meant for.
     let widget = false;
     if (manifest.widgets?.length) {
+      await page.setViewportSize({ width: 1100, height: 760 });
       await page.goto(`${web}/#/c/${id}`);
       const w = page.locator(".info-widget .widget-preview").first();
       await w.waitFor();
@@ -59,27 +62,49 @@ try {
       await w.screenshot({ path: out("widget") });
       widget = true;
     }
-    // Its screen: its own UI, else its widget, else the Run view on its first read operation.
+    // Its screen, at 16:9 (the card's frame): its own UI filling it, else its widget large on its
+    // colour, else the Run view on its first read operation.
+    await page.setViewportSize(SCREEN);
     if (manifest.ui?.available) {
-      // A phone-ish width: the card shows the top of it, legibly.
-      await page.setViewportSize({ width: 720, height: 560 });
       await page.goto(`${web}/#/app/${id}`);
       const frame = page.locator(".app-frame");
       await frame.waitFor();
-      await page.waitForTimeout(2500);
-      await frame.screenshot({ path: out("screen") });
-      await page.setViewportSize({ width: 1100, height: 760 });
+      await page.waitForTimeout(2000);
+      // Not "Got what you asked for?": that's for the owner after a build, not the tool.
+      await page.evaluate(() => document.querySelectorAll<HTMLElement>(".feedback-slot").forEach((e) => (e.style.display = "none")));
+      // The frame fills the page under the top bar: make that part 16:9, and take only it.
+      const top = (await frame.boundingBox())!.y + 1;
+      await page.setViewportSize({ width: SCREEN.width, height: Math.ceil(top + SCREEN.height) });
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: out("screen"), clip: { x: 0, y: top, width: SCREEN.width, height: SCREEN.height } });
     } else if (widget) {
-      await page.locator(".info-widget .widget-preview").first().screenshot({ path: out("screen") });
+      await page.goto(`${web}/#/c/${id}`);
+      await page.locator(".info-widget .widget-preview").first().waitFor();
+      await page.waitForTimeout(800);
+      const hue = manifest.hue ?? 250;
+      await page.evaluate((hue: number) => {
+        const w = document.querySelector(".info-widget .widget-preview")!.cloneNode(true) as HTMLElement;
+        const stage = document.createElement("div");
+        stage.id = "shot-stage";
+        stage.style.cssText = `position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%, oklch(0.93 0.05 ${hue}), oklch(0.97 0.01 ${hue}) 70%)`;
+        w.style.transform = "scale(1.5)";
+        stage.append(w);
+        document.body.append(stage);
+      }, hue);
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: out("screen") });
+      await page.evaluate(() => document.getElementById("shot-stage")?.remove());
     } else {
       const op = manifest.operations.find((o: any) => o.sideEffect === "read");
-      await page.setViewportSize({ width: 820, height: 560 });
       await page.goto(`${web}/#/run/${id}?op=${op.name}`);
       await page.locator("main.run").waitFor();
-      await page.locator("main.run button[type=submit]").first().click();
+      await page.locator("main.run button[type=submit]").first().click({ force: true });
       await page.waitForTimeout(1200);
-      await page.locator("main.run").screenshot({ path: out("screen") });
-      await page.setViewportSize({ width: 1100, height: 760 });
+      // The Run view under the top bar, 16:9.
+      const top = Math.max(0, (await page.locator("main.run").boundingBox())!.y - 12);
+      await page.setViewportSize({ width: SCREEN.width, height: Math.ceil(top + SCREEN.height) });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: out("screen"), clip: { x: 0, y: top, width: SCREEN.width, height: SCREEN.height } });
     }
     console.log("✔", id, widget ? "screen, widget" : "screen");
   }
