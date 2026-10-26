@@ -3,6 +3,7 @@
 // version, purge for good, and export and import its data.
 import { type Agent, requireOwner } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
+import { readSample } from "../bundle.ts";
 import { diffLines, diffStats, type Hunk, splitLines, toHunks } from "../diff.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
@@ -112,7 +113,7 @@ export class Data extends Domain {
    * Info › Data: rows per table (counted, not read) and when an operation last wrote, from the
    * call log (so "unknown" once the log has been pruned past it).
    */
-  async dataSummary(owner: Agent, capabilityId: string): Promise<{ tables: Record<string, number>; rows: number; lastWriteAt: string | null }> {
+  async dataSummary(owner: Agent, capabilityId: string): Promise<{ tables: Record<string, number>; rows: number; lastWriteAt: string | null; sample: number | null }> {
     requireOwner(owner);
     const cap = this.visibleActive(owner, capabilityId);
     const active = await this.loadVersion(capabilityId, cap.activeVersion!);
@@ -127,7 +128,13 @@ export class Data extends Domain {
         break;
       }
     }
-    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt };
+    let sample: number | null = null;
+    try {
+      sample = readSample(active.files)?.length ?? null;
+    } catch {
+      sample = null;
+    }
+    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt, sample };
   }
 
   /**

@@ -23,6 +23,16 @@ const STEPS = [
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
+/** A tool installed from a file has no builder: its milestones are the file's (R4). */
+const INSTALL_STEPS = [
+  ["spec", "From the file"],
+  ["code", "Unpacked"],
+  ["tests", "Running tests"],
+  ["auth", "Your authorization"],
+];
+/** No builder runs: an install from a file or a directory, or a change that needs none. */
+const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
+const stepsOf = (b) => (b.builder === "bundle" ? INSTALL_STEPS : STEPS);
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
 const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
@@ -101,8 +111,8 @@ const askedBy = (b) => {
 /** "Built with Claude Code · claude-fable-5-5 · high effort", and why it wasn't the model asked for. */
 const builtWith = (b) =>
   b.builder &&
-  !["keep", "agent"].includes(b.builder) &&
-  !b.builder.startsWith("copy:") &&
+  b.builder !== "agent" &&
+  !noBuilder(b) &&
   h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}${b.charge ? ` · ${chargeWords(b.charge)}` : ""}`);
 
 function buildPanel(id, { compact = false, onPromoted } = {}) {
@@ -176,9 +186,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : null,
           clockEl,
         ),
-        !waitingAgent && buildMeta(b),
+        !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? "Installed from a file: no builder runs. Its own tests run as for any build." : "No builder runs.") : buildMeta(b)),
         convoView,
-        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        h("ol", { class: "steps" }, stepsOf(b).map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );

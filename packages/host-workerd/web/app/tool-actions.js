@@ -24,6 +24,7 @@ import {
 import { go, put } from "./frame.js";
 import { grantsSheet } from "./grants.js";
 import { route } from "./router.js";
+import { shareSheet } from "./share.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
 export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo };
@@ -83,6 +84,7 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
     "-",
     rename && ["Rename", rename],
     ["Set icon…", () => iconDialog(c).catch(fail)],
+    !connection && ["Share…", () => shareSheet(c).catch(fail)],
     ["Export data", () => download(`/api/capabilities/${id}/export`)],
     hidden && show && ["Show on Home", show],
     editHome && ["Edit Home", editHome],

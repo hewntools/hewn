@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
-import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
+import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, menuFrom, modal, setWallpaper, sheetActions, sheetHead, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
 import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
@@ -12,6 +12,7 @@ import { addScheduleSheet, scheduleRow } from "./schedules.js";
 import { capabilityMenu, changeHref, download, inlineRename, openCapability, openChange } from "./tool-actions.js";
 import { modelSpend, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
+import { shareSheet } from "./share.js";
 import { madeBy, versionRow } from "./versions.js";
 import { addWidgetSheet, SIZE_LETTER, widgetPreview } from "./widgets.js";
 
@@ -46,8 +47,48 @@ function statusPills(c, cap, all) {
             ? h("span", { class: "pill with-dot" }, "you said no")
             : h("span", { class: "pill warn with-dot" }, "needs you"),
     latest && h("span", { class: "pill" }, `v${c.version ?? latest.version}`),
-    latest && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
+    // An install from a file says so once, in the origin pill.
+    latest && !(latest.builder === "bundle" && cap.source) && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
     latest && h("span", { class: "pill" }, ago(latest.createdAt)),
+    origin(cap.source),
+  );
+}
+
+/** T4 Where it came from, when it was installed from outside: Info only, Home stays clean. */
+function origin(s) {
+  if (!s) return null;
+  const text = s.from === "hub" ? "from Hub · Official" : s.from === "link" ? `from a link · ${s.host ?? "a link"}` : `from a file · ${s.name ?? s.id} v${s.version}`;
+  return h("span", { class: "pill accent" }, text);
+}
+
+/** U2 Start over: the Confirm pattern with the id typed, as purge; replays the sample data when asked. */
+function startOverDialog(c, hasSample) {
+  return modal(
+    (close) => {
+      const typed = h("input", { type: "text", autocomplete: "off", placeholder: c.id, "aria-label": `Type ${c.id} to confirm` });
+      const replay = h("input", { type: "checkbox", checked: hasSample });
+      const go = h("button", { class: "danger", disabled: true }, "Start over");
+      typed.addEventListener("input", () => (go.disabled = typed.value.trim() !== c.id));
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        try {
+          const r = await api(`/capabilities/${enc(c.id)}/start-over`, { method: "POST", body: { confirm: typed.value.trim(), sample: hasSample && replay.checked } });
+          toast(r.sample?.failed ? `${c.name} started over; sample data stopped at ${r.sample.failed.operation}: ${r.sample.failed.error}` : r.sample ? `${c.name} started over with its sample data` : `${c.name} started over`);
+          close(true);
+        } catch (e) {
+          go.disabled = false;
+          fail(e);
+        }
+      });
+      return [
+        sheetHead(appIcon(c, { size: 44 }), `Start ${c.name} over?`),
+        h("p", { class: "muted" }, "Its data is emptied and the tool stays. A backup of the data is kept, so this can be undone from the command line."),
+        h("label", { class: "field flush" }, h("span", { class: "label" }, `Type ${c.id} to confirm`), typed),
+        hasSample && h("label", { class: "check" }, replay, " And replay the sample data"),
+        sheetActions(h("button", { onclick: () => close(false) }, "Cancel"), go),
+      ];
+    },
+    { width: 440 },
   );
 }
 
@@ -233,6 +274,7 @@ async function infoPage(id) {
   );
 
   const tableCount = data ? Object.keys(data.tables).length : 0;
+  const hasSample = !!data?.sample;
   const dataSection = section(
     "Data",
     h(
@@ -243,6 +285,12 @@ async function infoPage(id) {
         {},
         h("div", { class: "grow" }, h("span", {}, data ? `${plural(data.rows, "row")} · ${plural(tableCount, "table")}` : "Its data"), h("span", { class: "sub" }, !data ? "Couldn't count it right now" : data.lastWriteAt ? `Last write ${ago(data.lastWriteAt)}` : data.rows ? "No recent writes" : "Nothing written yet")),
         h("button", { class: "sm", onclick: () => download(`/api/capabilities/${enc(id)}/export`) }, "Export"),
+      ),
+      h(
+        "li",
+        {},
+        h("div", { class: "grow" }, h("span", {}, "Start over"), h("span", { class: "sub" }, "Empty it, keep the tool · a backup is kept")),
+        h("button", { class: "sm danger", onclick: () => startOverDialog(c, hasSample).then((ok) => ok && route()) }, "Start over…"),
       ),
     ),
     { order: 7 },
@@ -306,7 +354,7 @@ async function infoPage(id) {
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
-    backBar("Home", "#/", h("div", { class: "glass-bar" }, more)),
+    backBar("Home", "#/", h("div", { class: "glass-bar" }, h("button", { onclick: () => shareSheet(c).catch(fail) }, "Share…"), more)),
     sandboxNotice(),
     h(
       "main",

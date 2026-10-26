@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Settings: General · AI · Remote access · Data · About.
 import { ago, api, appIcon, BRAND, capRef, CLI, commandBlock, confirmDialog, enc, fail, formSheet, h, invalidateCaps, modal, setWallpaper, sheetActions, skeleton, toast } from "../kit.js";
+import { installFromFile } from "./install.js";
 import { addPasskey, knownPasskeys, passkeyError, passkeysSupported } from "../passkey.js";
 import { deviceName } from "./add-passkey.js";
 import { addSheet, agentModelsSheet, agentTileOf, buildJobs, jobPicker, modelSheet, providerTile } from "./agents.js";
@@ -346,6 +347,7 @@ async function dataSection() {
       backups && setting("Backups", last ? `Last ${ago(last.at)} · ${Math.round(last.bytes / 1024)} KB · nightly, 7 daily and 4 weekly kept` : "Nightly; 7 daily and 4 weekly kept. Never includes secrets.", backupBtn),
       !s.hosted && backups && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Folder"), h("span", { class: "sub mono" }, backups.dir)), h("button", { class: "sm", onclick: folderSheet }, "Change")),
       setting("Keep call logs", "Builds, grants and access changes are always kept", keep),
+      setting("Install from a file", "A tool someone shared with you (.hewn.zip): you read it before it's installed", h("button", { class: "sm", onclick: () => installFromFile().catch(fail) }, "Install…")),
     ),
     deleted.length > 0 &&
       h(

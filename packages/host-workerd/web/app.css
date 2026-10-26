@@ -172,6 +172,18 @@ body.app-mode #app { height: 100vh; }
 .info-missing:empty { display: none; }
 .info-missing button.link { padding: 0; }
 .version-log { max-height: 70vh; }
+/* S1/S2 Share…, R1/R3 install, Write it yourself (design pass 3). */
+label.field.flush { margin: 0; }
+.pretty { text-wrap: pretty; }
+.share-eyebrow { padding-bottom: 4px; }
+.share-never { padding-top: 6px; }
+.share-ways.off { opacity: .45; }
+.share-version { width: 90px; }
+.install-source { padding: 0; }
+.drop-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 140px; border: 1.5px dashed var(--border-strong, var(--border)); border-radius: var(--radius-lg); background: var(--surface-2); }
+.drop-zone.over { border-color: var(--accent); background: var(--accent-soft); }
+.code-edit { display: block; width: 100%; min-height: 360px; margin: 0; padding: 10px 14px; border: 0; border-radius: 0; resize: vertical; font: 12.5px/1.75 var(--mono); background: var(--log-bg); color: var(--log-text); }
+dialog.wide-sheet .code-body { max-height: 56vh; }
 .list-card { padding: var(--s2) 18px; }
 .list-card > .eyebrow { padding: 10px 0 var(--s1); }
 

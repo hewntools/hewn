@@ -214,7 +214,7 @@ export class Platform {
   versionCode(owner: Agent, capabilityId: string, version: number) { return this.d.data.versionCode(owner, capabilityId, version); }
   versionFile(owner: Agent, capabilityId: string, version: number, path: string) { return this.d.data.versionFile(owner, capabilityId, version, path); }
   startOver(owner: Agent, capabilityId: string, req: { confirm: string; sample?: boolean }) { return this.d.data.startOver(owner, capabilityId, req); }
-  dataSummary(owner: Agent, capabilityId: string): Promise<{ tables: Record<string, number>; rows: number; lastWriteAt: string | null }> { return this.d.data.dataSummary(owner, capabilityId); }
+  dataSummary(owner: Agent, capabilityId: string): Promise<{ tables: Record<string, number>; rows: number; lastWriteAt: string | null; sample: number | null }> { return this.d.data.dataSummary(owner, capabilityId); }
   importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> { return this.d.data.importData(owner, capabilityId, tables); }
   archived(owner: Agent): { id: string; name: string; archivedAt: string }[] { return this.d.data.archived(owner); }
   restore(owner: Agent, capabilityId: string) { return this.d.data.restore(owner, capabilityId); }
