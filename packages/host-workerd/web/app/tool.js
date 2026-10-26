@@ -83,7 +83,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const setUrl = (open) => {
     const p = new URLSearchParams(q);
     if (open) p.set("change", "1");
-    else for (const k of ["change", "m", "send", "widget", "from"]) p.delete(k);
+    else for (const k of ["change", "m", "send", "widget", "from", "fix"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
   // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
@@ -101,7 +101,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else if (!want && shown()) {
       drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
-      for (const k of ["m", "send", "widget", "from"]) q.delete(k);
+      for (const k of ["m", "send", "widget", "from", "fix"]) q.delete(k);
       setUrl(false);
     } else drawer?.focus();
   };
@@ -135,7 +135,8 @@ async function appPage(id, q) {
   const drawerApi = {};
   const [barEl, layout] = withDrawer(c, q, frame, { reload, api: drawerApi });
   barEl.querySelector(".app-title")?.append(subtitle);
-  askFeedbackOnOpen(c, drawerApi);
+  const feedbackSlot = h("div", { class: "feedback-slot" });
+  askFeedbackOnOpen(c, drawerApi, feedbackSlot);
   const fixSlot = h("div", { class: "fix-slot" });
   const showFix = async () => {
     // This screen's own failure (its calls run as ui:<id>), not an agent's or a schedule's.
@@ -169,7 +170,7 @@ async function appPage(id, q) {
   // Older apps (or a slow first paint): don't stay invisible.
   const reveal = setInterval(() => frame.classList.remove("loading"), 1500);
   onLeave(() => clearInterval(reveal));
-  view(barEl, fixSlot, layout);
+  view(barEl, fixSlot, layout, feedbackSlot);
 }
 
 const isFlat = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.values(o).every((v) => v === null || typeof v !== "object");
@@ -328,9 +329,10 @@ async function runPage(id, q) {
   const main = h("main", { class: "run" }, list, right);
   const drawerApi = {};
   const [barEl, layout] = withDrawer(c, q, main, { reload: () => route(), noUi: true, api: drawerApi });
-  view(barEl, sandboxNotice(), layout);
+  const feedbackSlot = h("div", { class: "feedback-slot" });
+  view(barEl, sandboxNotice(), layout, feedbackSlot);
   if (selected) select(selected);
-  askFeedbackOnOpen(c, drawerApi);
+  askFeedbackOnOpen(c, drawerApi, feedbackSlot);
 }
 
 function runForm(id, cap, op) {

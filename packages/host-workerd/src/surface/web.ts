@@ -858,7 +858,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
 
   const building = builds
     .filter((b) => LIVE.has(b.status))
-    .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null }));
+    .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null, queued: !!b.queued }));
   return { needs, building, ...(recent ? { recent: activity(platform, owner, { limit: 6 }).items } : {}) };
 }
 

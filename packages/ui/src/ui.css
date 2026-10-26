@@ -440,14 +440,18 @@ input.bare, input.bare:focus { flex: 1; min-height: 44px; border: 0; background:
 
 
 /* Glyph editor: a 5×5 grid of toggles for drawing an app icon glyph. */
-.glyph-editor { display: grid; grid-template-columns: repeat(5, 36px); gap: var(--pixel-gap); align-self: flex-start; }
-.glyph-editor > button { width: 36px; min-height: 36px; padding: 0; border-radius: var(--radius-xs); background: var(--surface-2); border-color: var(--border); }
+/* The 5×5 editor sits centred in Set icon (design pass 3, V3). */
+.glyph-editor { display: grid; grid-template-columns: repeat(5, 40px); gap: var(--pixel-gap); align-self: center; }
+.glyph-editor > button { width: 40px; min-height: 40px; padding: 0; border-radius: var(--radius-xs); background: var(--surface-2); border-color: var(--border); }
 .glyph-editor > button[aria-pressed="true"] { background: var(--text); border-color: transparent; }
 input[type=range].hue-range { width: 100%; accent-color: var(--accent); }
 /* A mark under a slider where its default is (Set icon's Saturation: 100%). --at: 0–1 along the
    track, which runs from the thumb's centre at one end to the other (a native thumb is about 16px). */
 .range-mark { --thumb: 16px; --x: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--at)); position: relative; display: block; padding-bottom: 12px; }
 .range-mark > input { display: block; margin: 0; }
+/* A slider in the same frame as a marked one, without a mark, so the two line up (Set icon's Colour). */
+.range-mark.no-mark { padding-bottom: 0; }
+.range-mark.no-mark::before, .range-mark.no-mark::after { content: none; }
 .range-mark::before { content: ""; position: absolute; left: var(--x); bottom: 10px; width: 1px; height: 4px; background: var(--text-3); }
 .range-mark::after { content: attr(data-mark); position: absolute; left: var(--x); bottom: 0; transform: translateX(-50%); font: 500 10px/1 var(--mono); color: var(--text-3); }
 

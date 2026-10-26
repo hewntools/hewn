@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Activity: All · Builds · Calls · Access.
 import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, clock, empty, enc, fail, h, kindTag, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
-import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures } from "./build.js";
+import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures, waitingPill } from "./build.js";
 import { go, hues, onLeave, page, put } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
@@ -214,7 +214,7 @@ async function buildsView(head, only, all0) {
     const rest = list.filter((b) => !LIVE_BUILD.has(b.status) && b.status !== "review" && !failed.has(b.buildId));
     const nameOf = (b) => all.get(b.capabilityId)?.name ?? b.request?.name ?? b.capabilityId;
     const sub = (b) => {
-      if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Waiting for ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, b.queued ? "the change before it" : "another build") : "another build");
+      if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Starts once ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, b.queued ? "the change before it" : "the build it needs") : "the build it needs", " is done");
       if (b.status === "review") return h("span", { class: "sub" }, `${actorLabel(b.requestedBy, all)} changed it: it waits for you`);
       if (LIVE_BUILD.has(b.status)) return h("span", { class: "sub row tight" }, askedBy(b) && h("span", { class: "faint" }, `${askedBy(b)}on your ${builderLabel(b.builder)}`), milestones(b));
       const first = String(b.request?.request || b.request?.purpose || "").split("\n")[0];
@@ -230,7 +230,7 @@ async function buildsView(head, only, all0) {
           : b.status === "review"
             ? h("span", { class: "pill warn with-dot" }, "needs you")
             : b.status === "waiting"
-              ? kindTag("waiting", "warn")
+              ? waitingPill(b)
               : LIVE_BUILD.has(b.status)
                 ? h("span", { class: "mono faint small" }, b.progress ? mmss(b.progress.elapsedSeconds * 1000) : "")
                 : kindTag(b.status);

@@ -96,7 +96,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
-  const draftNow = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
+  const draftNow = h("button", { type: "button", class: "link sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
   // Images and files for the request: pasted, dropped or attached; uploaded as they're added, sent as refs.
   const pending = [];
   const chips = h("div", { class: "attachments", hidden: true });
@@ -121,6 +121,15 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     }
   };
   picker.addEventListener("change", () => (addFiles([...picker.files]), (picker.value = "")));
+  // V4 "Ask builder to fix this": the failure comes along as a file (open it, or drop it); the box has one line.
+  const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
+  if (failure) {
+    sessionStorage.removeItem(`hewn.fix.${capId}`);
+    const { name, text } = JSON.parse(failure);
+    uploadAttachment(new File([text], name, { type: "text/plain" }), session)
+      .then((a) => (pending.push(a), syncChips()))
+      .catch(() => ((input.value = `${text}\n\n${input.value}`), requestAnimationFrame(growWhenShown)));
+  }
   input.addEventListener("paste", (e) => {
     const files = [...(e.clipboardData?.files ?? [])];
     if (files.length) (e.preventDefault(), addFiles(files));
@@ -298,10 +307,12 @@ function modelChip() {
     return ctx;
   };
   const labelOf = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
+  // V2: "Claude Code · Fable · high": who builds, on what, how hard.
   const paint = () => {
     const m = jobModelOf(ctx.s, "builder");
-    name.textContent = labelOf(ctx.bCat, m.model);
-    effortEl.textContent = cap(m.effort);
+    // Hosted builds on one builder: its name goes without saying.
+    name.textContent = [ctx.s.builder !== "remote" && builderLabel(ctx.s.builder), labelOf(ctx.bCat, m.model)].filter(Boolean).join(" · ");
+    effortEl.textContent = m.effort ? `· ${m.effort}` : "";
   };
   load().then(paint).catch(() => (chip.hidden = true));
 
@@ -411,14 +422,21 @@ const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x
 /** Attachments as a message shows them: thumbnails, file names. */
 const attachmentsView = (list) => (list?.length ? h("div", { class: "attachments" }, list.map((a) => attachmentChip(a))) : null);
 
-/** One attachment: a thumbnail or the file's name, and (in the box, before sending) × to drop it. */
-const attachmentChip = (a, onRemove) =>
-  h(
-    "span",
-    { class: "attachment" },
-    a.kind === "image" ? h("img", { src: `/api/attachments/${enc(a.ref)}`, alt: a.name, title: a.name }) : h("span", { class: "file-chip", title: a.name }, a.name),
-    onRemove && h("button", { type: "button", class: "x", "aria-label": `Remove ${a.name}`, onclick: onRemove }, "×"),
-  );
+/**
+ * One attachment: a thumbnail or the file's name (opens it). In the box, before sending (V2): a
+ * 64px tile with its name on it and × to drop it.
+ */
+const attachmentChip = (a, onRemove) => {
+  const url = `/api/attachments/${enc(a.ref)}`;
+  if (onRemove)
+    return h(
+      "span",
+      { class: "attachment tile" },
+      h("a", { href: url, target: "_blank", rel: "noopener", class: "attachment-open", title: a.name }, a.kind === "image" ? h("img", { src: url, alt: a.name }) : h("span", { class: "attachment-ext" }, /\.(\w{1,4})$/.exec(a.name)?.[1].toUpperCase() ?? "TXT"), h("span", { class: "attachment-name" }, a.name)),
+      h("button", { type: "button", class: "x", "aria-label": `Remove ${a.name}`, onclick: onRemove }, "×"),
+    );
+  return h("span", { class: "attachment" }, a.kind === "image" ? h("img", { src: url, alt: a.name, title: a.name }) : h("a", { class: "file-chip", href: url, target: "_blank", rel: "noopener", title: a.name }, a.name));
+};
 
 /**
  * Upload one pasted, dropped or picked file for the request: an image is resized first (long side
@@ -459,12 +477,12 @@ async function resizeImage(file) {
 }
 
 /**
- * "Got what you asked for?", asked once as a toast when a tool is opened after a build went live
- * (its newest version's build, within a week, no answer yet): Yes, Not quite (which opens the
- * change drawer, so what's off becomes the next change), or × to skip. The answer stays in your
- * Hewn; nothing is sent anywhere.
+ * V5 "Got what you asked for?", asked once in a quiet strip at the foot of the tool when it's
+ * opened after a build went live (its newest version's build, within a week, no answer yet): Yes,
+ * Not quite (which opens the change drawer, so what's off becomes the next change), or × to skip.
+ * The answer stays in your Hewn; nothing is sent anywhere.
  */
-async function askFeedbackOnOpen(c, drawerApi) {
+async function askFeedbackOnOpen(c, drawerApi, slot) {
   const d = await api(`/capabilities/${enc(c.id)}`).catch(() => null);
   const last = d?.versions?.find((v) => v.buildId);
   if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
@@ -474,25 +492,22 @@ async function askFeedbackOnOpen(c, drawerApi) {
   const askedKey = `hewn.asked.${c.id}`;
   if (localStorage.getItem(askedKey) === String(last.version)) return;
   localStorage.setItem(askedKey, String(last.version));
-  let region = document.querySelector(".toast-region");
-  if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
   // An answer that didn't reach Hewn is asked for again next time.
   const send = (score) =>
     api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } }).catch((e) => {
       localStorage.removeItem(askedKey);
       throw e;
     });
-  const el = h("div", { class: "toast feedback-toast" });
+  const el = h("div", { class: "feedback-strip", role: "status" });
   const gone = () => el.remove();
   put(
     el,
-    h("span", { class: "dot info" }),
-    h("span", {}, `v${last.version} · got what you asked for?`),
+    h("span", { class: "grow" }, `v${last.version} · got what you asked for?`),
     h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
     h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.()), fail) }, "Not quite"),
     h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
   );
-  region.append(el);
+  slot.append(el);
   onLeave(gone);
 }
 /**

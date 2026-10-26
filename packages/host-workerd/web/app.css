@@ -46,6 +46,9 @@ body > .wallpaper { position: fixed; }
 .dialog > .actions { margin-top: 0; }
 .dialog-body { font-size: var(--fs-sm); line-height: 1.6; }
 .sheet-head { gap: 14px; flex-wrap: nowrap; }
+.icon-head { align-items: center; }
+.icon-head > .icon-preview { display: flex; }
+.icon-draw { align-items: center; }
 .sheet-title { font-size: var(--fs-lg); font-weight: 650; letter-spacing: -0.01em; }
 .dialog .list .grow input { margin-top: var(--s1); }
 code.token { overflow-wrap: anywhere; }
@@ -466,13 +469,19 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .attachment .file-chip { font-size: var(--fs-sm); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment > button.x { position: absolute; top: -7px; right: -7px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; min-height: 0; border-radius: 50%; border: 0; padding: 0; background: var(--text-2); color: var(--bg); font: 700 13px/1 var(--font); cursor: pointer; }
 .attachment > button.x:hover { background: var(--text); color: var(--bg); }
+/* V2 In the box: 64px tiles, the file's name on each, × in the corner. */
+.attachment.tile { width: 64px; height: 64px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-3); }
+.attachment.tile > .attachment-open { position: relative; display: flex; align-items: flex-end; width: 100%; height: 100%; color: var(--text); text-decoration: none; }
+.attachment.tile img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; border: 0; border-radius: 0; }
+.attachment.tile .attachment-ext { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font: 600 13px/1 var(--mono); color: var(--text-2); }
+.attachment.tile .attachment-name { position: relative; max-width: calc(100% - 8px); margin: 4px; padding: 2px 5px; border-radius: 4px; background: var(--surface-overlay); font: 9px/1.3 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment.tile > button.x { top: 3px; right: 3px; border-radius: 6px; background: var(--surface-overlay); color: var(--text); font-size: 11px; }
 .composer.drop { outline: 2px dashed var(--accent); outline-offset: 2px; }
 /* An earlier conversation picked up in the chat, as it was; the offer to pick it up is a card in the chat. */
 .thread .earlier { margin-bottom: 8px; }
 .thread .earlier .bubble { opacity: 0.65; }
 .composer .continue-offer { margin: 8px 8px 0; align-items: center; gap: 8px; }
 /* "Got what you asked for?": a toast when a tool is opened after a build went live. */
-.feedback-toast { flex-wrap: wrap; }
 .earlier-label { align-self: center; }
 .continue-card { align-self: stretch; padding: 12px 14px; }
 .continue-title { font-weight: 600; color: var(--accent-ink); margin-bottom: 2px; }
@@ -485,8 +494,8 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .step:has(.spec-step[open])::before { align-self: start; margin-top: 7px; }
 .spec-step > .spec-text { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
 /* What the intake remembered for later builds, and the owner's instructions (one per line). */
-.memory-notice { align-items: flex-start; }
-.memory-notice .memory-text { font-size: var(--fs-sm); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-notice { align-items: center; }
+.memory-notice .memory-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 
 /* Two lines at most (the full text on hover). */
@@ -498,5 +507,8 @@ textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 .caret-btn[aria-expanded="true"]::before { transform: rotate(225deg); margin-top: 8px; }
 .caret-btn:hover, .caret-btn:focus, .caret-btn:active { background: none; transform: none; }
 .fix-slot:empty { display: none; }
+/* V5 "Got what you asked for?": a quiet strip at the foot of the tool, once per version. */
+.feedback-slot:empty { display: none; }
+.feedback-strip { display: flex; align-items: center; gap: var(--s2); padding: 8px var(--s6); border-top: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-2); background: var(--surface); }
 .fix-slot { padding: 0 var(--s6) var(--s2); } /* "Ask builder to fix this", under a tool's bar */
 .fix-bar { align-items: center; }

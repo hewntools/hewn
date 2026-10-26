@@ -41,25 +41,29 @@ async function openCapability(c) {
  * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once; `from`: the
  * build whose conversation the intake continues from.
  */
-function changeHref(c, { m, send, widget, from } = {}) {
-  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}) });
+function changeHref(c, { m, send, widget, from, fix } = {}) {
+  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}) });
   return `#/${c.ui ? "app" : "run"}/${enc(c.id)}?${q}`;
 }
 const openChange = (c, o) => go(changeHref(c, o));
 
 /**
- * "Ask builder to fix this": a Change to the tool, the message written for the builder from one
- * failed call (what ran it, the operation, the error, its input and last log lines). The owner
- * reads it, can edit it, and sends it.
+ * "Ask builder to fix this" (V4): a Change to the tool with the failure attached as a file (what
+ * ran it, the operation, the error, its input and last log lines) and one line in the box. The
+ * owner can open the file, drop it, edit the line; nothing goes until Send.
  */
 const fixText = (f) => {
   const label = actorLabel(f.caller);
   const who = /^widget:/.test(f.caller ?? "") ? "A widget" : /^schedule:/.test(f.caller ?? "") ? "A schedule" : /^(user|web|ui:)/.test(f.caller ?? "user") ? "I" : label && label !== f.caller ? label : "An agent";
   const input = f.input && f.input !== "{}" ? `\n\nInput: ${f.input}` : "";
   const logs = f.logs?.length ? `\n\nLast log lines:\n${f.logs.join("\n")}` : "";
-  return `${who} ran ${f.operation} and it failed:\n${f.error}${input}${logs}\n\nFix it so this works.`;
+  return `${who} ran ${f.operation} and it failed:\n${f.error}${input}${logs}`;
 };
-const askFix = (c, f) => openChange(c, { m: fixText(f) });
+const askFix = (c, f) => {
+  // The box picks it up (once) from here: too long for the address.
+  sessionStorage.setItem(`hewn.fix.${c.id}`, JSON.stringify({ name: `${String(f.operation).split("@")[0]} failed.txt`, text: fixText(f) }));
+  openChange(c, { m: "Fix it so this works.", fix: "1" });
+};
 /** The newest recorded failure that matches (Hewn keeps the last ten per tool), else what's known here. */
 const askFixLatest = async (c, match, fallback) => askFix(c, (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find(match) ?? fallback);
 const fixButton = (onclick, cls = "sm") => h("button", { class: cls, type: "button", onclick }, "Ask builder to fix this");
@@ -140,10 +144,10 @@ async function instructionsSheet(c) {
 /** What the intake remembered (or dropped) for later builds, shown as saved, with Undo. */
 function memoryNotice(what, { scope, text }, cap) {
   const tool = scope === "tool" ? cap : null;
-  const where = tool ? `${tool.name}'s builder instructions` : "global builder instructions";
   const path = tool ? `/capabilities/${enc(tool.id)}/instructions` : "/instructions";
-  const undo = h("button", { type: "button", class: "link sm" }, "Undo");
-  const el = h("div", { class: "notice info memory-notice" }, h("div", { class: "grow col" }, h("span", { class: "strong" }, what === "remember" ? `Saved to ${where}` : `Removed from ${where}`), h("span", { class: "memory-text" }, text)), undo);
+  const undo = h("button", { type: "button", class: "sm ghost" }, "Undo");
+  // V2: one line, "Saved as a rule: always Swedish copy", with Undo.
+  const el = h("div", { class: "notice ok memory-notice" }, h("span", { class: "grow memory-text" }, what === "remember" ? `Saved as a rule${tool ? ` for ${tool.name}` : ""}: ` : `Removed the rule${tool ? ` for ${tool.name}` : ""}: `, text), undo);
   undo.addEventListener("click", async () => {
     undo.disabled = true;
     try {
@@ -245,16 +249,24 @@ async function iconDialog(c) {
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
   file.addEventListener("change", () => touched.add("icon"));
   const status = h("p", { class: "small error" });
-  const preview = h("span", { class: "icon-preview" });
+  // V3: the icon at the sizes it's seen at (Info, a row, a cap-ref), drawn as you go.
+  const previews = [64, 28, 20].map(() => h("span", { class: "icon-preview" }));
+  const litCount = h("span", {});
+  const satLabel = h("span", {});
   const rows = () => grid.map((r) => r.map((on) => (on ? "#" : ".")).join(""));
 
-  const drawPreview = () => {
-    const tile = h("span", { class: "app-icon", style: { "--size": "48px", "--hue": hue, "--s": saturation / 100 } });
+  const tileAt = (size) => {
+    const tile = h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue, "--s": saturation / 100 } });
     // The default without a builder's glyph is the monogram.
-    if (mode === "glyph" && defaulted && !touched.has("icon") && !grid.flat().some(Boolean)) tile.append(appIcon({ name: c.name }, { size: 48 }).firstChild);
+    if (mode === "glyph" && defaulted && !touched.has("icon") && !grid.flat().some(Boolean)) tile.append(appIcon({ name: c.name }, { size }).firstChild);
     else if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
-    else tile.append(appIcon({ ...c, hue, saturation }, { size: 48 }).firstChild ?? "");
-    put(preview, tile);
+    else tile.append(appIcon({ ...c, hue, saturation }, { size }).firstChild ?? "");
+    return tile;
+  };
+  const drawPreview = () => {
+    [64, 28, 20].forEach((size, i) => put(previews[i], tileAt(size)));
+    litCount.textContent = `${grid.flat().filter(Boolean).length} lit`;
+    satLabel.textContent = `Saturation · ${saturation}%`;
   };
   const cellButtons = grid.map((r, y) =>
     r.map((_, x) => {
@@ -270,11 +282,11 @@ async function iconDialog(c) {
   const satInput = h("input", { type: "range", min: 0, max: 150, step: 5, value: saturation, class: "hue-range", "aria-label": "Saturation" });
   satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), touched.add("saturation"), drawPreview()));
   const panes = {
-    glyph: h("div", { class: "stack-sm" }, editor, h("span", { class: "small faint" }, "7–17 lit cells, one simple idea.")),
+    glyph: h("div", { class: "stack-sm icon-draw" }, editor, h("span", { class: "small faint" }, litCount, " · 7–17 cells, one simple idea.")),
     image: h("label", { class: "field" }, h("span", { class: "label" }, "Image"), file, h("span", { class: "hint" }, "PNG, JPEG, WebP or SVG, up to 256 KB")),
   };
   const body = h("div", {});
-  const seg = h("div", { class: "segmented self-start", role: "group", "aria-label": "Icon type" });
+  const seg = h("div", { class: "segmented self-center", role: "group", "aria-label": "Icon type" });
   const show = () => {
     put(seg, ...[["glyph", "Draw"], ["image", "Image"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(k === mode), onclick: () => ((mode = k), touched.add("icon"), show()) }, l)));
     put(body, panes[mode]);
@@ -330,12 +342,13 @@ async function iconDialog(c) {
     };
     show();
     return [
-      sheetHead(preview, `Icon for ${c.name}`),
+      h("div", { class: "row sheet-head icon-head" }, previews[0], h("div", { class: "grow sheet-title" }, `Icon for ${c.name}`), previews[1], previews[2]),
       seg,
       body,
-      h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), hueInput),
+      // Both sliders the same width: the colour's sits in the same frame, without a mark.
+      h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), h("span", { class: "range-mark no-mark" }, hueInput)),
       // The mark under the slider: where the default (100%) is.
-      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), h("span", { class: "range-mark", style: { "--at": 100 / 150 }, "data-mark": "100%" }, satInput)),
+      h("label", { class: "field" }, h("span", { class: "label" }, satLabel), h("span", { class: "range-mark", style: { "--at": 100 / 150 }, "data-mark": "100%" }, satInput)),
       status,
       h(
         "div",
@@ -344,5 +357,5 @@ async function iconDialog(c) {
         h("span", { class: "row tight" }, h("button", { onclick: () => close() }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")),
       ),
     ];
-  }, { width: 440 });
+  }, { width: 480 });
 }
