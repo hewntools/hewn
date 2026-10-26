@@ -705,6 +705,21 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/capabilities/site-connection/grants/approve", { method: "POST", body: { grant: "host:elsewhere.example" } })).status, 400);
     });
 
+    test("Deny from the web: the owner's no is kept, and the Inbox stops asking", async () => {
+      await installFrom(platform, resolve(FIX, "run-feeder"));
+      const asks = async () => (await api("/inbox")).json.needs.some((n: any) => n.kind === "grant" && n.capabilityId === "run-feeder");
+      assert.ok(await asks());
+      const { pendingGrants } = (await api("/capabilities/run-feeder")).json.status;
+      for (const grant of pendingGrants) assert.deepEqual((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant } })).json, { declined: true });
+      const st = (await api("/capabilities/run-feeder")).json.status;
+      assert.equal(st.ready, false);
+      assert.deepEqual(st.declinedGrants, pendingGrants);
+      assert.equal(await asks(), false);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "run-feeder").saidNo, true, "Home doesn't badge it");
+      assert.equal((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant: "host:elsewhere.example" } })).status, 400);
+      assert.equal((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant: pendingGrants[0] }, cookie: "" })).status, 401, "owner only");
+    });
+
     test("the Inbox: what needs the owner in one list, what builds, and recent Activity on request", async () => {
       const r = (await api("/inbox")).json;
       assert.ok(Array.isArray(r.needs) && Array.isArray(r.building));

@@ -66,7 +66,7 @@ Use it (as the owner; talks to the running Hewn)
   config <id> [NAME value]
                       show a tool's config (non-secret settings like a site URL), or set one
   secrets list|set|import|rm <id> [NAME] [--from <path>]
-  grants [id]         show requested / approved authority; grants approve <id> [grant]
+  grants [id]         show requested / approved authority; grants approve <id> [grant]; grants deny <id> <grant>
   schedules [id]      list schedules; schedules add <id> <op> "<cadence>" [json input] | pause|resume|rm <schedule>
   logs <id> [-f] [-n N]
                       a tool's call log
@@ -865,7 +865,7 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     for (const i of items) {
       const secret = i.kind === "secret" ? i.grant.slice(7) : null;
       const value = secret ? (st.missingSecrets.includes(secret) ? " (value missing)" : " (value set)") : "";
-      console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : "  [not authorized]"}`);
+      console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : st.declinedGrants?.includes(i.grant) ? "  [you said no]" : "  [not authorized]"}`);
     }
     for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? "(not set)"}  ${x.description}`);
     for (const d of st.missingDependencies) console.log(`  ✖ depends on ${d}, which no longer exists`);
@@ -893,6 +893,11 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
 
   if (command === "grants") {
     if (pos[0] === "approve") return approve(pos[1] ?? "", pos[2]);
+    if (pos[0] === "deny") {
+      if (!pos[2]) throw new Error("usage: hewn grants deny <id> <grant>   (the grant as hewn grants <id> shows it, e.g. host:api.example.com)");
+      await c.call("declineGrant", pos[1], pos[2]);
+      return console.log(`✔ said no to ${pos[2]}: nothing asks for it again until a new version (hewn grants approve ${pos[1]} ${pos[2]} allows it)`);
+    }
     for (const x of pos[0] ? [{ id: pos[0] }] : caps) await show(x.id);
     return;
   }

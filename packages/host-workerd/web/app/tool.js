@@ -377,7 +377,7 @@ function runForm(id, cap, op) {
     }
   };
   return [
-    !cap.status.ready && h("div", { class: "notice" }, h("span", { class: "grow" }, cap.status.missingModel && !cap.status.pendingGrants.length ? "Needs a model." : "Needs your authorization."), h("button", { class: "sm", onclick: () => grantsSheet(id).then((ok) => ok && route()) }, "Review")),
+    !cap.status.ready && h("div", { class: "notice" }, h("span", { class: "grow" }, cap.status.missingModel && !cap.status.pendingGrants.length ? "Needs a model." : cap.status.pendingGrants.length && cap.status.declinedGrants?.length === cap.status.pendingGrants.length ? "You said no to what it asks for, so it can't run." : "Needs your authorization."), h("button", { class: "sm", onclick: () => grantsSheet(id).then((ok) => ok && route()) }, "Review")),
     h("form", { class: "card run-form", onsubmit: run }, h("div", { class: "muted small" }, op.description), fields.length ? h("div", { class: "fields" }, fields.map(([, f]) => f.el)) : null, h("div", { class: "actions flush" }, runBtn)),
     result,
   ];

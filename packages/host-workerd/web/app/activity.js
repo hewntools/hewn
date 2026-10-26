@@ -120,6 +120,7 @@ function activityRow(g, all, showCap) {
     const grant = g.grant.startsWith("capability:") ? [capRef(all.get(g.grant.slice(11).split("/")[0]), g.grant.slice(11).split("/")[0])] : [g.grant.replace(/^host:/, "").replace(/^secret:/, "")];
     if (g.outcome === "approve") (dot = "ok"), (text = on(`${who} authorized`, ...grant, ref && ["for", ref]));
     else if (g.outcome === "revoke") text = on("Revoked", ...grant, ref && ["for", ref]);
+    else if (g.outcome === "decline") text = on(`${who} said no to`, ...grant, ref && ["for", ref]);
     else (dot = "warn"), (text = on("Asked for access", ref && ["for", ref]));
   }
   const href = g.kind === "build" ? `#/b/${g.buildId}` : null;

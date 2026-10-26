@@ -219,6 +219,7 @@ export class Platform {
   approveGrants(owner: Agent, capabilityId: string): string[] { return this.d.grants.approveGrants(owner, capabilityId); }
   approveGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.approveGrant(owner, capabilityId, grant); }
   revokeGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.revokeGrant(owner, capabilityId, grant); }
+  declineGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.declineGrant(owner, capabilityId, grant); }
   deleteSecret(owner: Agent, capabilityId: string, name: string) { return this.d.grants.deleteSecret(owner, capabilityId, name); }
   agents(owner: Agent): AgentDetails[] { return this.d.grants.agents(owner); }
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[] } | "revoke") { return this.d.grants.updateAgent(owner, id, change); }

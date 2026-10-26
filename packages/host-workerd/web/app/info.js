@@ -42,7 +42,9 @@ function statusPills(c, cap, all) {
         ? h("a", { class: "pill danger with-dot", href: `#/b/${enc(c.lastBuild.buildId)}` }, "build failed")
         : cap.status.ready
           ? h("span", { class: "pill ok with-dot" }, "ready")
-          : h("span", { class: "pill warn with-dot" }, "needs you"),
+          : c.saidNo
+            ? h("span", { class: "pill with-dot" }, "you said no")
+            : h("span", { class: "pill warn with-dot" }, "needs you"),
     latest && h("span", { class: "pill" }, `v${c.version ?? latest.version}`),
     latest && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
     latest && h("span", { class: "pill" }, ago(latest.createdAt)),
@@ -52,8 +54,6 @@ function statusPills(c, cap, all) {
 /** One section of Info: a card with its title (and an action on the right), then the thing itself. */
 const section = (title, body, { action, order } = {}) => h("section", { class: "card info-section", style: { order } }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, title), action), body);
 
-/** A pending grant the owner left out with Deny: kept out of the notices for this version (in this browser). */
-const deniedKey = (id, grant) => `hewn.denied.${id}.${grant}`;
 
 async function infoPage(id) {
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("50%", "30%", "90%", "70%")));
@@ -87,14 +87,15 @@ async function infoPage(id) {
   const missingSecrets = new Set(cap.status.missingSecrets ?? []);
   const pending = items.filter((i) => !i.approved || (i.kind === "secret" && missingSecrets.has(i.grant.slice(7))) || (i.kind === "model" && needsKey));
   const oneTap = (i) => !i.approved && (i.kind === "host" || i.kind === "capability" || (i.kind === "model" && !needsKey));
-  const denied = (i) => localStorage.getItem(deniedKey(id, i.grant)) === String(version);
+  // What the owner said no to (Deny) for this version: it stays unapproved, and nothing asks for it again.
+  const declined = new Set(cap.status.declinedGrants ?? []);
+  const denied = (i) => declined.has(i.grant);
   const missingConfig = config.filter((x) => x.value === null);
 
   const refresh = () => (invalidateCaps(), route());
   const authorize = async (i) => {
     try {
       await api(`/capabilities/${enc(id)}/grants/approve`, { method: "POST", body: { grant: i.grant } });
-      localStorage.removeItem(deniedKey(id, i.grant));
       invalidateCaps();
       const now = await api(`/capabilities/${enc(id)}`);
       toast(now.status.ready ? `${cap.name} is ready` : "Authorized");
@@ -103,7 +104,9 @@ async function infoPage(id) {
       fail(e);
     }
   };
-  const deny = (i) => (localStorage.setItem(deniedKey(id, i.grant), String(version)), toast("Left out. It stays under Allowed to."), route());
+  const deny = (i) =>
+    api(`/capabilities/${enc(id)}/grants/decline`, { method: "POST", body: { grant: i.grant } }).then(() => (toast("Said no. It won't ask again for this version."), refresh()), fail);
+  const withoutIt = (list) => openChange(c, { m: `Make it work without ${list.map((i) => `being allowed to ${i.label}`).join(", or ")}. I said no to ${list.length > 1 ? "those" : "that"}.` });
   const giveWhatItNeeds = () => grantsSheet(id).then(refresh);
 
   const name = h("span", {}, cap.name);
@@ -119,6 +122,12 @@ async function infoPage(id) {
     const n = shownPending.length + missingConfig.length;
     notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, `Needs ${plural(n, "thing")} from you before it can run`), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Give it what it needs")));
   }
+  // What the owner said no to: the tool can't run without it, so the way on is allowing it or a change that works without it.
+  const saidNo = pending.filter(denied);
+  if (saidNo.length === 1)
+    notices.push(h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `You said no to letting it ${saidNo[0].label}. It won't run until you allow it or it changes.`), h("button", { class: "sm", onclick: () => withoutIt(saidNo) }, "Ask builder to work without it"), h("button", { class: "sm primary", onclick: () => authorize(saidNo[0]) }, "Authorize")));
+  else if (saidNo.length > 1)
+    notices.push(h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `You said no to ${plural(saidNo.length, "thing")} it asks for. It won't run until you allow them or it changes.`), h("button", { class: "sm", onclick: () => withoutIt(saidNo) }, "Ask builder to work without them")));
   if (c.lastBuild?.status === "failed" && !c.building)
     notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
   if (cap.status.retiredModel) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `${cap.status.retiredModel.model} is no longer available.`), h("button", { class: "sm primary", onclick: () => toolModelSheet(c, { replace: true }).then((ok) => ok || route()) }, "Replace…")));
@@ -154,7 +163,7 @@ async function infoPage(id) {
     else if (isPending) actions = h("button", { class: "sm primary", onclick: giveWhatItNeeds }, i.kind === "secret" ? "Set…" : "Authorize…");
     else if (i.kind === "secret") actions = h("button", { class: "sm ghost", onclick: (e) => replaceSecret(i, e.currentTarget) }, "Replace");
     else actions = h("button", { class: "sm ghost", onclick: () => revoke(i) }, "Revoke");
-    const sub = isPending ? (denied(i) ? "Left out" : "Asked for, not allowed yet") : i.kind === "capability" ? i.grant.split("/").at(-1).split("@")[0] : i.kind === "secret" ? i.description : null;
+    const sub = isPending ? (denied(i) ? "You said no" : "Asked for, not allowed yet") : i.kind === "capability" ? i.grant.split("/").at(-1).split("@")[0] : i.kind === "secret" ? i.description : null;
     return h("li", {}, isPending && !denied(i) && h("span", { class: "dot warn" }), kindPill(i), h("div", { class: "grow" }, grantText(i, all), sub && h("span", { class: "sub" }, sub)), actions);
   };
   const revoke = async (i) => {

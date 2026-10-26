@@ -233,6 +233,38 @@ describe("capability ↔ capability interop", () => {
     assert.deepEqual(t.platform.authorization("run-feeder").requests, [], "cleared on approval");
   });
 
+  test("the owner can say no (Deny): it stays not ready, nothing asks again for that version, agents are told; Authorize still allows it", async () => {
+    await build(feederManifest, { ts: FEEDER_TS }, feederCases);
+    const [write, read] = ["capability:running-log/record_run@1", "capability:running-log/list_runs@1"];
+    t.platform.requestAccess(t.codex, "run-feeder", "Needed to sync runs");
+    assert.throws(() => t.platform.declineGrant(t.codex, "run-feeder", write), code("forbidden"));
+    assert.throws(() => t.platform.declineGrant(USER, "run-feeder", "host:example.com"), code("invalid_request"));
+    t.platform.declineGrant(USER, "run-feeder", write);
+    assert.equal(t.platform.readiness("run-feeder").ready, false);
+    assert.deepEqual(t.platform.readiness("run-feeder").declinedGrants, [write]);
+    assert.equal(t.platform.authorization("run-feeder").requests.length, 1, "one grant is still undecided: the agent's request stands");
+    t.platform.declineGrant(USER, "run-feeder", read);
+    const st = t.platform.readiness("run-feeder");
+    assert.deepEqual(st.declinedGrants, [write, read]);
+    assert.match(st.userAction!, /owner said no to .*Don't request access again/);
+    assert.deepEqual(t.platform.authorization("run-feeder").requests, [], "answered");
+    assert.throws(() => t.platform.requestAccess(t.codex, "run-feeder", "please"), code("forbidden"));
+    await assert.rejects(t.platform.invoke(t.codex, { capabilityId: "run-feeder", operation: "feed", input: { runs: [] } }), code("not_ready"));
+    assert.ok(t.platform.registry.grantEvents().some((e) => e.action === "decline" && e.grant === write && e.actor === USER.id));
+    // A new version asks again.
+    const v2 = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "run-feeder", request: "say what it is" }),
+      (ws) => editJson(join(ws, "capability.json"), (m) => (m.purpose = "Test: feeds runs into Running Log, v2.")),
+    );
+    assert.equal(v2.status, "promoted", v2.log.join("\n"));
+    assert.equal(t.platform.readiness("run-feeder").declinedGrants, undefined);
+    // Authorize after a no: allowed, and a later revoke doesn't bring the old no back.
+    t.platform.declineGrant(USER, "run-feeder", write);
+    t.platform.approveGrant(USER, "run-feeder", write);
+    t.platform.revokeGrant(USER, "run-feeder", write);
+    assert.equal(t.platform.readiness("run-feeder").declinedGrants, undefined);
+  });
+
   test("a capability cannot call itself", async () => {
     const r = await build({ ...feederManifest, requires: { capabilities: [{ id: "run-feeder", operations: ["feed@1"] }] } }, { ts: FEEDER_TS }, feederCases);
     assert.equal(r.status, "failed");

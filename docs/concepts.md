@@ -52,7 +52,7 @@ Tools are isolated by default: no network, no keys, no model. A tool reaches out
 - **other tools' operations:** e.g. a Weekly Review reading `running-log/list_runs@1`
 - **a model:** at a tier you choose
 
-A tool is **not ready** until you've granted what it needs. You can revoke any grant at any time.
+A tool is **not ready** until you've granted what it needs. You can revoke any grant at any time. **Deny** says no to one: the tool stays not ready, and nothing asks for it again (Home, the Inbox, agents' requests) until its next version. Then it runs only if you **Authorize** it after all, or a change makes it work without it (**Ask builder to work without it**). From the terminal: `hewn grants deny <id> <grant>`.
 
 ## Connections
 

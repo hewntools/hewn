@@ -9,7 +9,7 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import { ABI } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
-import type { Platform } from "@hewntools/core/platform.ts";
+import type { Platform, Readiness } from "@hewntools/core/platform.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
@@ -372,6 +372,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
           return { approved: [String(grant)] };
         }
         if (arg === "revoke") return platform.revokeGrant(owner, id, String((await readJson(req)).grant ?? ""));
+        if (arg === "decline") return (platform.declineGrant(owner, id, String((await readJson(req)).grant ?? "")), { declined: true });
     }
   }
 
@@ -704,6 +705,8 @@ async function capabilityList(platform: Platform, owner: Agent) {
       ui: !!m.ui?.available,
       version: row?.activeVersion ?? null,
       requests: platform.registry.accessRequests(c.id).length,
+      // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
+      saidNo: !c.ready && saidNoOnly(platform.readiness(c.id)),
       lastBuild: last ? { buildId: last.id, status: last.status } : null,
       building: building(c.id),
     });
@@ -777,6 +780,10 @@ const usdText = (n: number) => `$${n >= 10 ? Math.round(n) : n.toFixed(2).replac
  * Everything that waits for the owner, in one list (the Inbox's "Needs you"), what's building,
  * and (with `recent`) the last few Activity rows. Each "needs" row opens its own sheet.
  */
+/** Whether the only thing between a tool and running is what the owner said no to (Deny). */
+const saidNoOnly = (st: Readiness) =>
+  !!st.declinedGrants?.length && st.declinedGrants.length === st.pendingGrants.length && !st.missingConfig.length && !st.missingSecrets.length && !st.missingDependencies.length && !st.missingModel && !st.unsupportedAbi;
+
 async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent: boolean) {
   const needs: InboxItem[] = [];
   const caps = platform.list(owner);
@@ -810,8 +817,10 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
     const connection = m.kind === "connection";
-    if (st.pendingGrants.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
-      const first = platform.authorization(c.id).items.find((i) => !i.approved);
+    // What the owner said no to (Deny) isn't asked again.
+    const asking = st.pendingGrants.filter((g) => !st.declinedGrants?.includes(g));
+    if (asking.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
+      const first = platform.authorization(c.id).items.find((i) => !i.approved && asking.includes(i.grant));
       const words = !first
         ? connection ? "needs setting up" : "needs your authorization"
         : first.kind === "capability"

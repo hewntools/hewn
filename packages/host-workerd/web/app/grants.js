@@ -112,8 +112,9 @@ async function grantsSheet(capId) {
 
   const secrets = new Map();
   const config = new Map();
-  /** Grant → its switch, for pending host and capability grants (the owner may leave some out). */
+  /** Grant → its switch, for pending host and capability grants (the owner may leave some out: that's saying no). */
   const picks = new Map();
+  const declined = new Set(cap.status.declinedGrants ?? []);
   let tier = modelReq?.tier ?? null;
   let keyOk = !needsKey;
   let check = () => {};
@@ -134,6 +135,7 @@ async function grantsSheet(capId) {
           const modelGrant = items.find((i) => i.kind === "model")?.grant;
           if (!left.length && !otherTier) await api(`/capabilities/${id}/grants/approve`, { method: "POST" });
           else for (const i of pending) if (!i.approved && !left.includes(i.grant) && !(otherTier && i.grant === modelGrant)) await api(`/capabilities/${id}/grants/approve`, { method: "POST", body: { grant: i.grant } });
+          for (const g of left) if (!declined.has(g)) await api(`/capabilities/${id}/grants/decline`, { method: "POST", body: { grant: g } });
           if (otherTier) {
             await api(`/capabilities/${id}/model`, { method: "POST", body: { tier } });
             toast(`${c.name} will use the ${tier} tier`);
@@ -169,7 +171,7 @@ async function grantsSheet(capId) {
         }
         let sw = null;
         if (!secretName && !i.approved) {
-          sw = h("input", { type: "checkbox", class: "switch", checked: true, "aria-label": "Allow" });
+          sw = h("input", { type: "checkbox", class: "switch", checked: !declined.has(i.grant), "aria-label": "Allow" });
           picks.set(i.grant, sw);
         }
         return {

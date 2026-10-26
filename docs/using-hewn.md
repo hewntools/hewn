@@ -50,7 +50,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 
 **Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
 - **Operations:** each with **Run**, which opens it as a form and shows the result
-- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for, **Revoke** what it has, and move it to another model tier from the menu on the model's row, with what it spent this month ([Models](models.md))
+- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for (a no is kept until its next version; it can't run without it, so Info offers **Ask builder to work without it**), **Revoke** what it has, and move it to another model tier from the menu on the model's row, with what it spent this month ([Models](models.md))
 - **Data:** how many rows it keeps, when it last wrote, and **Export**
 - **Schedules:** a switch each, and **+ Add schedule**
 - **Widgets:** the widgets themselves, and **Add to Home**
