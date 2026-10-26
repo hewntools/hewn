@@ -136,15 +136,23 @@ export function loadTables(db: AbiDb, tables: Record<string, Record<string, unkn
 }
 
 /** Every user table as JSON rows (BLOBs as base64). */
+/** A state's own tables (not SQLite's, the host's or the migrations record), by name. */
+const userTables = (db: AbiDb) => db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != '_hewn_migrations' ORDER BY name").all().map((r) => String(r.name));
+const quoted = (name: string) => `"${name.replace(/"/g, '""')}"`;
+
 export function dumpTables(db: AbiDb): Record<string, Record<string, unknown>[]> {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != '_hewn_migrations' ORDER BY name").all();
   const out: Record<string, Record<string, unknown>[]> = {};
-  for (const { name } of tables) {
-    out[name] = db.prepare(`SELECT * FROM "${String(name).replace(/"/g, '""')}"`).all().map((row) =>
+  for (const name of userTables(db)) {
+    out[name] = db.prepare(`SELECT * FROM ${quoted(name)}`).all().map((row) =>
       Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v instanceof Uint8Array || v instanceof ArrayBuffer ? { base64: b64(new Uint8Array(v as ArrayBuffer)) } : v])),
     );
   }
   return out;
+}
+
+/** Rows per user table (Info › Data): counts only, no rows leave the state. */
+export function countTables(db: AbiDb): Record<string, number> {
+  return Object.fromEntries(userTables(db).map((name) => [name, Number(db.prepare(`SELECT COUNT(*) AS n FROM ${quoted(name)}`).get()?.n ?? 0)]));
 }
 
 function b64(b: Uint8Array) {

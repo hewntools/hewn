@@ -76,6 +76,12 @@ describe("trust on the workerd host", () => {
     assert.ok(!("_hewn_migrations" in out.data));
   });
 
+  test("data summary: rows counted in the capability's Durable Object", async () => {
+    const out = await h.sv.admin("data", { capabilityId: "running-log" });
+    assert.equal(out.tables.runs, (await h.invoke("running-log", "list_runs")).result.runs.length);
+    assert.ok(!("_hewn_migrations" in out.tables));
+  });
+
   test("schedules: a Durable Object alarm runs a due schedule as schedule:<id>", async () => {
     const before = (await h.invoke("running-log", "list_runs")).result.runs.length;
     const s = await h.sv.admin("schedules", { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 2, durationSeconds: 600 }, cadence: "daily 06:00" });

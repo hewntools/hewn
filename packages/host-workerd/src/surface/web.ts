@@ -325,6 +325,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST purge":
         await platform.purge(owner, id, String((await readJson(req)).confirm ?? ""));
         return { ok: true };
+      // Info › Data: rows per table and the last write.
+      case "GET data":
+        return platform.dataSummary(owner, id);
       case "GET export": {
         const data = await platform.exportData(owner, id);
         return new Response(JSON.stringify(data, null, 2), {

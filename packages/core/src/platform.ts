@@ -205,6 +205,7 @@ export class Platform {
   rollback(owner: Agent, capabilityId: string, version?: number): Promise<{ from: number; to: number }> { return this.d.data.rollback(owner, capabilityId, version); }
   purge(owner: Agent, capabilityId: string, confirm: string) { return this.d.data.purge(owner, capabilityId, confirm); }
   exportData(owner: Agent, capabilityId: string): Promise<{ capability: string; version: number; exportedAt: string; source: "operation" | "state"; data: unknown }> { return this.d.data.exportData(owner, capabilityId); }
+  dataSummary(owner: Agent, capabilityId: string): Promise<{ tables: Record<string, number>; rows: number; lastWriteAt: string | null }> { return this.d.data.dataSummary(owner, capabilityId); }
   importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> { return this.d.data.importData(owner, capabilityId, tables); }
   archived(owner: Agent): { id: string; name: string; archivedAt: string }[] { return this.d.data.archived(owner); }
   restore(owner: Agent, capabilityId: string) { return this.d.data.restore(owner, capabilityId); }

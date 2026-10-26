@@ -108,6 +108,28 @@ export class Data extends Domain {
   }
 
   /**
+   * Info › Data: rows per table (counted, not read) and when an operation last wrote, from the
+   * call log (so "unknown" once the log has been pruned past it).
+   */
+  async dataSummary(owner: Agent, capabilityId: string): Promise<{ tables: Record<string, number>; rows: number; lastWriteAt: string | null }> {
+    requireOwner(owner);
+    const cap = this.visibleActive(owner, capabilityId);
+    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
+    const tables = await this.runtime.countState({ capabilityId }, active.code);
+    const writes = new Set(active.row.manifest.operations.filter((o) => o.sideEffect !== "read").flatMap((o) => [o.name, opKey(o.name, o.version)]));
+    let lastWriteAt: string | null = null;
+    for (const header of this.registry.capabilityLogHeaders(capabilityId, 500)) {
+      // The caller may hold spaces ("agent:x → tool"), so read from the end: "… <op> ok <ms>ms".
+      const m = /^(\S+) .* (\S+) ok \d+ms$/.exec(header);
+      if (m && writes.has(m[2])) {
+        lastWriteAt = m[1];
+        break;
+      }
+    }
+    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt };
+  }
+
+  /**
    * Load exported data into a capability's live state (owner only): the inverse of exportData's
    * state dump. Its tables must exist (migrations applied) and be empty.
    */
