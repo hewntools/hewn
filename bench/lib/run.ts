@@ -8,8 +8,8 @@ import { join, resolve } from "node:path";
 import { USER } from "@hewntools/core/auth.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
-import { ARMS, briefFor, CRITIQUE_REQUEST, othersNote, runOrder, type Arm } from "./arms.ts";
-import { DESKTOP, launchBrowser, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
+import { ARMS, briefFor, craftRequest, CRITIQUE_REQUEST, othersNote, runOrder, type Arm } from "./arms.ts";
+import { DESKTOP, launchBrowser, layoutDefects, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
 import { builderUsage, uiMetrics, type BuilderUsage, type UiMetrics } from "./metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle, type BenchPlatform } from "./platform.ts";
@@ -31,6 +31,8 @@ export interface Job {
   from?: string;
   /** Results whose tools count as the owner's other tools (a sequential arm's earlier cases). */
   others?: string[];
+  /** With `from`: a craft pass (fix measured defects, no redesign) instead of a critique. */
+  craft?: boolean;
   sandbox: boolean;
 }
 
@@ -52,6 +54,8 @@ export interface Result {
   /** CSS px the phone layout sticks out sideways. */
   overflowMobile?: number;
   clicks?: ClickResult;
+  /** A craft pass: the defects measured on the tool before it. */
+  defectsBefore?: string[];
   /** An arm that builds and then critiques in one result: the first version, before the review. */
   first?: { ui?: UiMetrics; pageErrors?: Record<string, string[]>; overflowMobile?: number };
   startedAt: string;
@@ -139,7 +143,7 @@ export async function runBench(o: RunOptions): Promise<string> {
         const from = arm.from ? resultDir(arm.from, c.id, rep) : undefined;
         const others = arm.sequential ? cases.slice(0, i).map((e) => resultDir(arm.name, e.id, rep)) : undefined;
         const after = [...(from ? [from] : []), ...(others?.length ? [others.at(-1)!] : [])];
-        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, from, ...(others ? { others } : {}), sandbox: o.sandbox } });
+        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, ...(arm.craft ? { craft: true } : {}), from, ...(others ? { others } : {}), sandbox: o.sandbox } });
       });
   const todo = planned.filter((p) => readResult(p.dir)?.status !== "done");
   log(`${planned.length} results, ${planned.length - todo.length} already done; running ${todo.length}, ${o.concurrency} at a time → ${runDir}`);
@@ -250,7 +254,17 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
     if (job.from) {
       const base = readResult(job.from)!;
       result.capabilityId = base.capabilityId;
-      if (job.critique) {
+      if (job.craft) {
+        // What's broken, measured on the tool as it is (the base's state and files), then fixed.
+        const defects = await measureDefects(bp, base.capabilityId!, join(job.from, "version"));
+        result.defectsBefore = defects;
+        log(`defects: ${defects.length ? defects.join(" | ") : "none measured"}`);
+        for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
+          if (existsSync(join(job.from, "shots", `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(job.from, "shots", `${f}.png`);
+        }
+        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: craftRequest(defects) });
+        build = await settle(bp.platform, started.buildId);
+      } else if (job.critique) {
         // The builder gets its own UI, with the data, as the owner sees it.
         for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
           if (existsSync(join(job.from, "shots", `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(job.from, "shots", `${f}.png`);
@@ -258,7 +272,7 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
         const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: CRITIQUE_REQUEST + othersNote(otherTools(job.others)) });
         build = await settle(bp.platform, started.buildId);
       } else {
-        throw new Error(`arm ${job.arm} starts from ${job.from} but does nothing to it`);
+        throw new Error(`arm ${job.arm} starts from ${job.from} but does nothing to it (critique or craft)`);
       }
     } else {
       const started = await bp.platform.create(USER, { name: c.name, purpose: c.purpose, requirements: c.requirements + othersNote(otherTools(job.others)) });
@@ -351,6 +365,30 @@ async function withPage<T>(s: Served, fn: (page: Page, url: string) => Promise<T
     await browser.close();
     await server.close();
   }
+}
+
+/** The defects a craft pass gets told about: what sticks out or is cut short on the phone, cut-short text on desktop, page errors. */
+async function measureDefects(bp: BenchPlatform, capabilityId: string, versionDir: string): Promise<string[]> {
+  const s = served(bp.platform, capabilityId, versionDir);
+  const server = await startUiServer((k) => (k === "r" ? s : undefined));
+  const browser = await launchBrowser();
+  const out: string[] = [];
+  try {
+    for (const v of [PHONE, DESKTOP]) {
+      const page = await browser.page(v);
+      await page.goto(server.url("r", capabilityId));
+      const d = await layoutDefects(page, v.width);
+      const where = v === PHONE ? "on the phone (390 px)" : "on desktop (1280 px)";
+      for (const x of d.sticksOut) out.push(`Sticks out ${where}: ${x}`);
+      for (const x of d.cutShort) out.push(`Text cut short ${where}: ${x}`);
+      for (const e of new Set(page.errors)) out.push(`Page error ${where}: ${e}`);
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+  return out.slice(0, 30);
 }
 
 /** Screenshots of the seeded UI: desktop and phone, light and dark, with the errors each showed. */

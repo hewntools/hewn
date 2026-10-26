@@ -182,6 +182,46 @@ export const overflowX = (page: Page, screenWidth?: number) =>
     return Math.round(worst);
   })()`);
 
+/**
+ * What a builder should fix on this screen, measured: elements that stick out past the screen's
+ * right edge (outermost ones, with how far), and text cut short (an ellipsis or clipped text).
+ */
+export const layoutDefects = (page: Page, screenWidth: number) =>
+  page.eval<{ sticksOut: string[]; cutShort: string[] }>(`(() => {
+    const vw = ${screenWidth};
+    const name = (el) => el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (typeof el.className === "string" && el.className.trim() ? "." + el.className.trim().split(/\\s+/).slice(0, 2).join(".") : "");
+    const text = (el) => (el.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 50);
+    const contained = (el) => {
+      for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+        const o = getComputedStyle(a).overflowX;
+        if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") return true;
+      }
+      return false;
+    };
+    const out = [];
+    const flagged = new Set();
+    for (const el of document.body.querySelectorAll("*")) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1 || getComputedStyle(el).position === "fixed") continue;
+      const px = Math.round(r.right - vw);
+      if (px <= 1 || contained(el)) continue;
+      let a = el.parentElement, inside = false;
+      for (; a; a = a.parentElement) if (flagged.has(a)) { inside = true; break; }
+      if (inside) continue;
+      flagged.add(el);
+      out.push(name(el) + (text(el) ? ' ("' + text(el) + '")' : "") + ": " + px + "px past the edge, " + Math.round(r.width) + "px wide");
+    }
+    const cut = [];
+    for (const el of document.body.querySelectorAll("*")) {
+      if (cut.length >= 10) break;
+      const st = getComputedStyle(el);
+      if (el.children.length || !text(el)) continue;
+      const clipped = el.scrollWidth > el.clientWidth + 1 && (st.textOverflow === "ellipsis" || st.overflow === "hidden" || st.overflowX === "hidden");
+      if (clipped) cut.push('"' + text(el) + '" (' + name(el) + ")");
+    }
+    return { sticksOut: out.slice(0, 10), cutShort: cut };
+  })()`);
+
 /** What the bench clicks: visible, enabled controls that don't delete, archive or reset anything. */
 const CLICKABLES = `(() => {
   const risky = /delete|remove|clear|reset|archive|discard|erase|sign out|log out/i;

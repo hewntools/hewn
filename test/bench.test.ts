@@ -9,7 +9,7 @@ import { describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
 import { ARMS, briefFor, othersNote, replaceSection, runOrder } from "../bench/lib/arms.ts";
-import { DESKTOP, PHONE, clickThrough, launchBrowser, overflowX } from "../bench/lib/browser.ts";
+import { DESKTOP, PHONE, clickThrough, launchBrowser, layoutDefects, overflowX } from "../bench/lib/browser.ts";
 import { idOf, loadCases, seedKit } from "../bench/lib/cases.ts";
 import { parseJson, total } from "../bench/lib/judge.ts";
 import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
@@ -249,6 +249,10 @@ describe("bench runs", () => {
       writeFileSync(page, readFileSync(page, "utf8").replace("</main>", `<div style="width: 600px; height: 20px">wide</div></main><style>body { overflow-x: hidden }</style>`));
       await phone.goto(url);
       assert.ok((await overflowX(phone, PHONE.width)) >= 200, "clipped overflow not caught");
+      // What the craft pass is told: the outermost thing that sticks out, and how far.
+      const defects = await layoutDefects(phone, PHONE.width);
+      assert.equal(defects.sticksOut.length, 1, JSON.stringify(defects));
+      assert.match(defects.sticksOut[0], /\("wide"\): 2\d\dpx past the edge, 600px wide/);
     } finally {
       await b.close();
       await server.close();

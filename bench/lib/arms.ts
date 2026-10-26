@@ -29,6 +29,11 @@ export interface Arm {
    * their ui/look.json), as an owner's Home fills up over time.
    */
   sequential?: boolean;
+  /**
+   * With `from`: a craft pass on that arm's tool: fresh screenshots plus the defects the bench
+   * measures (what sticks out on a phone, text cut short, page errors), fixed without a redesign.
+   */
+  craft?: boolean;
 }
 
 const ARMS_DIR = join(import.meta.dirname, "..", "arms");
@@ -95,6 +100,12 @@ export const ARMS: Arm[] = [
     sequential: true,
   },
   {
+    name: "character+critique+craft",
+    about: "character+critique, then a craft pass: fresh screenshots and the measured defects (cut off on the phone, text cut short), fixed without a redesign.",
+    from: "character+critique",
+    craft: true,
+  },
+  {
     name: "character+critique",
     about: "character, then the design-review pass (told the other tools' looks too).",
     from: "character",
@@ -102,6 +113,16 @@ export const ARMS: Arm[] = [
     sequential: true,
   },
 ];
+
+/** What the craft pass asks for: the screen made right, not redesigned. */
+export function craftRequest(defects: string[]): string {
+  return [
+    "Craft pass. The screenshots in screenshots/ show this tool's UI as it is now, filled with real data (desktop light, desktop dark, phone light, phone dark, the phone 390 px wide). Open every one of them.",
+    defects.length ? `Measured on this UI:\n${defects.map((d) => `- ${d}`).join("\n")}` : "Nothing was measured as broken, but look closely anyway.",
+    "Fix what's broken, cramped or cut off, on the phone first: anything that sticks out past the screen or gets clipped, elements that overlap or cover each other, labels cut short where the cut hides what they mean, text wrapping one word per line, collisions in charts and axes, low contrast, misalignment, and empty gaps that look like mistakes. Check the result against every screenshot's size, and keep it working from 375 px up.",
+    "Don't redesign: keep the concept, palette, type and layout direction, and every feature. Change only ui/ (keep ui/look.json true). The screenshots/ folder is removed after this pass; don't link to it.",
+  ].join("\n\n");
+}
 
 /** What a build is told about the owner's other tools (the arm's earlier results): name, hue, look. */
 export function othersNote(tools: { name: string; hue?: number; saturation?: number; look?: unknown }[]): string {
