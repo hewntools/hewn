@@ -9,7 +9,7 @@ import { builderPrompt } from "./cli.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 import { readTree, writeTree } from "../workbench.ts";
 import { hewnDocs } from "../assets.ts";
-import { intakeImages, intakePrompt, parseIntake, partialReply, SCHEMA } from "../intake.ts";
+import { intakeImages, intakePrompt, parseIntake, partialReply, schemaFor } from "../intake.ts";
 import type { Intake } from "../intake.ts";
 import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
 import type { HostGenerateResult, HostModels } from "@hewntools/core/models.ts";
@@ -175,7 +175,7 @@ export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
     await stream(
       r,
       "v1/intake",
-      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true, docs: await hewnDocs() }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(images.length ? { attachments: images } : {}) },
+      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true, docs: req.mode === "summarize" ? [] : await hewnDocs() }), schema: schemaFor(req), ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(images.length ? { attachments: images } : {}) },
       (e) => {
         if (typeof e.text === "string") {
           text += e.text;

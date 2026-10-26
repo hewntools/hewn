@@ -80,9 +80,10 @@ function prettyJson(path, text) {
 
 /**
  * The browser itself, for a source ({ label, list, file }): Changes when there's a version before
- * and something changed, else Source.
+ * and something changed, else Source. `at`: open this file at this line (a finding's "Show"),
+ * highlighted, in Source.
  */
-function codeBrowser(src) {
+function codeBrowser(src, { at } = {}) {
   const side = h("nav", { class: "side-list code-files", "aria-label": "Files" }, skeleton("80%", "60%", "70%"));
   const path = h("span", { class: "mono small grow clip-1" });
   const toggle = h("span", {});
@@ -126,6 +127,11 @@ function codeBrowser(src) {
       put(jsonToggle, laidOut && segmented([["pretty", "Pretty"], ["raw", "As written"]], pretty ? "pretty" : "raw", (k) => ((pretty = k === "pretty"), open(p)), { label: "JSON" }));
       put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text));
       body.scrollTop = 0;
+      if (at?.line && p === at.path && mode === "source") {
+        const line = body.querySelectorAll(".code-line")[at.line - 1];
+        line?.classList.add("hl");
+        line?.scrollIntoView({ block: "center" });
+      }
     } catch (e) {
       if (current !== p) return;
       put(body, h("div", { class: "code-empty" }, e.message || String(e)));
@@ -144,10 +150,10 @@ function codeBrowser(src) {
     try {
       data = await src.list();
       if (data.base && data.files.some((f) => f.status !== "same")) {
-        mode = "changes";
+        if (!at) mode = "changes";
         put(toggle, segmented([["changes", "Changes"], ["source", "Source"]], mode, setMode, { label: "Show" }));
       }
-      const first = shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
+      const first = (at && shown().find((f) => f.path === at.path)) ?? shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
       if (first) await open(first.path);
       else put(side, h("div", { class: "eyebrow" }, "No files"));
     } catch (e) {

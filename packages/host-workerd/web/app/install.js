@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // R1–R4, R7 Install: one sheet for a file (and, as they arrive, a link and the Hub); only the
-// "From …" line changes. R1 choose the file; R3 the sheet: what it does, its flags, Source code,
-// what it will ask for (a preview: grants still happen after install), Name, Start with sample
-// data; R4 the build page; R7 one reason and one way forward when it can't be installed.
-import { api, appIcon, commandBlock, enc, fail, h, hueOf, kindTag, modal, pixelGlyph, satOf, sheetActions, sheetHead } from "../kit.js";
-import { go, settings } from "./frame.js";
+// "From …" line changes. R1 choose the file; R2 your builder reads the code first (the sheet fills
+// in with what it found); R3 the sheet: what it does, its flags, Source code, what it will ask for
+// (a preview: grants still happen after install), Name, Start with sample data; R4 the build
+// page; R7 one reason and one way forward when it can't be installed.
+import { api, appIcon, builderLabel, commandBlock, enc, fail, h, hueOf, kindTag, modal, pixelGlyph, satOf, sheetActions, sheetHead } from "../kit.js";
+import { go, put, settings } from "./frame.js";
 import { codeBrowser } from "./files.js";
 import { titleCase } from "./models.js";
 
@@ -48,7 +49,66 @@ async function installFromFile() {
   } catch (e) {
     return refusal(e);
   }
-  return installSheet(preview, { from: `From a file · ${file.name}` });
+  return readThenInstall(preview, { from: `From a file · ${file.name}` });
+}
+
+/**
+ * Files and links get read by your builder before the sheet (R2); a tool whose summary ships with
+ * it (Hub, the shelf) goes straight to the sheet, where Check it yourself reads it again.
+ */
+async function readThenInstall(p, { from }) {
+  if (p.summary) return installSheet(p, { from });
+  const read = await readingSheet(p, { from });
+  if (read === null) return void api(`/bundles/${enc(p.token)}`, { method: "DELETE" }).catch(() => {});
+  return installSheet(read === "anyway" ? p : read, { from });
+}
+
+/** Who reads it: the builder you chose (hosted: implied, so unnamed). */
+const reader = () => (settings?.intake && settings.intake !== "remote" ? builderLabel(settings.intake) : null);
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+/** The head every install sheet shares: the tile, "Install X", and where it's from. */
+const installHead = (p, from) => h("div", { class: "row sheet-head" }, bundleTile(p), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Install ${p.name}`), h("div", { class: "small faint" }, `${from} · v${p.version}`)));
+
+/**
+ * R2: reading the code (typing dots), then the result in the same sheet: what it does, and what it
+ * found (warnings first, each with Show: the code at that line). Resolves the preview with the
+ * summary (Continue), "anyway" (Install anyway: no summary) or null (Cancel).
+ */
+function readingSheet(p, { from }) {
+  return modal(
+    (close) => {
+      const body = h("div", { class: "stack-md" });
+      const actions = h("div", { class: "actions flush between" });
+      const who = reader();
+      put(body, h("div", { class: "thread" }, h("div", { class: "bubble them typing" }, h("i"), h("i"), h("i"))), h("div", { class: "small muted" }, `${who ? `${who} is reading` : "Reading"} the code to say what it does with your data. Usually under a minute.`));
+      put(actions, h("button", { class: "ghost", onclick: () => close("anyway") }, "Install anyway"), h("button", { onclick: () => close(null) }, "Cancel"));
+      const source = () => h("button", { class: "link self-start install-source", onclick: () => sourceSheet(p).catch(fail) }, "Source code ›");
+      api(`/bundles/${enc(p.token)}/summary`, { method: "POST" })
+        .then((r) => {
+          const row = (f) =>
+            h(
+              "li",
+              {},
+              h("span", { class: `dot ${f.kind === "warn" ? "warn" : "ok"}` }),
+              h("div", { class: "grow" }, h("span", {}, f.title), (f.detail || f.file) && h("span", { class: "sub" }, f.detail, f.detail && f.file && " · ", f.file && h("span", { class: "mono" }, `${f.file}${f.line ? `:${f.line}` : ""}`))),
+              f.file && h("button", { class: "ghost sm", onclick: () => sourceSheet(p, { path: f.file, line: f.line }).catch(fail) }, "Show"),
+            );
+          put(
+            body,
+            h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), h("span", { class: "small faint" }, `${r.by && r.by !== "remote" ? `Read by ${builderLabel(r.by)}` : "Read"} · ${mmss(r.seconds)}`)), h("div", { class: "pretty" }, r.summary.message)),
+            r.summary.findings.length > 0 && h("div", {}, h("div", { class: "eyebrow share-eyebrow" }, "What it found"), h("ul", { class: "list" }, r.summary.findings.map(row))),
+            source(),
+          );
+          put(actions, h("span", {}), h("span", { class: "row tight" }, h("button", { onclick: () => close(null) }, "Cancel"), h("button", { class: "primary", onclick: () => close({ ...p, summary: r.summary, summaryBy: "yours" }) }, "Continue")));
+        })
+        .catch((e) => {
+          put(body, h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, /no builder/i.test(e.message) ? "No summary: no builder set up." : `No summary: ${e.message}`)), source());
+        });
+      return [installHead(p, from), body, actions];
+    },
+    { width: 520 },
+  );
 }
 
 /** R7: why it can't be installed, and the one way forward. */
@@ -78,10 +138,10 @@ function asksRows(a) {
   return rows.length ? rows : [h("li", {}, h("span", { class: "dot ok" }), h("span", { class: "grow muted" }, "Nothing outside itself"))];
 }
 
-/** Its code, before it's installed: the code browser on the staged file. */
-async function sourceSheet(p) {
+/** Its code, before it's installed: the code browser on the staged file (`at`: a file and line to show). */
+async function sourceSheet(p, at) {
   // The sheet opens with its first file in (a moment at most), not a skeleton that then grows.
-  const browser = codeBrowser({ label: `v${p.version}`, list: () => api(`/bundles/${enc(p.token)}/code`), file: (path) => api(`/bundles/${enc(p.token)}/code?path=${enc(path)}`) });
+  const browser = codeBrowser({ label: `v${p.version}`, list: () => api(`/bundles/${enc(p.token)}/code`), file: (path) => api(`/bundles/${enc(p.token)}/code?path=${enc(path)}`) }, { at });
   await Promise.race([browser.ready, new Promise((r) => setTimeout(r, 800))]);
   return modal(
     (close) => [
@@ -96,6 +156,7 @@ async function sourceSheet(p) {
 /** R3 the install sheet. `from`: the line under the title ("From a file · plant-log.hewn.zip"). */
 function installSheet(p, { from }) {
   let installed = false;
+  let checking = false;
   return modal(
     (close) => {
       const name = h("input", { type: "text", value: p.suggestedName, "aria-label": "Name", maxLength: 60 });
@@ -117,9 +178,11 @@ function installSheet(p, { from }) {
         }
       });
       const flags = (p.summary?.findings ?? []).filter((f) => f.kind === "warn");
+      // Hewn's own reading ships with an Official tool; Check it yourself has your builder read it too.
+      const check = p.summaryBy === "hewn" && h("button", { class: "link sm", onclick: () => ((checking = true), close()) }, "Check it yourself");
       return [
-        h("div", { class: "row sheet-head" }, bundleTile(p), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Install ${p.name}`), h("div", { class: "small faint" }, `${from} · v${p.version}`))),
-        h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, "What it does"), h("div", { class: "pretty" }, p.summary?.message ?? p.description ?? p.purpose)),
+        installHead(p, from),
+        h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), check), h("div", { class: "pretty" }, p.summary?.message ?? p.description ?? p.purpose)),
         flags.map((f) => h("div", { class: "notice warn" }, h("span", { class: "grow" }, f.title, f.file && h("span", { class: "mono faint" }, ` · ${f.file}${f.line ? `:${f.line}` : ""}`)))),
         h("button", { class: "link self-start install-source", onclick: () => sourceSheet(p).catch(fail) }, "Source code ›"),
         h("div", {}, h("div", { class: "eyebrow share-eyebrow" }, "It will ask for"), h("ul", { class: "list" }, asksRows(p.asks))),
@@ -130,9 +193,14 @@ function installSheet(p, { from }) {
       ];
     },
     { width: 520 },
-  ).then(() => {
+  ).then(async () => {
+    if (checking) {
+      const read = await readingSheet(p, { from });
+      if (read && read !== "anyway") return installSheet(read, { from });
+      if (read === "anyway") return installSheet(p, { from });
+    } else if (installed) return;
     // Cancelled: the staged file goes (it would anyway, after a day).
-    if (!installed) api(`/bundles/${enc(p.token)}`, { method: "DELETE" }).catch(() => {});
+    api(`/bundles/${enc(p.token)}`, { method: "DELETE" }).catch(() => {});
   });
 }
 

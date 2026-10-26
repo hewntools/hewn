@@ -463,6 +463,7 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .tk-type { color: var(--code-type); }
 .tk-prop, .tk-attr { color: var(--code-prop); }
 .tk-tag { color: var(--code-tag); }
+.code-line.hl { background: oklch(from var(--warn) l c h / 0.22); }
 @media (max-width: 760px) { .code-browser { flex-direction: column; } .code-browser > .side-list { width: 100%; } }
 
 /* Composer card: the prominent "Change it" input (eyebrow, borderless input, primary action). */

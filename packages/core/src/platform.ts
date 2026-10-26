@@ -22,6 +22,7 @@ import { Connections, type ConnectionHealth } from "./platform/connections.ts";
 import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
+import type { BundleSummary } from "./bundle.ts";
 import { type BundlePreview, Sharing, type ShareCheck } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport } from "./platform/builds.ts";
 import { Validation } from "./platform/validation.ts";
@@ -230,6 +231,8 @@ export class Platform {
   bundleCode(owner: Agent, token: string) { return this.d.sharing.bundleCode(owner, token); }
   bundleFile(owner: Agent, token: string, path: string) { return this.d.sharing.bundleFile(owner, token, path); }
   dropStaged(owner: Agent, token: string) { return this.d.sharing.dropStaged(owner, token); }
+  summaryInput(owner: Agent, token: string) { return this.d.sharing.summaryInput(owner, token); }
+  keepSummary(owner: Agent, token: string, summary: BundleSummary) { return this.d.sharing.keepSummary(owner, token, summary); }
   installBundle(owner: Agent, token: string, req: { name: string; sample?: boolean }): Promise<BuildView> { return this.d.sharing.installBundle(owner, token, req); }
   setSample(owner: Agent, capabilityId: string, json: string): Promise<BuildView> { return this.d.sharing.setSample(owner, capabilityId, json); }
 
@@ -346,7 +349,7 @@ export class Platform {
   activeBuilds(): { buildId: string; capabilityId: string; kind: BuildKind; name: string; purpose: string; connection: boolean; state: BuildStepState }[] { return this.d.builds.activeBuilds(); }
   create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> { return this.d.builds.create(agent, req); }
   agentModelChoices(builder?: string): string[] { return this.d.builds.agentModelChoices(builder); }
-  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean }): Promise<BuildView> { return this.d.builds.install(owner, req); }
+  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean; summary?: BundleSummary }): Promise<BuildView> { return this.d.builds.install(owner, req); }
   modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.modify(agent, req); }
   addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.addWidgets(agent, req); }
   changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] { return this.d.builds.changesComing(agent, capabilityId); }
