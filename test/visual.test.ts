@@ -68,6 +68,7 @@ describe("visual validation", () => {
     assert.deepEqual(seen, ['{"result":{"count":0}}', '{"result":{"count":3}}']);
     assert.equal(screenshot(done.buildId).toString(), "png 2", "the filled one");
     assert.ok(done.log.some((l) => /empty and with its sample data/.test(l)));
+    assert.equal(done.screenshot, true, "the build page shows it");
     assert.deepEqual((await platform.invoke(USER, { capabilityId: "ui-counter", operation: "get", input: {} })).result, { count: 0 }, "the check's state isn't the tool's");
     // A screen that breaks only with data fails the build too.
     let n = 0;
@@ -170,7 +171,8 @@ describe("visual validation: widgets", () => {
     const done = await build(platform);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.equal(seen[0].view.value, 4, "the sample's four taps, not the test case's one");
-    assert.ok(done.log.some((l) => /widgets render in every size \(screenshot with the sample data\)/.test(l)));
+    assert.ok(done.log.some((l) => /widgets render in every size \(screenshot attached, with the sample data\)/.test(l)));
+    assert.equal(done.screenshot, true, "the build page shows it");
     platform.close();
   });
 

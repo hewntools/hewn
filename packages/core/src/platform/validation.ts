@@ -188,7 +188,8 @@ export class Validation extends Domain {
           const v = filled && !filled.skipped ? filled : empty;
           await keep(v);
           if (filled?.errors.length) fail("UI didn't render cleanly with its sample data", filled.errors);
-          step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot with the sample data)" : "UI renders without errors (screenshot attached)");
+          // "(screenshot attached" is what tells the build page there's one to show.
+          step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
       }
@@ -211,7 +212,7 @@ export class Validation extends Domain {
           if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
           if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
           if (v.errors.length) fail("widgets didn't render cleanly", v.errors);
-          step(`widgets render in every size (screenshot ${sampled.size ? "with the sample data" : "attached"})`);
+          step(`widgets render in every size (screenshot attached${sampled.size ? ", with the sample data" : ""})`);
         }
       }
 
