@@ -444,6 +444,18 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .code-line.add { background: oklch(from var(--ok) l c h / 0.18); }
 .code-line.del { background: oklch(from var(--danger) l c h / 0.18); }
 .code-line.hunk { display: block; padding: 0 12px; background: oklch(from var(--info) l c h / 0.16); color: oklch(from var(--info) 0.8 c h); }
+.code-line .mark { color: oklch(from var(--log-text) l c h / 0.6); }
+.code-body[aria-busy="true"] { opacity: .55; transition: opacity .12s var(--ease); }
+/* Syntax colours, for the code browser's dark ground (the same in both themes) */
+.code-body { color: oklch(0.88 0.01 260); }
+.tk-com { color: oklch(0.62 0.02 260); font-style: italic; }
+.tk-str { color: oklch(0.8 0.13 145); }
+.tk-kw { color: oklch(0.76 0.13 305); }
+.tk-lit, .tk-num { color: oklch(0.8 0.12 60); }
+.tk-fn { color: oklch(0.8 0.1 235); }
+.tk-type { color: oklch(0.82 0.1 190); }
+.tk-prop, .tk-attr { color: oklch(0.82 0.08 215); }
+.tk-tag { color: oklch(0.75 0.13 15); }
 .code-empty { padding: var(--s4); color: oklch(from var(--log-text) l c h / 0.6); font-family: var(--font); }
 @media (max-width: 760px) { .code-browser { flex-direction: column; } .code-browser > .side-list { width: 100%; } }
 .side-list .side-foot { padding: 0 var(--s3); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.45; }

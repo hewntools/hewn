@@ -4,6 +4,7 @@
 // the file, as Changes (a git-style unified diff against the version before) or as Source.
 import { api, enc, h, skeleton } from "../kit.js";
 import { put } from "./frame.js";
+import { highlighter } from "./highlight.js";
 import { segmented } from "./widgets.js";
 
 export { codeBrowser, versionSource };
@@ -17,22 +18,30 @@ const versionSource = (id, version) => ({
 
 const kb = (n) => (n < 1024 ? `${n} B` : `${Math.round(n / 102.4) / 10} KB`);
 
-/** One line of code: its number(s), then the text with its + or − mark. */
-function codeLine(cls, old, now, text) {
-  return h("div", { class: `code-line ${cls}` }, old !== null && h("span", { class: "no" }, old ?? ""), h("span", { class: "no" }, now ?? ""), h("span", { class: "t" }, text));
+/** One line of code: its number(s), then the text (highlighted) after its + or − mark. */
+function codeLine(cls, old, now, mark, text) {
+  return h("div", { class: `code-line ${cls}` }, old !== null && h("span", { class: "no" }, old ?? ""), h("span", { class: "no" }, now ?? ""), h("span", { class: "t" }, mark && h("span", { class: "mark" }, mark), text));
 }
 
 /** Changes: each hunk's @@ header, then its lines with both line numbers. */
-function changesView(file) {
+function changesView(file, path) {
   if (!file.hunks.length) return h("div", { class: "code-empty" }, file.status === "same" ? "No changes in this file." : "Nothing to show.");
-  return file.hunks.map((hk) => [
-    h("div", { class: "code-line hunk" }, h("span", { class: "t" }, `@@ -${hk.oldStart},${hk.oldLines} +${hk.newStart},${hk.newLines} @@`)),
-    hk.lines.map((l) => codeLine(l.type === "+" ? "add" : l.type === "-" ? "del" : "", l.old, l.new, `${l.type === "+" ? "+ " : l.type === "-" ? "− " : "  "}${l.text}`)),
-  ]);
+  const hl = highlighter(path);
+  return file.hunks.map((hk) => {
+    hl.reset();
+    return [
+      h("div", { class: "code-line hunk" }, h("span", { class: "t" }, `@@ -${hk.oldStart},${hk.oldLines} +${hk.newStart},${hk.newLines} @@`)),
+      hk.lines.map((l) => codeLine(l.type === "+" ? "add" : l.type === "-" ? "del" : "", l.old, l.new, l.type === "+" ? "+ " : l.type === "-" ? "− " : "  ", hl.line(l.text))),
+    ];
+  });
 }
 
 /** Source: the file with one gutter. */
-const sourceView = (file) => (file.text === "" ? h("div", { class: "code-empty" }, "An empty file.") : file.text.replace(/\n$/, "").split("\n").map((t, i) => codeLine("", null, i + 1, t)));
+function sourceView(file, path) {
+  if (file.text === "") return h("div", { class: "code-empty" }, "An empty file.");
+  const hl = highlighter(path);
+  return file.text.replace(/\n$/, "").split("\n").map((t, i) => codeLine("", null, i + 1, null, hl.line(t)));
+}
 
 /**
  * The browser itself, for a source ({ label, list, file }). `mode`: "changes" or "source" (default:
@@ -68,16 +77,19 @@ function codeBrowser(src, { mode: wanted } = {}) {
     current = p;
     path.textContent = p;
     drawSide();
-    body.classList.toggle("source", mode === "source");
-    put(body, skeleton("60%", "80%", "40%"));
+    // The file on screen stays (dimmed) until the next one is ready: no blank, no jump.
+    body.setAttribute("aria-busy", "true");
     try {
       const f = await src.file(p);
       if (current !== p) return;
       const meta = data.files.find((x) => x.path === p);
-      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f) : sourceView(f));
+      body.classList.toggle("source", mode === "source");
+      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p));
+      body.scrollTop = 0;
     } catch (e) {
       put(body, h("div", { class: "code-empty" }, e.message || String(e)));
     }
+    if (current === p) body.removeAttribute("aria-busy");
   };
   const setMode = (m) => {
     mode = m;
