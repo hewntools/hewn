@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="../../../../../../packages/ui/src/ui.css">
+<script src="../../_ds/hewn-design-system-83a47d3e-82e4-4631-ba7b-8cb91d8eb560/_ds_bundle.js"></script>
+</helmet>
+<x-import component-from-global-scope="HewnDesignSystem_83a47d.CapRef" dc-props="{{ p }}" style="display:inline-flex;vertical-align:middle" hint-size="120px,24px"></x-import>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:240,&quot;height&quot;:60},&quot;label&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Running Log&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;glyph&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;run&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hue&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:30,&quot;min&quot;:0,&quot;max&quot;:360,&quot;tsType&quot;:&quot;number&quot;},&quot;chip&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;badge&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;warn&quot;,&quot;danger&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const { label, chip, glyph, hue, saturation, size, badge, href } = this.props;
+    const p = { name: label ?? 'Running Log', chip: !!chip, href, glyph: glyph ?? 'run', hue: hue ?? 30, saturation: saturation ?? 100, badge: badge || undefined };
+    if (size != null) p.size = Number(size);
+    return { p };
+  }
+}
+</script>
+</body>
+</html>

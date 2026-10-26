@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:grid;grid-template-columns:{{ gridCols }};gap:16px;align-items:start">
+  <sc-for list="{{ cols }}" as="col" hint-placeholder-count="2">
+    <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+      <sc-for list="{{ col }}" as="s" hint-placeholder-count="3">
+        <div class="card" style="margin:0;padding:6px 20px 10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 2px"><span class="eyebrow">{{ s.title }}</span><sc-if value="{{ s.hasAdd }}" hint-placeholder-val="{{ false }}"><button class="link sm" style="padding:0">{{ s.add }}</button></sc-if></div>
+          <sc-if value="{{ s.isRows }}" hint-placeholder-val="{{ true }}">
+            <ul class="list">
+              <sc-for list="{{ s.rows }}" as="r" hint-placeholder-count="2">
+                <li style="min-height:52px">
+                  <sc-if value="{{ r.hasDot }}" hint-placeholder-val="{{ false }}"><span class="dot {{ r.dot }}"></span></sc-if>
+                  <div class="grow" style="min-width:0">
+                    <span class="{{ r.cls }}" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">{{ r.pre }}<sc-if value="{{ r.hasRef }}" hint-placeholder-val="{{ false }}"><dc-import name="CapRef" label="{{ r.ref }}" glyph="{{ r.refGlyph }}" hue="{{ r.refHue }}" hint-size="100px,20px"></dc-import></sc-if></span>
+                    <sc-if value="{{ r.hasSub }}" hint-placeholder-val="{{ true }}"><span class="sub" style="color:{{ r.subC }}">{{ r.sub }}</span></sc-if>
+                  </div>
+                  <sc-if value="{{ r.isSwitch }}" hint-placeholder-val="{{ false }}"><input type="checkbox" class="switch" checked="{{ true }}"></sc-if>
+                  <sc-if value="{{ r.isSelect }}" hint-placeholder-val="{{ false }}"><select style="width:130px"><option>{{ r.act }}</option></select></sc-if>
+                  <sc-if value="{{ r.isBtn }}" hint-placeholder-val="{{ false }}"><button class="sm {{ r.btnCls }}">{{ r.act }}</button></sc-if>
+                  <sc-if value="{{ r.isBtn2 }}" hint-placeholder-val="{{ false }}"><button class="sm ghost">{{ r.act2 }}</button></sc-if>
+                </li>
+              </sc-for>
+            </ul>
+          </sc-if>
+          <sc-if value="{{ s.isWidgets }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:12px;padding:10px 0 8px">
+              <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start"><div class="jw jw-medium jw-marked" style="width:220px;height:108px"><div class="jw-title">Last run</div><div class="jw-body"><div class="jw-value">10.0<span class="jw-unit">km</span></div><div class="jw-caption">Sat · synced 07:00</div></div></div><span class="small faint">M · on Home</span></div>
+              <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start"><div class="jw jw-small jw-marked" style="width:108px;height:108px"><div class="jw-title">Week</div><div class="jw-body"><div class="jw-value">31.6</div><div class="jw-caption">km</div></div></div><button class="link sm" style="padding:0">Add to Home</button></div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ s.isRule }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:8px;padding:6px 0 8px"><input type="text" placeholder="Add a rule for this tool…" style="flex:1"><button class="sm">Add</button></div></sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1100,&quot;height&quot;:900},&quot;columns&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[1,2],&quot;default&quot;:2,&quot;tsType&quot;:&quot;1|2&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const R = (pre, sub, o = {}) => ({ pre, sub: sub || '', hasSub: !!sub, subC: o.subC || 'var(--text-3)', cls: o.mono ? 'mono' : '', hasRef: !!o.ref, ref: o.ref, refGlyph: o.refGlyph, refHue: o.refHue, hasDot: !!o.dot, dot: o.dot, isSwitch: o.kind === 'switch', isSelect: o.kind === 'select', isBtn: !!o.act && o.kind !== 'select', act: o.act || '', btnCls: o.btnCls || '', isBtn2: !!o.act2, act2: o.act2 || '' });
+    const S = (title, rows, o = {}) => ({ title, rows, isRows: !o.widgets, isWidgets: !!o.widgets, isRule: !!o.rule, add: o.add || '', hasAdd: !!o.add });
+    const ops = S('Operations · 3', [R('sync_runs', 'Pull new runs from Garmin', { mono: 1, act: 'Run' }), R('get_status', 'Last sync, device', { mono: 1, act: 'Run' }), R('list_devices', '', { mono: 1, act: 'Run' })]);
+    const allowed = S('Allowed to', [R('Write to', 'record_run · asked 2 h ago', { ref: 'Running Log', refGlyph: 'run', refHue: 30, dot: 'warn', act: 'Authorize', btnCls: 'primary', act2: 'Deny' }), R('Use', 'Connection', { ref: 'Garmin', refGlyph: 'plug', refHue: 200, act: 'Revoke', btnCls: 'ghost' }), R('Use a model', '$0.42 this month', { kind: 'select', act: 'Strong tier' })]);
+    const data = S('Data', [R('412 rows · 3 tables', 'Last write 5 min ago', { act: 'Export' }), R('Start over', 'Empty it, keep the tool · a backup is kept', { act: 'Start over…', btnCls: 'danger' })]);
+    const sched = S('Schedules', [R('sync_runs', 'Daily 07:00 · next in 3 h', { mono: 1, kind: 'switch' }), R('weekly_digest', 'Paused after 3 failures', { mono: 1, dot: 'danger', subC: 'var(--danger)', act: 'Resume' })], { add: '+ Add schedule' });
+    const widgets = S('Widgets · 2', [], { widgets: 1 });
+    const instr = S('Instructions', [R('Distances in km, never miles', '', { act: 'Remove', btnCls: 'ghost' })], { rule: 1 });
+    const versions = S('Versions', [R('v4 · live', 'Strong model · 2 days ago · Claude Code', { dot: 'ok', act: 'Details', btnCls: 'ghost' }), R('v3', 'Sleep field · Oct 14', { act: 'Details', btnCls: 'ghost' })], { add: 'All 4 versions ›' });
+    const two = Number(this.props.columns ?? 2) === 2;
+    return {
+      gridCols: two ? 'minmax(0,1fr) minmax(0,1fr)' : 'minmax(0,1fr)',
+      cols: two ? [[ops, allowed, data], [sched, widgets, instr, versions]] : [[ops, allowed, sched, widgets, instr, versions, data]],
+    };
+  }
+}
+</script>
+</body>
+</html>

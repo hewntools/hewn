@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:grid;grid-template-columns:repeat(6,124px);grid-auto-rows:116px;grid-auto-flow:row dense;row-gap:28px;align-items:center;filter:{{ filter }}">
+  <sc-for list="{{ items }}" as="it" hint-placeholder-count="12">
+    <sc-if value="{{ it.isIcon }}" hint-placeholder-val="{{ true }}">
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:10px;animation:{{ it.anim }}">
+        <dc-import name="AppIcon" glyph="{{ it.glyph }}" hue="{{ it.hue }}" size="80" badge="{{ it.badge }}" progress="{{ it.progress }}" hint-size="80px,80px"></dc-import>
+        <span class="small" style="text-align:center;max-width:112px;color:{{ it.labelColor }}">{{ it.label }}</span>
+        <sc-if value="{{ edit }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:-6px;left:14px;width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-size:13px;background:var(--surface-overlay);border:1px solid var(--border-strong);box-shadow:var(--shadow);display:{{ it.xD }}">×</span></sc-if>
+      </div>
+    </sc-if>
+    <sc-if value="{{ it.isWidget }}" hint-placeholder-val="{{ false }}">
+      <div style="position:relative;grid-column:span {{ it.cols }};grid-row:span {{ it.rows }};height:{{ it.h }};margin:0 6px;display:flex;animation:{{ it.anim }}">
+        <div class="jw {{ it.cls }}" style="flex:1;opacity:{{ it.op }}">
+          <div class="jw-title">{{ it.title }}</div>
+          <div class="jw-body">
+            <div class="jw-value {{ it.valueCls }}">{{ it.value }}<span class="jw-unit">{{ it.unit }}</span></div>
+            <div class="jw-caption">{{ it.caption }}</div>
+          </div>
+          <sc-if value="{{ it.hasButtons }}" hint-placeholder-val="{{ false }}"><div class="jw-buttons"><sc-for list="{{ it.buttons }}" as="b" hint-placeholder-count="3"><button class="jw-button">{{ b }}</button></sc-for></div></sc-if>
+          <span style="position:absolute;top:10px;right:10px;display:flex;line-height:0"><dc-import name="AppIcon" glyph="{{ it.glyph }}" hue="{{ it.hue }}" size="20" hint-size="20px,20px" style="display:flex"></dc-import></span>
+        </div>
+        <sc-if value="{{ it.stale }}" hint-placeholder-val="{{ false }}"><span class="small" style="position:absolute;bottom:10px;right:16px;display:inline-flex;align-items:center;gap:6px;color:var(--warn)"><span class="dot warn"></span>2 h ago</span></sc-if>
+        <sc-if value="{{ edit }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:-8px;left:-8px;width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-size:13px;background:var(--surface-overlay);border:1px solid var(--border-strong);box-shadow:var(--shadow)">×</span></sc-if>
+        <sc-if value="{{ edit }}" hint-placeholder-val="{{ false }}"><span class="pill" style="position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);background:var(--surface-overlay);border:1px solid var(--border-strong)">{{ it.sizeLabel }}</span></sc-if>
+      </div>
+    </sc-if>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:800,&quot;height&quot;:560},&quot;edit&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;blur&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;badges&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;building&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const edit = !!this.props.edit, badges = this.props.badges !== false;
+    const I = (label, glyph, hue, o = {}) => ({ isIcon: true, isWidget: false, label: o.building ? o.building : label, glyph, hue, badge: badges ? (o.badge || '') : '', progress: o.progress ?? null, labelColor: o.building ? 'var(--text-2)' : 'var(--text)', xD: glyph === 'plus' ? 'none' : 'grid' });
+    const W = (size, title, glyph, hue, value, o = {}) => ({ isIcon: false, isWidget: true, title, glyph, hue, value, unit: o.unit || '', caption: o.caption || '', buttons: o.buttons || [], hasButtons: !!o.buttons,
+      cols: size === 's' ? 1 : 2, rows: size === 'l' ? 2 : 1, h: size === 'l' ? '100%' : '116px', cls: `jw-${size === 's' ? 'small' : size === 'm' ? 'medium' : 'large'} jw-marked`, valueCls: o.sm ? 'jw-value-sm' : '',
+      stale: !!o.stale, op: o.stale ? 0.85 : 1, sizeLabel: size === 's' ? 'S' : size === 'm' ? 'M' : 'L' });
+    const items = [
+      I('Running Log', 'run', 30), I('Reading List', 'read', 250, { building: this.props.building === false ? null : 'Testing 4/6', progress: this.props.building === false ? null : 0.6 }),
+      W('m', 'Steps today', 'heart', 350, '8 214', { caption: 'Goal 10 000 · 82%' }),
+      I('Garmin Training', 'heart', 350, { badge: 'warn' }), I('Weekly Review', 'week', 150, { badge: 'danger' }),
+      W('l', 'Next word', 'words', 200, 'lucid', { sm: 1, caption: 'adj. · easy to understand; clear', buttons: ['Again', 'Good', 'Easy'] }),
+      I('Secret Echo', 'lock', 290), I('Coffee Log', 'cup', 55),
+      W('s', 'Brews', 'cup', 55, '4', { caption: 'this week', stale: true }),
+      I('Word List', 'words', 200), I('Todo', 'check', 160), I('New', 'plus', 260),
+    ].map((it, i) => ({ ...it, anim: edit ? `hw .34s ${(-((i * 0.09) % 0.34)).toFixed(2)}s ease-in-out infinite alternate` : 'none' }));
+    return { items, edit, filter: this.props.blur ? 'blur(3px)' : 'none' };
+  }
+}
+</script>
+</body>
+</html>
