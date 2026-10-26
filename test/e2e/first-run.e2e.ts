@@ -168,23 +168,22 @@ try {
     await page.screenshot({ path: "/tmp/e2e-fr-home.png" });
   });
 
-  await step("schedules: Info › Schedules, add one daily, see the next run, pause it", async () => {
+  await step("schedules: Info › Not set up › Schedules, add one daily, see the next run, pause it", async () => {
     await page.goto(`${web}/#/c/reading-list`);
-    await page.locator(".info-row", { hasText: "Schedules" }).click();
-    const sheet = page.locator("dialog[open]", { hasText: "Schedules · Reading List" });
-    await sheet.getByText("Nothing runs on a timetable.").waitFor();
+    await page.locator(".info-missing").getByRole("button", { name: "Schedules" }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "New schedule · Reading List" });
     // A read operation (list…/get…) needs no input; others may require some.
     const ops = await sheet.getByLabel("Operation", { exact: true }).locator("option").evaluateAll((els: HTMLOptionElement[]) => els.map((e) => e.value));
     const op = ops.find((o: string) => /^(list|get)/.test(o)) ?? ops[0];
     await sheet.getByLabel("Operation", { exact: true }).selectOption(op!);
     await sheet.getByLabel("At", { exact: true }).fill("07:30");
     await sheet.getByRole("button", { name: "Add schedule" }).click();
-    const row = sheet.locator("li", { hasText: op });
+    // Info shows it in its Schedules section, a switch per schedule.
+    const row = page.locator(".info-section", { hasText: "Schedules" }).locator("li", { hasText: op });
     await row.getByText(/Daily 07:30 · next /).waitFor();
     await row.getByRole("checkbox", { name: "On" }).uncheck();
     await row.getByText(/paused/).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-schedules.png" });
-    await sheet.getByRole("button", { name: "Done" }).click();
   });
 
   await step("an agent's destructive call waits for the owner, who allows it once", async () => {

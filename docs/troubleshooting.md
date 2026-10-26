@@ -143,7 +143,7 @@ Hewn lists what `opencode models` lists: the providers you're signed in to (`ope
 
 **Deleted a tool by mistake:** Settings › Data › Deleted tools → Restore (data included), or `hewn restore <id>`.
 
-**A new version broke something:** **Versions** in the tool's menu → Restore on the one before, or `hewn rollback <id>`.
+**A new version broke something:** **Versions** in the tool's menu → **Details** on the one before → **Restore**, or `hewn rollback <id>`.
 
 ## Reporting
 

@@ -2,6 +2,17 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.9 (unreleased)
+
+- **Info is one page you act on.** Each part of a tool is a section with its actions right there: **Operations** with **Run**; **Allowed to** with **Authorize** and **Deny** for what it asks, **Revoke** for what it has, and the model as a tier menu with this month's spend; **Data** with how many rows it keeps, when it last wrote, and **Export**; **Schedules** with a switch each and **+ Add schedule**; the **Widgets** themselves with **Add to Home**; **Instructions** with **Remove** and a line to add one; the last two **Versions**. What needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits above **Change it** with its one button. Sections with nothing in them yet fold into one line at the bottom, each a link that adds one. Two columns in a wide window. A connection's page uses the same sections.
+- **Versions are pages.** **All versions** lists them; a version's page has its conversation, spec and builder's log as tabs, with **Continue from here** and **Restore** at the top. **Versions** in a tool's menu opens the list (it was a dialog).
+- **Ask builder to fix this attaches what failed as a file** you can open or drop, and puts one line in the box, "Fix it so this works.", instead of the whole failure as text. Nothing is sent until you press Send.
+- **Got what you asked for?** is a quiet strip at the foot of the tool instead of a toast.
+- **The box:** attached files and images are 64px tiles with their name and ×, and open when clicked; **Draft now** is a link; the model menu says who builds and on what ("Claude Code · Fable · high"); a rule the intake saved is one line, "Saved as a rule: …", with Undo.
+- **Set icon** shows the icon at the three sizes it's seen at, centres the 5×5 grid with a count of lit cells, and gives Colour and Saturation the same width.
+- A change waiting for the one before it says so the same way in the change panel, the Inbox and Activity: "waiting for the change before it".
+- For hosts: `GET /api/capabilities/:id/data` (owner only) gives a tool's rows per table, counted without reading them, and its last write; the runtime port gains `countState`.
+
 ## 0.4.8 (2026-10-24)
 
 - **Changes to one tool take turns.** A second change asked for while one builds (by you or an agent) waits for it, then starts from the version it leaves, whether that one went live or failed. It used to run alongside and fail at the end with "capability changed since this build started", after a full build. The build page and Activity say "Waiting for the change before it"; for agents, the build has `queued: true`. An agent's change waiting for your approval doesn't hold the next one up. The box and agents see the changes on their way (for agents, `changesComing` in `capabilities_get`), so the next one builds on them. Deleting a widget or changing a tool's model, which make a version at once, wait until a change on its way is done.

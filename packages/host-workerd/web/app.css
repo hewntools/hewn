@@ -167,6 +167,7 @@ body.app-mode #app { height: 100vh; }
 .info-rule { padding: 6px 0 4px; }
 .info-rule > input { flex: 1; min-width: 0; }
 .info-rule-hint { padding-bottom: 6px; }
+.info-rule-hint a { white-space: nowrap; }
 .info-used-by { padding: 6px 0 10px; }
 .info-missing:empty { display: none; }
 .info-missing button.link { padding: 0; }

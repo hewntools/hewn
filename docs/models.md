@@ -44,7 +44,7 @@ A tool asks for a **tier**, not a model, so you can change providers without reb
 | Strong | harder reasoning |
 | Max | the most capable |
 
-Settings › AI › Models shows which model each tier uses on your provider, and its price. A tool's own **Model** row (Info) lets you move it to another tier.
+Settings › AI › Models shows which model each tier uses on your provider, and its price. On a tool's Info, **Allowed to** has its model as a tier menu, with what it spent this month; **Pin a model, set a cap…** at the bottom of that menu sets one model or the tool's own monthly cap.
 
 ## Spending
 

@@ -31,7 +31,7 @@ What you ask for goes live right after the checks. A change an agent asks for th
 
 Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes.
 
-When you next open the tool, a note at the bottom asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
+When you next open the tool, a quiet strip at its foot asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
 
 The build page keeps what led to the build: **Spec agreed** opens the spec the builder works from, and **Conversation** what you and the intake said. Both stay with the version it made, along with the builder's log, for the tool's life.
 
@@ -53,9 +53,9 @@ Some changes need no builder: picking another model tier, for example, is a new 
 
 ## Instructions
 
-Standing rules for how your tools are built, which the builder reads on every build: for every tool ("Swedish copy in every screen", "never a delete button without Undo") or for one tool ("keep it to a single screen"). Tell the intake a rule while you talk a request through and it remembers it: the chat shows **Saved to global builder instructions** (or to the tool's) with the rule as it was written down, and **Undo** if that's not what you meant. Withdraw a rule the same way.
+Standing rules for how your tools are built, which the builder reads on every build: for every tool ("Swedish copy in every screen", "never a delete button without Undo") or for one tool ("keep it to a single screen"). Tell the intake a rule while you talk a request through and it remembers it: the chat shows **Saved as a rule:** (or **Saved as a rule for** the tool) with the rule as it was written down, and **Undo** if that's not what you meant. Withdraw a rule the same way.
 
-They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool. Each build records the instructions it ran with, next to its conversation and spec.
+They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool, where **Remove** takes one out and the line under them adds one. Each build records the instructions it ran with, next to its conversation and spec.
 
 ## When a build fails
 
@@ -69,9 +69,9 @@ If the builder itself can't work (signed out, out of usage), Hewn stops instead 
 
 ## Versions
 
-Every change is a new version. Your data stays and moves forward with each one. **Versions** (Info, or the tool's menu) lists them; **Restore** makes an earlier one active again, with the data kept. Restoring is refused if a newer version changed the data in a way the older code can't read.
+Every change is a new version. Your data stays and moves forward with each one. Info shows the last two; **All versions** (or **Versions** in the tool's menu) lists every one. **Details** opens a version; **Restore** there makes it active again, with the data kept. Restoring is refused if a newer version changed the data in a way the older code can't read.
 
-Under each version is what led to it: the conversation with the intake, the spec and the builder's log. **Continue from here** opens a change with that conversation on top, so you pick up where you left off instead of explaining the tool again; opening **Change…** on a tool offers the same ("Continue from the last conversation?").
+A version's page shows what led to it: the conversation with the intake, the spec and the builder's log, one tab each. **Continue from here** opens a change with that conversation on top, so you pick up where you left off instead of explaining the tool again; opening **Change…** on a tool offers the same ("Continue from the last conversation?").
 
 Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@2` next to the old one, so agents and other tools that use `@1` keep working.
 
