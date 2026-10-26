@@ -38,10 +38,10 @@ describe("ABI versions", () => {
   });
 
   test("source and the hub fields need 2.5", () => {
-    const source = { id: "plant-log", name: "Plant Log", version: 7, hash: "a".repeat(64), from: "file" };
+    const source = { id: "plant-log", name: "Plant Log", version: 7, hash: "a".repeat(64), from: "file" as const };
     assert.match(validateManifest(manifest({ abi: "2.4", source }), "x").join(), /"source" needs ABI 2\.5/);
     assert.deepEqual(validateManifest(manifest({ abi: "2.5", source }), "x"), []);
-    assert.notDeepEqual(validateManifest(manifest({ abi: "2.5", source: { ...source, from: "somewhere" } }), "x"), []);
+    assert.notDeepEqual(validateManifest(manifest({ abi: "2.5", source: { ...source, from: "somewhere" as "file" } }), "x"), []);
     const requires = { capabilities: [{ id: "sky-log", operations: ["get_night@1"], hub: "hewn/sky-log", minVersion: 2 }] };
     assert.match(validateManifest(manifest({ abi: "2.4", requires }), "x").join(), /"hub" and "minVersion" in requires\.capabilities needs ABI 2\.5/);
     assert.deepEqual(validateManifest(manifest({ abi: "2.5", requires }), "x"), []);
