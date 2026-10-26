@@ -84,6 +84,19 @@ export const ARMS: Arm[] = [
     critique: true,
     sequential: true,
   },
+  {
+    name: "character",
+    about: "identity, after the owner's votes: colour from the subject (no forced hue spread), a real palette (not one hue in shades), big visuals instead of label: value lists, the strongest direction rather than the least typical. Cases built in order.",
+    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("character.md")),
+    sequential: true,
+  },
+  {
+    name: "character+critique",
+    about: "character, then the design-review pass (told the other tools' looks too).",
+    from: "character",
+    critique: true,
+    sequential: true,
+  },
 ];
 
 /** What a build is told about the owner's other tools (the arm's earlier results): name, hue, look. */
