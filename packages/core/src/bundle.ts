@@ -24,6 +24,26 @@ export interface BundleSummary {
   findings?: { kind: "warn" | "ok"; title: string; detail?: string; file?: string; line?: number }[];
 }
 
+/** A tool on the Official shelf (seeds/<id>/.hub/listing.json): what the Hub shows about it. */
+export interface HubListing {
+  /** One line for its card. */
+  line: string;
+  tags: string[];
+  /** Its version on the shelf. */
+  version: number;
+  versions: { version: number; line: string; date: string }[];
+  /** Hewn's reading of it, written when Hewn publishes it: installs show it at once. */
+  summary: BundleSummary;
+}
+
+/** An Official tool as a host hands it over: its listing, its files (what a version holds), and the names of its images. */
+export interface ShelfTool {
+  id: string;
+  listing: HubListing;
+  files: Files;
+  images: string[];
+}
+
 /** hewn-bundle.json: what the bundle is, never whose Hewn it came from. */
 export interface Sidecar {
   format: number;

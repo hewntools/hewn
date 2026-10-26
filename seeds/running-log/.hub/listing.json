@@ -1,0 +1,27 @@
+{
+  "line": "Runs with distance, time and pace",
+  "tags": [
+    "Health",
+    "Running"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "A history of your runs that you and your agents record into: distance, time, date and a note, with totals and pace for any range of dates.",
+    "keeps": "Runs: date, distance, duration and a note.",
+    "reaches": "",
+    "findings": [
+      {
+        "kind": "ok",
+        "title": "Keeps your data inside the tool",
+        "detail": "It reaches nothing outside itself."
+      }
+    ]
+  }
+}

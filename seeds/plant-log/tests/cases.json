@@ -1,0 +1,342 @@
+[
+  { "name": "empty list on day one", "operation": "list_plants", "input": { "today": "2026-10-01" }, "expect": { "plants": [], "locations": [], "due_count": 0 } },
+  {
+    "name": "widget with no plants asks for the first one",
+    "operation": "widget_due",
+    "input": {},
+    "expect": {
+      "small": { "template": "text", "text": "Add your first plant" },
+      "medium": { "template": "text", "text": "Add your first plant" },
+      "large": { "template": "text", "text": "Add your first plant" }
+    }
+  },
+  { "name": "water_due with no plants", "operation": "water_due", "input": {}, "expect": { "count": 0, "names": [] } },
+  { "name": "water_next with no plants", "operation": "water_next", "input": {}, "expect": { "plant": null } },
+
+  { "name": "rejects water_every_days 0", "operation": "add_plant", "input": { "name": "Fern", "water_every_days": 0 }, "expectError": true },
+  { "name": "rejects a blank name", "operation": "add_plant", "input": { "name": "   " }, "expectError": true },
+  { "name": "rejects last_watered in the future", "operation": "add_plant", "input": { "name": "Fern", "last_watered": "2099-01-01" }, "expectError": true },
+  { "name": "rejects an impossible date", "operation": "add_plant", "input": { "name": "Fern", "last_watered": "2026-02-30" }, "expectError": true },
+
+  {
+    "name": "never watered plant is due today",
+    "operation": "add_plant",
+    "input": { "name": "Fern", "location": "Bedroom north" },
+    "expect": { "id": 1, "name": "Fern", "location": "Bedroom north", "water_every_days": 7, "last_watered": null, "status": "today", "days_overdue": 0, "feed_every_days": null, "feed_status": null, "next_feed": null }
+  },
+  {
+    "name": "never watered stays due today with an earlier injected today",
+    "operation": "get_plant",
+    "input": { "id": 1, "today": "2026-10-01" },
+    "expect": { "status": "today", "next_water": "2026-10-01", "feed_status": null, "events": [] }
+  },
+
+  {
+    "name": "add with last_watered starts the schedule",
+    "operation": "add_plant",
+    "input": { "name": "Monstera", "species": "Monstera deliciosa", "location": "Kitchen window", "feed_every_days": 14, "last_watered": "2026-10-10" },
+    "expect": { "id": 2, "last_watered": "2026-10-10", "next_water": "2026-10-17", "status": "overdue", "feed_every_days": 14 }
+  },
+  { "name": "due today", "operation": "get_plant", "input": { "id": 2, "today": "2026-10-17" }, "expect": { "status": "today", "days_overdue": 0, "days_until": 0, "watered_days_ago": 7 } },
+  { "name": "overdue by 3 days", "operation": "get_plant", "input": { "id": 2, "today": "2026-10-20" }, "expect": { "status": "overdue", "days_overdue": 3, "days_until": 0 } },
+  {
+    "name": "not yet due; never fed is due for feeding",
+    "operation": "get_plant",
+    "input": { "id": 2, "today": "2026-10-12" },
+    "expect": { "status": "ok", "days_until": 5, "days_overdue": 0, "last_fed": null, "next_feed": "2026-10-12", "feed_status": "today" }
+  },
+  { "name": "log a feeding", "operation": "log_event", "input": { "plant_id": 2, "type": "fed", "date": "2026-10-05" }, "expect": { "id": 2, "plant_id": 2, "type": "fed", "date": "2026-10-05", "text": null } },
+  {
+    "name": "feed status from the last feeding",
+    "operation": "get_plant",
+    "input": { "id": 2, "today": "2026-10-12" },
+    "expect": { "last_fed": "2026-10-05", "next_feed": "2026-10-19", "feed_status": "ok", "feed_days_until": 7, "feed_days_overdue": 0 }
+  },
+  { "name": "back-dated watering", "operation": "log_event", "input": { "plant_id": 2, "type": "watered", "date": "2026-10-01" }, "expect": { "id": 3, "type": "watered", "date": "2026-10-01" } },
+  {
+    "name": "older back-dated watering doesn't move the schedule; history newest first",
+    "operation": "get_plant",
+    "input": { "id": 2, "today": "2026-10-12" },
+    "expect": {
+      "last_watered": "2026-10-10",
+      "next_water": "2026-10-17",
+      "events": [
+        { "id": 1, "type": "watered", "date": "2026-10-10" },
+        { "id": 2, "type": "fed", "date": "2026-10-05" },
+        { "id": 3, "type": "watered", "date": "2026-10-01" }
+      ]
+    }
+  },
+  { "name": "same watering on the same day is stored once", "operation": "log_event", "input": { "plant_id": 2, "type": "watered", "date": "2026-10-10" }, "expect": { "id": 1 } },
+
+  { "name": "add a cactus", "operation": "add_plant", "input": { "name": "Cactus", "location": "Kitchen window", "water_every_days": 21 }, "expect": { "id": 3, "water_every_days": 21 } },
+  { "name": "back-date the cactus's first watering", "operation": "log_event", "input": { "plant_id": 3, "type": "watered", "date": "2026-09-20" }, "expect": { "id": 4 } },
+  { "name": "back-dated watering sets the schedule", "operation": "get_plant", "input": { "id": 3, "today": "2026-10-12" }, "expect": { "last_watered": "2026-09-20", "next_water": "2026-10-11", "status": "overdue", "days_overdue": 1 } },
+  { "name": "change the interval", "operation": "update_plant", "input": { "id": 3, "water_every_days": 30 }, "expect": { "water_every_days": 30, "next_water": "2026-10-20" } },
+  { "name": "changed interval applies from the last watering", "operation": "get_plant", "input": { "id": 3, "today": "2026-10-12" }, "expect": { "status": "ok", "days_until": 8, "next_water": "2026-10-20" } },
+
+  { "name": "month boundary", "operation": "add_plant", "input": { "name": "Ivy", "location": "Bedroom north", "water_every_days": 5, "last_watered": "2026-01-29" }, "expect": { "id": 4, "next_water": "2026-02-03" } },
+  { "name": "month boundary due today", "operation": "get_plant", "input": { "id": 4, "today": "2026-02-03" }, "expect": { "status": "today" } },
+  { "name": "month boundary not yet due", "operation": "get_plant", "input": { "id": 4, "today": "2026-02-01" }, "expect": { "status": "ok", "days_until": 2 } },
+  { "name": "year boundary", "operation": "add_plant", "input": { "name": "Palm", "location": "Living room", "last_watered": "2025-12-29" }, "expect": { "id": 5, "next_water": "2026-01-05" } },
+  { "name": "year boundary due today", "operation": "get_plant", "input": { "id": 5, "today": "2026-01-05" }, "expect": { "status": "today" } },
+  { "name": "year boundary overdue", "operation": "get_plant", "input": { "id": 5, "today": "2026-01-07" }, "expect": { "status": "overdue", "days_overdue": 2 } },
+  { "name": "year boundary before due", "operation": "get_plant", "input": { "id": 5, "today": "2025-12-31" }, "expect": { "status": "ok", "days_until": 5, "watered_days_ago": 2 } },
+
+  { "name": "update rejects water_every_days 0", "operation": "update_plant", "input": { "id": 3, "water_every_days": 0 }, "expectError": true },
+  { "name": "a note needs text", "operation": "log_event", "input": { "plant_id": 2, "type": "note" }, "expectError": true },
+  { "name": "a note needs more than spaces", "operation": "log_event", "input": { "plant_id": 2, "type": "note", "text": "   " }, "expectError": true },
+  { "name": "unknown event type", "operation": "log_event", "input": { "plant_id": 2, "type": "pruned" }, "expectError": true },
+  { "name": "log_event for an unknown plant", "operation": "log_event", "input": { "plant_id": 99, "type": "watered" }, "expectError": true },
+  { "name": "get an unknown plant", "operation": "get_plant", "input": { "id": 99 }, "expectError": true },
+  { "name": "update an unknown plant", "operation": "update_plant", "input": { "id": 99, "name": "Ghost" }, "expectError": true },
+  { "name": "delete an unknown plant", "operation": "delete_plant", "input": { "id": 99 }, "expectError": true },
+  { "name": "water with an unknown plant fails the whole call", "operation": "water", "input": { "plant_ids": [1, 99] }, "expectError": true },
+  { "name": "water needs at least one plant", "operation": "water", "input": { "plant_ids": [] }, "expectError": true },
+  { "name": "delete an unknown history entry", "operation": "delete_event", "input": { "id": 999 }, "expectError": true },
+  { "name": "rejects an impossible today", "operation": "list_plants", "input": { "today": "2026-13-01" }, "expectError": true },
+
+  {
+    "name": "list in due order with locations",
+    "operation": "list_plants",
+    "input": { "today": "2026-10-12" },
+    "expect": {
+      "today": "2026-10-12",
+      "due_count": 3,
+      "locations": ["Bedroom north", "Kitchen window", "Living room"],
+      "plants": [
+        { "name": "Palm", "status": "overdue", "days_overdue": 280 },
+        { "name": "Ivy", "status": "overdue", "days_overdue": 251 },
+        { "name": "Fern", "status": "today", "last_watered": null },
+        { "name": "Monstera", "status": "ok", "days_until": 5, "location": "Kitchen window", "feed_status": "ok" },
+        { "name": "Cactus", "status": "ok", "days_until": 8, "feed_status": null }
+      ]
+    }
+  },
+  {
+    "name": "list one location",
+    "operation": "list_plants",
+    "input": { "location": "kitchen window", "today": "2026-10-12" },
+    "expect": { "due_count": 0, "plants": [{ "name": "Monstera" }, { "name": "Cactus" }], "locations": ["Bedroom north", "Kitchen window", "Living room"] }
+  },
+  {
+    "name": "widget with plants due",
+    "operation": "widget_due",
+    "input": { "today": "2026-10-12" },
+    "expect": {
+      "small": { "template": "stat", "value": 3, "caption": "need water" },
+      "medium": {
+        "template": "list",
+        "items": [
+          { "title": "Palm", "detail": "Living room", "value": "280 days late" },
+          { "title": "Ivy", "detail": "Bedroom north", "value": "251 days late" },
+          { "title": "Fern", "detail": "Bedroom north", "value": "today" }
+        ],
+        "buttons": [
+          { "label": "Watered all", "operation": "water_due@1" },
+          { "label": "Watered Palm", "operation": "water_next@1" }
+        ]
+      },
+      "large": {
+        "template": "list",
+        "items": [{ "title": "Palm" }, { "title": "Ivy" }, { "title": "Fern" }],
+        "buttons": [
+          { "label": "Watered all", "operation": "water_due@1" },
+          { "label": "Watered Palm", "operation": "water_next@1" }
+        ]
+      }
+    }
+  },
+
+  { "name": "water_next waters the most overdue", "operation": "water_next", "input": { "today": "2026-10-12" }, "expect": { "plant": { "id": 5, "name": "Palm", "next_water": "2026-10-19" } } },
+  { "name": "water_due waters exactly the due plants", "operation": "water_due", "input": { "today": "2026-10-12" }, "expect": { "count": 2, "names": ["Ivy", "Fern"] } },
+  { "name": "water_due left a plant that wasn't due alone", "operation": "get_plant", "input": { "id": 2, "today": "2026-10-12" }, "expect": { "last_watered": "2026-10-10", "next_water": "2026-10-17" } },
+  { "name": "water_due watered a due plant", "operation": "get_plant", "input": { "id": 4, "today": "2026-10-12" }, "expect": { "last_watered": "2026-10-12", "status": "ok", "days_until": 5 } },
+  {
+    "name": "widget with nothing due shows the next one",
+    "operation": "widget_due",
+    "input": { "today": "2026-10-12" },
+    "expect": {
+      "small": { "template": "stat", "value": 0, "caption": "All watered" },
+      "medium": { "template": "list", "items": [], "empty": "Next: Ivy, in 5 days" },
+      "large": { "template": "list", "items": [], "empty": "Next: Ivy, in 5 days" }
+    }
+  },
+  { "name": "water_due with nothing due", "operation": "water_due", "input": { "today": "2026-10-12" }, "expect": { "count": 0, "names": [] } },
+  { "name": "water_next breaks ties by location", "operation": "water_next", "input": { "today": "2026-10-18" }, "expect": { "plant": { "id": 4, "name": "Ivy", "next_water": "2026-10-23" } } },
+  { "name": "water_next takes the next one", "operation": "water_next", "input": { "today": "2026-10-18" }, "expect": { "plant": { "id": 2, "name": "Monstera", "next_water": "2026-10-25" } } },
+  { "name": "water_next with nothing due", "operation": "water_next", "input": { "today": "2026-10-18" }, "expect": { "plant": null } },
+
+  { "name": "delete a wrong watering", "operation": "delete_event", "input": { "id": 11 }, "expect": { "deleted": true } },
+  { "name": "deleting the watering brings the status back", "operation": "get_plant", "input": { "id": 2, "today": "2026-10-18" }, "expect": { "last_watered": "2026-10-10", "status": "overdue", "days_overdue": 1 } },
+  { "name": "a deleted entry is gone", "operation": "delete_event", "input": { "id": 11 }, "expectError": true },
+
+  { "name": "add a note", "operation": "log_event", "input": { "plant_id": 2, "type": "note", "text": "New leaf unfurling" }, "expect": { "id": 12, "type": "note", "text": "New leaf unfurling", "date": "$any" } },
+  { "name": "log a repotting", "operation": "log_event", "input": { "plant_id": 3, "type": "repotted", "date": "2026-09-01", "text": "Bigger terracotta pot" }, "expect": { "id": 13, "type": "repotted" } },
+  { "name": "last repotted and how long ago", "operation": "get_plant", "input": { "id": 3, "today": "2026-10-12" }, "expect": { "last_repotted": "2026-09-01", "repotted_days_ago": 41 } },
+  { "name": "stop tracking feeding", "operation": "update_plant", "input": { "id": 2, "feed_every_days": null, "notes": "Likes bright indirect light" }, "expect": { "feed_every_days": null, "feed_status": null, "next_feed": null, "notes": "Likes bright indirect light", "last_fed": "2026-10-05" } },
+
+  { "name": "add a snake plant", "operation": "add_plant", "input": { "name": "Snake plant", "location": "Hallway", "water_every_days": 14, "last_watered": "2026-10-01" }, "expect": { "id": 6, "next_water": "2026-10-15" } },
+  { "name": "add a plant with a long name", "operation": "add_plant", "input": { "name": "Philodendron Pink Princess", "location": "South-facing living room window", "last_watered": "2026-01-01" }, "expect": { "id": 7 } },
+  {
+    "name": "widget with more than 5 due",
+    "operation": "widget_due",
+    "input": { "today": "2027-06-01" },
+    "expect": {
+      "small": { "template": "stat", "value": 7, "caption": "need water" },
+      "medium": {
+        "template": "list",
+        "items": [
+          { "title": "Philodendron…", "detail": "South-facing li…", "value": "509 days late" },
+          { "title": "Snake plant", "detail": "Hallway" },
+          { "title": "Monstera" }
+        ],
+        "buttons": [
+          { "label": "Watered all", "operation": "water_due@1" },
+          { "label": "Watered next", "operation": "water_next@1" }
+        ]
+      },
+      "large": {
+        "template": "list",
+        "items": [
+          { "title": "Philodendron…" },
+          { "title": "Snake plant" },
+          { "title": "Monstera" },
+          { "title": "Fern" },
+          { "title": "Palm" }
+        ],
+        "buttons": [
+          { "label": "Watered all", "operation": "water_due@1" },
+          { "label": "Watered next", "operation": "water_next@1" }
+        ]
+      }
+    }
+  },
+
+  {
+    "name": "water several plants at once",
+    "operation": "water",
+    "input": { "plant_ids": [6, 7], "date": "2026-10-20" },
+    "expect": { "watered": [{ "id": 6, "name": "Snake plant", "next_water": "2026-11-03" }, { "id": 7, "name": "Philodendron Pink Princess", "next_water": "2026-10-27" }] }
+  },
+  { "name": "water defaults to today", "operation": "water", "input": { "plant_ids": [6] }, "expect": { "watered": [{ "id": 6, "next_water": "$any" }] } },
+  { "name": "delete a plant", "operation": "delete_plant", "input": { "id": 7 }, "expect": { "deleted": true } },
+  { "name": "a deleted plant is gone", "operation": "get_plant", "input": { "id": 7 }, "expectError": true },
+  { "name": "a deleted plant's history is gone too", "operation": "delete_event", "input": { "id": 17 }, "expectError": true },
+  { "name": "a deleted plant's first watering is gone too", "operation": "delete_event", "input": { "id": 15 }, "expectError": true },
+  { "name": "other plants keep their history", "operation": "get_plant", "input": { "id": 6, "today": "2026-10-20" }, "expect": { "last_watered": "$any", "events": [{ "type": "watered" }, { "type": "watered" }, { "type": "watered" }] } },
+
+  {
+    "name": "identify_plant suggests candidates from a photo",
+    "operation": "identify_plant",
+    "version": 1,
+    "input": { "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "media_type": "image/png" },
+    "model": [
+      {
+        "json": {
+          "not_a_plant": false,
+          "candidates": [
+            {
+              "common_name": "Monstera",
+              "species": "Monstera deliciosa",
+              "confidence": 0.92,
+              "water_every_days": 7,
+              "feed_every_days": 30,
+              "care_note": "Bright indirect light; water when the top soil is dry."
+            },
+            {
+              "common_name": "Philodendron",
+              "species": "Philodendron hederaceum",
+              "confidence": 0.45,
+              "water_every_days": 7,
+              "feed_every_days": 30,
+              "care_note": "Medium indirect light; water weekly."
+            },
+            {
+              "common_name": "Pothos",
+              "species": "Epipremnum aureum",
+              "confidence": 0.2,
+              "water_every_days": 10,
+              "feed_every_days": null,
+              "care_note": "Low to bright indirect light; let the soil dry between waterings."
+            }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "not_a_plant": false,
+      "candidates": [
+        { "common_name": "Monstera", "species": "Monstera deliciosa", "confidence": 0.92, "water_every_days": 7, "feed_every_days": 30, "care_note": "Bright indirect light; water when the top soil is dry." },
+        { "common_name": "Philodendron", "confidence": 0.45, "water_every_days": 7, "feed_every_days": 30 },
+        { "common_name": "Pothos", "confidence": 0.2, "water_every_days": 10, "feed_every_days": null }
+      ]
+    }
+  },
+  {
+    "name": "identify_plant says when the photo has no plant",
+    "operation": "identify_plant",
+    "version": 1,
+    "input": { "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "media_type": "image/png" },
+    "model": [
+      {
+        "json": {
+          "not_a_plant": true,
+          "candidates": [
+            { "common_name": "Not a plant", "species": "", "confidence": 0.9, "water_every_days": 7, "feed_every_days": null, "care_note": "" }
+          ]
+        }
+      }
+    ],
+    "expect": { "not_a_plant": true, "candidates": [] }
+  },
+  {
+    "name": "identify_plant keeps low confidence low and caps at three",
+    "operation": "identify_plant",
+    "version": 1,
+    "input": { "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "media_type": "image/png" },
+    "model": [
+      {
+        "json": {
+          "not_a_plant": false,
+          "candidates": [
+            { "common_name": "Snake plant", "species": "Dracaena trifasciata", "confidence": 0.05, "water_every_days": 14, "feed_every_days": 60, "care_note": "Low light; water sparingly." },
+            { "common_name": "ZZ plant", "species": "Zamioculcas zamiifolia", "confidence": 0.4, "water_every_days": 21, "feed_every_days": null, "care_note": "Low light; let the soil dry." },
+            { "common_name": "Pothos", "species": "Epipremnum aureum", "confidence": 0.7, "water_every_days": 10, "feed_every_days": 30, "care_note": "Medium light; water weekly." },
+            { "common_name": "Fern", "species": "Nephrolepis exaltata", "confidence": 0.9, "water_every_days": 7, "feed_every_days": 30, "care_note": "Bright indirect light; keep moist." }
+          ]
+        }
+      }
+    ],
+    "expect": {
+      "not_a_plant": false,
+      "candidates": [
+        { "common_name": "Snake plant", "confidence": 0.05 },
+        { "common_name": "ZZ plant", "confidence": 0.4, "water_every_days": 21, "feed_every_days": null },
+        { "common_name": "Pothos", "confidence": 0.7 }
+      ]
+    }
+  },
+  {
+    "name": "identify_plant rejects an unreadable image",
+    "operation": "identify_plant",
+    "version": 1,
+    "input": { "image": "!!!!notbase64!!!!", "media_type": "image/jpeg" },
+    "expectError": true
+  },
+  {
+    "name": "identify_plant rejects a mislabelled image",
+    "operation": "identify_plant",
+    "version": 1,
+    "input": { "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "media_type": "image/jpeg" },
+    "expectError": true
+  },
+  {
+    "name": "identify_plant reports a busy model",
+    "operation": "identify_plant",
+    "version": 1,
+    "input": { "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "media_type": "image/png" },
+    "model": [{ "error": "model is busy" }],
+    "expectError": true
+  }
+]

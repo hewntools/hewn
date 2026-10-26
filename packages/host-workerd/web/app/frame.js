@@ -109,6 +109,7 @@ const brand = () => h("a", { class: "brand-link", href: "#/" }, brandTile(), h("
 
 const NAV = [
   ["Home", "#/", "home"],
+  ["Hub", "#/hub", "hub"],
   ["Agents", "#/agents", "agents"],
   ["Accounts", "#/accounts", "accounts"],
   ["Settings", "#/settings", "settings"],

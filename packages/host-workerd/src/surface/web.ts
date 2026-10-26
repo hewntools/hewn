@@ -7,6 +7,8 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { ABI } from "@hewntools/core/manifest.ts";
+import { codeFiles, codeText } from "@hewntools/core/platform/data.ts";
+import { hubBundle } from "@hewntools/core/platform/sharing.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform, Readiness } from "@hewntools/core/platform.ts";
@@ -107,7 +109,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "home", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "home", "hub", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -400,6 +402,31 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   if (resource === "accounts") return platform.accounts(owner);
+
+  // The Hub (0.4.9: Hewn's own tools, Official, shipped with the release; offline): cards, a tool's page, its images and code, and staging one to install.
+  if (resource === "hub") {
+    const shelf = host.shelf ? await host.shelf.tools() : { tools: [], firstRun: [] };
+    if (!id && method === "GET") return { tools: platform.hubCards(owner, shelf.tools), firstRun: shelf.firstRun };
+    if (id && !sub && method === "GET") return platform.hubDetail(owner, shelf.tools, id);
+    if (id && sub === "image" && method === "GET") {
+      platform.hubDetail(owner, shelf.tools, id);
+      const png = await host.shelf?.image(id, arg ?? "");
+      if (!png) throw new PlatformError("not_found", "no such image");
+      return new Response(body(png), { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" } });
+    }
+    if (id && sub === "code" && method === "GET") {
+      const tool = shelf.tools.find((t) => t.id === id);
+      if (!tool) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+      const path = url.searchParams.get("path");
+      return path ? codeText(path, tool.files, null) : { version: tool.listing.version, base: null, files: codeFiles(tool.files, null) };
+    }
+    if (id && sub === "download" && method === "GET") {
+      const tool = shelf.tools.find((t) => t.id === id);
+      if (!tool) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+      return new Response(body(hubBundle(tool)), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${id}.hewn.zip"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    }
+    if (id && sub === "stage" && method === "POST") return platform.hubStage(owner, shelf.tools, id);
+  }
 
   // Install from a file: upload (staged, read before anything is installed), its code, install, or drop it.
   if (resource === "bundles") {

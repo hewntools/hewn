@@ -1,0 +1,7 @@
+[
+  {"operation": "add_book", "input": {"title": "Middlemarch", "author": "George Eliot", "pages": 880, "status": "reading"}},
+  {"operation": "add_book", "input": {"title": "The Left Hand of Darkness", "author": "Ursula K. Le Guin", "pages": 304, "status": "reading"}},
+  {"operation": "add_book", "input": {"title": "A Gentleman in Moscow", "author": "Amor Towles", "pages": 462, "status": "want"}},
+  {"operation": "add_book", "input": {"title": "Piranesi", "author": "Susanna Clarke", "pages": 272, "status": "want"}},
+  {"operation": "add_book", "input": {"title": "The Overstory", "author": "Richard Powers", "pages": 502, "status": "want"}}
+]

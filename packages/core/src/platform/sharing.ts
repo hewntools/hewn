@@ -4,10 +4,10 @@
 // a create build with no builder ("bundle") through the normal validation. Sample data: replayed
 // after an install or Start over, and written by the owner as a new version. Owner only.
 import { type Agent, requireOwner } from "../auth.ts";
-import { type BundleSummary, BundleError, type Finding, packBundle, readSample, SAMPLE_FILE, type SampleCall, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
+import { type BundleSummary, BundleError, type Finding, type HubListing, packBundle, type ShelfTool, readSample, SAMPLE_FILE, type SampleCall, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
-import { bytes, text } from "../files.ts";
+import { bytes, contentHash, text } from "../files.ts";
 import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, stampSource, type ToolSource } from "../manifest.ts";
 import type { Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
@@ -30,6 +30,29 @@ export interface ShareCheck {
   sample: { calls: number } | null;
   /** Why it can't be shared: one of the owner's own values in it, or no sample data. */
   blocked: { kind: "secret"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
+}
+
+/** A card on the Hub (Q2): enough to choose, and whether you have it. */
+export interface HubCard {
+  id: string;
+  name: string;
+  line: string;
+  tags: string[];
+  version: number;
+  official: true;
+  /** What it needs: hosts it reaches, a model tier, other tools. Nothing when it needs nothing. */
+  needs: { hosts: string[]; model: string | null; tools: string[] };
+  installed: boolean;
+  icon: { hue: number | null; saturation: number | null; glyph: Cells | null };
+  images: string[];
+}
+
+/** A tool's Hub page (Q3): the card, its reading, its operations and versions. */
+export interface HubDetail extends HubCard {
+  purpose: string;
+  summary: BundleSummary;
+  operations: { name: string; description: string; sideEffect: string }[];
+  versions: HubListing["versions"];
 }
 
 /** What the install sheet shows before anything is installed. */
@@ -312,6 +335,47 @@ export class Sharing extends Domain {
     if (changed) this.registry.setKv("bundles:staged", staged);
   }
 
+  // ---------- the Hub: Hewn's own tools (Official), shipped in the release ----------
+
+  /** The Official shelf as cards, in the shelf's order: installed when you have one from it (or one of the same id). */
+  hubCards(owner: Agent, shelf: ShelfTool[]): HubCard[] {
+    requireOwner(owner);
+    return shelf.map((t) => this.card(t));
+  }
+
+  hubDetail(owner: Agent, shelf: ShelfTool[], id: string): HubDetail {
+    requireOwner(owner);
+    const t = shelf.find((x) => x.id === id);
+    if (!t) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+    const m = manifestOf(t.files);
+    return { ...this.card(t), purpose: m.purpose, summary: t.listing.summary, operations: m.operations.filter((o) => !o.deprecated).map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect })), versions: t.listing.versions };
+  }
+
+  /** An Official tool, staged to install (from Hub, with Hewn's reading): the same sheet as a file's. */
+  async hubStage(owner: Agent, shelf: ShelfTool[], id: string): Promise<BundlePreview> {
+    requireOwner(owner);
+    const t = shelf.find((x) => x.id === id);
+    if (!t) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+    return this.stageBundle(owner, hubBundle(t), { from: "hub" });
+  }
+
+  private card(t: ShelfTool): HubCard {
+    const m = manifestOf(t.files);
+    const installed = this.registry.listActiveCapabilities().some((c) => c.id === t.id || (c.source?.from === "hub" && c.source.id === t.id));
+    return {
+      id: t.id,
+      name: m.name,
+      line: t.listing.line,
+      tags: t.listing.tags,
+      version: t.listing.version,
+      official: true,
+      needs: { hosts: (m.requires?.hosts ?? []).filter((x) => !x.startsWith("config:")), model: m.requires?.model ? (m.requires.model.tier ?? "model") : null, tools: (m.requires?.capabilities ?? []).map((c) => c.id) },
+      installed,
+      icon: { hue: m.hue ?? null, saturation: m.saturation ?? null, glyph: t.files["ui/icon.svg"] ? (cellsFromSvg(text(t.files["ui/icon.svg"])) ?? null) : null },
+      images: t.images,
+    };
+  }
+
   // ---------- sample data ----------
 
   /** After an install build went live: replay its sample data if the owner asked for it. Never fails the build. */
@@ -380,4 +444,12 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
   if (tooNew) throw new PlatformError("invalid_request", `${manifest.name} ${tooNew.replace(/^needs/, "needs")}. Upgrade Hewn to install it.`, { refusal: "newer", abi: abiOf(manifest) });
   if (!unpacked.sidecar.tool?.id || !Number.isInteger(unpacked.sidecar.tool?.version) || !/^[0-9a-f]{64}$/.test(unpacked.sidecar.tool?.hash ?? "")) throw new PlatformError("invalid_request", "Its hewn-bundle.json doesn't say which tool and version it is.", { refusal: "unreadable" });
   return { ...unpacked, manifest };
+}
+
+const manifestOf = (files: Files) => JSON.parse(text(files["capability.json"])) as CapabilityManifest;
+
+/** An Official tool as a bundle: its files, and Hewn's reading in the sidecar. */
+export function hubBundle(t: ShelfTool): Uint8Array {
+  const m = manifestOf(t.files);
+  return packBundle(t.files, { format: 1, hewn: "shelf", abi: abiOf(m), exportedAt: new Date().toISOString(), tool: { id: t.id, version: t.listing.version, hash: contentHash(t.files, "") }, summary: t.listing.summary });
 }

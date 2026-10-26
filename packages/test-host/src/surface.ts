@@ -12,11 +12,12 @@ import { toolStatus } from "@hewntools/cli/setup/tools.ts";
 import { DATA_FORMAT, VERSION } from "@hewntools/cli/supervisor/format.ts";
 import { harnessStatuses } from "@hewntools/cli/setup/harnesses.ts";
 import { sourceAsset } from "@hewntools/cli/assets.ts";
+import { readShelf, shelfImage } from "@hewntools/cli/shelf.ts";
 import type { SetupHooks } from "@hewntools/cli/setup/hooks.ts";
 import type { ModelCatalog, SurfaceHost } from "@hewntools/host-workerd/surface/host.ts";
 import { offlineCatalog } from "@hewntools/cli/builders/models.ts";
 
-export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: string) => void; intake?: Intake; setup?: SetupHooks; models?: (agent: string) => Promise<ModelCatalog> }): SurfaceHost {
+export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: string) => void; intake?: Intake; setup?: SetupHooks; models?: (agent: string) => Promise<ModelCatalog>; shelfDir?: string }): SurfaceHost {
   const log = opts.log ?? ((l: string) => console.error(`[${new Date().toISOString()}] ${l}`));
   const setup = opts.setup;
   return {
@@ -52,6 +53,10 @@ export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: s
           },
         }
       : {}),
+    shelf: {
+      tools: async () => readShelf(opts.shelfDir),
+      image: async (id, name) => shelfImage(id, name, opts.shelfDir),
+    },
     backups: {
       location: async () => backupLocation(home, readConfig(home).backupDir).dir,
       list: async () => listBackups(backupLocation(home, readConfig(home).backupDir).dir),

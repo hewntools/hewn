@@ -52,6 +52,10 @@ From the terminal: `hewn install <file.hewn.zip> [--name "Plant Log 2"] [--no-sa
 
 Tools from Hub (from Hewn 0.5) and Hewn's own come with Hewn's reading already, so they skip the wait; **Check it yourself** has your builder read them too.
 
+## The Hub
+
+The **Hub** tab holds tools ready to install. In this release it's Hewn's own (**Official**): Habits, Plant Log, Gift Ideas, Kid Quotes, Idea Tracker, Reading List and Running Log, shipped with Hewn (`seeds/` in the repo) and installed the same way as a file, from Hub, with Hewn's reading and their sample data. They're yours once installed, like any tool. Tools from other people come to the same Hub later.
+
 ## Start over
 
 Info › Data › **Start over** empties a tool's data and keeps the tool: after trying it with sample data, or any time you want it empty. You type the tool's id to confirm, and can tick **And replay the sample data**. A backup of the data is kept (the newest three). From the terminal: `hewn data reset <id> [--sample]`.
