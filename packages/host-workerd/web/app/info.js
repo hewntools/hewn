@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A tool's Info page, and a connection's page.
-import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, chip, enc, fail, h, menuFrom, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
+// A tool's Info page (W1–W3: everything on the page), and a connection's page.
+import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
 import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
-import { grantsSheet, signInDialog } from "./grants.js";
+import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
 import { buildingLabel } from "./home.js";
 import { plural } from "./intake.js";
-import { titleCase, usd } from "./models.js";
+import { titleCase } from "./models.js";
 import { route } from "./router.js";
-import { cadenceText, schedulesSheet } from "./schedules.js";
-import { capabilityMenu, changeHref, inlineRename, instructionsSheet, openCapability, openChange, versionsDialog } from "./tool-actions.js";
-import { toolModelSheet } from "./tool-model.js";
+import { addScheduleSheet, scheduleRow } from "./schedules.js";
+import { capabilityMenu, changeHref, download, inlineRename, openCapability, openChange } from "./tool-actions.js";
+import { modelSpend, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
-import { toolWidgetsSheet } from "./widgets.js";
+import { madeBy, versionRow } from "./versions.js";
+import { addWidgetSheet, SIZE_LETTER, widgetPreview } from "./widgets.js";
 
 export { infoPage };
 
-// ---------- N4 Info / I2 connection page ----------
+// ---------- W1–W3 Info / I2 connection page ----------
 
 /** Text with the owner's tool names rendered as cap-refs. */
 function richText(text, all, self) {
@@ -29,7 +30,7 @@ function richText(text, all, self) {
   });
 }
 
-/** A tool's status as pills: needs you, building or a failed build, the version, who built it, when. */
+/** A tool's status as pills: needs you, building or a failed build, the version, what built it, when. */
 function statusPills(c, cap, all) {
   const latest = cap.versions[0];
   return h(
@@ -43,10 +44,16 @@ function statusPills(c, cap, all) {
           ? h("span", { class: "pill ok with-dot" }, "ready")
           : h("span", { class: "pill warn with-dot" }, "needs you"),
     latest && h("span", { class: "pill" }, `v${c.version ?? latest.version}`),
-    latest && h("span", { class: "pill" }, `built by ${latest.builder === "agent" ? actorLabel(latest.requestedBy, all).replace(/^You$/, "you") : builderLabel(latest.builder)}`),
+    latest && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
     latest && h("span", { class: "pill" }, ago(latest.createdAt)),
   );
 }
+
+/** One section of Info: a card with its title (and an action on the right), then the thing itself. */
+const section = (title, body, { action, order } = {}) => h("section", { class: "card info-section", style: { order } }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, title), action), body);
+
+/** A pending grant the owner left out with Deny: kept out of the notices for this version (in this browser). */
+const deniedKey = (id, grant) => `hewn.denied.${id}.${grant}`;
 
 async function infoPage(id) {
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("50%", "30%", "90%", "70%")));
@@ -54,12 +61,72 @@ async function infoPage(id) {
   const c = all.get(id) ?? { id, name: cap.name, ui: !!cap.ui?.available, ready: cap.status.ready, kind: cap.kind };
   setWallpaper(await hues([tintOf(c)]));
   if (cap.kind === "connection") return connectionPage(c, cap, all);
+  const req = cap.requires?.model;
+  const [scheds, home, m, instr, data] = await Promise.all([
+    api("/schedules").catch(() => []),
+    api("/home").catch(() => ({ layout: [], gallery: [] })),
+    req ? api("/models").catch(() => null) : null,
+    api(`/capabilities/${enc(id)}/instructions`).catch(() => ({ lines: [] })),
+    api(`/capabilities/${enc(id)}/data`).catch(() => null),
+  ]);
   const ops = runnableOps(cap);
   const items = cap.authorization?.items ?? [];
+  const config = cap.authorization?.config ?? [];
   const uses = (cap.requires?.capabilities ?? []).map((u) => u.id);
   const usedBy = (cap.usedBy ?? []).map((u) => u.id);
+  const version = c.version ?? cap.versions[0]?.version;
+  const mine = scheds.filter((x) => x.capabilityId === id);
+  const widgets = home.gallery.find((g) => g.capabilityId === id)?.widgets ?? [];
+  const placed = (w) => home.layout.some((e) => e.type === "widget" && e.id === id && e.widget === w.name);
+  let rules = instr.lines;
+  let addingRule = false;
+
+  // What still needs the owner. A model with no provider key, a secret without its value or a
+  // setting without one goes through the grants sheet (it has the fields); a host or another tool is one tap.
+  const needsKey = !!req && !!m && !m.host && (!m.provider || !m.providers.find((p) => p.id === m.provider)?.keySet);
+  const missingSecrets = new Set(cap.status.missingSecrets ?? []);
+  const pending = items.filter((i) => !i.approved || (i.kind === "secret" && missingSecrets.has(i.grant.slice(7))) || (i.kind === "model" && needsKey));
+  const oneTap = (i) => !i.approved && (i.kind === "host" || i.kind === "capability" || (i.kind === "model" && !needsKey));
+  const denied = (i) => localStorage.getItem(deniedKey(id, i.grant)) === String(version);
+  const missingConfig = config.filter((x) => x.value === null);
+
+  const refresh = () => (invalidateCaps(), route());
+  const authorize = async (i) => {
+    try {
+      await api(`/capabilities/${enc(id)}/grants/approve`, { method: "POST", body: { grant: i.grant } });
+      localStorage.removeItem(deniedKey(id, i.grant));
+      invalidateCaps();
+      const now = await api(`/capabilities/${enc(id)}`);
+      toast(now.status.ready ? `${cap.name} is ready` : "Authorized");
+      route();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const deny = (i) => (localStorage.setItem(deniedKey(id, i.grant), String(version)), toast("Left out. It stays under Allowed to."), route());
+  const giveWhatItNeeds = () => grantsSheet(id).then(refresh);
+
   const name = h("span", {}, cap.name);
   const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
+
+  // W2: whatever needs the owner, above the composer, each with its one action. It stays in its section too.
+  const notices = [];
+  const shownPending = pending.filter((i) => !denied(i));
+  if (shownPending.length === 1 && oneTap(shownPending[0]) && !missingConfig.length) {
+    const i = shownPending[0];
+    notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow row tight wrap" }, "Wants to ", grantText(i, all), i.kind === "capability" && h("span", { class: "mono faint" }, `(${i.grant.split("/").at(-1).split("@")[0]})`)), h("button", { class: "sm", onclick: () => deny(i) }, "Deny"), h("button", { class: "sm primary", onclick: () => authorize(i) }, "Authorize")));
+  } else if (shownPending.length || missingConfig.length) {
+    const n = shownPending.length + missingConfig.length;
+    notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, `Needs ${plural(n, "thing")} from you before it can run`), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Give it what it needs")));
+  }
+  if (c.lastBuild?.status === "failed" && !c.building)
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
+  if (cap.status.retiredModel) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `${cap.status.retiredModel.model} is no longer available.`), h("button", { class: "sm primary", onclick: () => toolModelSheet(c, { replace: true }).then((ok) => ok || route()) }, "Replace…")));
+  else if (cap.status.missingModel && !pending.length) notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, cap.status.missingModel), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set a model")));
+  if (cap.status.missingDependencies?.length > 0) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "Depends on operations that no longer exist."), h("a", { class: "btn sm", href: changeHref(c) }, "Change it")));
+  if (cap.status.unsupportedAbi) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `This version ${cap.status.unsupportedAbi}. Upgrade Hewn, or roll it back.`)));
+  for (const x of mine.filter((s) => s.status === "paused" && s.pausedReason))
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), ` paused after ${x.failures} failures in a row`), h("button", { class: "sm primary", onclick: () => api(`/schedules/${enc(x.id)}`, { method: "PUT", body: { status: "active" } }).then(() => (toast("Resumed"), route()), fail) }, "Resume")));
 
   // "Change it" opens the tool with the drawer (P1) and sends the text.
   const ask = h("input", { type: "text", class: "bare", placeholder: `What should ${cap.name} also do?`, "aria-label": "Change it" });
@@ -71,39 +138,170 @@ async function infoPage(id) {
     h("button", { type: "submit", class: "primary lg" }, "Ask"),
   );
 
-  // One list of rows, each opening its sheet or page.
-  const infoRow = (label, value, onOpen, dot) =>
-    h("li", { class: "link info-row", tabindex: 0, onclick: onOpen, onkeydown: (e) => e.key === "Enter" && onOpen() }, h("span", { class: "info-key" }, label), h("div", { class: "grow row tight" }, dot && h("span", { class: `dot ${dot}` }), h("span", { class: "muted clip-1" }, value)));
-  const pendingN = items.filter((i) => !i.approved).length;
-  const rows = h("ul", { class: "list" });
-  const fill = async () => {
-    const [scheds, home, m, instr] = await Promise.all([api("/schedules").catch(() => []), api("/home").catch(() => ({ layout: [], gallery: [] })), cap.requires?.model ? api("/models").catch(() => null) : null, api(`/capabilities/${enc(id)}/instructions`).catch(() => ({ lines: [] }))]);
-    const mine = scheds.filter((x) => x.capabilityId === id);
-    const paused = mine.filter((x) => x.status === "paused");
-    const widgets = home.gallery.find((g) => g.capabilityId === id)?.widgets ?? [];
-    const placed = home.layout.filter((e) => e.type === "widget" && e.id === id).length;
-    const spent = m ? m.spend.rows.filter((r) => r.capabilityId === id).reduce((n, r) => n + r.costUsd, 0) : 0;
-    const req = cap.requires?.model;
-    const latest = cap.versions[0];
-    put(
-      rows,
-      infoRow("Operations", ops.length ? `${ops.length} · ${ops.map((o) => o.name).join(", ")}` : "None", () => go(`#/run/${enc(id)}`)),
-      infoRow("Allowed to", items.length ? `${items.length}${pendingN ? ` · ${pendingN} pending` : ""}` : "Nothing outside itself", () => grantsSheet(id).then(() => route()), pendingN ? "warn" : null),
-      req && infoRow("Model", `${req.tier ? `${titleCase(req.tier)} tier` : req.model}${m ? ` · ${usd(spent)} this month` : ""}`, () => toolModelSheet(c).then((ok) => ok || route()), cap.status.retiredModel ? "danger" : cap.status.missingModel ? "warn" : null),
-      infoRow("Schedules", mine.length ? [mine.filter((x) => x.status === "active").map((x) => cadenceText(x.cadence)).join(", "), paused.length ? `${paused.length} paused` : "", mine.some((x) => x.status === "proposed") ? "1 proposed" : ""].filter(Boolean).join(" · ") || "None" : "None", () => schedulesSheet(c, ops).then(() => route()), paused.some((x) => x.pausedReason) ? "danger" : mine.some((x) => x.status === "proposed") ? "warn" : null),
-      infoRow("Widgets", widgets.length ? `${widgets.length} · ${placed} on Home` : "None", () => toolWidgetsSheet(c).then(() => route())),
-      infoRow("Instructions", instr.lines.length ? `${plural(instr.lines.length, "rule")} for this tool` : "None · rules for every tool are under Settings › AI", () => instructionsSheet(c).then(() => route())),
-      latest && infoRow("Versions", `v${c.version ?? latest.version} · ${ago(latest.createdAt)}`, () => versionsDialog(c)),
-    );
+  // ---- the sections, each the thing itself with its actions inline ----
+
+  const operations = section(
+    `Operations · ${ops.length}`,
+    h("ul", { class: "list" }, ops.length ? ops.map((op) => h("li", {}, h("div", { class: "grow" }, h("span", { class: "mono" }, op.name), op.description && h("span", { class: "sub clip-1" }, op.description)), h("button", { class: "sm", onclick: () => go(`#/run/${enc(id)}?op=${enc(op.name)}`) }, "Run"))) : h("li", {}, h("span", { class: "grow muted" }, "Nothing to run by hand."))),
+    { order: 1 },
+  );
+
+  const grantRow = (i) => {
+    const isPending = pending.includes(i);
+    if (i.kind === "model") return modelRow(i, isPending);
+    let actions;
+    if (isPending && oneTap(i)) actions = [!denied(i) && h("button", { class: "sm ghost", onclick: () => deny(i) }, "Deny"), h("button", { class: "sm primary", onclick: () => authorize(i) }, "Authorize")];
+    else if (isPending) actions = h("button", { class: "sm primary", onclick: giveWhatItNeeds }, i.kind === "secret" ? "Set…" : "Authorize…");
+    else if (i.kind === "secret") actions = h("button", { class: "sm ghost", onclick: (e) => replaceSecret(i, e.currentTarget) }, "Replace");
+    else actions = h("button", { class: "sm ghost", onclick: () => revoke(i) }, "Revoke");
+    const sub = isPending ? (denied(i) ? "Left out" : "Asked for, not allowed yet") : i.kind === "capability" ? i.grant.split("/").at(-1).split("@")[0] : i.kind === "secret" ? i.description : null;
+    return h("li", {}, isPending && !denied(i) && h("span", { class: "dot warn" }), kindPill(i), h("div", { class: "grow" }, grantText(i, all), sub && h("span", { class: "sub" }, sub)), actions);
   };
-  fill();
+  const revoke = async (i) => {
+    try {
+      await api(`/capabilities/${enc(id)}/grants/revoke`, { method: "POST", body: { grant: i.grant } });
+      toast(`Revoked ${i.kind === "host" ? "host access" : "access"}`, { dot: "", undo: () => api(`/capabilities/${enc(id)}/grants/approve`, { method: "POST", body: { grant: i.grant } }).then(() => (toast("Restored"), refresh()), fail) });
+      refresh();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const replaceSecret = (i, btn) => {
+    const input = h("input", { type: "password", autocomplete: "off", placeholder: "Paste new value" });
+    const save = h("button", { class: "sm primary" }, "Save");
+    save.addEventListener("click", async () => {
+      if (!input.value) return input.focus();
+      try {
+        await api(`/capabilities/${enc(id)}/secrets/${enc(i.grant.slice(7))}`, { method: "PUT", body: { value: input.value } });
+        toast(`Replaced ${i.grant.slice(7)}`);
+        refresh();
+      } catch (e) {
+        fail(e);
+      }
+    });
+    btn.closest("li").querySelector(".grow").append(h("span", { class: "row tight" }, input, save));
+    btn.remove();
+    input.focus();
+  };
+  // The model as a tier select with this month's spend; a pinned model, a cap or a missing key go through its sheet.
+  const modelRow = (i, isPending) => {
+    const spend = m && modelSpend(m, id);
+    const sub = [req.tier ? null : req.model, spend && `${spend.text(spend)} this month`].filter(Boolean).join(" · ");
+    let control;
+    if (isPending && needsKey) control = h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set up…");
+    else if (isPending) control = [!denied(i) && h("button", { class: "sm ghost", onclick: () => deny(i) }, "Deny"), h("button", { class: "sm primary", onclick: () => authorize(i) }, "Authorize")];
+    else if (req.tier) {
+      const MORE = "more";
+      const select = h("select", { class: "tier-select", "aria-label": "Model tier" }, (m?.tierNames ?? TIERS).map((t) => h("option", { value: t, selected: t === req.tier }, `${titleCase(t)} tier`)), h("option", { value: MORE }, "Pin a model, set a cap…"));
+      select.addEventListener("change", async () => {
+        if (select.value === MORE) return toolModelSheet(c).then((ok) => (ok ? refresh() : (select.value = req.tier)));
+        try {
+          select.disabled = true;
+          // A quick change: a new version with the other tier, no builder.
+          await api(`/capabilities/${enc(id)}/model`, { method: "POST", body: { tier: select.value } });
+          toast(`${cap.name} will use the ${select.value} tier`);
+          refresh();
+        } catch (e) {
+          select.disabled = false;
+          select.value = req.tier;
+          fail(e);
+        }
+      });
+      control = select;
+    } else control = h("button", { class: "sm ghost", onclick: () => toolModelSheet(c).then((ok) => ok && refresh()) }, "Change…");
+    return h("li", {}, isPending && !denied(i) && h("span", { class: "dot warn" }), kindPill(i), h("div", { class: "grow" }, h("span", {}, "Use a model"), sub && h("span", { class: "sub" }, sub)), control);
+  };
+  const allowed = section(
+    "Allowed to",
+    h(
+      "ul",
+      { class: "list" },
+      missingConfig.map((x) => h("li", {}, h("span", { class: "dot warn" }), h("span", { class: "pill" }, "setting"), h("div", { class: "grow" }, h("span", { class: "mono" }, x.name), h("span", { class: "sub" }, x.description)), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set…"))),
+      items.map(grantRow),
+      !items.length && !missingConfig.length && h("li", {}, h("span", { class: "dot ok" }), h("span", { class: "grow muted" }, "Needs nothing outside itself")),
+    ),
+    { order: 2 },
+  );
+
+  const tableCount = data ? Object.keys(data.tables).length : 0;
+  const dataSection = section(
+    "Data",
+    h(
+      "ul",
+      { class: "list" },
+      h(
+        "li",
+        {},
+        h("div", { class: "grow" }, h("span", {}, data ? `${plural(data.rows, "row")} · ${plural(tableCount, "table")}` : "Its data"), h("span", { class: "sub" }, !data ? "Couldn't count it right now" : data.lastWriteAt ? `Last write ${ago(data.lastWriteAt)}` : data.rows ? "No recent writes" : "Nothing written yet")),
+        h("button", { class: "sm", onclick: () => download(`/api/capabilities/${enc(id)}/export`) }, "Export"),
+      ),
+    ),
+    { order: 7 },
+  );
+
+  const runnable = ops.filter((o) => o.sideEffect !== "destructive");
+  const addSchedule = () => addScheduleSheet(c, ops).then((added) => added && route());
+  const schedules =
+    mine.length > 0 &&
+    section("Schedules", h("ul", { class: "list" }, mine.map((x) => scheduleRow(c, x, route))), { order: 3, action: runnable.length > 0 && h("button", { class: "link sm", onclick: addSchedule }, "+ Add schedule") });
+
+  // The widgets themselves (S/M, drawn by the platform), each on Home or with Add to Home.
+  const widgetCard = (w) => {
+    const size = w.sizes.includes("medium") ? "medium" : w.sizes[0];
+    const preview = widgetPreview(c, id, w, { size });
+    return h("div", { class: "info-widget" }, preview.el, placed(w) ? h("span", { class: "small faint" }, `${SIZE_LETTER[size]} · on Home`) : h("button", { class: "link sm", onclick: () => addWidgetSheet({ capabilityId: id, widget: w.name, onAdded: route }).then(() => route()) }, "Add to Home"));
+  };
+  const widgetSection = widgets.length > 0 && section(`Widgets · ${widgets.length}`, h("div", { class: "info-widgets" }, widgets.map(widgetCard)), { order: 4 });
+
+  // The owner's rules for building this tool: one per line, removed or added right here.
+  const saveRules = async (next, message, undo) => {
+    await api(`/capabilities/${enc(id)}/instructions`, { method: "PUT", body: { text: next.join("\n") } });
+    const before = rules;
+    rules = next;
+    drawRules();
+    toast(message, undo ? { undo: () => saveRules(before, "Restored").catch(fail) } : {});
+  };
+  const ruleInput = h("input", { type: "text", placeholder: "Add a rule for this tool…", "aria-label": "New rule" });
+  const ruleForm = h(
+    "form",
+    { class: "row tight info-rule", onsubmit: (e) => (e.preventDefault(), ruleInput.value.trim() && saveRules([...rules, ruleInput.value.trim()], "Rule added").then(() => (ruleInput.value = ""), fail)) },
+    ruleInput,
+    h("button", { type: "submit", class: "sm" }, "Add"),
+  );
+  const ruleList = h("ul", { class: "list" });
+  const drawRules = () => put(ruleList, rules.map((line, n) => h("li", {}, h("span", { class: "grow" }, line), h("button", { class: "sm ghost", onclick: () => saveRules(rules.filter((_, k) => k !== n), "Rule removed", true).catch(fail) }, "Remove"))));
+  drawRules();
+  const instructions = section("Instructions", [ruleList, ruleForm, h("div", { class: "small faint info-rule-hint" }, "The builder reads these on every change. Rules for every tool are under ", h("a", { href: "#/settings/ai" }, "Settings › AI"), ".")], { order: 5 });
+
+  const versions = section("Versions", h("ul", { class: "list" }, cap.versions.slice(0, 2).map((v) => versionRow(c, v, version, all))), {
+    order: 6,
+    action: cap.versions.length > 2 && h("a", { class: "btn link sm", href: `#/c/${enc(id)}/versions` }, `All ${cap.versions.length} versions ›`),
+  });
+
+  // Empty sections fold into one line at the foot, each a link that adds one.
+  const missing = h("div", { class: "small muted info-missing" });
+  const columns = h("div", { class: "info-sections" });
+  const draw = () => {
+    const showRules = rules.length > 0 || addingRule;
+    const left = [operations, allowed, dataSection];
+    const right = [schedules, widgetSection, showRules && instructions, versions].filter(Boolean);
+    put(columns, h("div", { class: "info-col" }, left), h("div", { class: "info-col" }, right));
+    const links = [
+      !schedules && runnable.length > 0 && h("button", { class: "link sm", onclick: addSchedule }, "Schedules"),
+      !widgetSection && h("button", { class: "link sm", onclick: () => openChange(c, { widget: "new" }) }, "Widgets"),
+      !showRules && h("button", { class: "link sm", onclick: () => ((addingRule = true), draw(), ruleInput.focus()) }, "Instructions"),
+    ].filter(Boolean);
+    put(missing, links.length ? ["Not set up: ", links.flatMap((l, n) => (n ? [h("span", { class: "faint" }, " · "), l] : [l]))] : null);
+  };
+  draw();
+
   const connected = [...new Set([...uses, ...usedBy])];
   view(
     backBar("Home", "#/", h("div", { class: "glass-bar" }, more)),
     sandboxNotice(),
     h(
       "main",
-      { class: "column info", style: { "--w": "760px" } },
+      { class: "column info info-page" },
       h(
         "div",
         { class: "info-head" },
@@ -117,8 +315,10 @@ async function infoPage(id) {
         h("button", { class: "lg", onclick: () => openCapability(c).catch(fail) }, "Open"),
       ),
       statusPills(c, cap, all),
+      notices,
       composer,
-      h("div", { class: "card list-card" }, rows),
+      columns,
+      missing,
     ),
   );
 }
@@ -155,7 +355,7 @@ async function connectionPage(c, cap, all) {
     sandboxNotice(),
     h(
       "main",
-      { class: "column info", style: { "--w": "900px" } },
+      { class: "column info info-page" },
       h(
         "div",
         { class: "info-head" },
@@ -165,29 +365,34 @@ async function connectionPage(c, cap, all) {
       ),
       h(
         "div",
-        { class: "info-grid" },
+        { class: "info-sections" },
         h(
           "div",
-          { class: "card list-card" },
-          h("div", { class: "eyebrow" }, "Operations"),
-          h(
-            "ul",
-            { class: "list" },
-            ops.filter((o) => o.name !== "health").map((op) => h("li", { class: "link", tabindex: 0, onclick: () => go(`#/run/${enc(id)}?op=${enc(op.name)}`), onkeydown: (e) => e.key === "Enter" && go(`#/run/${enc(id)}?op=${enc(op.name)}`) }, h("div", { class: "grow" }, h("span", { class: "mono" }, op.name), h("span", { class: "sub" }, op.description)), sidePill(op.sideEffect))),
-            healthRow,
+          { class: "info-col" },
+          section(
+            "Operations",
+            h(
+              "ul",
+              { class: "list" },
+              ops.filter((o) => o.name !== "health").map((op) => h("li", {}, h("div", { class: "grow" }, h("span", { class: "mono" }, op.name), h("span", { class: "sub" }, op.description)), sidePill(op.sideEffect), h("button", { class: "sm", onclick: () => go(`#/run/${enc(id)}?op=${enc(op.name)}`) }, "Run"))),
+              healthRow,
+            ),
+            { order: 1 },
           ),
         ),
         h(
           "div",
-          { class: "stack-md" },
-          h("div", { class: "card connected" }, h("div", { class: "eyebrow" }, "Used by"), cap.usedBy?.length ? h("div", { class: "row tight wrap" }, cap.usedBy.map((u) => chip(all.get(u.id) ?? { id: u.id, name: u.name }, undefined, { href: `#/c/${enc(u.id)}` }))) : h("span", { class: "muted small" }, "Nothing yet")),
+          { class: "info-col" },
+          section("Used by", cap.usedBy?.length ? h("div", { class: "row tight wrap info-used-by" }, cap.usedBy.map((u) => chip(all.get(u.id) ?? { id: u.id, name: u.name }, undefined, { href: `#/c/${enc(u.id)}` }))) : h("div", { class: "muted small info-used-by" }, "Nothing yet"), { order: 2 }),
           (signIn || inputs.length > 0) &&
-            h(
-              "div",
-              { class: "card settings-card" },
-              signIn && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Sign-in"), h("span", { class: "sub" }, cap.status.missingSecrets.length ? "Not signed in" : "Signed in")), h("button", { class: cap.status.missingSecrets.length ? "sm primary" : "sm", onclick: () => signInDialog(id).then((ok) => ok && route()) }, cap.status.missingSecrets.length ? "Sign in" : "Sign in again")),
-              inputs.map(({ x, input }) => h("div", { class: "setting stacked" }, h("div", { class: "grow" }, h("span", { class: "mono" }, x.name), h("span", { class: "sub" }, x.description)), input)),
-              inputs.length > 0 && h("div", { class: "row end settings-save" }, save),
+            section(
+              "Settings",
+              [
+                signIn && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Sign-in"), h("span", { class: "sub" }, cap.status.missingSecrets.length ? "Not signed in" : "Signed in")), h("button", { class: cap.status.missingSecrets.length ? "sm primary" : "sm", onclick: () => signInDialog(id).then((ok) => ok && route()) }, cap.status.missingSecrets.length ? "Sign in" : "Sign in again")),
+                inputs.map(({ x, input }) => h("div", { class: "setting stacked" }, h("div", { class: "grow" }, h("span", { class: "mono" }, x.name), h("span", { class: "sub" }, x.description)), input)),
+                inputs.length > 0 && h("div", { class: "row end settings-save" }, save),
+              ],
+              { order: 3 },
             ),
         ),
       ),

@@ -6,7 +6,7 @@ import { put } from "./frame.js";
 import { PROVIDERS, titleCase, usd } from "./models.js";
 import { changeHref } from "./tool-actions.js";
 
-export { grantsSheet, perCall, signInDialog, tierModel, TIERS };
+export { grantsSheet, grantText, kindPill, perCall, signInDialog, tierModel, TIERS };
 
 // ---------- D1 / D2 / O4: the grants sheet (a Request; approved, the same rows with Revoke) ----------
 

@@ -141,7 +141,7 @@ try {
   const b2 = await post("/capabilities/running-log/modify", { request: "add delete_run" });
   await settle(b2.buildId);
   await page.goto(`${web}/#/c/running-log`);
-  await page.locator(".info-row", { hasText: "Versions" }).waitFor();
+  await page.locator(".info-section", { hasText: "Versions" }).waitFor();
   await page.waitForTimeout(300);
   const infoH = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
   await shot("tool-info", { width: 1280, height: 700 });

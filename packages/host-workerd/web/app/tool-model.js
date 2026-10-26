@@ -6,9 +6,23 @@ import { perCall, tierModel, TIERS } from "./grants.js";
 import { pollInbox } from "./inbox.js";
 import { modelPicker, TIER_TEXT, titleCase, usd } from "./models.js";
 
-export { toolModelSheet };
+export { modelSpend, toolModelSheet };
 
 // ---------- J3: a tool's model (tier or a pinned model, and its own cap) ----------
+
+/** This month's spend on a tool's model calls: dollars, or (hosted) the host's unit. */
+function modelSpend(m, id) {
+  const rows = m.spend.rows.filter((r) => r.capabilityId === id);
+  const hostUsed = m.host?.charges.byCapability.filter((x) => x.capabilityId === id) ?? [];
+  const unit = hostUsed[0]?.unit ?? m.host?.charges.totals[0]?.unit ?? "Credits";
+  return {
+    spent: rows.reduce((n, r) => n + r.costUsd, 0),
+    calls: rows.reduce((n, r) => n + r.calls, 0),
+    unit,
+    used: Math.round(hostUsed.reduce((n, x) => n + x.amount, 0) * 100) / 100,
+    text: (x) => (m.host ? `${x.used} ${x.unit}` : usd(x.spent)),
+  };
+}
 
 /**
  * J3 One Picker for a tool's model: a tier (it follows Models) or one specific model, and this
@@ -24,12 +38,7 @@ async function toolModelSheet(c, { replace = false } = {}) {
   let pinned = req.model ?? null;
   let tier = req.tier ?? null;
   const retired = cap.status.retiredModel;
-  const rows = m.spend.rows.filter((r) => r.capabilityId === c.id);
-  const spent = rows.reduce((n, r) => n + r.costUsd, 0);
-  const calls = rows.reduce((n, r) => n + r.calls, 0);
-  const hostUsed = m.host?.charges.byCapability.filter((x) => x.capabilityId === c.id) ?? [];
-  const unit = hostUsed[0]?.unit ?? m.host?.charges.totals[0]?.unit ?? "Credits";
-  const used = Math.round(hostUsed.reduce((n, x) => n + x.amount, 0) * 100) / 100;
+  const { spent, calls, unit, used } = modelSpend(m, c.id);
   return modal(
     (close) => {
       const ok = h("button", { class: "primary" }, "Save");

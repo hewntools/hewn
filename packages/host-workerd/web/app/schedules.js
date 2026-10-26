@@ -8,7 +8,7 @@ import { askFixLatest } from "./tool-actions.js";
 import { sidePill } from "./tool.js";
 import { segmented } from "./widgets.js";
 
-export { cadenceText, proposalSheet, runFailure, schedulesSheet };
+export { addScheduleSheet, cadenceText, proposalSheet, runFailure, scheduleRow, schedulesSheet };
 
 // ---------- K: schedules ----------
 
@@ -43,94 +43,101 @@ function expandable(text, cls = "") {
 const runFailure = (outcome, operation) => String(outcome).replace(/^\w+: /, "").replace(new RegExp(`^${operation.split("@")[0]}(@\\d+)? failed: `), "");
 
 /**
- * K1 + K2 Schedules for one tool: each schedule a row with a switch and its next run (paused ones
- * say why and offer Resume), then a New schedule block with preset cadences in the owner's time zone.
+ * One schedule as a row: a switch with its next run (a proposed one offers Enable; one paused after
+ * failures says why and offers Resume), why the last run failed with Ask builder to fix this, and ×.
+ * `after` redraws once something changed; `leave` runs before the fix opens the drawer.
+ */
+function scheduleRow(c, x, after, leave = () => {}) {
+  const act = (body, message) => async () => {
+    try {
+      await api(`/schedules/${enc(x.id)}`, body ? { method: "PUT", body } : { method: "DELETE" });
+      toast(message);
+      after();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const sw = h("input", { type: "checkbox", class: "switch", checked: x.status === "active", "aria-label": "On" });
+  sw.addEventListener("change", () => act({ status: sw.checked ? "active" : "paused" }, sw.checked ? "Schedule on" : "Schedule paused")());
+  const failed = x.lastRunAt && x.lastOutcome && x.lastOutcome !== "ok";
+  const sub =
+    x.status === "proposed"
+      ? h("span", { class: "sub" }, `${cadenceText(x.cadence)} · proposed by ${actorLabel(x.createdBy)}`)
+      : x.status === "paused"
+        ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `${cadenceText(x.cadence)} · paused after ${x.failures} failures in a row` : `${cadenceText(x.cadence)} · paused`)
+        : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
+  // Why the last run failed, and when: the tool's own words, without the call's prefixes.
+  const why = failed && expandable(`Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`, "sub danger-text");
+  const fix = failed && h("button", { class: "link sm self-start", type: "button", onclick: () => (leave(), askFixLatest(c, (f) => f.caller === `schedule:${x.id}`, { caller: `schedule:${x.id}`, operation: x.operation, error: runFailure(x.lastOutcome, x.operation), input: JSON.stringify(x.input ?? {}) }).catch(fail)) }, "Ask builder to fix this");
+  return h(
+    "li",
+    {},
+    h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why, fix),
+    x.status === "proposed" ? h("button", { class: "sm primary", onclick: act({ status: "active" }, "Schedule enabled") }, "Enable") : x.status === "paused" && x.pausedReason ? h("button", { class: "sm", onclick: act({ status: "active" }, "Resumed") }, "Resume") : sw,
+    h("button", { class: "ghost sm icon-only", "aria-label": "Delete schedule", onclick: act(null, "Schedule deleted") }, "×"),
+  );
+}
+
+/** K2 New schedule: an operation, a preset cadence (or cron), a time in the owner's zone. `add` posts it. */
+function newScheduleForm(c, runnable, onAdded) {
+  const zone = settings?.timeZone ?? browserZone();
+  const op = h("select", { "aria-label": "Operation" }, runnable.map((o) => h("option", { value: o.name }, o.name)));
+  let kind = "daily";
+  const time = h("input", { type: "time", value: "07:00", class: "time-input", "aria-label": "At" });
+  const day = h("select", { "aria-label": "Day", class: "day-select" }, ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => h("option", { value: d }, titleCase(d))));
+  const cron = h("input", { type: "text", class: "code", placeholder: "0 7 * * 1-5", "aria-label": "Cron" });
+  const when = h("div", { class: "row tight" });
+  const drawWhen = () => put(when, kind === "hourly" ? null : kind === "custom" ? cron : [kind === "weekly" && day, time], h("span", { class: "small faint" }, `${zone} · your time zone`));
+  const cadence = () => (kind === "hourly" ? "hourly" : kind === "custom" ? cron.value.trim() : kind === "weekly" ? `weekly ${day.value} ${time.value}` : `daily ${time.value}`);
+  drawWhen();
+  const add = h("button", { class: "primary" }, "Add schedule");
+  add.addEventListener("click", async () => {
+    try {
+      add.disabled = true;
+      await api("/schedules", { method: "POST", body: { capabilityId: c.id, operation: op.value, cadence: cadence() } });
+      toast(`Scheduled ${op.value}: ${cadenceText(cadence())}`);
+      onAdded();
+    } catch (e) {
+      fail(e);
+    } finally {
+      add.disabled = false;
+    }
+  });
+  const fields = [op, segmented([["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["custom", "Custom"]], kind, (k) => ((kind = k), drawWhen()), { label: "Cadence" }), when];
+  return { fields, add };
+}
+
+/**
+ * K1 + K2 Schedules for one tool (from the Inbox): each schedule a row, then a New schedule block
+ * with preset cadences in the owner's time zone.
  */
 async function schedulesSheet(c, ops) {
   const runnable = ops.filter((o) => o.sideEffect !== "destructive");
-  const zone = settings?.timeZone ?? browserZone();
   return modal(
     (close) => {
       const list = h("ul", { class: "list" });
-      const act = (id, body, message) => async () => {
-        try {
-          await api(`/schedules/${enc(id)}`, body ? { method: "PUT", body } : { method: "DELETE" });
-          toast(message);
-          render();
-        } catch (e) {
-          fail(e);
-        }
-      };
       const render = async () => {
         const all = (await api("/schedules").catch(() => [])).filter((x) => x.capabilityId === c.id);
-        put(
-          list,
-          all.length
-            ? all.map((x) => {
-                const sw = h("input", { type: "checkbox", class: "switch", checked: x.status === "active", "aria-label": "On" });
-                sw.addEventListener("change", () => act(x.id, { status: sw.checked ? "active" : "paused" }, sw.checked ? "Schedule on" : "Schedule paused")());
-                const failed = x.lastRunAt && x.lastOutcome && x.lastOutcome !== "ok";
-                const sub =
-                  x.status === "proposed"
-                    ? h("span", { class: "sub" }, `${cadenceText(x.cadence)} · proposed by ${actorLabel(x.createdBy)}`)
-                    : x.status === "paused"
-                      ? h("span", { class: `sub ${x.pausedReason ? "danger-text" : ""}` }, x.pausedReason ? `${cadenceText(x.cadence)} · paused after ${x.failures} failures in a row` : `${cadenceText(x.cadence)} · paused`)
-                      : h("span", { class: "sub" }, `${cadenceText(x.cadence)}${x.nextRunAt ? ` · next ${inFuture(x.nextRunAt)}` : ""}`);
-                // Why the last run failed, and when: the tool's own words, without the call's prefixes.
-                const why = failed && expandable(`Last run ${ago(x.lastRunAt)} failed: ${runFailure(x.lastOutcome, x.operation)}`, "sub danger-text");
-                const fix = failed && h("button", { class: "link sm self-start", type: "button", onclick: () => (close?.(), askFixLatest(c, (f) => f.caller === `schedule:${x.id}`, { caller: `schedule:${x.id}`, operation: x.operation, error: runFailure(x.lastOutcome, x.operation), input: JSON.stringify(x.input ?? {}) }).catch(fail)) }, "Ask builder to fix this");
-                return h(
-                  "li",
-                  {},
-                  h("div", { class: "grow" }, h("span", { class: "mono" }, x.operation.split("@")[0]), sub, why, fix),
-                  x.status === "proposed" ? h("button", { class: "sm primary", onclick: act(x.id, { status: "active" }, "Schedule enabled") }, "Enable") : x.status === "paused" && x.pausedReason ? h("button", { class: "sm", onclick: act(x.id, { status: "active" }, "Resumed") }, "Resume") : sw,
-                  h("button", { class: "ghost sm icon-only", "aria-label": "Delete schedule", onclick: act(x.id, null, "Schedule deleted") }, "×"),
-                );
-              })
-            : h("li", {}, h("span", { class: "grow muted" }, "Nothing runs on a timetable.")),
-        );
+        put(list, all.length ? all.map((x) => scheduleRow(c, x, render, () => close?.())) : h("li", {}, h("span", { class: "grow muted" }, "Nothing runs on a timetable.")));
       };
       render();
       if (!runnable.length) return [sheetHead(appIcon(c, { size: 44 }), `Schedules · ${c.name}`), list, sheetActions(h("button", { onclick: () => close() }, "Done"))];
-      // New schedule: an operation, a preset cadence, a time.
-      const op = h("select", { "aria-label": "Operation" }, runnable.map((o) => h("option", { value: o.name }, o.name)));
-      let kind = "daily";
-      const time = h("input", { type: "time", value: "07:00", class: "time-input", "aria-label": "At" });
-      const day = h("select", { "aria-label": "Day", class: "day-select" }, ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => h("option", { value: d }, titleCase(d))));
-      const cron = h("input", { type: "text", class: "code", placeholder: "0 7 * * 1-5", "aria-label": "Cron" });
-      const when = h("div", { class: "row tight" });
-      const drawWhen = () =>
-        put(when, kind === "hourly" ? null : kind === "custom" ? cron : [kind === "weekly" && day, time], h("span", { class: "small faint" }, `${zone} · your time zone`));
-      const cadence = () => (kind === "hourly" ? "hourly" : kind === "custom" ? cron.value.trim() : kind === "weekly" ? `weekly ${day.value} ${time.value}` : `daily ${time.value}`);
-      drawWhen();
-      const add = h("button", { class: "primary" }, "Add schedule");
-      add.addEventListener("click", async () => {
-        try {
-          add.disabled = true;
-          await api("/schedules", { method: "POST", body: { capabilityId: c.id, operation: op.value, cadence: cadence() } });
-          toast(`Scheduled ${op.value}: ${cadenceText(cadence())}`);
-          render();
-        } catch (e) {
-          fail(e);
-        } finally {
-          add.disabled = false;
-        }
-      });
-      return [
-        sheetHead(appIcon(c, { size: 44 }), `Schedules · ${c.name}`),
-        list,
-        h(
-          "div",
-          { class: "inset-block stack-sm" },
-          h("div", { class: "eyebrow" }, "New schedule"),
-          op,
-          segmented([["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["custom", "Custom"]], kind, (k) => ((kind = k), drawWhen()), { label: "Cadence" }),
-          when,
-        ),
-        sheetActions(h("button", { onclick: () => close() }, "Done"), add),
-      ];
+      const form = newScheduleForm(c, runnable, render);
+      return [sheetHead(appIcon(c, { size: 44 }), `Schedules · ${c.name}`), list, h("div", { class: "inset-block stack-sm" }, h("div", { class: "eyebrow" }, "New schedule"), form.fields), sheetActions(h("button", { onclick: () => close() }, "Done"), form.add)];
     },
     { width: 480 },
+  );
+}
+
+/** Info › Schedules › + Add schedule: the one sheet Info opens to add. Resolves true once one is added. */
+function addScheduleSheet(c, ops) {
+  const runnable = ops.filter((o) => o.sideEffect !== "destructive");
+  return modal(
+    (close) => {
+      const form = newScheduleForm(c, runnable, () => close(true));
+      return [sheetHead(appIcon(c, { size: 44 }), `New schedule · ${c.name}`), h("div", { class: "stack-sm" }, form.fields), sheetActions(h("button", { onclick: () => close(false) }, "Cancel"), form.add)];
+    },
+    { width: 440 },
   );
 }
 

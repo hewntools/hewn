@@ -15,6 +15,7 @@ import { infoPage } from "./info.js";
 import { intakePage } from "./intake.js";
 import { settingsPage } from "./settings.js";
 import { appPage, runPage } from "./tool.js";
+import { versionPage, versionsPage } from "./versions.js";
 
 export { route };
 
@@ -24,7 +25,7 @@ function parseHash() {
   const raw = location.hash.replace(/^#/, "") || "/";
   const [path, qs] = raw.split("?");
   const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
-  return { page: parts[0] ?? "", id: parts[1], sub: parts[2], q: new URLSearchParams(qs ?? "") };
+  return { page: parts[0] ?? "", id: parts[1], sub: parts[2], arg: parts[3], q: new URLSearchParams(qs ?? "") };
 }
 
 let routing = 0;
@@ -32,7 +33,7 @@ async function route() {
   for (const fn of leaving.splice(0)) fn();
   for (const d of document.querySelectorAll("dialog[open]")) d.close();
   const n = ++routing;
-  const { page: p, id, sub, q } = parseHash();
+  const { page: p, id, sub, arg, q } = parseHash();
   document.body.classList.remove("app-mode");
   if (p !== "") setWallpaper(await hues(), { dim: true });
   if (n !== routing) return;
@@ -40,6 +41,8 @@ async function route() {
     if (p === "") return await home();
     if (p === "app") return await appPage(id, q);
     if (p === "run") return await runPage(id, q);
+    if (p === "c" && sub === "versions") return await versionsPage(id);
+    if (p === "c" && sub === "v") return await versionPage(id, Number(arg));
     if (p === "c") return await infoPage(id);
     if (p === "new") return await intakePage(q);
     if (p === "b") return await buildPage(id);

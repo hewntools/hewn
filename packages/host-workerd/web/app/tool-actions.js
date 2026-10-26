@@ -2,7 +2,6 @@
 // A tool's actions: its menu, Change…, rename, delete, icon, versions and instructions.
 import {
   actorLabel,
-  ago,
   api,
   appIcon,
   bumpIcons,
@@ -20,16 +19,14 @@ import {
   rowCells,
   sheetActions,
   sheetHead,
-  skeleton,
   toast,
 } from "../kit.js";
 import { go, put } from "./frame.js";
 import { grantsSheet } from "./grants.js";
-import { conversationThread } from "./intake.js";
 import { route } from "./router.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
-export { askFix, askFixLatest, capabilityMenu, changeHref, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo, versionsDialog };
+export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo };
 
 // ---------- tool actions (menu, change, rename, delete, icon, versions) ----------
 
@@ -78,7 +75,7 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
     "-",
     !connection && ["Widgets…", () => toolWidgetsSheet(c).catch(fail)],
     ["Activity", () => go(`#/activity?capability=${id}`)],
-    ["Versions…", () => versionsDialog(c).catch(fail)],
+    ["Versions", () => go(`#/c/${id}/versions`)],
     "-",
     rename && ["Rename", rename],
     ["Set icon…", () => iconDialog(c).catch(fail)],
@@ -105,75 +102,6 @@ async function rollbackTo(c, version) {
   invalidateCaps();
   toast(`${c.name} is back on v${r.to}`, { undo: () => api(`/capabilities/${id}/rollback`, { method: "POST", body: { version: r.from } }).then(() => (invalidateCaps(), route())) });
   return r;
-}
-
-/** Versions and rollback: each version with what led to it (the conversation, the spec, the builder's log), and restoring an earlier one. */
-async function versionsDialog(c) {
-  const id = enc(c.id);
-  const detail = await api(`/capabilities/${id}`);
-  const active = (await caps(true)).get(c.id)?.version;
-  return modal(
-    (close) => [
-      sheetHead(appIcon(c, { size: 44 }), `Versions · ${c.name}`),
-      h("div", { class: "stack-sm version-panes" }, detail.versions.map((v) => versionPane(c, v, v.version === active, close))),
-      h("div", { class: "small faint" }, "Restoring keeps the data. It's refused if a newer version changed the data in a way older code can't read."),
-      sheetActions(h("button", { onclick: () => close() }, "Done")),
-    ],
-    { width: 640 },
-  );
-}
-
-/**
- * One version: when and who asked, Restore (or active), and at the bottom what led to it, kept
- * for the tool's life: the conversation with the intake, the spec the builder worked from, the
- * builder's log (each loaded when opened). "Continue from here" opens a change picking up that
- * conversation.
- */
-function versionPane(c, v, isActive, close) {
-  const who = actorLabel(v.requestedBy);
-  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
-  /** An expander whose content comes when it's first opened. */
-  const lazy = (summary, load) => {
-    const body = h("div", { class: "stack-sm" }, skeleton("60%", "40%"));
-    const d = h("details", { class: "spec-step" }, h("summary", {}, summary), body);
-    let loaded = false;
-    d.addEventListener("toggle", async () => {
-      if (!d.open || loaded) return;
-      loaded = true;
-      try {
-        put(body, await load());
-      } catch (e) {
-        put(body, h("div", { class: "small faint" }, e.message || String(e)));
-      }
-    });
-    return d;
-  };
-  const kept = v.buildId
-    ? [
-        lazy("Conversation", async () => {
-          const ctx = await api(`/builds/${enc(v.buildId)}/context`);
-          return ctx.conversation?.length ? conversationThread(ctx.conversation, { mode: v.kind === "create" ? "create" : "modify", cap: c, all: await caps(true).catch(() => new Map()), version: v.version }) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
-        }),
-        spec && h("details", { class: "spec-step" }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
-        lazy("Builder's log", async () => {
-          const t = await api(`/builds/${enc(v.buildId)}/transcript`);
-          return t.text ? h("pre", { class: "log tail" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "small faint" }, "No log was kept.");
-        }),
-        v.conversation && h("button", { class: "link sm self-start", onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here ›"),
-      ]
-    : [];
-  return h(
-    "div",
-    { class: "version-pane" },
-    h(
-      "div",
-      { class: "row tight" },
-      h("span", { class: "pill" }, `v${v.version}`),
-      h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
-      isActive ? h("span", { class: "pill ok with-dot" }, "active") : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
-    ),
-    kept.length ? h("div", { class: "stack-sm version-kept" }, kept) : null,
-  );
 }
 
 /**
