@@ -2,7 +2,7 @@
 
 `hewn open` opens Hewn in your browser, signed in. Hewn's web client runs only on the machine Hewn runs on, unless you've set up [a public URL](remote-access.md).
 
-The top bar has Search, **Home · Agents · Accounts · Settings**, and the **Inbox** on the right.
+The top bar has Search, **Home · Hub · Agents · Accounts · Settings**, and the **Inbox** on the right.
 
 ## Home
 
@@ -24,9 +24,15 @@ Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget tha
 
 A widget shows a tool's data at a glance: today's habits, tonight's aurora forecast, a quote. It refreshes by itself. When it couldn't refresh, it keeps the last view and says how old it is.
 
+## The Hub
+
+**Hub** holds tools ready to install: today Hewn's own (**Official**), which come with Hewn, so the Hub works offline. Search, or pick a tag; each card shows what the tool is for and what it needs ("reaches api.met.no", "uses a model"; nothing when it needs nothing), and **Installed** when you have it. A tool's page has its screens, what it does (Hewn's reading of its code), its operations, what it needs, its versions and its **Source code**. **Install** opens the install sheet ([Sharing tools](sharing.md#installing-a-tool-someone-shared)); a tool you have already offers **Open** and **Install a copy**. **Install from a file…** is here too.
+
+New also links to the Hub, under the box ("Or start from one in Hub").
+
 ## Search and commands
 
-Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now…). Enter opens it.
+Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). Enter opens it. Tools on the Hub you don't have yet come last.
 
 ![The command palette with "run" typed: Running Log, Weekend Weather, Change Running Log… and Running Log · Info](images/command-palette.png)
 

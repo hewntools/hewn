@@ -505,6 +505,37 @@ describe("web client (owner surface)", () => {
       }
     });
 
+    test("the Hub: Hewn's own tools from the release, a tool's page, its image and code; installed from Hub with its sample data", async () => {
+      const hub = await api("/hub");
+      assert.equal(hub.status, 200, JSON.stringify(hub.json));
+      const ids = hub.json.tools.map((t: any) => t.id);
+      assert.ok(ids.includes("plant-log") && ids.includes("habits"), ids.join());
+      assert.deepEqual(hub.json.firstRun.length, 3);
+      const plant = hub.json.tools.find((t: any) => t.id === "plant-log");
+      assert.equal(plant.official, true);
+      assert.equal(plant.needs.model, "light");
+      assert.equal(plant.installed, false);
+      assert.ok(plant.images.includes("screen"));
+      const detail = await api("/hub/plant-log");
+      assert.ok(detail.json.summary.findings.some((f: any) => f.kind === "warn"), "Hewn's reading ships with it");
+      assert.ok(detail.json.operations.some((o: any) => o.name === "add_plant"));
+      const img = await http("/api/hub/plant-log/image/screen", { headers: { "x-hewn-ui": "1" } });
+      assert.equal(img.status, 200);
+      assert.equal(img.headers["content-type"], "image/png");
+      assert.equal((await http("/api/hub/plant-log/image/nope", { headers: { "x-hewn-ui": "1" } })).status, 404);
+      const code = await api("/hub/plant-log/code");
+      assert.ok(code.json.files.some((f: any) => f.path === "sample/calls.json"));
+      assert.ok(!code.json.files.some((f: any) => f.path.startsWith(".hub/")), "the listing never travels with the tool");
+      const preview = await api("/hub/kid-quotes/stage", { method: "POST" });
+      assert.equal(preview.json.summaryBy, "hewn");
+      assert.equal(preview.json.from, "hub");
+      const done = await platform.settle((await api(`/bundles/${preview.json.token}/install`, { method: "POST", body: { name: preview.json.suggestedName, sample: true } })).json.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.equal((await api("/capabilities/kid-quotes")).json.source.from, "hub");
+      assert.equal((await api("/hub")).json.tools.find((t: any) => t.id === "kid-quotes").installed, true);
+      assert.equal((await api("/hub/nope")).status, 404);
+    });
+
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {
       const r = await http("/api/intake", {
         method: "POST",

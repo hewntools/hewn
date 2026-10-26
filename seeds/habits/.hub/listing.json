@@ -1,0 +1,27 @@
+{
+  "line": "Check in daily, see streaks",
+  "tags": [
+    "Health",
+    "Daily"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "A short list of daily habits, each checked off once a day, with streaks and a widget for today with a Done button.",
+    "keeps": "Your habits and the days you checked each one off.",
+    "reaches": "",
+    "findings": [
+      {
+        "kind": "ok",
+        "title": "Keeps your data inside the tool",
+        "detail": "It reaches nothing outside itself."
+      }
+    ]
+  }
+}

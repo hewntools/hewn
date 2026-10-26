@@ -1,0 +1,26 @@
+{
+  "line": "Books you're reading, and how far in",
+  "tags": [
+    "Reading"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "Books you want to read, are reading and have finished: your page in each, a rating when you finish, and a widget with the one on your nightstand.",
+    "keeps": "Books with title, author, pages, your page, status, rating and finish date.",
+    "reaches": "",
+    "findings": [
+      {
+        "kind": "ok",
+        "title": "Keeps your data inside the tool",
+        "detail": "It reaches nothing outside itself."
+      }
+    ]
+  }
+}

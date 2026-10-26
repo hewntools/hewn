@@ -1,0 +1,10 @@
+[
+  {"operation": "add_plant", "input": {"name": "Monstera", "location": "Living room", "species": "Monstera deliciosa", "water_every_days": 7, "feed_every_days": 30}},
+  {"operation": "add_plant", "input": {"name": "Fern", "location": "Bathroom", "species": "Boston fern", "water_every_days": 3}},
+  {"operation": "add_plant", "input": {"name": "Snake plant", "location": "Bedroom", "species": "Sansevieria", "water_every_days": 14}},
+  {"operation": "add_plant", "input": {"name": "Basil", "location": "Kitchen window", "water_every_days": 2}},
+  {"operation": "add_plant", "input": {"name": "Pothos", "location": "Bookshelf", "species": "Epipremnum aureum", "water_every_days": 7}},
+  {"operation": "water", "input": {"plant_ids": [1, 3, 5]}},
+  {"operation": "log_event", "input": {"plant_id": 1, "type": "note", "text": "New leaf unfurling"}},
+  {"operation": "log_event", "input": {"plant_id": 3, "type": "repotted", "text": "Into the blue pot"}}
+]

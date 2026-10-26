@@ -309,6 +309,33 @@ fieldset.job legend .sub { color: var(--text-2); }
 .stack-xs { display: flex; flex-direction: column; gap: 4px; }
 .clip-1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .danger-text, .list > li .sub.danger-text { color: var(--danger); }
+.warn-text { color: var(--warn); }
+/* Q1–Q3 the Hub (design pass 3): one grid of cards, a tool's page, the link under New, the hosted first run. */
+.hub-head { gap: 16px; align-items: center; }
+.hub-head > input { flex: 1; min-width: 0; }
+.chip-divider { width: 1px; height: 20px; background: var(--border); }
+.hub-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
+@media (max-width: 760px) { .hub-grid { grid-template-columns: 1fr; } }
+.card.hub-card { margin: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; color: inherit; text-decoration: none; }
+.card.hub-card:hover { border-color: var(--border-strong); }
+.hub-shot { height: 132px; background: var(--surface-2); border-bottom: 1px solid var(--border); overflow: hidden; display: grid; place-items: center; }
+.hub-shot > img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.hub-card-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.hub-needs { min-height: 1.5em; color: var(--text-2); }
+.hub-needs.warn-text { color: var(--warn); }
+.hub-card-foot { display: flex; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.hub-official > .small { font-weight: 600; color: var(--accent-ink); }
+.hub-paging:empty { display: none; }
+.hub-none { padding: var(--s5) 0; }
+.hub-link { align-self: center; }
+.hub-shots { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+.hub-shots.n1 { grid-template-columns: 1fr; }
+.hub-shots > img { width: 100%; height: 200px; object-fit: cover; object-position: top; border-radius: 16px; border: 1px solid var(--border); background: var(--surface-2); }
+.hub-shots > img.widget { object-fit: contain; object-position: center; padding: 12px; }
+.hub-cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 760px) { .hub-cols { grid-template-columns: 1fr; } .hub-shots { grid-template-columns: 1fr; } }
+.hub-what > .pretty, .hub-what > .small { padding-bottom: 6px; }
+.first-shelf { margin-top: var(--s4); }
 .wide { width: 100%; }
 .center { text-align: center; }
 .inset-block { padding: 14px; border-radius: 14px; background: var(--surface-2); }

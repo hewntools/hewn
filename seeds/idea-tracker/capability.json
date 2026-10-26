@@ -1,0 +1,714 @@
+{
+  "id": "idea-tracker",
+  "name": "Idea Tracker",
+  "purpose": "Capture business and product ideas quickly and see the best ones first. Each idea has a one-line pitch, an optional link, tags, a status (raw, exploring, validating, active, parked, shipped, killed), a 1–5 star gut rating and dated notes as it develops.",
+  "abi": "2.0",
+  "hue": 48,
+  "tags": ["ideas", "business", "notes"],
+  "ui": { "available": true },
+  "operations": [
+    {
+      "name": "add_idea",
+      "version": 1,
+      "sideEffect": "write",
+      "description": "Log a new idea. Only title is required; pitch, url, tags, rating (1–5), status and a first note are optional. Contract v1 reports a 'shipped' idea as status 'parked' and an 'active' idea as 'validating'; use v3 to see both.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "Optional client-chosen id; a short random id is generated when omitted" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S", "description": "Idea title, 1–200 chars after trimming" },
+          "pitch": { "type": "string", "maxLength": 500, "description": "One-line pitch, max 500 chars; newlines become spaces" },
+          "url": { "type": "string", "maxLength": 500, "description": "Optional http(s) link, max 500 chars; '' means none" },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 50, "description": "Tags; normalized to lowercase-hyphenated, max 20 per idea, max 40 chars each" },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Gut rating 1–5 stars" },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"], "description": "Defaults to raw" },
+          "note": { "type": "string", "minLength": 1, "maxLength": 5000, "pattern": "\\S", "description": "Optional first note" }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "add_idea",
+      "version": 2,
+      "sideEffect": "write",
+      "description": "Log a new idea. Only title is required; pitch, url (http/https), tags, rating (1–5), status (incl. 'shipped') and a first note are optional. Contract v2 reports an 'active' idea as 'validating'; use v3 to see or set 'active'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "Optional client-chosen id; a short random id is generated when omitted" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S", "description": "Idea title, 1–200 chars after trimming" },
+          "pitch": { "type": "string", "maxLength": 500, "description": "One-line pitch, max 500 chars; newlines become spaces" },
+          "url": { "type": "string", "maxLength": 500, "description": "Optional http(s) link, max 500 chars; '' means none" },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 50, "description": "Tags; normalized to lowercase-hyphenated, max 20 per idea, max 40 chars each" },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Gut rating 1–5 stars" },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"], "description": "Defaults to raw. shipped: the idea became a real, live thing" },
+          "note": { "type": "string", "minLength": 1, "maxLength": 5000, "pattern": "\\S", "description": "Optional first note" }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "add_idea",
+      "version": 3,
+      "sideEffect": "write",
+      "description": "Log a new idea. Only title is required; pitch, url (http/https), tags, rating (1–5), status and a first note are optional. Statuses in lifecycle order: raw, exploring, validating, active (being worked on or built now), parked (on hold, still open), shipped, killed. Open = raw, exploring, validating, active, parked; closed = shipped, killed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "Optional client-chosen id; a short random id is generated when omitted" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S", "description": "Idea title, 1–200 chars after trimming" },
+          "pitch": { "type": "string", "maxLength": 500, "description": "One-line pitch, max 500 chars; newlines become spaces" },
+          "url": { "type": "string", "maxLength": 500, "description": "Optional http(s) link, max 500 chars; '' means none" },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 50, "description": "Tags; normalized to lowercase-hyphenated, max 20 per idea, max 40 chars each" },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5, "description": "Gut rating 1–5 stars" },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"], "description": "Defaults to raw. active: the owner is working on or building it now. parked: on hold, still open. shipped: the idea became a real, live thing" },
+          "note": { "type": "string", "minLength": 1, "maxLength": 5000, "pattern": "\\S", "description": "Optional first note" }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "update_idea",
+      "version": 1,
+      "sideEffect": "write",
+      "description": "Partially update an idea. Only provided fields change. pitch '' clears it, url '' or null clears it, rating null clears it, tags replaces the full set. Contract v1 reports a 'shipped' idea as status 'parked' and an 'active' idea as 'validating'; use v3 to see or set both. Without status (or with 'validating') a stored 'active' is kept.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+          "pitch": { "type": "string", "maxLength": 500 },
+          "url": { "type": ["string", "null"], "maxLength": 500, "description": "http(s) link; '' or null clears it" },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 50 },
+          "rating": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "update_idea",
+      "version": 2,
+      "sideEffect": "write",
+      "description": "Partially update an idea. Only provided fields change. pitch '' clears it, url '' or null clears it, rating null clears it, tags replaces the full set. status may be 'shipped'. Contract v2 reports an 'active' idea as 'validating'; without status (or with 'validating') a stored 'active' is kept. Use v3 to see or set 'active'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+          "pitch": { "type": "string", "maxLength": 500 },
+          "url": { "type": ["string", "null"], "maxLength": 500, "description": "http(s) link; '' or null clears it" },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 50 },
+          "rating": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "update_idea",
+      "version": 3,
+      "sideEffect": "write",
+      "description": "Partially update an idea. Only provided fields change. pitch '' clears it, url '' or null clears it, rating null clears it, tags replaces the full set. status may be any of raw, exploring, validating, active (being worked on or built now), parked (on hold, still open), shipped, killed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+          "pitch": { "type": "string", "maxLength": 500 },
+          "url": { "type": ["string", "null"], "maxLength": 500, "description": "http(s) link; '' or null clears it" },
+          "tags": { "type": "array", "items": { "type": "string", "maxLength": 100 }, "maxItems": 50 },
+          "rating": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "add_note",
+      "version": 1,
+      "sideEffect": "write",
+      "description": "Append a dated note to an idea. Contract v1 reports a 'shipped' idea as status 'parked' and an 'active' idea as 'validating'; use v3 to see both.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "body": { "type": "string", "minLength": 1, "maxLength": 5000, "pattern": "\\S" }
+        },
+        "required": ["id", "body"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "add_note",
+      "version": 2,
+      "sideEffect": "write",
+      "description": "Append a dated note to an idea. Returns the idea with its status (incl. 'shipped') and url. Contract v2 reports an 'active' idea as 'validating'; use v3 to see 'active'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "body": { "type": "string", "minLength": 1, "maxLength": 5000, "pattern": "\\S" }
+        },
+        "required": ["id", "body"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "add_note",
+      "version": 3,
+      "sideEffect": "write",
+      "description": "Append a dated note to an idea. Returns the idea with its full status (incl. 'active' and 'shipped') and url.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "body": { "type": "string", "minLength": 1, "maxLength": 5000, "pattern": "\\S" }
+        },
+        "required": ["id", "body"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "delete_note",
+      "version": 1,
+      "sideEffect": "destructive",
+      "description": "Delete one note from an idea.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "note_id": { "type": "string", "minLength": 1 }
+        },
+        "required": ["id", "note_id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": { "deleted": { "const": true } },
+        "required": ["deleted"]
+      }
+    },
+    {
+      "name": "get_idea",
+      "version": 1,
+      "sideEffect": "read",
+      "description": "Get one idea with its notes (newest first). Contract v1 reports a 'shipped' idea as status 'parked' and an 'active' idea as 'validating'; use v3 to see both.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "minLength": 1 } },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "get_idea",
+      "version": 2,
+      "sideEffect": "read",
+      "description": "Get one idea with its notes (newest first), its status (incl. 'shipped') and url. Contract v2 reports an 'active' idea as 'validating'; use v3 to see 'active'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "minLength": 1 } },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "get_idea",
+      "version": 3,
+      "sideEffect": "read",
+      "description": "Get one idea with its notes (newest first), its full status (incl. 'active': being worked on or built now) and url.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "minLength": 1 } },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "pitch": { "type": ["string", "null"] },
+          "url": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] },
+          "rating": { "type": ["integer", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "note_count": { "type": "integer" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "status_changed_at": { "type": "string" },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "id": { "type": "string" }, "body": { "type": "string" }, "created_at": { "type": "string" } },
+              "required": ["id", "body", "created_at"]
+            }
+          }
+        },
+        "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at", "notes"]
+      }
+    },
+    {
+      "name": "list_ideas",
+      "version": 1,
+      "sideEffect": "read",
+      "description": "List ideas, best first by default. Parked and killed (and shipped) are hidden unless include_closed or an explicit status filter is given. Filter by tag, min_rating and a text query (title, pitch, notes). Contract v1 reports a 'shipped' idea as status 'parked' (the 'parked' filter includes them) and an 'active' idea as 'validating' (the 'validating' filter and the default view include them); use v3 to see both.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "array", "items": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] } },
+          "include_closed": { "type": "boolean", "default": false },
+          "tag": { "type": "string" },
+          "min_rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "query": { "type": "string" },
+          "sort": { "type": "string", "enum": ["rating", "updated", "created"], "default": "rating" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+          "offset": { "type": "integer", "minimum": 0, "default": 0 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ideas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": "string" },
+                "pitch": { "type": ["string", "null"] },
+                "url": { "type": ["string", "null"] },
+                "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed"] },
+                "rating": { "type": ["integer", "null"] },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "note_count": { "type": "integer" },
+                "created_at": { "type": "string" },
+                "updated_at": { "type": "string" },
+                "status_changed_at": { "type": "string" }
+              },
+              "required": ["id", "title", "pitch", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at"]
+            }
+          },
+          "total": { "type": "integer" }
+        },
+        "required": ["ideas", "total"]
+      }
+    },
+    {
+      "name": "list_ideas",
+      "version": 2,
+      "sideEffect": "read",
+      "description": "List ideas, best first by default. Closed ideas (parked, killed, shipped) are hidden unless include_closed or an explicit status filter is given. Filter by tag, min_rating and a text query (title, pitch, notes). Returns url and status. Contract v2 reports an 'active' idea as 'validating' (the 'validating' filter and the default view include them); use v3 to see 'active' and for the newer open/closed split where parked counts as open.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "array", "items": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] } },
+          "include_closed": { "type": "boolean", "default": false },
+          "tag": { "type": "string" },
+          "min_rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "query": { "type": "string" },
+          "sort": { "type": "string", "enum": ["rating", "updated", "created"], "default": "rating" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+          "offset": { "type": "integer", "minimum": 0, "default": 0 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ideas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": "string" },
+                "pitch": { "type": ["string", "null"] },
+                "url": { "type": ["string", "null"] },
+                "status": { "type": "string", "enum": ["raw", "exploring", "validating", "parked", "killed", "shipped"] },
+                "rating": { "type": ["integer", "null"] },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "note_count": { "type": "integer" },
+                "created_at": { "type": "string" },
+                "updated_at": { "type": "string" },
+                "status_changed_at": { "type": "string" }
+              },
+              "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at"]
+            }
+          },
+          "total": { "type": "integer" }
+        },
+        "required": ["ideas", "total"]
+      }
+    },
+    {
+      "name": "list_ideas",
+      "version": 3,
+      "sideEffect": "read",
+      "description": "List ideas, best first by default: live ideas (raw, exploring, validating, active) first, then parked, then closed, each by stars (unrated last), ties most recently updated. Open = raw, exploring, validating, active (being worked on or built now) and parked (on hold, still open, so shown by default). Closed = shipped and killed, hidden unless include_closed or an explicit status filter is given. sort 'status' orders by lifecycle (raw, exploring, validating, active, parked, shipped, killed). Filter by tag, min_rating and a text query (title, pitch, notes).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "array", "items": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] } },
+          "include_closed": { "type": "boolean", "default": false, "description": "Also return closed ideas (shipped, killed)" },
+          "tag": { "type": "string" },
+          "min_rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "query": { "type": "string" },
+          "sort": { "type": "string", "enum": ["rating", "updated", "created", "status"], "default": "rating" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+          "offset": { "type": "integer", "minimum": 0, "default": 0 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ideas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "title": { "type": "string" },
+                "pitch": { "type": ["string", "null"] },
+                "url": { "type": ["string", "null"] },
+                "status": { "type": "string", "enum": ["raw", "exploring", "validating", "active", "parked", "shipped", "killed"] },
+                "rating": { "type": ["integer", "null"] },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "note_count": { "type": "integer" },
+                "created_at": { "type": "string" },
+                "updated_at": { "type": "string" },
+                "status_changed_at": { "type": "string" }
+              },
+              "required": ["id", "title", "pitch", "url", "status", "rating", "tags", "note_count", "created_at", "updated_at", "status_changed_at"]
+            }
+          },
+          "total": { "type": "integer" }
+        },
+        "required": ["ideas", "total"]
+      }
+    },
+    {
+      "name": "list_tags",
+      "version": 1,
+      "sideEffect": "read",
+      "description": "All tags in use with counts, most used first.",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "tag": { "type": "string" }, "count": { "type": "integer" } },
+              "required": ["tag", "count"]
+            }
+          }
+        },
+        "required": ["tags"]
+      }
+    },
+    {
+      "name": "delete_idea",
+      "version": 1,
+      "sideEffect": "destructive",
+      "description": "Permanently delete an idea with its tags and notes. Prefer status 'killed'; use this for mistakes and duplicates.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string", "minLength": 1 } },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": { "deleted": { "const": true } },
+        "required": ["deleted"]
+      }
+    }
+  ]
+}

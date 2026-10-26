@@ -1,0 +1,116 @@
+[
+  { "name": "adds a person with a full birthday", "operation": "add_person", "version": 1, "input": { "name": "Ada", "relation": "sister", "birthday": "1990-11-02", "notes": "Loves ceramics and gardening. Size M." }, "expect": { "id": 1, "name": "Ada", "relation": "sister", "birthday": "1990-11-02" } },
+  { "name": "adds a person with month-day birthday", "operation": "add_person", "version": 1, "input": { "name": "Ben", "birthday": "10-25" }, "expect": { "id": 2, "name": "Ben", "relation": null, "notes": "" } },
+  { "name": "adds a leap-day person", "operation": "add_person", "version": 1, "input": { "name": "Maya", "birthday": "2000-02-29" }, "expect": { "id": 3 } },
+  { "name": "adds an early-January person", "operation": "add_person", "version": 1, "input": { "name": "Otto", "birthday": "01-05" }, "expect": { "id": 4 } },
+  { "name": "rejects an impossible birthday", "operation": "add_person", "version": 1, "input": { "name": "X", "birthday": "13-45" }, "expectError": true },
+  { "name": "rejects Feb 30", "operation": "add_person", "version": 1, "input": { "name": "X", "birthday": "02-30" }, "expectError": true },
+  { "name": "rejects a blank name", "operation": "add_person", "version": 1, "input": { "name": "   " }, "expectError": true },
+
+  { "name": "Feb 29 falls on Feb 28 in a common year", "operation": "get_person", "version": 1, "input": { "id": 3, "today": "2027-02-01" }, "expect": { "next_birthday": { "date": "2027-02-28", "days_until": 27, "turning": 27 } } },
+  { "name": "Feb 29 stays Feb 29 in a leap year", "operation": "get_person", "version": 1, "input": { "id": 3, "today": "2028-02-01" }, "expect": { "next_birthday": { "date": "2028-02-29", "days_until": 28, "turning": 28 } } },
+  { "name": "Feb 29 just passed rolls to next year", "operation": "get_person", "version": 1, "input": { "id": 3, "today": "2028-03-01" }, "expect": { "next_birthday": { "date": "2029-02-28", "days_until": 364, "turning": 29 } } },
+  { "name": "birthday rolls over the year end", "operation": "get_person", "version": 1, "input": { "id": 4, "today": "2026-12-30" }, "expect": { "next_birthday": { "date": "2027-01-05", "days_until": 6, "turning": null } } },
+  { "name": "birthday today is 0 days away", "operation": "get_person", "version": 1, "input": { "id": 2, "today": "2026-10-25" }, "expect": { "next_birthday": { "date": "2026-10-25", "days_until": 0 } } },
+  { "name": "Christmas Eve counts for everyone on the day", "operation": "upcoming", "version": 1, "input": { "today": "2026-12-24", "days": 0 }, "expect": { "count": 4 } },
+  { "name": "Christmas rolls over to next year after Dec 24", "operation": "upcoming", "version": 1, "input": { "today": "2026-12-25", "days": 300 }, "expect": { "count": 2, "occasions": [{ "person_name": "Otto", "date": "2027-01-05", "days_until": 11 }, { "person_name": "Maya", "date": "2027-02-28", "days_until": 65 }] } },
+
+  { "name": "updates notes and relation", "operation": "update_person", "version": 1, "input": { "id": 2, "relation": "friend", "notes": "Into board games" }, "expect": { "id": 2, "name": "Ben", "relation": "friend", "notes": "Into board games", "birthday": "10-25" } },
+  { "name": "update rejects unknown person", "operation": "update_person", "version": 1, "input": { "id": 99, "name": "Z" }, "expectError": true },
+
+  { "name": "adds an idea, occasion defaults to next birthday", "operation": "add_gift", "version": 1, "input": { "person_id": 1, "idea": "Ceramic mug", "link": "https://example.com/mug", "price": 25, "today": "2026-10-20" }, "expect": { "id": 1, "status": "idea", "occasion": "birthday", "year": null, "given_at": null, "price": 25 } },
+  { "name": "adds a bought gift", "operation": "add_gift", "version": 1, "input": { "person_id": 1, "idea": "Pottery class", "status": "bought", "occasion": "birthday", "year": 2026 }, "expect": { "id": 2, "status": "bought", "given_at": null } },
+  { "name": "adds a given gift, stamping given_at", "operation": "add_gift", "version": 1, "input": { "person_id": 1, "idea": "Wool scarf", "status": "given", "occasion": "christmas", "year": 2025 }, "expect": { "id": 3, "status": "given", "given_at": "$any", "year": 2025 } },
+  { "name": "adds an idea for Ben", "operation": "add_gift", "version": 1, "input": { "person_id": 2, "idea": "Catan expansion", "today": "2026-10-20" }, "expect": { "id": 4, "occasion": "birthday", "status": "idea" } },
+  { "name": "add_gift rejects unknown person", "operation": "add_gift", "version": 1, "input": { "person_id": 99, "idea": "Book" }, "expectError": true },
+
+  { "name": "status idea to bought keeps given_at empty", "operation": "update_gift", "version": 1, "input": { "id": 4, "status": "bought" }, "expect": { "status": "bought", "given_at": null } },
+  { "name": "status bought to given sets given_at", "operation": "update_gift", "version": 1, "input": { "id": 4, "status": "given" }, "expect": { "status": "given", "given_at": "$any", "year": "$any" } },
+  { "name": "status given back to idea clears given_at", "operation": "update_gift", "version": 1, "input": { "id": 4, "status": "idea", "year": null }, "expect": { "status": "idea", "given_at": null, "year": null } },
+  { "name": "update_gift rejects unknown gift", "operation": "update_gift", "version": 1, "input": { "id": 999, "status": "given" }, "expectError": true },
+
+  { "name": "adds a general custom occasion", "operation": "add_occasion", "version": 1, "input": { "name": "Wedding anniversary", "date": "11-10" }, "expect": { "id": 1, "person_id": null, "name": "Wedding anniversary" } },
+  { "name": "add_occasion rejects bad date", "operation": "add_occasion", "version": 1, "input": { "name": "Bad", "date": "02-31" }, "expectError": true },
+
+  { "name": "upcoming orders by days left, with readiness", "operation": "upcoming", "version": 1, "input": { "today": "2026-10-20" }, "expect": { "days": 60, "count": 3, "occasions": [
+    { "person_name": "Ben", "kind": "birthday", "date": "2026-10-25", "days_until": 5, "ready": "ideas", "idea_count": 1 },
+    { "person_name": "Ada", "kind": "birthday", "date": "2026-11-02", "days_until": 13, "turning": 36, "ready": "bought", "bought_count": 1 },
+    { "person_name": null, "kind": "other", "name": "Wedding anniversary", "date": "2026-11-10", "days_until": 21, "ready": "none" }
+  ] } },
+  { "name": "upcoming wider window adds Christmas per person", "operation": "upcoming", "version": 1, "input": { "today": "2026-10-20", "days": 70 }, "expect": { "count": 7 } },
+  { "name": "upcoming rejects too long window", "operation": "upcoming", "version": 1, "input": { "days": 1000 }, "expectError": true },
+
+  { "name": "list_people sorts by next occasion", "operation": "list_people", "version": 1, "input": { "today": "2026-10-20" }, "expect": { "people": [
+    { "name": "Ben", "idea_count": 1, "bought_count": 0, "next_occasion": { "kind": "birthday", "days_until": 5, "ready": "ideas" } },
+    { "name": "Ada", "idea_count": 1, "bought_count": 1, "next_occasion": { "kind": "birthday", "days_until": 13, "ready": "bought" } },
+    { "name": "Maya", "idea_count": 0, "next_occasion": { "kind": "christmas", "days_until": 65, "ready": "none" } },
+    { "name": "Otto", "next_occasion": { "kind": "christmas", "days_until": 65 } }
+  ] } },
+
+  { "name": "get_person shows ideas, bought and given by year", "operation": "get_person", "version": 1, "input": { "id": 1, "today": "2026-10-20" }, "expect": {
+    "person": { "name": "Ada", "notes": "Loves ceramics and gardening. Size M." },
+    "ideas": [{ "idea": "Ceramic mug" }],
+    "bought": [{ "idea": "Pottery class" }],
+    "given_by_year": [{ "year": 2025, "gifts": [{ "idea": "Wool scarf" }] }],
+    "next_occasion": { "kind": "birthday", "days_until": 13, "ready": "bought" }
+  } },
+
+  { "name": "suggest_gifts drops past and saved gifts", "operation": "suggest_gifts", "version": 1, "input": { "person_id": 1, "count": 3, "budget": 50 }, "model": [{ "json": { "suggestions": [
+    { "idea": "Wool Scarf", "why": "Warm for winter." },
+    { "idea": "ceramic mug!", "why": "She loves ceramics." },
+    { "idea": "Herb garden kit", "why": "She gardens." },
+    { "idea": "Linocut print set", "why": "Crafty and hands-on." }
+  ] } }], "expect": { "person_id": 1, "count": 2, "excluded": 2, "suggestions": [{ "idea": "Herb garden kit" }, { "idea": "Linocut print set" }] } },
+  { "name": "suggest_gifts caps at count", "operation": "suggest_gifts", "version": 1, "input": { "person_id": 2, "count": 1 }, "model": [{ "json": { "suggestions": [
+    { "idea": "Ticket to Ride", "why": "Board games." },
+    { "idea": "Dice tower", "why": "Board games." }
+  ] } }], "expect": { "count": 1, "excluded": 0, "suggestions": [{ "idea": "Ticket to Ride" }] } },
+  { "name": "suggest_gifts fails cleanly when the model fails", "operation": "suggest_gifts", "version": 1, "input": { "person_id": 1 }, "model": [{ "error": "over budget" }], "expectError": true },
+  { "name": "suggest_gifts rejects unknown person", "operation": "suggest_gifts", "version": 1, "input": { "person_id": 99 }, "expectError": true },
+
+  { "name": "widget shows 3 medium and 5 large rows", "operation": "widget_upcoming", "version": 1, "input": { "today": "2026-10-20" }, "expect": {
+    "medium": { "template": "list", "items": [
+      { "title": "Ben · Birthday", "detail": "in 5 days", "value": "1 idea" },
+      { "title": "Ada · Birthday", "detail": "in 13 days", "value": "bought ✓" },
+      { "title": "Wedding anniversary", "detail": "in 21 days" }
+    ] },
+    "large": { "template": "list", "items": [
+      { "title": "Ben · Birthday" },
+      { "title": "Ada · Birthday" },
+      { "title": "Wedding anniversary" },
+      { "title": "Ada · Christmas", "detail": "in 65 days", "value": "1 idea" },
+      { "title": "Ben · Christmas", "detail": "in 65 days", "value": "1 idea" }
+    ] }
+  } },
+  { "name": "widget draws with defaults", "operation": "widget_upcoming", "version": 1, "input": {}, "expect": { "medium": { "template": "list" }, "large": { "template": "list" } } },
+
+  { "name": "deletes a gift", "operation": "delete_gift", "version": 1, "input": { "id": 1 }, "expect": { "deleted": true, "id": 1 } },
+  { "name": "deleting it again fails", "operation": "delete_gift", "version": 1, "input": { "id": 1 }, "expectError": true },
+  { "name": "deletes the custom occasion", "operation": "delete_occasion", "version": 1, "input": { "id": 1 }, "expect": { "deleted": true, "id": 1 } },
+  { "name": "delete_person removes their gifts too", "operation": "delete_person", "version": 1, "input": { "id": 1 }, "expect": { "deleted": true, "id": 1, "gifts_deleted": 2 } },
+  { "name": "deleted person is gone", "operation": "get_person", "version": 1, "input": { "id": 1 }, "expectError": true },
+  { "name": "their gifts are gone", "operation": "update_gift", "version": 1, "input": { "id": 2, "status": "given" }, "expectError": true },
+  { "name": "others are untouched", "operation": "get_person", "version": 1, "input": { "id": 2, "today": "2026-10-20" }, "expect": { "ideas": [{ "idea": "Catan expansion" }] } },
+  { "name": "list_people after delete", "operation": "list_people", "version": 1, "input": { "today": "2026-10-20" }, "expect": { "people": [{ "name": "Ben" }, { "name": "Maya" }, { "name": "Otto" }] } },
+  {"name":"adds old dated wish","operation":"add_note","version":1,"input":{"person_id":3,"text":"Wanted a telescope","date":"2020-01-01"},"expect":{"id":1,"date":"2020-01-01","text":"Wanted a telescope"}},
+  {"name":"adds recent dated wish","operation":"add_note","version":1,"input":{"person_id":3,"text":"Would love a star atlas","date":"2098-12-20"},"expect":{"id":2}},
+  {"name":"v2 orders notes newest first","operation":"get_person","version":2,"input":{"id":3,"today":"2099-02-10"},"expect":{"notes_log":[{"id":2,"text":"Would love a star atlas"},{"id":1,"text":"Wanted a telescope"}]}},
+  {"name":"dated wishes used by suggestion path with fake reply","operation":"suggest_gifts","version":1,"input":{"person_id":3,"today":"2099-02-10","count":1},"model":[{"json":{"suggestions":[{"idea":"Star atlas","why":"Her recent dated wish asks for an atlas."}]}}],"expect":{"suggestions":[{"idea":"Star atlas"}]}},
+  {"name":"prepare none-ready birthday","operation":"prepare_upcoming","version":1,"input":{"today":"2099-02-10"},"model":[{"json":{"suggestions":[{"idea":"Star atlas","why":"Recent wish"},{"idea":"Red reading light","why":"For stargazing"}]}}],"expect":{"checked":1,"skipped":0,"prepared":[{"person_id":3,"name":"Birthday","date":"2099-02-28","days_until":18,"suggestions":[{"idea":"Star atlas"},{"idea":"Red reading light"}]}]}},
+  {"name":"repeat preparation does not call model","operation":"prepare_upcoming","version":1,"input":{"today":"2099-02-11"},"model":[],"expect":{"checked":1,"skipped":1,"prepared":[]}},
+  {"name":"get current prepared for person","operation":"get_prepared","version":1,"input":{"person_id":3},"expect":{"prepared":[{"person_id":3,"generated_at":"$any","suggestions":[{"idea":"Star atlas"},{"idea":"Red reading light"}]}]}},
+  {"name":"new widget flags stored suggestions","operation":"widget_upcoming","version":2,"input":{"today":"2099-02-10"},"expect":{"medium":{"template":"list","items":[{"title":"Maya · Birthday","detail":"in 18 days · Nothing yet · 2 ready"},{"title":"Ben · Birthday","detail":"in 257 days","value":"1 idea"},{"title":"Ben · Christmas","detail":"in 317 days","value":"1 idea"}]}}},
+  {"name":"save stored suggestion as idea","operation":"save_suggestion","version":1,"input":{"person_id":3,"idea":"Star atlas","why":"Recent wish"},"expect":{"person_id":3,"idea":"Star atlas","status":"idea","link":null,"year":null}},
+  {"name":"saved suggestion removed from batch","operation":"get_prepared","version":1,"input":{"person_id":3},"expect":{"prepared":[{"suggestions":[{"idea":"Red reading light"}]}]}},
+  {"name":"cannot save same stored suggestion twice","operation":"save_suggestion","version":1,"input":{"person_id":3,"idea":"Star atlas"},"expectError":true},
+  {"name":"ready occasion skips model","operation":"prepare_upcoming","version":1,"input":{"today":"2099-02-12"},"model":[],"expect":{"checked":1,"prepared":[],"skipped":1}},
+  {"name":"expired batches pruned","operation":"prepare_upcoming","version":1,"input":{"today":"2099-03-01"},"model":[],"expect":{"checked":0,"prepared":[],"skipped":0}},
+  {"name":"pruned batch absent even with real today","operation":"get_prepared","version":1,"input":{"person_id":3},"expect":{"prepared":[]}},
+  {"name":"delete dated note","operation":"delete_note","version":1,"input":{"id":2},"expect":{"deleted":true,"id":2}},
+  {"name":"deleted note no longer in log","operation":"get_person","version":2,"input":{"id":3},"expect":{"notes_log":[{"id":1}]}},
+  {"name":"delete missing note fails","operation":"delete_note","version":1,"input":{"id":2},"expectError":true},
+  {"name":"blank dated note rejected","operation":"add_note","version":1,"input":{"person_id":3,"text":"   "},"expectError":true},
+  {"name":"impossible note date rejected","operation":"add_note","version":1,"input":{"person_id":3,"text":"A wish","date":"2026-02-30"},"expectError":true},
+  {"name":"note defaults to today","operation":"add_note","version":1,"input":{"person_id":4,"text":"A cooking class"},"expect":{"date":"$any","text":"A cooking class"}},
+  {"name":"preparation model failure is retryable","operation":"prepare_upcoming","version":1,"input":{"today":"2099-01-01"},"model":[{"error":"over budget"}],"expect":{"checked":1,"prepared":[],"skipped":1}}
+]

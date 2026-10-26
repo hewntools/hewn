@@ -4,6 +4,7 @@ import { api, appIcon, caps, enc, fail, glyphCells, h, invalidateCaps, menuFrom,
 import { agentTile, agentTileOf, buildJobs, jobPicker } from "./agents.js";
 import { connectDialog } from "./connect.js";
 import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, stillHere, topBar, view } from "./frame.js";
+import { hubCard } from "./hub.js";
 import { inboxBtn } from "./inbox.js";
 import { modelChip } from "./intake.js";
 import { capabilityMenu, inlineRename, openCapability } from "./tool-actions.js";
@@ -379,8 +380,19 @@ async function firstRun() {
       h("div", { class: "eyebrow" }, hosted ? "2 · Make something" : "3 · Make something"),
       h("form", { class: "composer boxed", onsubmit: (e) => (e.preventDefault(), start()) }, ask, h("div", { class: "composer-tools" }, builderOk && modelChip(), next)),
       h("div", { class: "row tight wrap" }, starters),
+      hosted && shelf,
     );
   };
+  // Hosted, with nothing built yet: three of Hewn's own tools to start from, and the rest a tap away.
+  const shelf = h("div", { class: "stack-sm first-shelf" });
+  if (hosted)
+    api("/hub")
+      .then(({ tools, firstRun }) => {
+        const three = firstRun.map((id) => tools.find((t) => t.id === id)).filter(Boolean);
+        const draw = (list) => put(shelf, h("div", { class: "eyebrow" }, "Or start from one of Hewn's"), h("div", { class: "hub-grid" }, list.map((c) => hubCard(c))), list.length < tools.length && h("button", { class: "link sm self-start", onclick: () => draw(tools) }, `Show all ${tools.length}`));
+        if (tools.length) draw(three.length ? three : tools.slice(0, 3));
+      })
+      .catch(() => {});
   const renderAll = () => Promise.all([renderAgents(), renderJobs()]);
   view(
     moment(

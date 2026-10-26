@@ -22,7 +22,8 @@ export { commandPalette };
  * (pages and Settings sections) and actions. Each: [label, group, run, icon?, words?, more?].
  */
 async function paletteItems() {
-  const all = [...(await caps().catch(() => new Map())).values()].filter((c) => c.version || c.building);
+  const [capsMap, hub] = await Promise.all([caps().catch(() => new Map()), api("/hub").catch(() => ({ tools: [] }))]);
+  const all = [...capsMap.values()].filter((c) => c.version || c.building);
   const tools = all.filter((c) => c.kind !== "connection");
   const tile = (key) => glyphTile(PALETTE_GLYPHS[key], 24);
   const place = (label, href, words = "", glyph = "settings") => [label, "Go to", () => go(href), tile(glyph), words];
@@ -55,6 +56,9 @@ async function paletteItems() {
     place("Accounts", "#/accounts", "connections", "key"),
     ...SECTIONS.map(([k, label]) => place(`Settings › ${label}`, `#/settings/${k}`)),
     place("Settings › AI › Models", "#/settings/ai/models", "provider key budget spend tier", "chip"),
+    // The Hub comes last: Hewn's own tools you don't have yet (Install opens the sheet, never installs at once).
+    place("Hub", "#/hub", "official install tools shelf", "plus"),
+    ...hub.tools.filter((t) => !t.installed).map((t) => [t.name, "Hub", () => go(`#/hub/${enc(t.id)}`), appIcon({ id: t.id, name: t.name, hue: t.icon?.hue ?? undefined, saturation: t.icon?.saturation ?? undefined }, { size: 24 }), `${t.line} ${t.tags.join(" ")} hub official install`, true]),
   ]
     .filter(Boolean)
     .map(([label, group, run, icon, words = "", more = false]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more }));

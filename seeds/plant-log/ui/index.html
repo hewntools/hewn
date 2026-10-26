@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plant Log</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+  <style>
+    .page { max-width: 720px; }
+    header.top h1 { margin: 0; }
+    .list .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .list .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .list > li.late .name { color: var(--danger); }
+    .due-list > li > label { display: flex; align-items: center; gap: var(--s3); flex: 1; min-width: 0; min-height: 40px; cursor: pointer; }
+    .due-list > li > label > input { flex: none; width: 18px; height: 18px; }
+    .row-link { display: flex; align-items: center; gap: var(--s3); flex: 1; min-width: 0; min-height: 40px; color: inherit; text-decoration: none; }
+    .row-link:hover { color: inherit; }
+    .group + .group { margin-top: var(--s5); }
+    .group > .eyebrow { margin-bottom: var(--s1); }
+    .chips { display: flex; gap: var(--s2); overflow-x: auto; padding: 2px 2px var(--s1); }
+    .chips .chip { min-height: 36px; }
+    .two { display: grid; gap: 0 var(--s3); grid-template-columns: 1fr 1fr; }
+    .card > h2:first-child, form.card > h2:first-child { margin-top: 0; }
+    .card label.field:first-of-type { margin-top: 0; }
+    .stat .value.bad { color: var(--danger); }
+    .stat .value .when { display: block; font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0; color: var(--text-2); }
+    .log-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+    .log-actions > button { flex: 1 1 auto; }
+    .note-form { display: flex; gap: var(--s2); margin-top: var(--s3); }
+    .note-form input { flex: 1; min-width: 0; }
+    .date-field { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+    .date-field .label { font-size: var(--fs-sm); font-weight: 600; }
+    .date-field input { width: auto; flex: 1; max-width: 200px; }
+    .history-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font-size: var(--fs-sm); }
+    .history > li .grow .sub { white-space: normal; }
+    .back { margin-left: calc(-1 * var(--s3)); }
+    .empty .actions { margin-top: var(--s2); }
+    .card > .row:first-child h2 { margin-top: 0; }
+    .candidates { margin: var(--s3) 0; }
+    .candidates .list .name, .candidates .list .sub { white-space: normal; }
+    .candidates .list > li { align-items: flex-start; }
+    @media (max-width: 420px) { .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page stack" id="app" aria-busy="true">
+    <span class="skeleton" style="height: 28px; width: 40%"></span>
+    <span class="skeleton" style="height: 140px"></span>
+    <span class="skeleton" style="height: 220px"></span>
+  </main>
+  <datalist id="locations"></datalist>
+  <dialog id="confirm">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text" class="muted"></p>
+    <div class="actions">
+      <button type="button" class="ghost" data-answer="no">Cancel</button>
+      <button type="button" class="danger solid" data-answer="yes" id="confirm-yes">Delete</button>
+    </div>
+  </dialog>
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

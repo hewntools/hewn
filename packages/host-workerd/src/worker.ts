@@ -13,6 +13,7 @@ import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { DOC_NAME } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
+import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
@@ -180,6 +181,9 @@ class EncryptedSecretStore implements SecretStore {
 }
 
 const aad = (capabilityId: string, name: string) => new TextEncoder().encode(`${capabilityId}/${name}`);
+
+/** The shelf, read once (it changes only with the release). */
+let shelfCache: Promise<{ tools: ShelfTool[]; firstRun: string[] }> | undefined;
 
 /** Calls to the supervisor (token-authenticated, loopback only). */
 function supervisor(env: Env) {
@@ -474,6 +478,17 @@ export class HewnDO extends DurableObject<Env> {
             },
             tunnel: () => sv.json("/tunnel/status", {}),
           }),
+      // The release's Official shelf: the supervisor reads seeds/ (kept a while: it changes only with the release).
+      shelf: {
+        tools: async () => {
+          shelfCache ??= sv.json<{ tools: (Omit<ShelfTool, "files"> & { files: Record<string, string> })[]; firstRun: string[] }>("/shelf/tools", {}).then((r) => ({ firstRun: r.firstRun, tools: r.tools.map((t) => ({ ...t, files: Object.fromEntries(Object.entries(t.files).map(([p, b]) => [p, fromBase64(b)])) })) }));
+          return shelfCache.catch((e) => ((shelfCache = undefined), Promise.reject(e)));
+        },
+        image: async (id, name) => {
+          const r = await sv.json<{ data: string | null }>("/shelf/image", { id, name });
+          return r.data ? fromBase64(r.data) : undefined;
+        },
+      },
       backups: {
         location: async () => (await sv.json<{ dir: string }>("/backups/list", {})).dir,
         list: async () => (await sv.json<{ backups: unknown[] }>("/backups/list", {})).backups,

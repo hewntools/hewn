@@ -143,8 +143,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+  // Q1 New: one quiet link to the Hub under the box (no cards: they'd go stale after a couple of tools).
+  const hubLink = mode === "create" && !connection && h("a", { class: "link small hub-link", href: "#/hub" }, "Or start from one in Hub ›");
   // Continue the last conversation? sits above the box, not in it.
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, hubLink));
   const say = (who, text, attachments) => thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);

@@ -30,6 +30,7 @@ import { cliCatalogs } from "../builders/cli-agents.ts";
 import { modelCatalogs } from "../builders/models.ts";
 import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
+import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { workerdBinary } from "../app-dir.ts";
 
@@ -265,6 +266,15 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       }
       res.end();
       return STREAMED;
+    },
+    // The Official shelf (seeds/, shipped with this release): every tool's listing and files, and a card image.
+    "/shelf/tools": async () => {
+      const s = readShelf();
+      return { firstRun: s.firstRun, tools: s.tools.map((t) => ({ ...t, files: Object.fromEntries(Object.entries(t.files).map(([p, b]) => [p, toBase64(b)])) })) };
+    },
+    "/shelf/image": async (b) => {
+      const png = shelfImage(String(b.id), String(b.name));
+      return { data: png ? toBase64(png) : null };
     },
     "/backups/list": async () => ({ dir: backupDir(), backups: listBackups(backupDir()), sameDisk: sameDisk(o.home.root, backupDir()) }),
     "/backups/now": async () => backupNow(o.home, backupDir()),

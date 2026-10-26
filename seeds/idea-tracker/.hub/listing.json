@@ -1,0 +1,32 @@
+{
+  "line": "Ideas with a pitch, a status and a gut rating",
+  "tags": [
+    "Work",
+    "Writing"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "Capture ideas quickly and see the best ones first: each has a one-line pitch, an optional link, tags, a status from raw to shipped, a 1–5 rating and dated notes.",
+    "keeps": "Ideas with their pitch, link, tags, status, rating and notes.",
+    "reaches": "",
+    "findings": [
+      {
+        "kind": "ok",
+        "title": "Keeps your data inside the tool",
+        "detail": "It reaches nothing outside itself."
+      },
+      {
+        "kind": "ok",
+        "title": "Deleting an idea or a note is marked destructive",
+        "detail": "An agent has to ask you before it can."
+      }
+    ]
+  }
+}

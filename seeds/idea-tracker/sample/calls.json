@@ -1,0 +1,7 @@
+[
+  {"operation": "add_idea", "input": {"id": "bike-swap", "title": "Neighbourhood bike swap", "pitch": "A weekend market where families trade outgrown kids' bikes.", "tags": ["community", "kids"], "rating": 4, "status": "exploring", "note": "Asked two schools; both keen on a spring date."}},
+  {"operation": "add_idea", "input": {"id": "recipe-cards", "title": "Printable recipe cards", "pitch": "Turn any recipe link into a tidy A6 card to print.", "tags": ["cooking", "print"], "rating": 3, "status": "raw"}},
+  {"operation": "add_idea", "input": {"id": "plant-sitter", "title": "Plant sitter rota", "pitch": "Neighbours water each other's plants during holidays.", "tags": ["community"], "rating": 5, "status": "validating", "note": "Twelve sign-ups from one poster."}},
+  {"operation": "add_idea", "input": {"id": "quiet-hours", "title": "Quiet hours badge", "pitch": "A small sign for focus time at the shared office.", "tags": ["work"], "rating": 2, "status": "parked"}},
+  {"operation": "add_idea", "input": {"id": "map-walks", "title": "Map of short walks", "pitch": "Thirty-minute walks from each bus stop in town.", "url": "https://example.com/walks", "tags": ["outdoors", "maps"], "rating": 4, "status": "active"}}
+]
