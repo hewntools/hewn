@@ -216,6 +216,8 @@ export const layoutDefects = (page: Page, screenWidth: number) =>
       if (cut.length >= 10) break;
       const st = getComputedStyle(el);
       if (el.children.length || !text(el)) continue;
+      const box = el.getBoundingClientRect();
+      if (box.width <= 2 || box.height <= 2) continue; // screen-reader-only text is clipped on purpose
       const clipped = el.scrollWidth > el.clientWidth + 1 && (st.textOverflow === "ellipsis" || st.overflow === "hidden" || st.overflowX === "hidden");
       if (clipped) cut.push('"' + text(el) + '" (' + name(el) + ")");
     }
