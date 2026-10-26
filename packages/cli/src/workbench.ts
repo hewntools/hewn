@@ -127,8 +127,8 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
       forgetSession(buildId);
     },
     async build(job: BuildJob, hooks) {
-      // "keep": the workspace is already the candidate (e.g. an install from given files).
-      if (job.builder === "keep") return;
+      // "keep": the workspace is already the candidate (an install from given files, an owner's edit); "bundle": a tool installed from a file.
+      if (job.builder === "keep" || job.builder === "bundle") return;
       const builder = job.builder.startsWith("copy:") ? copyBuilder(job.builder.slice("copy:".length)) : builders()[job.builder];
       if (!builder) throw Object.assign(new Error(`unknown builder '${job.builder}'`), { unavailable: true });
       await builder.build({

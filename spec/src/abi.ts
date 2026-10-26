@@ -4,7 +4,7 @@
 // and runs every minor up to its own. Minor versions only add; anything else is a new major.
 
 /** The ABI this spec describes. */
-export const ABI = "2.4";
+export const ABI = "2.5";
 
 /** What a manifest without `abi` needs. */
 export const DEFAULT_ABI = "2.0";
@@ -16,4 +16,12 @@ export const ABI_HISTORY: { version: string; added: string[] }[] = [
   { version: "2.2", added: ["manifest `requires.model`", "`ctx.model.generate`"] },
   { version: "2.3", added: ["manifest `widgets`, and the widget view models their operations return"] },
   { version: "2.4", added: ["manifest `saturation`"] },
+  {
+    version: "2.5",
+    added: [
+      "manifest `source`: where an installed tool came from (written by the host, never by a builder)",
+      "`requires.capabilities[]` `hub` and `minVersion`: another tool this one builds on, from the hub (written by the host when it's published)",
+      "sample/calls.json: sample data, replayed when the owner installs the tool with it",
+    ],
+  },
 ];

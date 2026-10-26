@@ -7,7 +7,7 @@ import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
-import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection } from "../manifest.ts";
+import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { Files } from "../ports.ts";
@@ -85,6 +85,10 @@ type CreateRequest = {
   /** The build it waited for. */
   after?: string;
   retryOf?: string;
+  /** Installed from a file (or the hub): where it came from, kept as the capability's record once it promotes. */
+  source?: ToolSource;
+  /** Replay its sample data once it's live. */
+  sample?: boolean;
 } & ModelAsk;
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
@@ -340,6 +344,26 @@ export class Builds extends Domain {
     return this.buildView(this.registry.getBuild(buildId)!);
   }
 
+  /**
+   * Platform-internal: a new version with the active version's files and `changes` (path →
+   * contents), through the normal validation and promotion, no builder ("keep"). The owner's own
+   * edit to a file that isn't code: sample data, written by hand.
+   */
+  async filesOnlyModify(owner: Agent, capabilityId: string, changes: Files, request: string): Promise<BuildView> {
+    requireOwner(owner);
+    const cap = this.registry.getCapability(capabilityId);
+    if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${capabilityId} is not active`);
+    this.noChangeOnItsWay(capabilityId, "write the sample data");
+    const base = await this.loadVersion(cap.id, cap.activeVersion);
+    const buildId = newBuildId();
+    this.registry.insertBuild({ id: buildId, capabilityId, kind: "modify", request: { capabilityId, request, filesOnly: Object.keys(changes) }, requestedBy: owner.id, baseVersion: cap.activeVersion, builder: "keep" });
+    await this.workbench.open(buildId, { ...base.files, ...changes });
+    this.buildEvent(buildId, `opened from v${cap.activeVersion}: ${Object.keys(changes).join(", ")} (${request})`, `build ${buildId} [modify ${capabilityId} by ${owner.id}]`);
+    this.setStep(buildId, capabilityId, "spec");
+    this.startBuilder(buildId, "keep");
+    return this.buildView(this.registry.getBuild(buildId)!);
+  }
+
   // ---------- creation / modification ----------
 
   /**
@@ -501,7 +525,7 @@ export class Builds extends Domain {
    * a name it may not use is an error listing the ones it may, never a quiet default.
    */
   private modelFor(agent: Agent, builder: string, ask: ModelAsk): { model?: string; effort?: string } {
-    if (builder === "keep" || builder.startsWith("copy:")) return {};
+    if (builder === "keep" || builder === "bundle" || builder.startsWith("copy:")) return {};
     const { model, effort } = ask;
     if (model === undefined && effort === undefined) return this.buildModelFor(builder);
     if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) throw new PlatformError("invalid_request", "model must be a model name, like fable or claude-fable-5-1, or default");
@@ -594,12 +618,13 @@ export class Builds extends Domain {
    * Install a capability from a directory the host knows how to copy (`hewn install <dir>`):
    * a create build whose builder copies the files in, then the normal validation. Owner only.
    */
-  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string }): Promise<BuildView> {
+  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean }): Promise<BuildView> {
     requireOwner(owner);
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
     if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
-    return this.openCreateBuild(owner, id, { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})` }, !existing, req.builder, req.seed);
+    const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}) };
+    return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). */
@@ -891,6 +916,7 @@ export class Builds extends Domain {
       const version = r.version;
       step(`promoted: implementation v${version} is now active`);
       this.d.schedules.applyApprovedSchedules(build, step);
+      await this.d.sharing.afterInstall(build, step);
       this.setStep(build.id, build.capabilityId, this.platform.readiness(build.capabilityId).ready ? "done" : "auth", this.steps.get(build.id)?.tests);
       return { version, log };
     } catch (e) {

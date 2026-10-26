@@ -170,6 +170,7 @@ const hewn :Workerd.Worker = (
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
     (name = "PORT", text = "${o.port}"),
+    (name = "VERSION", text = "${VERSION}"),
   ],
   durableObjectNamespaces = [
     (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),

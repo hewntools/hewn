@@ -22,6 +22,7 @@ import { Connections, type ConnectionHealth } from "./platform/connections.ts";
 import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
+import { type BundlePreview, Sharing, type ShareCheck } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport } from "./platform/builds.ts";
 import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
@@ -88,6 +89,8 @@ export interface PlatformOptions {
    * is needed, the host decides what a tier runs on, and it charges in its own unit (no USD caps).
    */
   hostModels?: HostModels;
+  /** This Hewn's version (a shared tool's file says which Hewn made it). */
+  version?: string;
 }
 
 /** Secrets kept in memory (tests, and until the host provides a store). */
@@ -123,6 +126,7 @@ export class Platform {
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Hosted: the host runs tools' model calls (PlatformOptions.hostModels). */
   hostModels?: HostModels;
+  version?: string;
   /** Heartbeat interval for builder liveness logging. */
   heartbeatMs = 10_000;
   /** How long a build waits after losing its builder connection before counting the attempt. */
@@ -153,6 +157,7 @@ export class Platform {
     this.logRetentionDays = opts.logRetentionDays ?? (() => LOG_RETENTION_DAYS);
     this.modelFetch = opts.modelFetch;
     this.hostModels = opts.hostModels;
+    this.version = opts.version;
     // The domains share the facade, the ports and the event bus, and reach each other through `d`.
     const d = (this.d = {} as Domains);
     const s: Shared = { platform: this, events: this.events, loaded: new Map(), d };
@@ -168,6 +173,7 @@ export class Platform {
     d.models = new Models(s);
     d.presentation = new Presentation(s);
     d.schedules = new Schedules(s, opts);
+    d.sharing = new Sharing(s);
     d.sessions = new Sessions(s);
     d.validation = new Validation(s);
     d.widgets = new Widgets(s);
@@ -209,10 +215,23 @@ export class Platform {
   exportData(owner: Agent, capabilityId: string): Promise<{ capability: string; version: number; exportedAt: string; source: "operation" | "state"; data: unknown }> { return this.d.data.exportData(owner, capabilityId); }
   versionCode(owner: Agent, capabilityId: string, version: number) { return this.d.data.versionCode(owner, capabilityId, version); }
   versionFile(owner: Agent, capabilityId: string, version: number, path: string) { return this.d.data.versionFile(owner, capabilityId, version, path); }
+  startOver(owner: Agent, capabilityId: string, req: { confirm: string; sample?: boolean }) { return this.d.data.startOver(owner, capabilityId, req); }
   dataSummary(owner: Agent, capabilityId: string): Promise<DataSummary> { return this.d.data.dataSummary(owner, capabilityId); }
   importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> { return this.d.data.importData(owner, capabilityId, tables); }
   archived(owner: Agent): { id: string; name: string; archivedAt: string }[] { return this.d.data.archived(owner); }
   restore(owner: Agent, capabilityId: string) { return this.d.data.restore(owner, capabilityId); }
+
+  // ---------- sharing: a tool as a file, sample data (platform/sharing.ts) ----------
+
+  shareCheck(owner: Agent, capabilityId: string, version?: number): Promise<ShareCheck> { return this.d.sharing.shareCheck(owner, capabilityId, version); }
+  shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.shareBundle(owner, capabilityId, version); }
+  stageBundle(owner: Agent, zip: Uint8Array, origin?: { from: "file" | "link" | "hub"; host?: string }): Promise<BundlePreview> { return this.d.sharing.stageBundle(owner, zip, origin); }
+  stagedBundle(owner: Agent, token: string): Promise<BundlePreview> { return this.d.sharing.stagedBundle(owner, token); }
+  bundleCode(owner: Agent, token: string) { return this.d.sharing.bundleCode(owner, token); }
+  bundleFile(owner: Agent, token: string, path: string) { return this.d.sharing.bundleFile(owner, token, path); }
+  dropStaged(owner: Agent, token: string) { return this.d.sharing.dropStaged(owner, token); }
+  installBundle(owner: Agent, token: string, req: { name: string; sample?: boolean }): Promise<BuildView> { return this.d.sharing.installBundle(owner, token, req); }
+  setSample(owner: Agent, capabilityId: string, json: string): Promise<BuildView> { return this.d.sharing.setSample(owner, capabilityId, json); }
 
   // ---------- grants, secrets, config, agents, confirmations (platform/grants.ts) ----------
 

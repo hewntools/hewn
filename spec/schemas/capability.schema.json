@@ -71,6 +71,41 @@
       "minimum": 0,
       "maximum": 150
     },
+    "source": {
+      "type": "object",
+      "required": [
+        "id",
+        "version",
+        "hash",
+        "from"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "from": {
+          "enum": [
+            "file",
+            "link",
+            "hub"
+          ]
+        },
+        "host": {
+          "type": "string",
+          "pattern": "^[a-z0-9.-]+(:[0-9]+)?$"
+        }
+      }
+    },
     "requires": {
       "type": "object",
       "additionalProperties": false,
@@ -150,6 +185,14 @@
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9_]*@[0-9]+$"
                 }
+              },
+              "hub": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$"
+              },
+              "minVersion": {
+                "type": "integer",
+                "minimum": 1
               }
             }
           }

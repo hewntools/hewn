@@ -30,6 +30,18 @@ export const MANIFEST_SCHEMA: JSONSchema = {
     runtime: { enum: [...RUNTIME_PROFILES] },
     hue: { type: "integer", minimum: 0, maximum: 359 },
     saturation: { type: "integer", minimum: 0, maximum: 150 },
+    source: {
+      type: "object",
+      required: ["id", "version", "hash", "from"],
+      additionalProperties: false,
+      properties: {
+        id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
+        version: { type: "integer", minimum: 1 },
+        hash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        from: { enum: ["file", "link", "hub"] },
+        host: { type: "string", pattern: "^[a-z0-9.-]+(:[0-9]+)?$" },
+      },
+    },
     requires: {
       type: "object",
       additionalProperties: false,
@@ -61,6 +73,8 @@ export const MANIFEST_SCHEMA: JSONSchema = {
             properties: {
               id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*$" },
               operations: { type: "array", minItems: 1, items: { type: "string", pattern: "^[a-z][a-z0-9_]*@[0-9]+$" } },
+              hub: { type: "string", pattern: "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
+              minVersion: { type: "integer", minimum: 1 },
             },
           },
         },
@@ -138,5 +152,24 @@ export const CASES_SCHEMA: JSONSchema = {
   },
 };
 
+export const SAMPLE_SCHEMA: JSONSchema = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://hewn.tools/spec/2/sample.schema.json",
+  title: "Hewn tool sample data (sample/calls.json), ABI 2.5",
+  type: "array",
+  minItems: 1,
+  maxItems: 200,
+  items: {
+    type: "object",
+    required: ["operation"],
+    additionalProperties: false,
+    properties: {
+      operation: { type: "string", pattern: "^[a-z][a-z0-9_]*$" },
+      version: { type: "integer", minimum: 1 },
+      input: {},
+    },
+  },
+};
+
 /** The published files: name → schema. */
-export const SCHEMA_FILES: Record<string, JSONSchema> = { "capability.schema.json": MANIFEST_SCHEMA, "cases.schema.json": CASES_SCHEMA };
+export const SCHEMA_FILES: Record<string, JSONSchema> = { "capability.schema.json": MANIFEST_SCHEMA, "cases.schema.json": CASES_SCHEMA, "sample.schema.json": SAMPLE_SCHEMA };

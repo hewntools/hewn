@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import type { CapabilityManifest } from "./manifest.ts";
+import type { CapabilityManifest, ToolSource } from "./manifest.ts";
 import type { Sql } from "./ports.ts";
 
 export interface CapabilityRow {
@@ -17,6 +17,8 @@ export interface CapabilityRow {
   saturation: number | null;
   /** Owner's position on Home (null: after the ordered ones, by name). */
   homeOrder: number | null;
+  /** Where it came from, when it was installed from outside (the record the manifest's `source` is stamped from). */
+  source: ToolSource | null;
   archivedAt: string | null;
   createdBy: string;
   createdAt: string;
@@ -153,7 +155,8 @@ CREATE TABLE IF NOT EXISTS capabilities (
   hue            TEXT,
   home_order     TEXT,
   ui_key         TEXT,
-  saturation     INTEGER
+  saturation     INTEGER,
+  source         TEXT
 );
 CREATE TABLE IF NOT EXISTS capability_versions (
   capability_id TEXT NOT NULL REFERENCES capabilities(id),
@@ -397,6 +400,7 @@ const toCapability = (r: Row): CapabilityRow => ({
   hue: r.hue === null || r.hue === undefined ? null : Number(r.hue),
   saturation: r.saturation === null || r.saturation === undefined ? null : Number(r.saturation),
   homeOrder: r.home_order === null || r.home_order === undefined ? null : Number(r.home_order),
+  source: r.source ? JSON.parse(r.source) : null,
   archivedAt: r.archived_at ?? null,
   createdBy: r.created_by,
   createdAt: r.created_at,
@@ -452,7 +456,10 @@ const passkeyRow = (r: Row) => ({
 });
 
 /** Columns added to a table after it first shipped (also in SCHEMA, for new homes): [table, column, type]. */
-const ADDED_COLUMNS: [string, string, string][] = [["capabilities", "saturation", "INTEGER"]];
+const ADDED_COLUMNS: [string, string, string][] = [
+  ["capabilities", "saturation", "INTEGER"],
+  ["capabilities", "source", "TEXT"],
+];
 
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
 export class Registry {
@@ -655,6 +662,11 @@ export class Registry {
   setOwnerPrefs(id: string, prefs: { displayName?: string | null; iconType?: string | null; archivedAt?: string | null; hue?: number | null; saturation?: number | null }) {
     const map: Record<string, string> = { displayName: "display_name", iconType: "icon_type", archivedAt: "archived_at", hue: "hue", saturation: "saturation" };
     for (const [k, v] of Object.entries(prefs)) this.db.prepare(`UPDATE capabilities SET ${map[k]} = ? WHERE id = ?`).run(v ?? null, id);
+  }
+
+  /** Record where an installed capability came from (set once, at its first version). */
+  setSource(id: string, source: ToolSource) {
+    this.db.prepare("UPDATE capabilities SET source = ? WHERE id = ?").run(JSON.stringify(source), id);
   }
 
   promote(c: { id: string; name: string; purpose: string; version: number }) {
@@ -1126,7 +1138,7 @@ export class Registry {
   }
 
   /** Owner lifecycle actions for the activity timeline: delete, restore, rollback, purge. */
-  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule", detail: string, actor: string) {
+  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
   }
 

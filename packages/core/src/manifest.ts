@@ -3,9 +3,9 @@ import { Validator } from "@cfworker/json-schema";
 
 // The contract's types and constants live in the spec (Apache-2.0); the checks below are the host's.
 import { RUNTIME_PROFILES, WIDGET_SIZES, MODEL_TIERS, MODEL_PROVIDERS, HEALTH_STATUSES, CONNECT_OUTPUT, HEALTH_OUTPUT } from "@hewntools/spec/manifest.ts";
-import type { RuntimeProfile, JSONSchema, SideEffect, OperationManifest, CapabilityManifest, WidgetSize, WidgetManifest, ModelTier, ModelProvider, ModelRequirement } from "@hewntools/spec/manifest.ts";
+import type { RuntimeProfile, JSONSchema, SideEffect, OperationManifest, CapabilityManifest, WidgetSize, WidgetManifest, ModelTier, ModelProvider, ModelRequirement, ToolSource } from "@hewntools/spec/manifest.ts";
 export { RUNTIME_PROFILES, WIDGET_SIZES, MODEL_TIERS, MODEL_PROVIDERS, HEALTH_STATUSES, CONNECT_OUTPUT, HEALTH_OUTPUT };
-export type { RuntimeProfile, JSONSchema, SideEffect, OperationManifest, CapabilityManifest, WidgetSize, WidgetManifest, ModelTier, ModelProvider, ModelRequirement };
+export type { RuntimeProfile, JSONSchema, SideEffect, OperationManifest, CapabilityManifest, WidgetSize, WidgetManifest, ModelTier, ModelProvider, ModelRequirement, ToolSource };
 
 /** The grant a model requirement becomes: "model:standard" or "model:anthropic/claude-sonnet-5-5". */
 export const modelGrant = (r: ModelRequirement) => `model:${r.model ?? r.tier}`;
@@ -27,6 +27,8 @@ export const ABI_FEATURES: AbiFeature[] = [
   { name: '"requires.model"', since: "2.2", used: (m) => m.requires?.model !== undefined },
   { name: '"widgets"', since: "2.3", used: (m) => m.widgets !== undefined },
   { name: '"saturation"', since: "2.4", used: (m) => m.saturation !== undefined },
+  { name: '"source"', since: "2.5", used: (m) => m.source !== undefined },
+  { name: '"hub" and "minVersion" in requires.capabilities', since: "2.5", used: (m) => (m.requires?.capabilities ?? []).some((c) => c.hub !== undefined || c.minVersion !== undefined) },
 ];
 
 /** ctx members added after 2.0, each exposed only to code whose manifest declares at least `since`. */
@@ -65,6 +67,24 @@ export function abiErrors(m: CapabilityManifest, has: string = ABI, features: Ab
 }
 
 export const opKey = (name: string, version: number) => `${name}@${version}`;
+
+/**
+ * The platform's own fields, set from its record whatever a builder wrote: `source` (where an
+ * installed tool came from; ABI 2.5, so the declared `abi` is raised to it) and, until the hub
+ * resolves them, no `hub` or `minVersion` in `requires.capabilities`. Returns a copy.
+ */
+export function stampSource(m: CapabilityManifest, source: ToolSource | null): CapabilityManifest {
+  const out: CapabilityManifest = structuredClone(m);
+  if (source) {
+    out.source = source;
+    if (abiBelow(abiOf(out), "2.5")) out.abi = "2.5";
+  } else delete out.source;
+  for (const c of out.requires?.capabilities ?? []) {
+    delete c.hub;
+    delete c.minVersion;
+  }
+  return out;
+}
 
 /** A compiled JSON Schema check. `errors` holds the last failure's messages. */
 export interface SchemaCheck {

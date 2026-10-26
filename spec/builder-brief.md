@@ -15,6 +15,7 @@ src/index.ts         implementation (TypeScript; the entry point the platform bu
 package.json         optional: npm dependencies (the platform installs and bundles them)
 migrations/NNN_*.sql state schema (SQLite), append-only
 tests/cases.json     test cases the platform runs before promotion
+sample/calls.json    sample data: calls that fill an empty tool with made-up entries (see below)
 ui/icon.svg          the app icon: a 5×5 pixel glyph (always write one, see "Icon")
 ```
 
@@ -42,6 +43,9 @@ shades from it in light and dark mode.
 unless the tool stands for a brand: a connection to a black-and-white service (Ghost, Notion, the
 BBC) gets `0` (black or white on grey), a muted brand 30–60, a loud brand colour (Todoist red) up to
 150, with the brand's hue.
+
+Never write `"source"` (ABI 2.5): it records where an installed tool came from, and the platform
+writes it. Leave `hub` and `minVersion` out of `requires.capabilities` too; the platform fills them in.
 
 ### Icon (required, and first)
 
@@ -457,3 +461,22 @@ An ordered list. All cases share one fresh state DB with all migrations applied:
 ```
 
 `expect` is a subset match. `"$any"` matches any present value. Cover every operation.
+
+### sample/calls.json (ABI 2.5)
+
+Sample data: what the tool looks like in use. The owner can install or start over with it, and
+a tool needs it to be shared (its screenshots show it). When you create a tool, write one; when a
+change renames or reshapes the operations it calls, update it.
+
+```json
+[
+  { "operation": "add_plant", "input": { "name": "Monstera", "room": "Living room" } },
+  { "operation": "log_watering", "input": { "plant": "Monstera", "date": "2026-10-20" } }
+]
+```
+
+5–20 calls (at most 200), in order, `version` optional. They replay on an empty database as the
+owner, before anything is granted: plain writes only, no network, no other tools, no model. Use
+made-up names, places and dates that look real and fill the UI and widgets well; never anything
+from the owner's own data or the conversation. The platform replays it on a fresh database before
+promotion, and a call that fails fails the version. It needs no `"abi"` change.
