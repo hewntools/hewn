@@ -11,6 +11,7 @@ import { judgeRun } from "./lib/judge.ts";
 import { runBench, runOne } from "./lib/run.ts";
 import { serveRun } from "./lib/serve.ts";
 import { summaryMarkdown } from "./lib/summary.ts";
+import { setHidden } from "./lib/view.ts";
 
 const USAGE = `usage: npm run bench -- <command>
 
@@ -20,6 +21,7 @@ const USAGE = `usage: npm run bench -- <command>
   judge <run> [--model M] [--again]    score the screenshots with a model (and each arm's sameness)
   serve <run> [--port N]               the gallery, live tools, the blind vote and the summary
   report <run>                         write <run>/summary.md
+  hide <run> a,b  |  show <run> a,b     take arms out of (or back into) the gallery, vote, score page, summary and judge
   list                                 arms and cases
 
   <run> is a run's name (under --out) or its directory. --out defaults to $HEWN_BENCH_DIR or ~/hewn-bench.`;
@@ -74,6 +76,10 @@ try {
     const dir = runDir(arg);
     writeFileSync(join(dir, "summary.md"), summaryMarkdown(dir));
     console.log(summaryMarkdown(dir));
+  } else if (command === "hide" || command === "show") {
+    const arms = list(positionals[2]);
+    if (!arms?.length) throw new Error(`which arms? npm run bench -- ${command} <run> a,b`);
+    console.log(`hidden: ${setHidden(runDir(arg), arms, command === "hide").join(", ") || "none"}`);
   } else if (command === "list") {
     console.log("arms:");
     for (const a of ARMS) console.log(`  ${a.name.padEnd(26)} ${a.about}`);

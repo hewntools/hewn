@@ -2,7 +2,7 @@
 // The build-quality bench (bench/): its arms still apply to today's brief, its cases load, and its
 // plumbing (build, export, serve, screenshot, click through, summarize) works with a scripted builder.
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
@@ -14,8 +14,9 @@ import { idOf, loadCases, seedKit } from "../bench/lib/cases.ts";
 import { parseJson, total } from "../bench/lib/judge.ts";
 import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle } from "../bench/lib/platform.ts";
-import { checkOut, cleanEnv, otherTools } from "../bench/lib/run.ts";
+import { checkOut, cleanEnv, otherTools, runOne } from "../bench/lib/run.ts";
 import { summarize } from "../bench/lib/summary.ts";
+import { setHidden, writeOwner } from "../bench/lib/view.ts";
 import { startUiServer } from "../bench/lib/ui-server.ts";
 
 const BRIEF = readFileSync(resolve(import.meta.dirname, "../spec/builder-brief.md"), "utf8");
@@ -148,6 +149,15 @@ describe("bench metrics and judging", () => {
     assert.equal(df.judge!.total, 30);
     assert.equal(df.sameness, 6);
     assert.deepEqual(df.tells, [["pills and badges on everything", 1]]);
+    // The owner's own scores sit beside the judge's; a hidden arm drops out of every view.
+    writeOwner(join(run, "results", "design-forward", "plant-log", "r1"), { design_quality: 8, originality: 7, craft: 6, usefulness: 9 });
+    assert.throws(() => writeOwner(run, { design_quality: 11, originality: 7, craft: 6, usefulness: 9 }), /design_quality must be a whole number from 1 to 10/);
+    assert.deepEqual(summarize(run).find((a) => a.arm === "design-forward")!.owner, { n: 1, total: 45, design_quality: 8, originality: 7, craft: 6, usefulness: 9, judgeGap: -15 });
+    writeFileSync(join(run, "run.json"), JSON.stringify({ name: "t" }));
+    assert.deepEqual(setHidden(run, ["current"], true), ["current"]);
+    assert.deepEqual(summarize(run).map((a) => a.arm), ["design-forward"]);
+    assert.deepEqual(setHidden(run, ["current"], false), []);
+    assert.equal(summarize(run).length, 2);
     rmSync(run, { recursive: true, force: true });
   });
 });
@@ -162,6 +172,39 @@ describe("bench runs", () => {
 
   // Screenshots and clicks need a browser (the platform's own visual tests run on macOS only, too).
   const browser = process.platform === "darwin" ? findBrowser() : undefined;
+  test("an arm that critiques in the same result: built, captured, reviewed with its screenshots, captured again", { skip: !browser && "no Chromium-based browser on this machine", timeout: 240_000 }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-one-"));
+    const fixture = resolve(import.meta.dirname, "fixtures", "ui-counter");
+    writeFileSync(join(dir, "brief.md"), "");
+    writeFileSync(join(dir, "job.json"), JSON.stringify({ arm: "x+critique", case: "plant-log", rep: 1, brief: join(dir, "brief.md"), critique: true, sandbox: false }));
+    const seen: { kind: string; shots: string[] }[] = [];
+    await runOne(dir, {
+      builder: {
+        name: "claude",
+        build: async (job) => {
+          seen.push({ kind: job.kind, shots: existsSync(join(job.workspace, "screenshots")) ? readdirSync(join(job.workspace, "screenshots")).sort() : [] });
+          cpSync(fixture, join(job.workspace), { recursive: true, filter: (f) => !f.endsWith("capability.json") || job.kind === "create" });
+          const manifest = join(job.workspace, "capability.json");
+          writeFileSync(manifest, JSON.stringify({ ...JSON.parse(readFileSync(manifest, "utf8")), id: job.capabilityId, name: "Plant Log" }));
+        },
+      },
+    });
+    const r = JSON.parse(readFileSync(join(dir, "result.json"), "utf8"));
+    assert.equal(r.status, "done", r.error);
+    assert.deepEqual(r.builds.map((b: { kind: string; status: string }) => `${b.kind} ${b.status}`), ["create promoted", "modify promoted"]);
+    // The review saw the first version's screenshots, and they don't stay in the tool.
+    assert.deepEqual(seen, [{ kind: "create", shots: [] }, { kind: "modify", shots: ["desktop-dark.png", "desktop-light.png", "mobile-dark.png", "mobile-light.png"] }]);
+    assert.ok(!existsSync(join(dir, "version", "screenshots")));
+    for (const f of ["desktop-light", "mobile-dark"]) {
+      assert.ok(existsSync(join(dir, "shots-first", `${f}.png`)), `shots-first/${f}`);
+      assert.ok(existsSync(join(dir, "shots", `${f}.png`)), `shots/${f}`);
+    }
+    assert.ok(r.first.ui);
+    // The counter doesn't take plant-log's operations: recorded, not fatal.
+    assert.match(r.seedError, /add_plant/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("a scripted build is exported, seeded, served as Hewn serves it, screenshotted and clicked through", { skip: !browser && "no Chromium-based browser on this machine", timeout: 120_000 }, async () => {
     const root = mkdtempSync(join(tmpdir(), "bench-e2e-"));
     const fixture = resolve(import.meta.dirname, "fixtures", "ui-counter");

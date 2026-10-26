@@ -3,10 +3,11 @@
 // in <run>/results/<arm>/<case>/r<n>/. A run can be stopped and started again: finished results are kept.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { USER } from "@hewntools/core/auth.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
+import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { ARMS, briefFor, CRITIQUE_REQUEST, othersNote, runOrder, type Arm } from "./arms.ts";
 import { DESKTOP, launchBrowser, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
@@ -51,6 +52,8 @@ export interface Result {
   /** CSS px the phone layout sticks out sideways. */
   overflowMobile?: number;
   clicks?: ClickResult;
+  /** An arm that builds and then critiques in one result: the first version, before the review. */
+  first?: { ui?: UiMetrics; pageErrors?: Record<string, string[]>; overflowMobile?: number };
   startedAt: string;
   finishedAt?: string;
 }
@@ -231,7 +234,8 @@ const buildSummary = (v: BuildView, transcripts: string) => ({
   ...(v.tests ? { tests: v.tests } : {}),
 });
 
-export async function runOne(dir: string): Promise<void> {
+/** One result, in the process `run` starts for it. `builder` replaces Claude Code (tests). */
+export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {}): Promise<void> {
   const job: Job = JSON.parse(readFileSync(join(dir, "job.json"), "utf8"));
   const [c] = await loadCases([job.case]);
   const log = (line: string) => console.log(`${new Date().toTimeString().slice(0, 8)} ${line}`);
@@ -240,7 +244,7 @@ export async function runOne(dir: string): Promise<void> {
   const home = join(dir, "home");
   const versionDir = join(dir, "version");
   if (job.from) cpSync(join(job.from, "home"), home, { recursive: true });
-  const bp = benchPlatform(home, { brief: readFileSync(job.brief, "utf8"), model: job.model, effort: job.effort, sandbox: job.sandbox, transcripts: join(dir, "transcripts"), log: (l) => log(`[platform] ${l}`) });
+  const bp = benchPlatform(home, { brief: readFileSync(job.brief, "utf8"), model: job.model, effort: job.effort, sandbox: job.sandbox, transcripts: join(dir, "transcripts"), log: (l) => log(`[platform] ${l}`), ...(o.builder ? { builder: o.builder } : {}) });
   try {
     let build: BuildView;
     if (job.from) {
@@ -287,6 +291,30 @@ export async function runOne(dir: string): Promise<void> {
       }
     }
     await capture(dir, bp, capabilityId, result);
+    if (job.critique && !job.from) {
+      // Build, then critique, in one result: the first version's screenshots go to shots-first/ and
+      // the builder reviews them in a change of its own.
+      const first = join(dir, "shots-first");
+      rmSync(first, { recursive: true, force: true });
+      renameSync(join(dir, "shots"), first);
+      mkdirSync(join(dir, "shots"), { recursive: true });
+      for (const f of ["empty-light", "empty-dark"]) if (existsSync(join(first, `${f}.png`))) cpSync(join(first, `${f}.png`), join(dir, "shots", `${f}.png`));
+      result.first = { ui: result.ui, pageErrors: result.pageErrors, overflowMobile: result.overflowMobile };
+      for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
+        if (existsSync(join(first, `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(first, `${f}.png`);
+      }
+      const review = await settle(bp.platform, (await bp.platform.modify(USER, { capabilityId, request: CRITIQUE_REQUEST + othersNote(otherTools(job.others)) })).buildId);
+      result.builds.push(buildSummary(review, join(dir, "transcripts")));
+      result.usage = builderUsage(readdirSync(join(dir, "transcripts")).filter((f) => f.endsWith(".jsonl")).map((f) => join(dir, "transcripts", f)));
+      if (review.status !== "promoted" || !review.resultVersion) {
+        result.error = `critique build ${review.status}:\n${review.log.slice(-12).join("\n")}`;
+        save();
+        return;
+      }
+      await exportVersion(bp.platform, capabilityId, review.resultVersion, versionDir);
+      result.ui = uiMetrics(join(versionDir, "ui"));
+      await capture(dir, bp, capabilityId, result);
+    }
     bp.close();
     // Clicks write: they run on a copy, so the seeded state stays as it was for the gallery.
     const scratch = join(dir, "home-clicks");

@@ -18,7 +18,11 @@ export interface Arm {
    * then run the critique pass on it. The base arm runs first.
    */
   from?: string;
-  /** After the build: hand the builder screenshots of its own UI with the seeded data, and let it improve the UI. */
+  /**
+   * After the build: hand the builder screenshots of its own UI with the seeded data, and let it
+   * improve the UI. Without `from`, it's the same result: built, captured (shots-first/), reviewed,
+   * captured again (shots/).
+   */
   critique?: boolean;
   /**
    * Build the cases one after another, each told how this arm's earlier tools look (name, hue and

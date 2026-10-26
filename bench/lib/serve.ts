@@ -7,7 +7,8 @@ import { extname, join, normalize } from "node:path";
 import { loadCases } from "./cases.ts";
 import { readJudge } from "./judge.ts";
 import { benchPlatform, served, type BenchPlatform } from "./platform.ts";
-import { listResults, type Result } from "./run.ts";
+import type { Result } from "./run.ts";
+import { readOwner, visibleResults, writeOwner } from "./view.ts";
 import { summarize, votesFile, readVotes, type Vote } from "./summary.ts";
 import { readBody, startUiServer, TYPES, type Served } from "./ui-server.ts";
 
@@ -15,7 +16,7 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.ch
 
 export async function serveRun(runDir: string, o: { port?: number } = {}) {
   const cases = new Map((await loadCases().catch(() => [])).map((c) => [c.id, c]));
-  const index = () => listResults(runDir);
+  const index = () => visibleResults(runDir);
   const byKey = (key: string) => index().find((r) => r.key === key);
   const live = new Map<string, { bp: BenchPlatform; s: Served }>();
 
@@ -61,6 +62,26 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
     return { id, case: pick.case, name: cases.get(pick.case)?.name ?? pick.case, purpose: cases.get(pick.case)?.purpose ?? "", seen: least, left: side(left), right: side(right) };
   };
 
+  /** The next result for the owner to score: one not scored yet, picked at random, without its arm. */
+  const nextToScore = (skip: string[]) => {
+    const done = index().filter((r) => r.result?.status === "done");
+    const left = done.filter((r) => !readOwner(r.dir) && !skip.includes(r.key));
+    if (!left.length) return { done: true, scored: done.length - left.length, total: done.length };
+    const r = left[Math.floor(Math.random() * left.length)];
+    const c = cases.get(r.result!.case);
+    const sketch = c?.requirements.split(/\n(?=UI sketch)/)[1]?.replace(/^UI sketch\n/, "").trim() ?? "";
+    return {
+      key: r.key,
+      name: c?.name ?? r.result!.case,
+      purpose: c?.purpose ?? "",
+      sketch,
+      scored: done.filter((x) => readOwner(x.dir)).length,
+      total: done.length,
+      shots: { desktop: `/f/${r.key}/shots/desktop-light.png`, desktopDark: `/f/${r.key}/shots/desktop-dark.png`, mobile: `/f/${r.key}/shots/mobile-light.png`, mobileDark: `/f/${r.key}/shots/mobile-dark.png` },
+      live: `/live/${r.key}`,
+    };
+  };
+
   const page = (title: string, body: string) =>
     `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title><link rel="stylesheet" href="/_platform/ui.css"><style>${CSS}</style></head><body><main class="page stack bench">${NAV}${body}</main></body></html>`;
 
@@ -76,6 +97,7 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
       if (!res) return `<td><span class="pill">running…</span></td>`;
       if (res.status !== "done") return `<td><span class="pill bad">failed</span><pre class="err">${esc(res.error?.slice(-600))}</pre><a href="/f/${r.key}/run.log">log</a></td>`;
       const j = readJudge(r.dir);
+      const own = readOwner(r.dir);
       const errs = Object.values(res.pageErrors ?? {}).flat().length;
       const flags = [
         res.seedError ? `<span class="pill warn" title="${esc(res.seedError)}">seed error</span>` : "",
@@ -85,7 +107,7 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
         res.clicks?.dialogs?.length ? `<span class="pill" title="${esc(res.clicks.dialogs.map((d) => `${d.label}: ${d.dialogs.join("; ")}`).join("\n"))}">${res.clicks.dialogs.length} browser dialog${res.clicks.dialogs.length > 1 ? "s" : ""}</span>` : "",
       ].join(" ");
       return `<td><a href="/f/${r.key}/shots/desktop-light.png" target="_blank"><img class="thumb" src="/f/${r.key}/shots/desktop-light.png" loading="lazy" alt=""></a>
-        <div class="row between small"><span>${j ? `<strong>${j.total}</strong>/60` : "not judged"}</span><span class="muted">${res.usage ? `$${res.usage.usd} · ${res.usage.minutes} min` : ""}</span></div>
+        <div class="row between small"><span>${own ? `you <strong>${own.total}</strong> · ` : ""}${j ? `judge <strong>${j.total}</strong>/60` : "not judged"}</span><span class="muted">${res.usage ? `$${res.usage.usd} · ${res.usage.minutes} min` : ""}</span></div>
         <div class="small">${flags}</div>
         ${j ? `<details class="small"><summary>judge</summary><p>Design ${j.design_quality} · original ${j.originality} · craft ${j.craft} · useful ${j.usefulness}</p><p><strong>Best:</strong> ${esc(j.best)}</p><ul>${j.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>${j.tells.length ? `<p><strong>Tells:</strong> ${esc(j.tells.join("; "))}</p>` : ""}</details>` : ""}
         <div class="links small"><a href="/live/${r.key}" target="_blank">open live</a> <a href="/f/${r.key}/shots/desktop-dark.png" target="_blank">dark</a> <a href="/f/${r.key}/shots/mobile-light.png" target="_blank">phone</a> <a href="/f/${r.key}/shots/mobile-dark.png" target="_blank">phone dark</a> <a href="/f/${r.key}/shots/empty-light.png" target="_blank">empty</a> <a href="/f/${r.key}/result.json" target="_blank">result</a> <a href="/f/${r.key}/run.log" target="_blank">log</a> <form method="post" action="/reset/${r.key}"><button class="ghost sm" title="Throw away what you changed in the live tool">reset</button></form></div></td>`;
@@ -110,10 +132,10 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
     const v = (x: unknown) => (x === undefined ? "–" : esc(x));
     return page(
       "Summary",
-      `<h1>Summary</h1><div class="table-wrap"><table><thead><tr><th>Arm</th><th>Built</th><th>$ / result</th><th>Min</th><th>Judge /60</th><th>Design</th><th>Original</th><th>Craft</th><th>Useful</th><th>Sameness /10</th><th>Your win % (n)</th><th>Would open daily %</th><th>UI KB</th><th>CSS KB</th><th>SVG</th><th>Motion</th><th>Page errors</th><th>Broken clicks</th><th>Phone overflow</th></tr></thead><tbody>${s
+      `<h1>Summary</h1><div class="table-wrap"><table><thead><tr><th>Arm</th><th>Built</th><th>$ / result</th><th>Min</th><th>You /60 (n)</th><th>Judge − you</th><th>Judge /60</th><th>Design</th><th>Original</th><th>Craft</th><th>Useful</th><th>Sameness /10</th><th>Your win % (n)</th><th>Would open daily %</th><th>UI KB</th><th>CSS KB</th><th>SVG</th><th>Motion</th><th>Page errors</th><th>Broken clicks</th><th>Phone overflow</th></tr></thead><tbody>${s
         .map(
           (a) =>
-            `<tr><th scope="row">${esc(a.arm)}</th><td>${a.done}/${a.results}${a.seedErrors ? ` (${a.seedErrors} seed err)` : ""}</td><td class="num">${v(a.usd)}</td><td class="num">${v(a.minutes)}</td><td class="num"><strong>${v(a.judge?.total)}</strong></td><td class="num">${v(a.judge?.design_quality)}</td><td class="num">${v(a.judge?.originality)}</td><td class="num">${v(a.judge?.craft)}</td><td class="num">${v(a.judge?.usefulness)}</td><td class="num">${v(a.sameness)}</td><td class="num"><strong>${a.votes ? `${a.votes.winRate}` : "–"}</strong>${a.votes ? ` (${a.votes.n})` : ""}</td><td class="num">${v(a.votes?.daily)}</td><td class="num">${v(a.ui?.kb)}</td><td class="num">${v(a.ui?.cssKb)}</td><td class="num">${v(a.ui?.svgSites)}</td><td class="num">${v(a.ui?.motion)}</td><td class="num">${a.pageErrors}</td><td class="num">${a.clickFailures}</td><td class="num">${a.overflowing}</td></tr>`,
+            `<tr><th scope="row">${esc(a.arm)}</th><td>${a.done}/${a.results}${a.seedErrors ? ` (${a.seedErrors} seed err)` : ""}</td><td class="num">${v(a.usd)}</td><td class="num">${v(a.minutes)}</td><td class="num"><strong>${a.owner ? a.owner.total : "–"}</strong>${a.owner ? ` (${a.owner.n})` : ""}</td><td class="num">${v(a.owner?.judgeGap)}</td><td class="num"><strong>${v(a.judge?.total)}</strong></td><td class="num">${v(a.judge?.design_quality)}</td><td class="num">${v(a.judge?.originality)}</td><td class="num">${v(a.judge?.craft)}</td><td class="num">${v(a.judge?.usefulness)}</td><td class="num">${v(a.sameness)}</td><td class="num"><strong>${a.votes ? `${a.votes.winRate}` : "–"}</strong>${a.votes ? ` (${a.votes.n})` : ""}</td><td class="num">${v(a.votes?.daily)}</td><td class="num">${v(a.ui?.kb)}</td><td class="num">${v(a.ui?.cssKb)}</td><td class="num">${v(a.ui?.svgSites)}</td><td class="num">${v(a.ui?.motion)}</td><td class="num">${a.pageErrors}</td><td class="num">${a.clickFailures}</td><td class="num">${a.overflowing}</td></tr>`,
         )
         .join("")}</tbody></table></div>
       <h2>Tells the judge saw most</h2><ul>${s.map((a) => `<li><strong>${esc(a.arm)}:</strong> ${esc(a.tells.map(([t, n]) => `${t} (${n})`).join("; ") || "none")}</li>`).join("")}</ul>`,
@@ -129,6 +151,18 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
       if (url.pathname === "/summary") return html(summaryPage()), true;
       if (url.pathname === "/vote") return html(page("Blind vote", VOTE_HTML)), true;
       if (url.pathname === "/api/pair") return json(200, nextPair() ?? { done: true }), true;
+      if (url.pathname === "/score") return html(page("Score", SCORE_HTML)), true;
+      if (url.pathname === "/api/next-score") return json(200, nextToScore(url.searchParams.get("skip")?.split(",") ?? [])), true;
+      if (url.pathname === "/api/score" && req.method === "POST") {
+        const b = JSON.parse((await readBody(req)) || "{}");
+        const r = byKey(String(b.key));
+        if (r?.result?.status !== "done") return json(404, { error: "no such result" }), true;
+        try {
+          return json(200, { ok: true, score: writeOwner(r.dir, b) }), true;
+        } catch (e) {
+          return json(400, { error: (e as Error).message }), true;
+        }
+      }
       if (url.pathname === "/api/vote" && req.method === "POST") {
         const b = JSON.parse((await readBody(req)) || "{}");
         const p = pairs.get(b.id);
@@ -161,7 +195,7 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
   return server;
 }
 
-const NAV = `<nav class="row bench-nav"><a href="/">Gallery</a><a href="/vote">Blind vote</a><a href="/summary">Summary</a></nav>`;
+const NAV = `<nav class="row bench-nav"><a href="/">Gallery</a><a href="/vote">Blind vote</a><a href="/score">Score</a><a href="/summary">Summary</a></nav>`;
 
 const CSS = `
 .bench { max-width: none; }
@@ -179,8 +213,65 @@ pre.err { white-space: pre-wrap; max-height: 12rem; overflow: auto; font-size: 0
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
 .pair img { width: 100%; border: 1px solid var(--border, #8884); border-radius: 8px; display: block; }
 .side .phone { max-width: 220px; }
+.score-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 1.5rem; align-items: start; }
+.score-shots { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 1rem; align-items: start; }
+.score-shots img { width: 100%; border: 1px solid var(--border, #8884); border-radius: 8px; display: block; }
+.score-panel { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; padding: 1rem; border: 1px solid var(--border, #8884); border-radius: 12px; background: var(--surface, transparent); }
+.score-panel .segmented { display: flex; flex-wrap: nowrap; }
+.score-panel .segmented button { flex: 1; min-width: 0; padding-inline: 0; }
+.criterion { gap: 0.4rem; }
+@media (max-width: 900px) { .score-layout { grid-template-columns: 1fr; } .score-panel { position: static; max-height: none; } }
+pre.sketch { white-space: pre-wrap; font-size: 0.85rem; }
 .shots { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: start; }
 `;
+
+const SCORE_HTML = `<h1>Score</h1>
+<p class="muted">One build at a time, without its arm. Score it like the judge does: 1 to 10, where 5 is competent but generic, 7 is good work, 8 would impress a design-literate user and 10 is best in class. Open it live to click around.</p>
+<div id="score"></div>
+<script type="module">
+const el = document.getElementById("score");
+const CRITERIA = [
+  ["design_quality", "Design quality", "A coherent whole: hierarchy, composition, typography, colour, spacing, in light and dark."],
+  ["originality", "Originality", "A character of its own from what the tool is about, or a template, default components, the common AI look?"],
+  ["craft", "Craft", "The details: alignment, truncation, density, the phone layout, contrast, nothing broken or cut off."],
+  ["usefulness", "Usefulness", "Does it answer the owner's question at a glance, and make the main action quick?"],
+];
+let cur, picks = {}, skipped = [];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
+async function load() {
+  cur = await (await fetch("/api/next-score?skip=" + skipped.join(","))).json();
+  picks = {};
+  if (cur.done) { el.innerHTML = '<p class="empty"><strong>All ' + cur.total + ' scored.</strong> See the <a href="/summary">summary</a> for your scores beside the judge’s.</p>'; return; }
+  el.innerHTML = '<p class="muted">' + cur.scored + ' of ' + cur.total + ' scored</p>'
+    + '<h2>' + esc(cur.name) + '</h2><p>' + esc(cur.purpose) + '</p>'
+    + (cur.sketch ? '<details><summary>What the screen was asked to do</summary><pre class="sketch">' + esc(cur.sketch) + '</pre></details>' : '')
+    + '<div class="score-layout"><div class="score-shots">'
+    + '<a href="' + cur.shots.desktop + '" target="_blank"><img src="' + cur.shots.desktop + '" alt="desktop, light"></a>'
+    + '<a href="' + cur.shots.mobile + '" target="_blank"><img class="phone" src="' + cur.shots.mobile + '" alt="phone, light"></a>'
+    + '</div><aside class="score-panel stack">'
+    + '<div class="row"><a class="btn" href="' + cur.live + '" target="_blank">Open it live</a><a href="' + cur.shots.desktopDark + '" target="_blank">desktop dark</a><a href="' + cur.shots.mobileDark + '" target="_blank">phone dark</a></div>'
+    + CRITERIA.map(([k, name, help]) => '<div class="criterion stack"><div><strong>' + name + '</strong><div class="muted small">' + help + '</div></div><div class="segmented" data-k="' + k + '">' + [1,2,3,4,5,6,7,8,9,10].map((n) => '<button type="button" aria-pressed="false" data-n="' + n + '">' + n + '</button>').join("") + '</div></div>').join("")
+    + '<label class="field"><span class="label">Notes (optional)</span><textarea id="note" rows="3" placeholder="What works, what doesn’t"></textarea></label>'
+    + '<div class="row"><button class="primary" id="save" disabled>Save and next</button><button class="ghost" id="skip">Skip for now</button></div><span class="muted small" id="msg"></span>'
+    + '</aside></div>';
+  el.querySelectorAll(".segmented").forEach((seg) => seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-n]"); if (!b) return;
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    picks[seg.dataset.k] = Number(b.dataset.n);
+    document.getElementById("save").disabled = CRITERIA.some(([k]) => !picks[k]);
+  }));
+  document.getElementById("save").onclick = save;
+  document.getElementById("skip").onclick = () => { skipped.push(cur.key); scrollTo(0, 0); load(); };
+}
+async function save() {
+  const r = await fetch("/api/score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: cur.key, ...picks, note: document.getElementById("note").value }) });
+  const body = await r.json();
+  if (!r.ok) { document.getElementById("msg").textContent = body.error; return; }
+  scrollTo(0, 0);
+  load();
+}
+load();
+</script>`;
 
 const VOTE_HTML = `<h1>Blind vote</h1>
 <p class="muted" id="ctx">Two builds of the same tool, from different setups, in random order. Which one would you rather have? Open them live to click around.</p>
