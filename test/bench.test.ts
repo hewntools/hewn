@@ -165,6 +165,12 @@ describe("bench runs", () => {
       assert.ok(clicks.clicked >= 1);
       assert.deepEqual(clicks.failures, []);
       assert.equal((await call("get")).count, 3 + clicks.clicked);
+      // A button that asks with confirm() blocks the page until answered: the click-through dismisses it and goes on.
+      const page = join(root, "version", "ui", "index.html");
+      writeFileSync(page, readFileSync(page, "utf8").replace("</main>", `<button id="stop" onclick="if (confirm('Stop counting?')) document.title = 'stopped'">Stop</button></main>`));
+      const asked = await clickThrough(desktop, url);
+      assert.deepEqual(asked.dialogs, [{ label: "Stop", dialogs: ["confirm: Stop counting?"] }]);
+      assert.deepEqual(asked.failures, []);
       const phone = await b.page(PHONE);
       await phone.goto(url);
       assert.equal(await overflowX(phone), 0);

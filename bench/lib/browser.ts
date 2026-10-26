@@ -29,6 +29,8 @@ export interface Page {
   errors: string[];
   /** The tool's API calls that answered with an error status. */
   apiErrors: string[];
+  /** alert/confirm/prompt dialogs the page opened (each dismissed). */
+  dialogs: string[];
   clear(): void;
   close(): Promise<void>;
 }
@@ -64,10 +66,12 @@ export async function launchBrowser(binary = process.env.HEWN_BROWSER ?? findBro
       m.error ? p.reject(new Error(m.error.message)) : p.resolve(m.result);
     } else for (const l of listeners) l(m);
   };
-  const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string) =>
+  // Nothing waits forever: a page that blocks (a dialog, an endless loop) fails the call instead.
+  const send = (method: string, params: Record<string, unknown> = {}, sessionId?: string, timeoutMs = 60_000) =>
     new Promise<any>((resolve, reject) => {
       const id = ++next;
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => (pending.delete(id), reject(new Error(`${method} took over ${timeoutMs / 1000}s`))), timeoutMs);
+      pending.set(id, { resolve: (v) => (clearTimeout(timer), resolve(v)), reject: (e) => (clearTimeout(timer), reject(e)) });
       ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
 
@@ -78,11 +82,17 @@ export async function launchBrowser(binary = process.env.HEWN_BROWSER ?? findBro
       const s = (method: string, params: Record<string, unknown> = {}) => send(method, params, sessionId);
       const errors: string[] = [];
       const apiErrors: string[] = [];
+      const dialogs: string[] = [];
       let loaded: (() => void) | undefined;
       let loads = 0;
       const onMsg = (m: Msg) => {
         if (m.sessionId !== sessionId) return;
         if (m.method === "Page.loadEventFired") loaded?.();
+        // alert/confirm/prompt block the page until answered: dismiss them (a confirm is cancelled) and note it.
+        if (m.method === "Page.javascriptDialogOpening") {
+          dialogs.push(`${m.params.type}: ${String(m.params.message).slice(0, 120)}`);
+          void send("Page.handleJavaScriptDialog", { accept: false }, sessionId).catch(() => {});
+        }
         if (m.method === "Runtime.exceptionThrown") errors.push(`uncaught: ${m.params.exceptionDetails.exception?.description?.split("\n")[0] ?? m.params.exceptionDetails.text}`);
         if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description ?? "").join(" ").slice(0, 300)}`);
         if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/\/api\/|favicon\.ico/.test(m.params.entry.url ?? "")) errors.push(`${m.params.entry.source}: ${m.params.entry.text}`);
@@ -95,7 +105,8 @@ export async function launchBrowser(binary = process.env.HEWN_BROWSER ?? findBro
       const page: Page = {
         errors,
         apiErrors,
-        clear: () => ((errors.length = 0), (apiErrors.length = 0)),
+        dialogs,
+        clear: () => ((errors.length = 0), (apiErrors.length = 0), (dialogs.length = 0)),
         async goto(url, settleMs = 1500) {
           const load = new Promise<void>((r) => (loaded = r));
           // A fresh load every time: the same URL with only a fragment would be a same-document
@@ -169,6 +180,8 @@ export interface ClickResult {
   /** Clicks after which the page threw or logged an error (API answers with an error status are listed separately). */
   failures: { label: string; errors: string[] }[];
   apiErrors: { label: string; errors: string[] }[];
+  /** Clicks that opened a browser dialog (alert, confirm, prompt) rather than the page's own UI. */
+  dialogs: { label: string; dialogs: string[] }[];
 }
 
 /**
@@ -179,16 +192,18 @@ export interface ClickResult {
 export async function clickThrough(page: Page, url: string, limit = 20): Promise<ClickResult> {
   await page.goto(url);
   const labels = await page.eval<string[]>(`${CLICKABLES}.map((c) => c.label)`);
-  const out: ClickResult = { clickable: labels.length, clicked: 0, failures: [], apiErrors: [] };
+  const out: ClickResult = { clickable: labels.length, clicked: 0, failures: [], apiErrors: [], dialogs: [] };
   for (let i = 0; i < Math.min(labels.length, limit); i++) {
     await page.goto(url, 1000);
     page.clear();
-    const clicked = await page.eval<boolean>(`(() => { const c = ${CLICKABLES}[${i}]; if (!c) return false; c.el.scrollIntoView({ block: "center" }); c.el.click(); return true; })()`);
+    // The click runs after this call returns, so a dialog it opens can't block the call itself.
+    const clicked = await page.eval<boolean>(`(() => { const c = ${CLICKABLES}[${i}]; if (!c) return false; c.el.scrollIntoView({ block: "center" }); setTimeout(() => c.el.click()); return true; })()`);
     if (!clicked) continue;
     out.clicked++;
     await new Promise((r) => setTimeout(r, 700));
     if (page.errors.length) out.failures.push({ label: labels[i], errors: [...new Set(page.errors)] });
     if (page.apiErrors.length) out.apiErrors.push({ label: labels[i], errors: [...new Set(page.apiErrors)] });
+    if (page.dialogs.length) out.dialogs.push({ label: labels[i], dialogs: [...new Set(page.dialogs)] });
   }
   return out;
 }

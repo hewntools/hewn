@@ -82,6 +82,7 @@ export async function serveRun(runDir: string, o: { port?: number } = {}) {
         errs ? `<span class="pill bad" title="${esc(Object.values(res.pageErrors ?? {}).flat().join("\n"))}">${errs} page error${errs > 1 ? "s" : ""}</span>` : "",
         res.clicks?.failures.length ? `<span class="pill bad" title="${esc(res.clicks.failures.map((f) => `${f.label}: ${f.errors.join("; ")}`).join("\n"))}">${res.clicks.failures.length} broken click${res.clicks.failures.length > 1 ? "s" : ""}</span>` : "",
         (res.overflowMobile ?? 0) > 1 ? `<span class="pill warn">phone overflow ${res.overflowMobile}px</span>` : "",
+        res.clicks?.dialogs?.length ? `<span class="pill" title="${esc(res.clicks.dialogs.map((d) => `${d.label}: ${d.dialogs.join("; ")}`).join("\n"))}">${res.clicks.dialogs.length} browser dialog${res.clicks.dialogs.length > 1 ? "s" : ""}</span>` : "",
       ].join(" ");
       return `<td><a href="/f/${r.key}/shots/desktop-light.png" target="_blank"><img class="thumb" src="/f/${r.key}/shots/desktop-light.png" loading="lazy" alt=""></a>
         <div class="row between small"><span>${j ? `<strong>${j.total}</strong>/60` : "not judged"}</span><span class="muted">${res.usage ? `$${res.usage.usd} · ${res.usage.minutes} min` : ""}</span></div>
