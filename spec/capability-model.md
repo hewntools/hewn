@@ -282,7 +282,7 @@ interface CapabilityManifest {
   /** Since 2.4. How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. */
   saturation?: number;
   /** Since 2.5. Where an installed tool came from; written by the host, a builder's value is replaced. */
-  source?: { id: string; version: number; hash: string; from: "file" | "link" | "hub"; host?: string };
+  source?: { id: string; name?: string; version: number; hash: string; from: "file" | "link" | "hub"; host?: string };
   tags?: string[];
 
   /** Since 2.1. Non-secret settings the owner fills in; code reads ctx.config.NAME. */

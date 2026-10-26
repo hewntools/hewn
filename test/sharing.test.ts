@@ -100,8 +100,8 @@ describe("sharing: a tool as a file", () => {
     );
     assert.equal(b.status, "promoted", b.log.join("\n"));
     const check = await t.platform.shareCheck(USER, "running-log");
-    assert.deepEqual(check.blocked, { kind: "secret", file: "capability.json", line: check.blocked!.kind === "secret" ? check.blocked!.line : 0 });
-    await assert.rejects(t.platform.shareBundle(USER, "running-log"), /capability\.json:\d+ has one of your own stored values/);
+    assert.deepEqual(check.blocked, { kind: "secret", file: "capability.json", line: check.blocked!.kind === "secret" ? check.blocked!.line : 0, label: "your Running Log setting SITE" });
+    await assert.rejects(t.platform.shareBundle(USER, "running-log"), /capability\.json:\d+ is your Running Log setting SITE\. Remove it/);
   });
 
   test("round trip: share, then install on another Hewn with its sample data; source is set and stays", async () => {
@@ -119,7 +119,7 @@ describe("sharing: a tool as a file", () => {
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(done.log.some((l) => /sample data: 3 calls$/.test(l)), done.log.join("\n"));
     assert.equal(await runs(other), 3, "the sample data was replayed");
-    const source = { id: "running-log", version: 2, hash: t.platform.registry.getVersion("running-log", 2)!.contentHash, from: "file" };
+    const source = { id: "running-log", name: "Running Log", version: 2, hash: t.platform.registry.getVersion("running-log", 2)!.contentHash, from: "file" };
     assert.deepEqual(other.platform.registry.getCapability("running-log")!.source, source);
     const installed = other.platform.activeManifest("running-log");
     assert.deepEqual(installed.source, source);

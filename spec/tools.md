@@ -39,7 +39,7 @@ Widgets have no files of their own: they are declared in the manifest and backed
 | `runtime` | no | 2.0 | Leave it out. The only profile is `"isolate"`. |
 | `hue` | no | 2.0 | Tile colour for the icon: an OKLCH hue, integer 0–359. |
 | `saturation` | no | 2.4 | How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. `0` draws the icon black or white on grey (for a black-and-white brand). |
-| `source` | no | 2.5 | Where an installed tool came from: `{ id, version, hash, from }` (`from`: `"file"`, `"link"` with its `host`, or `"hub"`). The host writes it when it installs a tool from outside and keeps it on every later version. Leave it out: a value you write is replaced. |
+| `source` | no | 2.5 | Where an installed tool came from: `{ id, name, version, hash, from }` (`from`: `"file"`, `"link"` with its `host`, or `"hub"`). The host writes it when it installs a tool from outside and keeps it on every later version. Leave it out: a value you write is replaced. |
 | `tags` | no | 2.0 | Strings agents can filter on. |
 | `requires` | no | 2.0 | Authority the code needs: `secrets`, `hosts`, `capabilities`, and `model` (since 2.2). See [Grants](#grants). |
 | `operations` | yes | 2.0 | At least one. See [Operations](#operations). |
