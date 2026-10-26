@@ -18,7 +18,7 @@ const changed = (v) => String(v.request?.request ?? v.request?.purpose ?? "").sp
  * files (no builder ran), or a quick change (a new tier or model, no builder either).
  */
 const madeBy = (v, all) =>
-  v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;
+  v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "bundle" ? "installed from a file" : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;
 const capital = (s) => s[0].toUpperCase() + s.slice(1);
 
 /** One version as a list row: "v4 · live", what it changed, when and by what; Details opens it. */

@@ -255,9 +255,14 @@ export function mask(s: string): string {
  * the owner's own stored secret and config values (`own`: these block). Values shorter than 6
  * characters are left out of the exact match: too common to mean anything.
  */
-export function scanFiles(files: Files, own: string[] = []): Finding[] {
+export function scanFiles(files: Files, own: (string | { value: string; label: string })[] = []): Finding[] {
   const out: Finding[] = [];
-  const mine = [...new Set(own.filter((v) => v.length >= 6))].sort((a, b) => b.length - a.length);
+  const named = new Map<string, string>();
+  for (const o of own) {
+    const [value, label] = typeof o === "string" ? [o, "One of your own stored values"] : [o.value, o.label];
+    if (value.length >= 6 && !named.has(value)) named.set(value, label);
+  }
+  const mine = [...named.keys()].sort((a, b) => b.length - a.length);
   for (const [file, data] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (data.includes(0)) continue;
     const lines = dec.decode(data).split("\n");
@@ -269,7 +274,7 @@ export function scanFiles(files: Files, own: string[] = []): Finding[] {
         seen.add(match);
         out.push({ file, line, kind, label, masked: mask(match), text: match });
       };
-      for (const v of mine) if (text.includes(v)) add("secret", "One of your own stored values", v);
+      for (const v of mine) if (text.includes(v)) add("secret", named.get(v)!, v);
       for (const [label, re] of KEYS) for (const m of text.matchAll(re)) add("key", label, m[0]);
       for (const m of text.matchAll(LONG)) if (!seen.has(m[0]) && !/^[a-z_]+$/i.test(m[0]) && entropy(m[0]) > 3.5) add("key", "Long random string", m[0]);
       for (const [label, re, keep] of PII) for (const m of text.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());

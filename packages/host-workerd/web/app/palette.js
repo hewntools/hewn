@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The command palette (⌘K, "/"): tools, places and actions in one search.
 import { api, appIcon, caps, enc, fail, h, modal, toast } from "../kit.js";
+import { installFromFile } from "./install.js";
 import { addConnectionSheet } from "./accounts.js";
 import { jobPicker } from "./agents.js";
 import { applyTheme, isDark, THEME_KEY } from "./appearance.js";
@@ -32,6 +33,7 @@ async function paletteItems() {
     ...tools.map((c) => [`${c.name} · Info`, "Tools", () => go(`#/c/${enc(c.id)}`), appIcon(c, { size: 24 }), `${c.id} details grants schedules widgets versions`, true]),
     ...all.filter((c) => c.kind === "connection").map((c) => [c.name, "Connections", () => go(`#/c/${enc(c.id)}`), appIcon(c, { size: 24 }), `${c.id} account sign in`]),
     act("New tool", () => go("#/new"), "make create build", "plus"),
+    act("Install from a file…", () => installFromFile().catch(fail), "install share zip bundle import tool", "plus"),
     act("Add a widget", () => addWidgetSheet(), "home", "widget"),
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
     act("Connect an agent", () => connectDialog(), "claude codex opencode chatgpt mcp", "agent"),

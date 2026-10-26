@@ -6,6 +6,7 @@
 import { type Agent, requireOwner } from "../auth.ts";
 import { BundleError, type Finding, packBundle, readSample, SAMPLE_FILE, type SampleCall, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
+import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, text } from "../files.ts";
 import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, stampSource, type ToolSource } from "../manifest.ts";
 import type { Files } from "../ports.ts";
@@ -28,7 +29,7 @@ export interface ShareCheck {
   findings: Finding[];
   sample: { calls: number } | null;
   /** Why it can't be shared: one of the owner's own values in it, or no sample data. */
-  blocked: { kind: "secret"; file: string; line: number } | { kind: "no-sample" } | null;
+  blocked: { kind: "secret"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
 }
 
 /** What the install sheet shows before anything is installed. */
@@ -52,6 +53,8 @@ export interface BundlePreview {
   /** Its name, or the first free "Name 2", "Name 3"… */
   suggestedName: string;
   operations: { name: string; description: string; sideEffect: string }[];
+  /** Its tile: the manifest's hue and saturation, and its 5×5 glyph (ui/icon.svg) when it has one. */
+  icon: { hue: number | null; saturation: number | null; glyph: Cells | null };
 }
 
 interface Staged {
@@ -85,14 +88,14 @@ export class Sharing extends Domain {
       files: Object.keys(files).length,
       findings,
       sample: sample ? { calls: sample.length } : null,
-      blocked: secret ? { kind: "secret", file: secret.file, line: secret.line } : !sample ? { kind: "no-sample" } : null,
+      blocked: secret ? { kind: "secret", file: secret.file, line: secret.line, label: secret.label } : !sample ? { kind: "no-sample" } : null,
     };
   }
 
   /** The bundle (`<id>.hewn.zip`): refused while the check blocks it. */
   async shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> {
     const check = await this.shareCheck(owner, capabilityId, version);
-    if (check.blocked?.kind === "secret") throw new PlatformError("conflict", `${check.blocked.file}:${check.blocked.line} has one of your own stored values (a key or a setting). Remove it, then share again.`, { blocked: check.blocked });
+    if (check.blocked?.kind === "secret") throw new PlatformError("conflict", `${check.blocked.file}:${check.blocked.line} is ${check.blocked.label}. Remove it, then share again.`, { blocked: check.blocked });
     if (check.blocked?.kind === "no-sample") throw new PlatformError("conflict", `${capabilityId} has no sample data (${SAMPLE_FILE}), and a tool needs it to be shared. Ask the builder to add some, or write it yourself.`, { blocked: check.blocked });
     const files = await this.shareFiles(capabilityId, check.version);
     const row = this.registry.getVersion(capabilityId, check.version)!;
@@ -111,20 +114,21 @@ export class Sharing extends Domain {
     return { ...v.files, "capability.json": bytes(JSON.stringify(rest, null, 2) + "\n") };
   }
 
-  /** The owner's own stored values: every tool's secrets and settings, and the model providers' keys. */
-  private ownValues(): string[] {
-    const out: string[] = [];
+  /** The owner's own stored values, each named: every tool's secrets and settings, and the model providers' keys. */
+  private ownValues(): { value: string; label: string }[] {
+    const out: { value: string; label: string }[] = [];
     for (const c of [...this.registry.listActiveCapabilities(), ...this.registry.listArchivedCapabilities()]) {
-      out.push(...Object.values(this.registry.config(c.id)));
+      const name = c.displayName ?? c.name;
+      for (const [k, value] of Object.entries(this.registry.config(c.id))) out.push({ value, label: `your ${name} setting ${k}` });
       const m = this.registry.getVersion(c.id, c.activeVersion!)?.manifest;
       for (const s of m?.requires?.secrets ?? []) {
-        const v = this.secrets.get(c.id, s.name);
-        if (v) out.push(v);
+        const value = this.secrets.get(c.id, s.name);
+        if (value) out.push({ value, label: `your ${name} key (${s.name})` });
       }
     }
     for (const p of MODEL_PROVIDERS) {
-      const key = this.secrets.get(MODEL_KEYS, p);
-      if (key) out.push(key);
+      const value = this.secrets.get(MODEL_KEYS, p);
+      if (value) out.push({ value, label: `your ${p === "openai" ? "OpenAI" : p === "openrouter" ? "OpenRouter" : "Anthropic"} API key` });
     }
     return out;
   }
@@ -186,7 +190,7 @@ export class Sharing extends Domain {
     if (!id) throw new PlatformError("invalid_request", "the name needs a letter or a digit");
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     if (this.registry.getCapability(id)) throw new PlatformError("conflict", `You already have a tool called ${name}. Pick another name.`);
-    const source: ToolSource = { id: s.sidecar.tool.id, version: s.sidecar.tool.version, hash: s.sidecar.tool.hash, from: s.staged.from, ...(s.staged.host ? { host: s.staged.host } : {}) };
+    const source: ToolSource = { id: s.sidecar.tool.id, name: s.manifest.name, version: s.sidecar.tool.version, hash: s.sidecar.tool.hash, from: s.staged.from, ...(s.staged.host ? { host: s.staged.host } : {}) };
     const manifest = stampSource({ ...s.manifest, id, name }, source);
     const seed: Files = { ...s.files, "capability.json": bytes(JSON.stringify(manifest, null, 2) + "\n") };
     const sample = !!req.sample && !!s.files[SAMPLE_FILE];
@@ -226,6 +230,7 @@ export class Sharing extends Domain {
       files: Object.keys(files).length,
       suggestedName: this.freeName(m.name),
       operations: m.operations.filter((o) => !o.deprecated).map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect })),
+      icon: { hue: m.hue ?? null, saturation: m.saturation ?? null, glyph: files["ui/icon.svg"] ? (cellsFromSvg(text(files["ui/icon.svg"])) ?? null) : null },
     };
   }
 
