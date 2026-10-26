@@ -26,6 +26,10 @@ Restoring replaces the data and keeps Hewn running: it stops and starts its runt
 
 **Export data** in a tool's menu, or **Export** in Info › Data, downloads all its data as JSON. Or `hewn export <id> --out file.json`. Info › Data also shows how many rows the tool keeps, in how many tables, and when it last wrote.
 
+## Start over
+
+Info › Data › **Start over** empties a tool's data and keeps the tool, with a backup of the data kept. `hewn data reset <id>` from the terminal. See [Sharing tools](sharing.md#start-over).
+
 ## Versions and rollback
 
 Every change to a tool is a new version, and your data moves forward with it. Restore an earlier version from **Versions** (Info) or `hewn rollback <id> [version]`. See [Building tools](building-tools.md#versions).

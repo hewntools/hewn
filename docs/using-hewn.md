@@ -13,7 +13,7 @@ Home holds your tools as icons, and the widgets you've put there. Click a tool t
 Right-click a tool for its menu:
 - **Open**, **Change…** and **Info**
 - **Widgets…**, **Activity** and **Versions**
-- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand) and **Export data**
+- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand), **Share…** (the tool as a file: [Sharing tools](sharing.md)) and **Export data**
 - **Delete…**
 
 Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget that takes options, such as which item to show: the same form as when you added it, with a preview), **Change…** and **Remove widget**.
@@ -51,7 +51,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 **Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
 - **Operations:** each with **Run**, which opens it as a form and shows the result
 - **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for (a no is kept until its next version; it can't run without it, so Info offers **Ask builder to work without it**), **Revoke** what it has, and move it to another model tier from the menu on the model's row, with what it spent this month ([Models](models.md))
-- **Data:** how many rows it keeps, when it last wrote, and **Export**
+- **Data:** how many rows it keeps, when it last wrote, **Export**, and **Start over** (empty it, keep the tool: [Sharing tools](sharing.md#start-over))
 - **Schedules:** a switch each, and **+ Add schedule**
 - **Widgets:** the widgets themselves, and **Add to Home**
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
