@@ -71,7 +71,7 @@ The **Change it** box asks for a change ([Building tools](building-tools.md#chan
 
 **When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed in the box (the operation, the error, its input and the last log lines) and "Fix it so this works." Add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 
-![Running Log's Info page: its status and version, the Change it box, then Operations, Allowed to and Data on the left, and Schedules, Instructions and Versions on the right](images/tool-info.png)
+![Running Log's Info page: its status and version, Share… in the top bar, the Change it box, then Operations, Allowed to and Data (with Start over) on the left, and Schedules, Widgets, Instructions and Versions on the right](images/tool-info.png)
 
 ### Schedules
 
