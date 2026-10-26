@@ -71,7 +71,7 @@ describe("remote builder and intake", () => {
       ]);
     const dir = workspace();
     const charges: unknown[] = [];
-    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed", onCharge: (c) => charges.push(c) });
+    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed", retryOf: "b-0", onCharge: (c) => charges.push(c) });
     await remoteBuilder(remote).build(j);
     const sent = seen.at(-1)!;
     assert.equal(sent.path, "/v1/builds");
@@ -80,6 +80,7 @@ describe("remote builder and intake", () => {
     assert.equal(sent.body.effort, "high");
     assert.equal(sent.body.feedback, "1 test failed");
     assert.equal(sent.body.session, "b-1", "one session per build, for the service to resume on a later attempt");
+    assert.equal(sent.body.retryOf, "b-0", "the first build of the chain it retries");
     assert.match(sent.body.prompt, /builder for Hewn/);
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);

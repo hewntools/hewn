@@ -33,6 +33,7 @@ Request:
   "capabilityId": "reading-list",
   "kind": "create",
   "attempt": 1,
+  "retryOf": "b-…",
   "feedback": "The previous candidate FAILED platform validation: …",
   "model": "fable",
   "effort": "high",
@@ -42,6 +43,7 @@ Request:
 ```
 
 - `kind`: `create`, `modify` or `widgets`. `feedback` is set from the second attempt on.
+- `retryOf` is set when this build retries a failed or cancelled one (Retry, Ask builder to fix, or Hewn's own retry after a restart): the first build of that chain, the same on every retry of it. A host that bills or averages per build can count the chain as one. Unset: not a retry.
 - `session` is the same for every attempt of one build (the build id), so the service may resume its own model session on a later attempt instead of starting over; `prompt` and `files` are still whole each time, so a stateless service works.
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
 - `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.

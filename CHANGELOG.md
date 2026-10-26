@@ -22,6 +22,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Set icon** shows the icon at the three sizes it's seen at, centres the 5×5 grid with a count of lit cells, and gives Colour and Saturation the same width.
 - A change waiting for the one before it says so the same way in the change panel, the Inbox and Activity: "waiting for the change before it".
 - Docs: [Sharing tools](docs/sharing.md) is new; the web client, building tools, the threat model and the internal architecture and security notes cover sharing and the Hub.
+- For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to a remote builder, the first build of the chain it retries, so a host can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 - For hosts: `GET /api/capabilities/:id/data` (owner only) gives a tool's rows per table, counted without reading them, and its last write; the runtime port gains `countState`.
 
 ## 0.4.8 (2026-10-24)
