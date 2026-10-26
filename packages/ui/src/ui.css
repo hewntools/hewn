@@ -444,6 +444,7 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .code-line.add { background: oklch(from var(--ok) l c h / 0.18); }
 .code-line.del { background: oklch(from var(--danger) l c h / 0.18); }
 .code-line.hunk { display: block; padding: 0 12px; background: oklch(from var(--info) l c h / 0.16); color: oklch(from var(--info) 0.8 c h); }
+.code-line.hl { background: oklch(from var(--warn) l c h / 0.22); }
 .code-empty { padding: var(--s4); color: oklch(from var(--log-text) l c h / 0.6); font-family: var(--font); }
 @media (max-width: 760px) { .code-browser { flex-direction: column; } .code-browser > .side-list { width: 100%; } }
 .side-list .side-foot { padding: 0 var(--s3); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.45; }

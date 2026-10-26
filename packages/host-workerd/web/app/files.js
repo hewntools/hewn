@@ -38,7 +38,10 @@ const sourceView = (file) => (file.text === "" ? h("div", { class: "code-empty" 
  * The browser itself, for a source ({ label, list, file }). `mode`: "changes" or "source" (default:
  * changes when there's a version before with changes, else source).
  */
-function codeBrowser(src, { mode: wanted } = {}) {
+/**
+ * `at`: open this file at this line (a finding's "Show"), highlighted, in Source.
+ */
+function codeBrowser(src, { mode: wanted, at } = {}) {
   const side = h("nav", { class: "side-list code-files", "aria-label": "Files" }, skeleton("80%", "60%", "70%"));
   const path = h("span", { class: "mono small grow clip-1" });
   const toggle = h("span", {});
@@ -75,6 +78,11 @@ function codeBrowser(src, { mode: wanted } = {}) {
       if (current !== p) return;
       const meta = data.files.find((x) => x.path === p);
       put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f) : sourceView(f));
+      if (at?.line && p === at.path && mode === "source") {
+        const line = body.querySelectorAll(".code-line")[at.line - 1];
+        line?.classList.add("hl");
+        line?.scrollIntoView({ block: "center" });
+      }
     } catch (e) {
       put(body, h("div", { class: "code-empty" }, e.message || String(e)));
     }
@@ -88,10 +96,10 @@ function codeBrowser(src, { mode: wanted } = {}) {
     try {
       data = await src.list();
       const changed = data.files.some((f) => f.status !== "same");
-      if (!data.base || !changed) mode = "source";
+      if (!data.base || !changed || at) mode = "source";
       mode ??= "changes";
       if (data.base && changed) put(toggle, segmented([["changes", "Changes"], ["source", "Source"]], mode, setMode, { label: "Show" }));
-      const first = shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
+      const first = (at && shown().find((f) => f.path === at.path)) ?? shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
       if (first) open(first.path);
       else put(side, h("div", { class: "eyebrow" }, "No files"));
     } catch (e) {

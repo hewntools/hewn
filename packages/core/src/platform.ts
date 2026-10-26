@@ -22,6 +22,7 @@ import { Connections, type ConnectionHealth } from "./platform/connections.ts";
 import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
+import type { BundleSummary } from "./bundle.ts";
 import { type BundlePreview, Sharing, type ShareCheck } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport } from "./platform/builds.ts";
 import { Validation } from "./platform/validation.ts";
@@ -228,6 +229,8 @@ export class Platform {
   bundleCode(owner: Agent, token: string) { return this.d.sharing.bundleCode(owner, token); }
   bundleFile(owner: Agent, token: string, path: string) { return this.d.sharing.bundleFile(owner, token, path); }
   dropStaged(owner: Agent, token: string) { return this.d.sharing.dropStaged(owner, token); }
+  summaryInput(owner: Agent, token: string) { return this.d.sharing.summaryInput(owner, token); }
+  keepSummary(owner: Agent, token: string, summary: BundleSummary) { return this.d.sharing.keepSummary(owner, token, summary); }
   installBundle(owner: Agent, token: string, req: { name: string; sample?: boolean }): Promise<BuildView> { return this.d.sharing.installBundle(owner, token, req); }
   setSample(owner: Agent, capabilityId: string, json: string): Promise<BuildView> { return this.d.sharing.setSample(owner, capabilityId, json); }
 

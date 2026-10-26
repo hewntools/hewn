@@ -82,6 +82,9 @@ describe("web client (owner surface)", () => {
       intake: async (req, onProgress) => {
         intakeCalls.push(req);
         onProgress?.({ activity: "Thinking" });
+        // Reading a tool someone shared, before it's installed.
+        if (req.mode === "summarize")
+          return { kind: "summary", message: "Logs your runs and sums them up.", keeps: "Runs: date, distance, time, notes.", reaches: "", findings: [{ kind: "ok", title: "Keeps your data inside the tool" }, { kind: "warn", title: "Agents can delete runs", file: "src/index.ts", line: 3 }] };
         // A rule stated in passing is remembered (global, or for the tool when modifying); "forget" drops one.
         const last = req.messages.at(-1)?.content ?? "";
         const memory = /always Swedish/.test(last) ? { remember: [{ scope: "global" as const, text: "Swedish copy in every screen" }, { scope: "tool" as const, text: "One screen only" }] } : /drop the Swedish rule/.test(last) ? { forget: [{ scope: "global" as const, text: "Swedish copy in every screen" }] } : {};
@@ -385,6 +388,37 @@ describe("web client (owner surface)", () => {
       assert.deepEqual(c.json, { kind: "answer", message: "Through a connection: it holds the sign-in." });
       const m = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "How do I see its old versions?" }] } });
       assert.equal(m.json.kind, "answer");
+    });
+
+    test("install from a file: staged, read by your builder first (kept with the install), then installed with its sample data", async () => {
+      const sample = JSON.stringify([{ operation: "record_run", input: { distanceKm: 6, durationSeconds: 2000, date: "2026-10-02" } }]);
+      assert.equal((await platform.settle((await platform.setSample(USER, "running-log", sample)).buildId)).status, "promoted");
+      const { bundle } = await platform.shareBundle(USER, "running-log");
+      const staged = await api("/bundles", { method: "POST", body: { data: Buffer.from(bundle).toString("base64") } });
+      assert.equal(staged.status, 200, JSON.stringify(staged.json));
+      assert.equal(staged.json.summary, null);
+      assert.equal(staged.json.suggestedName, "Running Log 2");
+      assert.equal(staged.json.sample, 1);
+      const code = await api(`/bundles/${staged.json.token}/code?path=src/index.ts`);
+      assert.ok(code.json.text.length > 0);
+      const read = await api(`/bundles/${staged.json.token}/summary`, { method: "POST" });
+      assert.equal(read.status, 200, JSON.stringify(read.json));
+      assert.equal(read.json.summary.message, "Logs your runs and sums them up.");
+      assert.deepEqual(read.json.summary.findings.map((f: any) => f.kind), ["ok", "warn"]);
+      const asked = intakeCalls.at(-1)!;
+      assert.equal(asked.mode, "summarize");
+      assert.equal(asked.bundle!.files[0].path, "capability.json", "the manifest first");
+      assert.match(asked.bundle!.files.find((f) => f.path === "src/index.ts")!.text, /^ {3}1\| /, "lines numbered");
+      assert.equal((await api(`/bundles/${staged.json.token}`)).json.summaryBy, "yours");
+      const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Shared Log", sample: true } });
+      const done = await platform.settle(started.json.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.equal((done.request as any).summary.message, "Logs your runs and sums them up.", "the reading is kept with the install");
+      assert.equal((await api("/capabilities/shared-log")).json.source.from, "file");
+      assert.equal((await api(`/bundles/${staged.json.token}`)).status, 404, "installed: gone");
+      const refused = await api("/bundles", { method: "POST", body: { data: Buffer.from("not a zip").toString("base64") } });
+      assert.equal(refused.status, 400);
+      assert.match(refused.json.message, /isn't a zip file/);
     });
 
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {

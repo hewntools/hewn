@@ -18,7 +18,7 @@ import { hewnDocs } from "./assets.ts";
  * themselves. It runs headless, sandboxed, with no tools that matter and no MCP.
  */
 
-export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
+export type { ConnectionStep, CreateDraft, DraftSpec, ScheduleSuggestion, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeMessage, IntakeProgress, IntakeReply, IntakeRequest, SummaryFinding, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
 import type { ConnectionStep, CreateDraft, DraftSpec, Intake, IntakeAttachment, IntakeInstruction, IntakeMemory, IntakeProgress, IntakeReply, IntakeRequest, ScheduleSuggestion, WidgetProposal } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { MAX_IDEAS } from "@hewntools/host-workerd/surface/intake-types.ts";
 
@@ -175,6 +175,68 @@ export const SCHEMA = {
   },
 };
 
+/** The reply when summarizing a tool someone shared (mode "summarize"). */
+export const SUMMARY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["kind", "message", "keeps", "reaches", "findings"],
+  properties: {
+    kind: { type: "string", enum: ["summary"] },
+    message: { type: "string" },
+    keeps: { type: "string" },
+    reaches: { type: "string" },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "title", "detail", "file", "line"],
+        properties: { kind: { type: "string", enum: ["warn", "ok"] }, title: { type: "string" }, detail: { type: "string" }, file: { type: "string" }, line: { type: "integer" } },
+      },
+    },
+  },
+};
+
+/** The schema a request's reply follows. */
+export const schemaFor = (req: Pick<IntakeRequest, "mode">) => (req.mode === "summarize" ? SUMMARY_SCHEMA : SCHEMA);
+
+/**
+ * Summarizing (decision 29): read a tool someone shared, before it's installed, and say what it
+ * does with the owner's data. The sandbox already enforces what the manifest declares, so this is
+ * about what the tool does within that, and where what it says and what it does differ. Advisory:
+ * the owner can read the code, and the code is what runs.
+ */
+export function summaryPrompt(req: IntakeRequest): string {
+  const b = req.bundle;
+  if (!b) throw new Error("summarize: no tool to read");
+  const m = b.manifest;
+  const asks = [
+    m.requires?.hosts?.length ? `hosts: ${m.requires.hosts.join(", ")}` : "",
+    m.requires?.model ? `a model (${m.requires.model.tier ?? m.requires.model.model}${m.requires.model.input?.includes("image") ? ", with images" : ""})` : "",
+    m.requires?.capabilities?.length ? `other tools' operations: ${m.requires.capabilities.map((c) => `${c.id} (${c.operations.join(", ")})`).join("; ")}` : "",
+    m.requires?.secrets?.length ? `credentials: ${m.requires.secrets.map((s) => s.name).join(", ")}` : "",
+  ].filter(Boolean);
+  return `You are Hewn's reader. The owner of a Hewn (a personal tool platform) is about to install a tool someone shared with them. Read its code below and tell them, in plain words, what it does with their data, before they install it.
+
+How a Hewn tool works: typed operations (name@version, read | write | destructive) over the tool's own SQLite database; a sandbox lets it reach only what its manifest declares, and only once the owner grants each: ${asks.length ? asks.join("; ") : "this one declares nothing outside itself"}. So don't repeat what the sandbox enforces. Say what the tool does within it, and where what it says (its name, purpose, descriptions, manifest) and what its code does differ.
+
+Reply with ONLY a JSON object matching this schema, no prose, no code fences:
+${JSON.stringify(SUMMARY_SCHEMA)}
+- "message": what the tool does, for the owner, in two or three short sentences. Plain words, no code.
+- "keeps": what it stores, from the migrations and the code, in one sentence.
+- "reaches": where data goes: each host and what it sends there, the model and what it sends to it, other tools and what it reads or writes there. Empty when nothing leaves.
+- "findings": up to 6 rows, warnings first.
+  "warn": what the owner should know before installing: it says one thing and does another; it asks for something it never uses (a host it never calls, a model it never calls); data leaving that the purpose doesn't mention (it sends each photo to the model, it posts notes to a host); it stores more than it needs (the whole page it fetches); a destructive operation agents could call. Title one short sentence; "detail" one more if needed; "file" and "line" where the code shows it (the line numbers below), else "" and 0.
+  "ok": what checks out, briefly ("Keeps your data inside the tool", "Calls only api.met.no, for the forecast"). "file" "" and "line" 0.
+  No warnings when there's nothing to warn about: don't invent concerns.
+${b.cut.length ? `
+Left out or shortened (too long to include): ${b.cut.join(", ")}. Say so in a finding if it matters.
+` : ""}
+Its files, capability.json (the manifest) first, each line numbered:
+${b.files.map((f) => `=== ${f.path}\n${f.text}`).join("\n\n")}
+`;
+}
+
 /** What the intake needs to know about widgets, in either mode. */
 const WIDGETS_GUIDE = `- Widgets: cards on Hewn's Home (and in agent chats), drawn by the platform from a view model a read operation returns. Templates: stat (one number with a caption), list (up to 5 rows: title, detail, value), chart (bar or line, up to 31 labels, 3 series), progress (value of max), text (up to 280 characters). Sizes: small (one number), medium (a number with context, 3 rows, a short chart), large (5 rows, a taller chart); its operation may return a view per size in one output, so large should use its room. Offer only the sizes its content fits: one size is fine (a word with its definition and buttons is large only); a size whose content gets cut off fails the build. Drawing one is read-only and offline: it shows what the capability already stores (no network, no model, no writes while drawing). It can still act: up to 3 buttons, each running one of the capability's own operations, writes included (grade a word, check off a habit), after which it redraws; and "reveal" text hidden behind "Show" (the answer on a practice card). Fresh outside data needs an operation that fetches and stores it (a host), run by a button on the widget or on a schedule the owner sets in Hewn.`;
 
@@ -234,6 +296,7 @@ function turnText(m: { role: string; content: string; attachments?: IntakeAttach
 
 /** `docs`: Hewn's docs, for excerpts when the owner's latest message is a question (kind "answer"). */
 export function intakePrompt(req: IntakeRequest, opts: { web?: boolean; docs?: DocPage[] } = {}): string {
+  if (req.mode === "summarize") return summaryPrompt(req);
   const convo = req.messages.map((m) => turnText(m)).join("\n\n");
   const asked = req.messages.filter((m) => m.role === "user").map((m) => m.content);
   const latest = asked.at(-1) ?? "";
@@ -308,7 +371,26 @@ export function parseIntake(raw: string, mode: IntakeRequest["mode"], current?: 
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error(`intake returned no JSON: ${text.slice(0, 200)}`);
   const j = JSON.parse(text.slice(start, end + 1));
+  if (mode === "summarize") return summaryOf(j);
   return { ...replyOf(j, mode, current), ...memoryOf(j) };
+}
+
+/** A summary reply: the message is required; findings are cleaned up (warnings first, at most six). */
+function summaryOf(j: any): IntakeReply {
+  const message = typeof j?.message === "string" ? j.message.trim() : "";
+  if (!message) throw new Error("intake summary is empty");
+  const findings = (Array.isArray(j.findings) ? j.findings : [])
+    .filter((f: any) => f && (f.kind === "warn" || f.kind === "ok") && typeof f.title === "string" && f.title.trim())
+    .map((f: any) => ({
+      kind: f.kind as "warn" | "ok",
+      title: String(f.title).trim(),
+      ...(typeof f.detail === "string" && f.detail.trim() ? { detail: f.detail.trim() } : {}),
+      ...(typeof f.file === "string" && f.file.trim() ? { file: f.file.trim() } : {}),
+      ...(Number.isInteger(f.line) && f.line > 0 ? { line: f.line } : {}),
+    }))
+    .sort((a: { kind: string }, b: { kind: string }) => (a.kind === b.kind ? 0 : a.kind === "warn" ? -1 : 1))
+    .slice(0, 6);
+  return { kind: "summary", message, keeps: typeof j.keeps === "string" ? j.keeps.trim() : "", reaches: typeof j.reaches === "string" ? j.reaches.trim() : "", findings };
 }
 
 /** What the reply asks to remember or drop: well-formed entries only (the platform checks again as it saves). */
@@ -455,6 +537,8 @@ export function run(command: string, args: string[], cwd: string, env: NodeJS.Pr
 interface IntakeRun {
   ws: string;
   prompt: string;
+  /** The JSON Schema the reply follows (by the request's mode). */
+  schema: object;
   images: ReturnType<typeof intakeImages>;
   onProgress?: Parameters<Intake>[1];
   signal?: Parameters<Intake>[2];
@@ -475,7 +559,8 @@ function intakeOn(model: JobModel, o: { web: boolean }, body: (x: IntakeRun) => 
     if (model.effort !== undefined && !EFFORT.test(String(model.effort))) throw new Error("intake: effort must be a level such as low or high");
     const ws = mkdtempSync(join(tmpdir(), "hewn-intake-"));
     try {
-      const text = await body({ ws, prompt: intakePrompt(req, { web: o.web, docs: await hewnDocs() }), images: intakeImages(req), onProgress, signal });
+      // Summarizing reads the code it's given: no docs, no web lookups needed (the prompt says what it needs).
+      const text = await body({ ws, prompt: intakePrompt(req, { web: o.web, docs: req.mode === "summarize" ? [] : await hewnDocs() }), schema: schemaFor(req), images: intakeImages(req), onProgress, signal });
       return parseIntake(text, req.mode, req.current);
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -549,8 +634,8 @@ export const opencodeIntake = (platformRoot: string, model: JobModel): Intake =>
 
 /** Codex: `codex exec` with the draft's schema as its output schema, in a home of its own; no web lookup. */
 export const codexIntake = (platformRoot: string, model: JobModel): Intake =>
-  intakeOn(model, { web: false }, async ({ ws, prompt, images, signal }) => {
-    writeFileSync(join(ws, "schema.json"), JSON.stringify(SCHEMA));
+  intakeOn(model, { web: false }, async ({ ws, prompt, schema, images, signal }) => {
+    writeFileSync(join(ws, "schema.json"), JSON.stringify(schema));
     // `-i` takes several files: it goes before another flag, never right before the prompt (it would take it).
     const imageArgs = imageFiles(ws, images).flatMap((p) => ["-i", p]);
     const args = [

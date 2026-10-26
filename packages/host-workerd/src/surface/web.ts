@@ -417,6 +417,19 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       await platform.dropStaged(owner, id);
       return { ok: true };
     }
+    // R2: your builder reads the code before you install it (decision 29): what it does with your data, and what it found.
+    if (id && sub === "summary" && method === "POST") {
+      if (!host.intake) throw new PlatformError("not_found", "No summary: no builder is set up (Settings › AI)");
+      const bundle = await platform.summaryInput(owner, id);
+      const started = Date.now();
+      const reply = await host.intake({ mode: "summarize", messages: [], bundle }, (p) => (p as IntakeProgress).charge !== undefined && platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge));
+      if (reply.kind !== "summary") throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
+      const summary = { message: reply.message, keeps: reply.keeps, reaches: reply.reaches, findings: reply.findings };
+      await platform.keepSummary(owner, id, summary);
+      const seconds = Math.round((Date.now() - started) / 1000);
+      host.log(`web intake summarize ${bundle.manifest.id} → ${summary.findings.filter((f) => f.kind === "warn").length} warning(s) (${seconds}s)`);
+      return { summary, seconds, by: (await host.settings.read()).intake ?? null };
+    }
   }
 
   if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");

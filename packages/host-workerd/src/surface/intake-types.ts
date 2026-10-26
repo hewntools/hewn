@@ -27,8 +27,12 @@ export interface IntakeMessage {
 }
 
 export interface IntakeRequest {
-  /** "modify" also covers widgets: the reply may propose widgets-only builds instead of a draft. */
-  mode: "create" | "modify";
+  /**
+   * "modify" also covers widgets: the reply may propose widgets-only builds instead of a draft.
+   * "summarize": read a tool someone shared (`bundle`) and say what it does with the owner's data,
+   * before it's installed (decision 29); no conversation, the reply is kind "summary".
+   */
+  mode: "create" | "modify" | "summarize";
   capabilityId?: string;
   /** Modifying with one of its widgets in mind (its name): opened from that widget's Change…. */
   widget?: string;
@@ -47,6 +51,17 @@ export interface IntakeRequest {
   earlier?: { buildId: string; version?: number; messages?: IntakeMessage[] };
   /** The owner's standing rules for building (the platform fills these in): for every tool, and for this one when modifying. */
   instructions?: { global: string[]; tool?: string[] };
+  /** Summarizing: the tool's manifest and its text files (each line numbered), cut to a size; `cut` names what was left out or shortened. */
+  bundle?: { manifest: CapabilityManifest; files: { path: string; text: string }[]; cut: string[] };
+}
+
+/** One thing the summary found: a warning the owner should know before installing, or something that checks out. */
+export interface SummaryFinding {
+  kind: "warn" | "ok";
+  title: string;
+  detail?: string;
+  file?: string;
+  line?: number;
 }
 
 /** A standing rule the intake remembers (or drops) for the owner: for every tool, or for this one. */
@@ -137,6 +152,8 @@ export type IntakeReply = (
   | { kind: "schedules"; message: string; schedules: ScheduleSuggestion[] }
   | { kind: "draft"; message: string; draft: CreateDraft }
   | { kind: "draft"; message: string; draft: { request: string; spec?: DraftSpec; connection?: ConnectionStep; schedules?: ScheduleSuggestion[] } }
+  /** Summarizing: what the tool does, what it keeps, where data goes, and what the owner should know. */
+  | { kind: "summary"; message: string; keeps: string; reaches: string; findings: SummaryFinding[] }
 ) &
   IntakeMemory;
 

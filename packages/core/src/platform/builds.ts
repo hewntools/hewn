@@ -7,6 +7,7 @@ import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
+import type { BundleSummary } from "../bundle.ts";
 import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
@@ -89,6 +90,8 @@ type CreateRequest = {
   source?: ToolSource;
   /** Replay its sample data once it's live. */
   sample?: boolean;
+  /** What the intake read in it before it was installed (Hewn's, or the owner's builder's). */
+  summary?: BundleSummary;
 } & ModelAsk;
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
@@ -618,12 +621,12 @@ export class Builds extends Domain {
    * Install a capability from a directory the host knows how to copy (`hewn install <dir>`):
    * a create build whose builder copies the files in, then the normal validation. Owner only.
    */
-  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean }): Promise<BuildView> {
+  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean; summary?: BundleSummary }): Promise<BuildView> {
     requireOwner(owner);
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
     if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
-    const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}) };
+    const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };
     return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
   }
 
