@@ -208,7 +208,7 @@ export interface CodeText {
   status: CodeFile["status"];
 }
 
-const strict = new TextDecoder("utf-8", { fatal: true });
+const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
 /** Text, or null for a file that isn't (images, fonts). */
 function asText(b: Uint8Array | undefined): string | null {
   if (!b) return "";
