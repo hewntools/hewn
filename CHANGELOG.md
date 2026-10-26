@@ -28,6 +28,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **The box:** attached files and images are 64px tiles with their name and ×, and open when clicked; **Draft now** is a link; the model menu says who builds and on what ("Claude Code · Fable · high"); a rule the intake saved is one line, "Saved as a rule: …", with Undo.
 - **Set icon** shows the icon at the three sizes it's seen at, centres the 5×5 grid with a count of lit cells, and gives Colour and Saturation the same width.
 - A change waiting for the one before it says so the same way in the change panel, the Inbox and Activity: "waiting for the change before it".
+- Docs: [Sharing tools](docs/sharing.md) is new; the web client, building tools, the threat model and the internal architecture and security notes cover sharing and the Hub.
 - For hosts: `GET /api/capabilities/:id/data` (owner only) gives a tool's rows per table, counted without reading them, and its last write in its latest 500 calls (`callsChecked` says how many there were); the runtime port gains `countState`. `POST /api/schedules/:id/run` runs a schedule once now.
 
 ## 0.4.8 (2026-10-24)

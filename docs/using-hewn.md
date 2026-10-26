@@ -30,6 +30,8 @@ A widget shows a tool's data at a glance: today's habits, tonight's aurora forec
 
 New also offers it under the box: **Or start from** a tool in Hub, or a file someone shared ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
 
+![The Hub: search, Install from a file, the Official and tag filters, and a grid of Hewn's own tools, each with a screenshot, what it needs and the Official mark](images/hub.png)
+
 ## Search and commands
 
 Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). Enter opens it. Tools on the Hub you don't have yet come last.

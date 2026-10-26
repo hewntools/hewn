@@ -190,6 +190,43 @@ try {
     return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
   });
   await shot("build-failed", { width: 1280, height: 1000, clip: { x: card.x - 20, y: card.y - 20, width: card.width + 40, height: card.height + 40 } });
+
+  // 6. The Hub: Hewn's own tools.
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto(`${web}/#/hub`);
+  await page.locator(".hub-card").first().waitFor();
+  await page.waitForTimeout(800);
+  await shot("hub", { width: 1280, height: 1000 });
+
+  // 7. Share…: Running Log with sample data, written by hand (a new version, v3).
+  const sample = JSON.stringify([1, 2, 3].map((n) => ({ operation: "record_run", input: { distanceKm: 4 + n * 1.5, durationSeconds: 1400 + n * 420, notes: n === 2 ? "Hill repeats" : undefined } })), null, 2);
+  const sb = await page.evaluate(async (text: string) => (await fetch("/api/capabilities/running-log/sample", { method: "POST", headers: { "x-hewn-ui": "1", "content-type": "application/json" }, body: JSON.stringify({ text }) })).json(), sample);
+  await settle(sb.buildId);
+  await page.goto(`${web}/#/c/running-log`);
+  await page.locator(".info-section").first().waitFor();
+  await page.getByRole("button", { name: "Share…" }).click();
+  await page.locator("dialog[open]").getByText("always included").waitFor();
+  await page.waitForTimeout(400);
+  const dialog = async () => {
+    const r = await page.locator("dialog[open]").last().boundingBox();
+    return { x: r!.x - 16, y: r!.y - 16, width: r!.width + 32, height: r!.height + 32 };
+  };
+  await shot("share", { width: 1280, height: 1000, clip: await dialog() });
+  await page.keyboard.press("Escape");
+
+  // 8. Installing from the Hub: Hewn's reading, what it will ask for, the name, sample data.
+  await page.goto(`${web}/#/hub/plant-log`);
+  await page.getByRole("button", { name: "Install" }).click();
+  await page.locator("dialog[open]").getByText("It will ask for").waitFor();
+  await page.waitForTimeout(400);
+  await shot("install", { width: 1280, height: 1000, clip: await dialog() });
+  await page.keyboard.press("Escape");
+
+  // 9. A version's files: what v3 changed (its sample data).
+  await page.goto(`${web}/#/c/running-log/v/3?tab=files`);
+  await page.locator(".code-line").first().waitFor();
+  await page.waitForTimeout(400);
+  await shot("version-files", { width: 1280, height: 760 });
 } finally {
   await browser.close();
   await sv.stop();
