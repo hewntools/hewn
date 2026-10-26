@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor } from "@hewntools/cli/supervisor/index.ts";
+import { packBundle, unpackBundle } from "@hewntools/core/bundle.ts";
 import { editJson, SEED } from "./helpers.ts";
 import { freePort, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
@@ -74,6 +75,28 @@ describe("trust on the workerd host", () => {
     assert.equal(out.source, "state");
     assert.equal(out.data.runs.length, 1);
     assert.ok(!("_hewn_migrations" in out.data));
+  });
+
+  test("sharing: install a shared file with its sample data, share it again, start over", async () => {
+    const files: Record<string, Uint8Array> = {};
+    const walk = (d: string, at = "") => {
+      for (const e of readdirSync(d)) statSync(join(d, e)).isDirectory() ? walk(join(d, e), `${at}${e}/`) : (files[`${at}${e}`] = readFileSync(join(d, e)));
+    };
+    walk(SEED);
+    files["sample/calls.json"] = Buffer.from(JSON.stringify([1, 2, 3].map((n) => ({ operation: "record_run", input: { distanceKm: n * 3, durationSeconds: n * 1000, date: `2026-10-0${n}` } }))));
+    const zip = packBundle(files, { format: 1, hewn: "test", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 1, hash: "d".repeat(64) } });
+    const done = await h.sv.admin("install", { bundle: Buffer.from(zip).toString("base64"), name: "Shared Log", wait: true });
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.equal(done.builder, "bundle");
+    assert.equal((await h.invoke("shared-log", "list_runs")).result.runs.length, 3, "sample data replayed by default from the CLI");
+    const out = await h.sv.admin("share", { capabilityId: "shared-log" });
+    assert.equal(out.check.blocked, null);
+    const again = unpackBundle(Buffer.from(out.bundle, "base64"));
+    assert.equal(again.sidecar.tool.id, "shared-log");
+    assert.ok(!JSON.parse(Buffer.from(again.files["capability.json"]).toString()).source, "a shared-on file carries no source of its own");
+    const r = (await h.sv.admin("call", { method: "startOver", args: ["shared-log", { confirm: "shared-log" }] })).result;
+    assert.match(r.backup, /^backup:start-over-\d+$/);
+    assert.equal((await h.invoke("shared-log", "list_runs")).result.runs.length, 0);
   });
 
   test("data summary: rows counted in the capability's Durable Object", async () => {

@@ -604,7 +604,7 @@ export class HewnDO extends DurableObject<Env> {
 const ADMIN_CALLS: Record<string, { owner: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
   setSecret: { owner: true }, deleteSecret: { owner: true }, setConfig: { owner: true }, connect: { owner: true }, accounts: { owner: true }, approveGrants: { owner: true }, approveGrant: { owner: true }, revokeGrant: { owner: true }, declineGrant: { owner: true },
-  archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true },
+  archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true }, startOver: { owner: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
   buildReport: { owner: true },

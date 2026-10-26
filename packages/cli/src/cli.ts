@@ -54,7 +54,11 @@ Use it (as the owner; talks to the running Hewn)
   feedback [--days N] [--json]
                       how recent builds worked out: your answers to "Got what you asked for?", attempts,
                       what they ran on, and the signs in the record (a fix, a change soon after, a restore, a delete)
-  install <dir>       install a tool from a source dir
+  install <dir | file.hewn.zip> [--name <name>] [--no-sample]
+                      install a tool from a source dir, or from a file someone shared (with its sample data)
+  share <id> [--version N] [--out file.hewn.zip]
+                      a tool as a file to give someone: what's in it (personal data, keys) first;
+                      refused if it holds one of your own stored values or has no sample data
   connect <id>        give a tool what it needs: config, secrets (hidden prompt or --from <path>) + approval;
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
   accounts            connections to external services: health and what uses them
@@ -76,6 +80,9 @@ Use it (as the owner; talks to the running Hewn)
   restore <id>        bring back a deleted tool, with its data
   rollback <id> [version]
   export <id> [--out file.json]
+  data reset <id> [--sample]
+                      Start over: empty a tool's data and keep the tool (a backup is kept; asks you to
+                      type the id); --sample replays its sample data after
   purge <id>          permanently delete a deleted tool (asks you to type the id)
   backup now|list|restore <date|file>|dir <path>
                       zipped snapshots (never secrets in plain text, never agent tokens)
@@ -350,10 +357,13 @@ async function main() {
 
     case "install": {
       const dir = resolve(positional()[0] ?? "");
-      const manifest = JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
       const info = supervisorInfo(home);
       if (!info) throw new Error("Hewn isn't running: start it with hewn serve (or hewn service install)");
-      const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify({ name: manifest.name, purpose: manifest.purpose, dir, wait: true }) });
+      // A shared tool's file (a zip): installed under its name (or --name), with its sample data unless --no-sample.
+      const zip = statSync(dir, { throwIfNoEntry: false })?.isFile();
+      const manifest = zip ? null : JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
+      const body = zip ? { bundle: readFileSync(dir).toString("base64"), ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
+      const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
@@ -437,6 +447,46 @@ async function main() {
         else console.log(data);
       });
       return;
+
+    case "share": {
+      const id = positional()[0] ?? "";
+      const info = supervisorInfo(home);
+      if (!info) throw new Error("Hewn isn't running: start it with hewn serve (or hewn service install)");
+      const version = option("version");
+      const res = await fetch(`${info.url}/_admin/share`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify({ capabilityId: id, ...(version ? { version: Number(version.replace(/^v/, "")) } : {}) }) });
+      const out = (await res.json()) as any;
+      if (!res.ok) throw new Error(out.message ?? out.error);
+      const { check } = out;
+      console.log(`${check.name} v${check.version}: ${check.files} files${check.sample ? `, sample data (${check.sample.calls} calls)` : ""}`);
+      for (const f of check.findings) console.log(`  ${f.kind === "secret" ? "✖" : "!"} ${f.file}:${f.line}  ${f.label}: ${f.masked}`);
+      if (!check.findings.length) console.log("  nothing personal or key-shaped found");
+      console.log("  never in it: your data, keys, settings, conversations, logs");
+      if (check.blocked?.kind === "secret") {
+        process.exitCode = 1;
+        return void console.error(`✖ ${check.blocked.file}:${check.blocked.line} is one of your own stored values (a key or a setting). Remove it, then share again.`);
+      }
+      if (check.blocked?.kind === "no-sample") {
+        process.exitCode = 1;
+        return void console.error(`✖ ${id} has no sample data (sample/calls.json), and a tool needs it to be shared. Open Share… on it in Hewn: Ask builder adds some, or write it yourself.`);
+      }
+      const file = resolve(option("out") ?? out.name);
+      writeFileSync(file, Buffer.from(out.bundle, "base64"));
+      console.log(`✔ wrote ${file}`);
+      return;
+    }
+
+    case "data": {
+      const [sub, id] = positional();
+      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample]");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const typed = (await rl.question(`Start ${id} over: its data is emptied (a backup is kept), the tool stays.\nType ${id} to confirm: `)).trim();
+      rl.close();
+      await owner(async (c) => {
+        const r = await c.call("startOver", id, { confirm: typed, sample: args.includes("--sample") });
+        console.log(`✔ ${id} started over${r.backup ? ` (backup kept: ${r.backup})` : ""}${r.sample ? (r.sample.failed ? `; sample data stopped at call ${r.sample.failed.index + 1} (${r.sample.failed.operation}): ${r.sample.failed.error}` : `; sample data: ${r.sample.calls} calls`) : ""}`);
+      });
+      return;
+    }
 
     case "purge": {
       const id = positional()[0] ?? "";
