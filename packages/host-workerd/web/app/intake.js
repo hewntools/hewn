@@ -53,6 +53,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     all = m;
     put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode: b.kind === "create" ? "create" : "modify", cap, all, version: b.resultVersion }));
     earlierEl.hidden = false;
+    // A long conversation comes back above: the box is where you go on, so that's where it lands.
+    requestAnimationFrame(() => (composer.scrollIntoView({ block: "end" }), input.focus()));
   };
   if (from) continueFrom(from).catch(fail);
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.

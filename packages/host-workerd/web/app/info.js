@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
-import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
+import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
 import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
@@ -9,7 +9,7 @@ import { plural } from "./intake.js";
 import { modelPicker, titleCase } from "./models.js";
 import { route } from "./router.js";
 import { addScheduleSheet, scheduleRow } from "./schedules.js";
-import { capabilityMenu, changeHref, download, inlineRename, openCapability, openChange } from "./tool-actions.js";
+import { changeHref, download, inlineRename, openCapability, openChange, toolActions } from "./tool-actions.js";
 import { modelSpend, quickModelChange, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
 import { madeBy, versionRow } from "./versions.js";
@@ -111,7 +111,6 @@ async function infoPage(id) {
   const giveWhatItNeeds = () => grantsSheet(id).then(refresh);
 
   const name = h("span", {}, cap.name);
-  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
 
   // W2: whatever needs the owner, above the composer, each with its one action. It stays in its section too.
   const notices = [];
@@ -363,7 +362,7 @@ async function infoPage(id) {
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
-    backBar("Home", "#/", h("div", { class: "glass-bar" }, more)),
+    backBar("Home", "#/", toolActions(c, { rename: () => inlineRename(c, name) })),
     sandboxNotice(),
     h(
       "main",
@@ -395,7 +394,6 @@ async function infoPage(id) {
 async function connectionPage(c, cap, all) {
   const id = c.id;
   const name = h("span", {}, cap.name);
-  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
   const ops = runnableOps(cap);
   const signIn = cap.operations.some((o) => o.name === "connect");
   const healthLine = h("div", { class: "muted row tight" }, skeleton("40%"));
@@ -416,7 +414,7 @@ async function connectionPage(c, cap, all) {
   });
   const needsSetup = !cap.status.ready && (cap.status.pendingGrants.length || cap.status.missingConfig.length);
   view(
-    backBar("Accounts", "#/accounts", h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), more)),
+    backBar("Accounts", "#/accounts", toolActions(c, { rename: () => inlineRename(c, name) })),
     sandboxNotice(),
     h(
       "main",

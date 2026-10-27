@@ -123,7 +123,13 @@ async function grantsSheet(capId) {
   return modal(
     (close) => {
       const authorize = h("button", { class: "primary", disabled: true }, "Authorize");
-      check = () => (authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || [...config.values()].some((input) => !input.value.trim()));
+      check = () => {
+        authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || [...config.values()].some((input) => !input.value.trim());
+        // Every switch off and nothing else to give: the button says what it does.
+        const saysNo = picks.size > 0 && ![...picks.values()].some((sw) => sw.checked) && !pending.some((i) => !picks.has(i.grant)) && !config.size;
+        authorize.textContent = saysNo ? "Deny" : "Authorize";
+        authorize.classList.toggle("primary", !saysNo);
+      };
       authorize.addEventListener("click", async () => {
         authorize.disabled = true;
         try {
@@ -179,6 +185,7 @@ async function grantsSheet(capId) {
         let sw = null;
         if (!secretName && !i.approved) {
           sw = h("input", { type: "checkbox", class: "switch", checked: !declined.has(i.grant), "aria-label": "Allow" });
+          sw.addEventListener("change", () => check());
           picks.set(i.grant, sw);
         }
         return {

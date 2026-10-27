@@ -2,11 +2,11 @@
 // A tool's versions (U3) and one version (U4): what led to it, kept for the tool's life (the
 // conversation with the intake, the spec the builder worked from, the builder's log), Continue
 // from here and Restore. Both are pages under the main top bar, as Settings is.
-import { actorLabel, ago, api, appIcon, builderLabel, caps, confirmDialog, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
+import { actorLabel, ago, api, builderLabel, capRef, caps, confirmDialog, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { buildModelWords } from "./build.js";
-import { go, hues, page, put, sandboxNotice, topBar, view } from "./frame.js";
+import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
-import { changeHref, rollbackTo } from "./tool-actions.js";
+import { changeHref, rollbackTo, toolActions } from "./tool-actions.js";
 
 export { madeBy, versionRow, versionPage, versionsPage };
 
@@ -39,21 +39,23 @@ async function load(id) {
   return { cap, all, c, active: c.version ?? cap.versions[0]?.version };
 }
 
-/** Back to the tool's Info, above a page's title (the main top bar has no back button). */
-const backTo = (cap, id) => h("a", { class: "btn link self-start back-link", href: `#/c/${enc(id)}` }, `‹ ${cap.name}`);
+/** Info's top bar, the same on a tool's version pages. */
+const toolBar = (c) => backBar("Home", "#/", toolActions(c));
+/** Back to the tool's Info: the tool itself, at the top left of the page. */
+const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), href: `#/c/${enc(id)}` }, "‹", capRef(c, id));
 
 /** U3 Every version of a tool, newest first. */
 async function versionsPage(id) {
-  page("", 760, skeleton("40%", "90%", "90%"));
+  view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("40%", "90%", "90%")));
   const { cap, all, c, active } = await load(id);
-  page(
-    "",
-    760,
+  view(
+    toolBar(c),
+    sandboxNotice(),
     h(
-      "div",
-      { class: "info stack-md" },
-      backTo(cap, id),
-      h("div", { class: "info-head" }, appIcon(c, { size: 48 }), h("h1", { class: "title-lg grow" }, `Versions · ${cap.name}`)),
+      "main",
+      { class: "column info", style: { "--w": "760px" } },
+      backRef(c, id, "self-start"),
+      h("h1", { class: "title-lg" }, "Versions"),
       h("div", { class: "card info-section" }, h("ul", { class: "list" }, cap.versions.map((v) => versionRow(c, v, active, all)))),
     ),
   );
@@ -67,12 +69,13 @@ const PARTS = [
 ];
 
 /**
- * U4 One version: the main top bar, the left menu of its parts (Conversation · Spec · Log), each
- * in a panel, and its actions (Continue from here, Restore) with its title.
+ * U4 One version: Info's top bar with the tool as its back button, the left menu of its parts
+ * (Conversation · Spec · Log), each in a panel, and its actions (Continue from here, Restore) with
+ * its title, which leads with the version.
  */
 async function versionPage(id, n, q) {
-  const frame = (side, ...content) => view(topBar(""), sandboxNotice(), h("main", { class: "settings-layout version-layout" }, side, h("div", { class: "settings-main" }, content)));
-  frame(h("nav", { class: "side-list" }), skeleton("40%", "30%", "90%", "70%"));
+  const frame = (top, side, ...content) => view(top, sandboxNotice(), h("main", { class: "settings-layout version-layout" }, side, h("div", { class: "settings-main" }, content)));
+  frame(backBar("Home", "#/"), h("nav", { class: "side-list" }), skeleton("40%", "30%", "90%", "70%"));
   const { cap, all, c, active } = await load(id);
   const v = cap.versions.find((x) => x.version === n);
   if (!v) throw new Error(`${cap.name} has no version ${n}`);
@@ -95,7 +98,8 @@ async function versionPage(id, n, q) {
   };
   let part = parts[q?.get("tab")] ? q.get("tab") : "conversation";
   const menu = h("nav", { class: "side-list", "aria-label": `v${v.version}` });
-  const drawMenu = () => put(menu, h("div", { class: "eyebrow" }, `v${v.version}`), PARTS.filter(([k]) => parts[k]).map(([k, label]) => h("button", { "aria-pressed": String(k === part), onclick: () => show(k) }, label)));
+  // The tool on top, as the way back to its Info; then the version's parts.
+  const drawMenu = () => put(menu, backRef(c, id, "side-back"), PARTS.filter(([k]) => parts[k]).map(([k, label]) => h("button", { "aria-pressed": String(k === part), onclick: () => show(k) }, label)));
   // Switching parts keeps the page (and the URL, for a reload) without a new route.
   const show = async (k) => {
     part = k;
@@ -126,17 +130,16 @@ async function versionPage(id, n, q) {
   const resume = v.conversation && h("button", { onclick: () => go(changeHref(c, { from: v.buildId })) }, "Continue from here");
   const made = [capital(madeBy(v, all)), build && buildModelWords(build), ago(v.createdAt)].filter(Boolean).join(" · ");
   frame(
+    toolBar(c),
     menu,
-    backTo(cap, id),
     h(
       "div",
       { class: "info-head version-head" },
-      appIcon(c, { size: 48 }),
+      h("span", { class: "version-tile", "aria-label": `Version ${v.version}` }, `v${v.version}`),
       h(
         "div",
         { class: "grow col" },
-        h("div", { class: "row tight" }, h("h1", { class: "title-lg flush" }, `v${v.version}`), v.version === active && h("span", { class: "pill ok with-dot" }, "live")),
-        changed(v) && h("p", { class: "version-what" }, changed(v)),
+        h("div", { class: "row tight wrap" }, h("h1", { class: "title-lg flush version-what" }, changed(v) || `${cap.name}, version ${v.version}`), v.version === active && h("span", { class: "pill ok with-dot" }, "live")),
         h("span", { class: "muted small" }, made),
       ),
       (resume || restore) && h("div", { class: "row tight version-actions" }, resume, restore),

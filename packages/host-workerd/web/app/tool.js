@@ -29,6 +29,28 @@ function appBar(c, { onChange } = {}) {
   return { el, change };
 }
 
+const DRAWER_WIDTH = "hewn.drawer.width";
+const drawerWidth = (w) => Math.round(Math.max(320, Math.min(w, window.innerWidth * 0.7, 960)));
+/** Drag `grip` (or press ← →) to set `el`'s width; it's kept for next time. */
+function resizable(el, grip) {
+  const saved = Number(localStorage.getItem(DRAWER_WIDTH));
+  if (saved) el.style.width = `${drawerWidth(saved)}px`;
+  const set = (w) => {
+    el.style.width = `${drawerWidth(w)}px`;
+    localStorage.setItem(DRAWER_WIDTH, String(drawerWidth(w)));
+  };
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const move = (m) => set(window.innerWidth - m.clientX);
+    const up = () => (grip.removeEventListener("pointermove", move), grip.removeEventListener("pointerup", up), document.body.classList.remove("resizing"));
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+  });
+  grip.addEventListener("keydown", (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && (e.preventDefault(), set(el.offsetWidth + (e.key === "ArrowLeft" ? 40 : -40))));
+}
+
 /**
  * The change drawer beside an opened tool (P1): the intake as a component, then the build (P3),
  * then "vN is ready" with Reload and Undo (P4). The tool stays live on the left. Closing it while
@@ -37,7 +59,10 @@ function appBar(c, { onChange } = {}) {
 function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
   const body = h("div", { class: "drawer-body" });
   const close = h("button", { class: "ghost sm icon-only", "aria-label": "Close", onclick: () => onClose() }, "×");
-  const el = h("aside", { class: "drawer", "aria-label": `Change ${c.name}` }, h("div", { class: "drawer-head" }, h("span", { class: "row tight" }, h("span", { class: "eyebrow" }, "Change"), capRef(c)), close), body);
+  // Its left edge drags to make it wider or narrower; the width is kept (in this browser).
+  const grip = h("div", { class: "drawer-grip", role: "separator", "aria-orientation": "vertical", "aria-label": "Drawer width", tabindex: 0 });
+  const el = h("aside", { class: "drawer", "aria-label": `Change ${c.name}` }, grip, h("div", { class: "drawer-head" }, h("span", { class: "row tight" }, h("span", { class: "eyebrow" }, "Change"), capRef(c)), close), body);
+  resizable(el, grip);
   let intake = null;
   const showBuild = (buildId) => {
     intake = null;
