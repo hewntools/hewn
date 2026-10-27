@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The build-quality bench: build the same frozen requests under different setups (arms), show each tool
 // with the same data, and compare. See bench/README.md.
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -53,7 +53,13 @@ const runDir = (name?: string) => {
 
 try {
   if (o.help || !command) console.log(USAGE);
-  else if (command === "one") await runOne(resolve(arg));
+  else if (command === "one") {
+    // A STOP file in the run: results not started yet don't start (the run can be resumed later).
+    const dir = resolve(arg);
+    if (existsSync(join(dir, "..", "..", "..", "..", "STOP"))) {
+      writeFileSync(join(dir, "result.json"), JSON.stringify({ status: "failed", error: "stopped: the run has a STOP file", builds: [], startedAt: new Date().toISOString() }, null, 2));
+    } else await runOne(dir);
+  }
   else if (command === "run") {
     const dir = await runBench({
       out: o.out!,
