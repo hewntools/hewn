@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Home: the first run, the grid of tools and widgets, and Edit Home; and who builds tools.
-import { api, appIcon, caps, enc, fail, h, invalidateCaps, menuFrom, openMenu, setWallpaper, skeleton, tintOf, withContextMenu } from "../kit.js";
+import { api, appIcon, caps, enc, fail, glyphCells, h, invalidateCaps, menuFrom, openMenu, setWallpaper, skeleton, tintOf, withContextMenu } from "../kit.js";
 import { agentTile, agentTileOf, buildJobs, jobPicker } from "./agents.js";
 import { connectDialog } from "./connect.js";
 import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, topBar, view } from "./frame.js";
 import { inboxBtn } from "./inbox.js";
 import { modelChip } from "./intake.js";
 import { capabilityMenu, inlineRename, openCapability } from "./tool-actions.js";
-import { addWidgetSheet, SIZE_LETTER, widgetOptionsSheet, widgetTile } from "./widgets.js";
+import { addWidgetSheet, SIZE_LETTER, widgetOptionsSheet, widgetRenderer, widgetTile } from "./widgets.js";
 
 export { buildingLabel, buildsChosen, home, jobModelOf, modelWords, saveBuildModel, storedEntry };
 
@@ -41,7 +41,8 @@ const modelWords = (m = {}, catalog) => {
 async function home({ editing = false } = {}) {
   // Redrawn in place (a layout save, a build starting or ending): stop the last drawing's timers first.
   for (const fn of leaving.splice(0)) fn();
-  view(topBar("home"), h("main", { class: "home" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
+  // A loading draw (held back while the page before stays on screen, see view()).
+  view(topBar("home"), h("main", { class: "home", "aria-busy": "true" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
   // Connections live under Accounts, not on Home.
   const onHome = (cs) => [...cs.values()].filter((c) => c.kind !== "connection");
   const [all0, homeData] = await Promise.all([caps(true), api("/home").catch(() => ({ layout: [], gallery: [] }))]);
@@ -49,6 +50,9 @@ async function home({ editing = false } = {}) {
   setWallpaper(list.map(tintOf), { dim: !list.length });
   // The first run's moment screen, until a tool exists (even after leaving it once).
   if (!list.some((c) => c.version || c.building)) return firstRun();
+  // Home arrives in one step: the icons' glyphs and the widget renderer first (a moment at most),
+  // instead of empty tiles, then glyphs, then widgets.
+  await Promise.race([Promise.all([...list.filter((c) => c.iconKind === "glyph").map(glyphCells), widgetRenderer()]), new Promise((r) => setTimeout(r, 400))]).catch(() => {});
 
   // One grid: the owner's layout of icons and widgets, then whatever it doesn't place yet (new
   // tools land last, next to "New"). Tools hidden from Home keep their place, hidden, for search.
