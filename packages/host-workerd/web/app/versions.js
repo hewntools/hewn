@@ -115,6 +115,8 @@ async function versionPage(id, n, q) {
     panel.setAttribute("aria-busy", "true");
     try {
       const el = await parts[k]();
+      // A part that loads more itself (the code browser) is swapped in once it's ready (or after a moment).
+      if (el?.ready) await Promise.race([el.ready, new Promise((r) => setTimeout(r, 800))]);
       if (part === k) put(panel, el);
     } catch (e) {
       if (part === k) put(panel, h("div", { class: "muted" }, e.message || String(e)));

@@ -112,6 +112,9 @@ function codeBrowser(src, { mode: wanted } = {}) {
     const list = shown();
     open(list.some((f) => f.path === current) ? current : list[0]?.path ?? data.files[0]?.path);
   };
+  // Ready once the first file is on screen: a page or sheet can wait for it rather than show the skeleton.
+  let markReady;
+  el.ready = new Promise((r) => (markReady = r));
   (async () => {
     try {
       data = await src.list();
@@ -120,12 +123,12 @@ function codeBrowser(src, { mode: wanted } = {}) {
       mode ??= "changes";
       if (data.base && changed) put(toggle, segmented([["changes", "Changes"], ["source", "Source"]], mode, setMode, { label: "Show" }));
       const first = shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
-      if (first) open(first.path);
+      if (first) await open(first.path);
       else put(side, h("div", { class: "eyebrow" }, "No files"));
     } catch (e) {
       put(side, h("div", { class: "small faint" }, e.message || String(e)));
       put(body);
     }
-  })();
+  })().finally(() => markReady());
   return el;
 }
