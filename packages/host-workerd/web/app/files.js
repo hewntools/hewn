@@ -37,10 +37,21 @@ function changesView(file, path) {
 }
 
 /** Source: the file with one gutter. */
-function sourceView(file, path) {
-  if (file.text === "") return h("div", { class: "code-empty" }, "An empty file.");
+function sourceView(file, path, text = file.text) {
+  if (text === "") return h("div", { class: "code-empty" }, "An empty file.");
   const hl = highlighter(path);
-  return file.text.replace(/\n$/, "").split("\n").map((t, i) => codeLine("", null, i + 1, null, hl.line(t)));
+  return text.replace(/\n$/, "").split("\n").map((t, i) => codeLine("", null, i + 1, null, hl.line(t)));
+}
+
+/** A JSON file laid out (two-space indents), when that isn't how it was written; else null. */
+function prettyJson(path, text) {
+  if (!/\.json$/i.test(path)) return null;
+  try {
+    const pretty = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
+    return pretty.trimEnd() === text.trimEnd() ? null : pretty;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -51,8 +62,11 @@ function codeBrowser(src, { mode: wanted } = {}) {
   const side = h("nav", { class: "side-list code-files", "aria-label": "Files" }, skeleton("80%", "60%", "70%"));
   const path = h("span", { class: "mono small grow clip-1" });
   const toggle = h("span", {});
+  // JSON written compactly reads laid out; As written shows the file's own lines.
+  const jsonToggle = h("span", {});
+  let pretty = true;
   const body = h("div", { class: "code-body" }, skeleton("60%", "80%", "40%"));
-  const el = h("div", { class: "code-browser" }, side, h("div", { class: "card code-pane" }, h("div", { class: "code-head" }, path, toggle), body));
+  const el = h("div", { class: "code-browser" }, side, h("div", { class: "card code-pane" }, h("div", { class: "code-head" }, path, jsonToggle, toggle), body));
   let data = null;
   let mode = wanted;
   let current = null;
@@ -84,7 +98,9 @@ function codeBrowser(src, { mode: wanted } = {}) {
       if (current !== p) return;
       const meta = data.files.find((x) => x.path === p);
       body.classList.toggle("source", mode === "source");
-      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p));
+      const laidOut = mode === "source" && !f.binary ? prettyJson(p, f.text) : null;
+      put(jsonToggle, laidOut && segmented([["pretty", "Pretty"], ["raw", "As written"]], pretty ? "pretty" : "raw", (k) => ((pretty = k === "pretty"), open(p)), { label: "JSON" }));
+      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text));
       body.scrollTop = 0;
     } catch (e) {
       put(body, h("div", { class: "code-empty" }, e.message || String(e)));
