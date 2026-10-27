@@ -33,9 +33,11 @@ let routing = 0;
 let shown = null;
 /**
  * How long a page that's loading keeps the one before it on screen: most pages are ready sooner,
- * so they replace it in one step; a slower one shows its loading state after this.
+ * so they replace it in one step; a slower one shows its loading state after this. While it waits,
+ * a thin bar moves along the top, so the click is seen to have done something.
  */
-const HOLD_MS = 250;
+const HOLD_MS = 600;
+const BAR_MS = 120;
 async function route() {
   for (const fn of leaving.splice(0)) fn();
   for (const d of document.querySelectorAll("dialog[open]")) d.close();
@@ -48,6 +50,7 @@ async function route() {
   // Any page (a new one, or this one again) keeps the one on screen until it's ready: no skeleton
   // flashed in between. A refresh waits for its content however long it takes.
   holdFirstDraw(true);
+  const bar = setTimeout(() => n === routing && document.body.classList.add("routing"), BAR_MS);
   if (!refresh) setTimeout(() => n === routing && releaseHeld(), HOLD_MS);
   try {
     if (p === "") return await home();
@@ -67,7 +70,8 @@ async function route() {
   } catch (e) {
     if (n === routing) page("", 680, errorBox(e), h("a", { class: "btn self-start", href: "#/" }, "‹ Home"));
   } finally {
-    if (n === routing) (releaseHeld(), (shown = location.hash));
+    clearTimeout(bar);
+    if (n === routing) (releaseHeld(), document.body.classList.remove("routing"), (shown = location.hash));
   }
 }
 
