@@ -7,6 +7,7 @@ import { buildModelWords } from "./build.js";
 import { codeBrowser, versionSource } from "./files.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
+import { shareButton } from "./share.js";
 import { changeHref, rollbackTo, toolActions } from "./tool-actions.js";
 
 export { madeBy, versionRow, versionPage, versionsPage };
@@ -41,7 +42,7 @@ async function load(id) {
 }
 
 /** Info's top bar, the same on a tool's version pages. */
-const toolBar = (c) => backBar("Home", "#/", toolActions(c));
+const toolBar = (c) => backBar("Home", "#/", toolActions(c, { extra: shareButton(c) }));
 /** Back to the tool's Info: the tool itself, at the top left of the page. */
 const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), href: `#/c/${enc(id)}` }, "‹", capRef(c, id, { size: 28 }));
 

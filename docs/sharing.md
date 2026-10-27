@@ -10,7 +10,7 @@ A shared tool is one file, `<tool>.hewn.zip`, with one version's files as they a
 
 ## Sharing a tool
 
-**Share…** on a tool (in Info's top bar, or the tool's menu) shows what the file would hold before you download it:
+**Share…** on a tool (in the top bar of Info and of the open tool, or the tool's menu) shows what the file would hold before you download it:
 
 - **What's in it:** anything in the files that looks personal (an email address, a phone number, coordinates) or like a key (`sk-…`, a GitHub or AWS token, a long random string), each with the file and line, partly hidden; **Show** reveals it. These are warnings: test data often trips them, so read them and decide.
 - **Sample data:** how many calls it holds. Sharing needs it (below).
