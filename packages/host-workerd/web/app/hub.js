@@ -110,15 +110,19 @@ const enlarge = (src, alt) =>
   modal((close) => [h("img", { class: "lightbox-img", src, alt, onclick: () => close() }), sheetActions(h("button", { onclick: () => close() }, "Close"))], { width: 1200, cls: "lightbox" });
 
 /** Q5 a Hub tool's source: the code browser, read-only, in the same sheet the install sheet opens. */
-const hubSourceSheet = (t) =>
-  modal(
+async function hubSourceSheet(t) {
+  // It opens with its first file in (a moment at most), not a skeleton that then grows.
+  const browser = codeBrowser({ label: `v${t.version}`, list: () => api(`/hub/${enc(t.id)}/code`), file: (path) => api(`/hub/${enc(t.id)}/code?path=${enc(path)}`) });
+  await Promise.race([browser.ready, new Promise((r) => setTimeout(r, 800))]);
+  return modal(
     (close) => [
       h("div", { class: "row sheet-head" }, cardTile(t, 44), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Source code · v${t.version}`), h("div", { class: "small faint" }, `${t.name} · Official · read-only`))),
-      codeBrowser({ label: `v${t.version}`, list: () => api(`/hub/${enc(t.id)}/code`), file: (path) => api(`/hub/${enc(t.id)}/code?path=${enc(path)}`) }),
+      browser,
       sheetActions(h("button", { onclick: () => close() }, "Done")),
     ],
     { width: 1100, cls: "wide-sheet" },
   );
+}
 
 /** Q3 a tool's Hub page. */
 async function hubToolPage(id) {
