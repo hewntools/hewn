@@ -445,7 +445,8 @@ input[type=checkbox].switch.danger:not(:checked) { background: var(--danger); }
 .code-line.del { background: oklch(from var(--danger) l c h / 0.18); }
 .code-line.hunk { display: block; padding: 0 12px; background: oklch(from var(--info) l c h / 0.16); color: oklch(from var(--info) 0.8 c h); }
 .code-line .mark { color: oklch(from var(--log-text) l c h / 0.6); }
-.code-body[aria-busy="true"] { opacity: .55; transition: opacity .12s var(--ease); }
+/* The next file is loading: the lines fade only if it takes a moment; the dark ground never changes (fading it showed the card behind, a grey flash). */
+.code-body[aria-busy="true"] > * { opacity: .55; transition: opacity .12s var(--ease) .2s; }
 /* Syntax colours, for the code browser's dark ground (the same in both themes) */
 .code-body { color: oklch(0.88 0.01 260); }
 .tk-com { color: oklch(0.62 0.02 260); font-style: italic; }
