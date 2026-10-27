@@ -42,7 +42,7 @@ async function load(id) {
 /** Info's top bar, the same on a tool's version pages. */
 const toolBar = (c) => backBar("Home", "#/", toolActions(c));
 /** Back to the tool's Info: the tool itself, at the top left of the page. */
-const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), href: `#/c/${enc(id)}` }, "‹", capRef(c, id));
+const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), href: `#/c/${enc(id)}` }, "‹", capRef(c, id, { size: 28 }));
 
 /** U3 Every version of a tool, newest first. */
 async function versionsPage(id) {
@@ -129,6 +129,12 @@ async function versionPage(id, n, q) {
     );
   const resume = v.conversation && h("button", { onclick: () => go(changeHref(c, { from: v.buildId })) }, "Continue from here");
   const made = [capital(madeBy(v, all)), build && buildModelWords(build), ago(v.createdAt)].filter(Boolean).join(" · ");
+  // What it was asked to do: three lines, the rest a click away (a builder's request can run long).
+  const text = changed(v) || `${cap.name}, version ${v.version}`;
+  const long = text.length > 220;
+  const what = h("h1", { class: `version-what${long ? " clamped" : ""}` }, text);
+  if (long) what.addEventListener("click", () => what.classList.toggle("clamped"));
+  if (long) what.title = "Click to show all of it, or less";
   frame(
     toolBar(c),
     menu,
@@ -139,8 +145,8 @@ async function versionPage(id, n, q) {
       h(
         "div",
         { class: "grow col" },
-        h("div", { class: "row tight wrap" }, h("h1", { class: "title-lg flush version-what" }, changed(v) || `${cap.name}, version ${v.version}`), v.version === active && h("span", { class: "pill ok with-dot" }, "live")),
-        h("span", { class: "muted small" }, made),
+        what,
+        h("div", { class: "row tight wrap" }, v.version === active && h("span", { class: "pill ok with-dot" }, "live"), h("span", { class: "muted small" }, made)),
       ),
       (resume || restore) && h("div", { class: "row tight version-actions" }, resume, restore),
     ),

@@ -8,9 +8,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Deny means no.** Saying no to something a tool asks for is kept (it was only hidden in that browser): nothing asks for it again, on Home, in the Inbox or through an agent's access request, until the tool's next version, and agents are told you said no. The tool still can't run without it, so Info offers **Ask builder to work without it**, or **Authorize** after all. Leaving a switch off in the authorize sheet says no too. From the terminal: `hewn grants deny <id> <grant>`.
 - **Versions are pages.** **All versions** lists them; a version's page has Info's top bar, the tool (back to its Info) above a menu of its conversation, spec and builder's log (as Settings has), each in a panel, and **Continue from here** and **Restore…** (it asks first) by its title. **Versions** in a tool's menu opens the list (it was a dialog).
 - **Info's top bar has Change…** next to •••, as a connection's page does.
-- **The change drawer's width drags** from its left edge, and stays as you left it. **Continue** on the last conversation lands at the box, however long the conversation.
+- **The change drawer's width drags** by the handle on its left edge (no narrower than its box needs), and stays as you left it. **Continue** on the last conversation lands at the box, however long the conversation.
 - **The authorize sheet's button says Deny** when every switch is off.
 - **Try again on a schedule's failed run** runs it once now, as the schedule does, to see whether it was a passing problem or a fix worked. A success clears its failures.
+- **Pages change in one step:** the page on screen stays until the next one is ready (a quarter of a second at most, then its loading state), instead of a skeleton flashing in between and the page building downwards.
 - **Changing a tool's model tier waits until the new version is live,** so Info shows the new tier (it showed the old one until a reload).
 - **Delete asks you to type the tool's id,** as Start over does.
 - **Got what you asked for?** is a quiet strip at the foot of the tool instead of a toast.

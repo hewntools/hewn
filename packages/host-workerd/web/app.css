@@ -181,15 +181,17 @@ body.app-mode #app { height: 100vh; }
 .version-layout { width: min(960px, calc(100% - var(--s5))); padding-top: var(--s4); }
 .version-layout.wide { width: min(1280px, calc(100% - var(--s5))); }
 .version-head { align-items: flex-start; }
-.version-what { overflow-wrap: anywhere; text-wrap: pretty; }
+.version-what { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; text-wrap: pretty; }
+.version-what.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .version-tile { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); font: 650 18px var(--mono); letter-spacing: -0.02em; }
 .back-ref { display: inline-flex; align-items: center; gap: 6px; }
 .back-ref .cap-ref { font-weight: 600; }
-.side-list > .side-back { min-height: 40px; padding: 0 var(--s3); margin-bottom: 6px; color: var(--text); text-decoration: none; font-size: var(--fs-sm); }
+.side-list > .side-back { min-height: 48px; padding: 0 var(--s3); margin-bottom: 8px; color: var(--text); text-decoration: none; font-size: var(--fs); font-weight: 600; }
 .side-list > .side-back:hover { color: var(--accent-ink); }
 .version-actions { flex: none; }
 .card.version-panel { margin: 0; padding: 20px; }
-.version-panel[aria-busy] { opacity: .6; transition: opacity .15s var(--ease); }
+/* Loading the next part: its text fades only if it takes a while; the panel's ground never changes (that flashed). */
+.version-panel[aria-busy] > * { opacity: .6; transition: opacity .15s var(--ease) .2s; }
 .version-panel .thread.kept { max-height: none; overflow: visible; margin-top: 0; }
 .version-log { max-height: none; }
 .list-card { padding: var(--s2) 18px; }

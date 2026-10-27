@@ -533,10 +533,13 @@ input[type=range].hue-range { width: 100%; accent-color: var(--accent); }
 /* ---------- Change drawer: Change… keeps the tool visible ---------- */
 .with-drawer { display: flex; min-height: 0; flex: 1; }
 .with-drawer > .drawer-main { flex: 1; min-width: 0; }
-.drawer { width: 400px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface-overlay); -webkit-backdrop-filter: var(--blur-strong); backdrop-filter: var(--blur-strong); }
+.drawer { width: 420px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--surface-overlay); -webkit-backdrop-filter: var(--blur-strong); backdrop-filter: var(--blur-strong); }
 .drawer { position: relative; }
-.drawer-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; touch-action: none; }
-.drawer-grip:hover, .drawer-grip:focus-visible { background: oklch(from var(--accent) l c h / 0.35); outline: none; }
+.drawer-grip { position: absolute; left: -6px; top: 0; bottom: 0; width: 12px; cursor: col-resize; z-index: 2; touch-action: none; }
+/* A handle on the edge, always there, so it's clear the edge drags. */
+.drawer-grip::after { content: ""; position: absolute; left: 4px; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 2px; background: var(--border-strong); transition: background var(--dur) var(--ease), height var(--dur) var(--ease); }
+.drawer-grip:hover::after, .drawer-grip:focus-visible::after, body.resizing .drawer-grip::after { background: var(--accent); height: 64px; margin-top: -32px; }
+.drawer-grip:focus-visible { outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe { pointer-events: none; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: var(--s4) 20px; }

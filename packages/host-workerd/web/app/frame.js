@@ -84,9 +84,9 @@ const onLeave = (fn) => leaving.push(fn);
 /** replaceChildren, skipping the false/null/"" that conditional children produce. */
 const put = (el, ...nodes) => el.replaceChildren(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false && n !== ""));
 /**
- * A page drawn again where it is (the same address, after an action) stays as it was until its new
- * content is ready: its first draw, if it's a loading one, is held back, and drawn only if nothing
- * follows it. Otherwise each refresh blanked the page to a skeleton and built it again downwards.
+ * The page on screen stays until the next one is ready: a route's first draw, if it's a loading one,
+ * is held back, and drawn only if nothing follows it (or the router gives up waiting). Otherwise
+ * every page change flashed a skeleton and built the page again downwards.
  */
 let holding = false;
 let held = null;

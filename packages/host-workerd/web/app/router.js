@@ -29,8 +29,13 @@ function parseHash() {
 }
 
 let routing = 0;
-/** The address on screen: drawing it again is a refresh, which keeps the page until it's ready. */
+/** The address on screen: drawing it again is a refresh. */
 let shown = null;
+/**
+ * How long a page that's loading keeps the one before it on screen: most pages are ready sooner,
+ * so they replace it in one step; a slower one shows its loading state after this.
+ */
+const HOLD_MS = 250;
 async function route() {
   for (const fn of leaving.splice(0)) fn();
   for (const d of document.querySelectorAll("dialog[open]")) d.close();
@@ -40,7 +45,10 @@ async function route() {
   document.body.classList.remove("app-mode");
   if (p !== "" && !refresh) setWallpaper(await hues(), { dim: true });
   if (n !== routing) return;
-  holdFirstDraw(refresh);
+  // Any page (a new one, or this one again) keeps the one on screen until it's ready: no skeleton
+  // flashed in between. A refresh waits for its content however long it takes.
+  holdFirstDraw(true);
+  if (!refresh) setTimeout(() => n === routing && releaseHeld(), HOLD_MS);
   try {
     if (p === "") return await home();
     if (p === "app") return await appPage(id, q);

@@ -30,7 +30,9 @@ function appBar(c, { onChange } = {}) {
 }
 
 const DRAWER_WIDTH = "hewn.drawer.width";
-const drawerWidth = (w) => Math.round(Math.max(320, Math.min(w, window.innerWidth * 0.7, 960)));
+// Narrower than this and the box's tools (Attach, the model, Send) no longer fit on a line.
+const DRAWER_MIN = 420;
+const drawerWidth = (w) => Math.round(Math.max(DRAWER_MIN, Math.min(w, window.innerWidth * 0.7, 960)));
 /** Drag `grip` (or press ← →) to set `el`'s width; it's kept for next time. */
 function resizable(el, grip) {
   const saved = Number(localStorage.getItem(DRAWER_WIDTH));
