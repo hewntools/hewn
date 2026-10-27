@@ -4,7 +4,7 @@
 // the same grid. A tool's Hub page: its screens, Hewn's reading, its operations, what it needs,
 // Source code, Install (or Open and Install a copy). Installing opens the one install sheet.
 import { api, appIcon, enc, fail, h, hueOf, modal, pixelGlyph, satOf, setWallpaper, sheetActions, skeleton } from "../kit.js";
-import { backBar, brandTile, hues, page, put, settings, view } from "./frame.js";
+import { brandTile, hues, page, put, settings, topBar, view } from "./frame.js";
 import { codeBrowser } from "./files.js";
 import { installFromFile, installSheet } from "./install.js";
 import { titleCase } from "./models.js";
@@ -122,11 +122,12 @@ const hubSourceSheet = (t) =>
 
 /** Q3 a tool's Hub page. */
 async function hubToolPage(id) {
-  view(backBar("Hub", "#/hub"), h("main", { class: "column", style: { "--w": "880px" } }, skeleton("40%", "90%", "70%")));
+  view(topBar("hub", { back: ["Hub", "#/hub"] }), h("main", { class: "column", style: { "--w": "880px" } }, skeleton("40%", "90%", "70%")));
   const [t, all] = await Promise.all([api(`/hub/${enc(id)}`), api("/capabilities").catch(() => [])]);
   setWallpaper(await hues([t.icon?.hue ?? 250]));
   const mine = all.find((c) => c.id === t.id || c.source?.id === t.id);
-  const shots = ["screen", "widget"].filter((n) => t.images.includes(n));
+  // The screen sets out the tool with its widget; the widget alone only when there's no screen.
+  const shots = t.images.includes("screen") ? ["screen"] : t.images.filter((n) => n === "widget");
   const install = () => installFromHub(t.id).catch(fail);
   const source = () => hubSourceSheet(t).catch(fail);
   const needs = [
@@ -140,7 +141,7 @@ async function hubToolPage(id) {
     return h("button", { class: `hub-shot-btn ${n}`, "aria-label": `${alt}, larger`, onclick: () => enlarge(src, alt) }, h("img", { src, alt }));
   };
   view(
-    backBar("Hub", "#/hub"),
+    topBar("hub", { back: ["Hub", "#/hub"] }),
     h(
       "main",
       { class: "column hub-page", style: { "--w": "880px" } },

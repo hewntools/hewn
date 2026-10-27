@@ -157,14 +157,15 @@ const bar = ({ left, center, right } = {}) =>
 const glassBack = (label, href) => h("div", { class: "glass-bar" }, h("a", { href }, `‹ ${label}`));
 
 /**
- * Main pages: brand left; the four tabs and the Inbox right. On a phone the tabs fold into a ☰
- * menu while the Inbox stays visible.
+ * Main pages: brand left; the tabs and the Inbox right. On a phone the tabs fold into a ☰ menu
+ * while the Inbox stays visible. `back` ([label, href]): a page one step in (a Hub tool, New) has
+ * its back button where the brand is.
  */
-const topBar = (active) => {
+const topBar = (active, { back } = {}) => {
   const menuBtn = h("button", { "aria-label": "Menu" }, "☰");
   menuBtn.addEventListener("click", () => menuFrom(menuBtn, NAV.map(([label, href]) => [label, () => go(href)])));
   return bar({
-    left: brand(),
+    left: back ? glassBack(...back) : brand(),
     right: [
       h("button", { class: "palette-btn", "aria-label": "Search and commands", title: "Search and commands (⌘K)", onclick: () => commandPalette() }, h("span", {}, "Search"), h("kbd", {}, /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl K")),
       h("nav", { class: "glass-bar main-nav", "aria-label": "Main" }, NAV.map(([label, href, key]) => h("a", { href, "aria-current": key === active ? "page" : undefined }, label))),

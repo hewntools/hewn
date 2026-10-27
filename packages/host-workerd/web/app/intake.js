@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
 import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
-import { backBar, brandTile, go, hues, moment, onLeave, put, settings, stillHere, view } from "./frame.js";
+import { brandTile, go, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
 import { installFromFile } from "./install.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
 import { cadenceText } from "./schedules.js";
@@ -26,7 +26,8 @@ async function intakePage(q) {
   setWallpaper(await hues(service ? [260, 200] : [125, 250]));
   if (!here()) return;
   const intake = intakeView({ mode: "create", q, connection: service, onBuilt: (b) => go(`#/b/${enc(b.buildId)}`) });
-  view(...moment({ right: "-20px", top: "60px" }, backBar(service ? "Accounts" : "Home", service ? "#/accounts" : "#/"), h("div", { class: "moment-col" }, intake.el)));
+  // The normal top bar, its back button where the brand is.
+  view(...moment({ right: "-20px", top: "60px" }, topBar(service ? "accounts" : "", { back: service ? ["Accounts", "#/accounts"] : ["Home", "#/"] }), h("div", { class: "moment-col" }, intake.el)));
   intake.focus();
 }
 
