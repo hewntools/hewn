@@ -79,11 +79,14 @@ function asksRows(a) {
 }
 
 /** Its code, before it's installed: the code browser on the staged file. */
-function sourceSheet(p) {
+async function sourceSheet(p) {
+  // The sheet opens with its first file in (a moment at most), not a skeleton that then grows.
+  const browser = codeBrowser({ label: `v${p.version}`, list: () => api(`/bundles/${enc(p.token)}/code`), file: (path) => api(`/bundles/${enc(p.token)}/code?path=${enc(path)}`) });
+  await Promise.race([browser.ready, new Promise((r) => setTimeout(r, 800))]);
   return modal(
     (close) => [
       h("div", { class: "row sheet-head" }, bundleTile(p, 44), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Source code · v${p.version}`), h("div", { class: "small faint" }, `${p.name} · read-only`))),
-      codeBrowser({ label: `v${p.version}`, list: () => api(`/bundles/${enc(p.token)}/code`), file: (path) => api(`/bundles/${enc(p.token)}/code?path=${enc(path)}`) }),
+      browser,
       sheetActions(h("button", { onclick: () => close() }, "Done")),
     ],
     { width: 1100, cls: "wide-sheet" },
