@@ -123,7 +123,8 @@ function codeBrowser(src, { at } = {}) {
       if (current !== p) return;
       const meta = data.files.find((x) => x.path === p);
       body.classList.toggle("source", mode === "source");
-      const laidOut = mode === "source" && !f.binary ? prettyJson(p, f.text) : null;
+      // Show at a line is the file's own lines: no layout then.
+      const laidOut = mode === "source" && !f.binary && !(at?.line && p === at.path) ? prettyJson(p, f.text) : null;
       put(jsonToggle, laidOut && segmented([["pretty", "Pretty"], ["raw", "As written"]], pretty ? "pretty" : "raw", (k) => ((pretty = k === "pretty"), open(p)), { label: "JSON" }));
       put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text));
       body.scrollTop = 0;
