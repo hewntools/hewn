@@ -32,6 +32,8 @@ export interface ArmSummary {
   usd?: number;
   minutes?: number;
   attempts?: number;
+  /** Judge on the version before the passes (shots-first/), mean total out of 60. */
+  judgeFirst?: number;
   /** Judge, mean over results (total out of 60). */
   judge?: { total: number; design_quality: number; originality: number; craft: number; usefulness: number; n: number };
   /** Most frequent tells the judge saw. */
@@ -99,6 +101,7 @@ export function summarize(runDir: string): ArmSummary[] {
             ...(gaps.length ? { judgeGap: r1(mean(gaps)) } : {}),
           }
         : undefined,
+      judgeFirst: r1(mean(done.map((r) => readJudge(r.dir, "judge-first.json")?.total).filter((x): x is number => x !== undefined))),
       tells: [...tellCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5),
       sameness: r1(mean(same)),
       votes: mine.length ? { n: mine.length, winRate: Math.round((100 * points.reduce((a: number, b) => a + b, 0)) / mine.length), daily: Math.round((100 * daily.filter(Boolean).length) / mine.length) } : undefined,
@@ -126,9 +129,9 @@ export function summaryMarkdown(runDir: string): string {
     "",
     `Started ${meta.startedAt ?? "?"} on ${meta.commit ?? "?"}${meta.dirty ? " (with uncommitted changes)" : ""}, brief ${meta.briefSha ?? "?"}, ${meta.claude ?? "claude ?"}. Cases: ${(meta.cases ?? []).join(", ")}; ${meta.reps ?? "?"} repetition(s).`,
     "",
-    "| Arm | Built | $ / result | Min | You /60 (n) | Judge /60 | Design | Original | Craft | Useful | Sameness /10 | Owner win % (n) | Daily % | UI KB | CSS KB | SVG | Motion | Page errors | Click failures | Phone overflow |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ...s.map((a) => `| ${a.arm} | ${a.done}/${a.results}${a.seedErrors ? ` (${a.seedErrors} seed err)` : ""} | ${v(a.usd)} | ${v(a.minutes)} | ${a.owner ? `${a.owner.total} (${a.owner.n})` : "–"} | ${v(a.judge?.total)} | ${v(a.judge?.design_quality)} | ${v(a.judge?.originality)} | ${v(a.judge?.craft)} | ${v(a.judge?.usefulness)} | ${v(a.sameness)} | ${a.votes ? `${a.votes.winRate} (${a.votes.n})` : "–"} | ${v(a.votes?.daily)} | ${v(a.ui?.kb)} | ${v(a.ui?.cssKb)} | ${v(a.ui?.svgSites)} | ${v(a.ui?.motion)} | ${a.pageErrors} | ${a.clickFailures} | ${a.overflowing} |`),
+    "| Arm | Built | $ / result | Min | You /60 (n) | Judge before passes | Judge /60 | Design | Original | Craft | Useful | Sameness /10 | Owner win % (n) | Daily % | UI KB | CSS KB | SVG | Motion | Page errors | Click failures | Phone overflow |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...s.map((a) => `| ${a.arm} | ${a.done}/${a.results}${a.seedErrors ? ` (${a.seedErrors} seed err)` : ""} | ${v(a.usd)} | ${v(a.minutes)} | ${a.owner ? `${a.owner.total} (${a.owner.n})` : "–"} | ${v(a.judgeFirst)} | ${v(a.judge?.total)} | ${v(a.judge?.design_quality)} | ${v(a.judge?.originality)} | ${v(a.judge?.craft)} | ${v(a.judge?.usefulness)} | ${v(a.sameness)} | ${a.votes ? `${a.votes.winRate} (${a.votes.n})` : "–"} | ${v(a.votes?.daily)} | ${v(a.ui?.kb)} | ${v(a.ui?.cssKb)} | ${v(a.ui?.svgSites)} | ${v(a.ui?.motion)} | ${a.pageErrors} | ${a.clickFailures} | ${a.overflowing} |`),
     "",
     "Tells the judge saw most:",
     "",

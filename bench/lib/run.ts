@@ -8,7 +8,8 @@ import { join, resolve } from "node:path";
 import { USER } from "@hewntools/core/auth.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
-import { ARMS, briefFor, craftRequest, CRITIQUE_REQUEST, othersNote, runOrder, type Arm } from "./arms.ts";
+import { ARMS, briefFor, craftRequest, CRITIQUE_REQUEST, othersNote, runOrder, type Arm, type Pass } from "./arms.ts";
+import { specFor, type SpecSource } from "./intake.ts";
 import { DESKTOP, launchBrowser, layoutDefects, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
 import { builderUsage, uiMetrics, type BuilderUsage, type UiMetrics } from "./metrics.ts";
@@ -33,6 +34,10 @@ export interface Job {
   others?: string[];
   /** With `from`: a craft pass (fix measured defects, no redesign) instead of a critique. */
   craft?: boolean;
+  /** Passes after the build, in this result. */
+  passes?: Pass[];
+  spec?: SpecSource;
+  sample?: boolean;
   sandbox: boolean;
 }
 
@@ -143,7 +148,7 @@ export async function runBench(o: RunOptions): Promise<string> {
         const from = arm.from ? resultDir(arm.from, c.id, rep) : undefined;
         const others = arm.sequential ? cases.slice(0, i).map((e) => resultDir(arm.name, e.id, rep)) : undefined;
         const after = [...(from ? [from] : []), ...(others?.length ? [others.at(-1)!] : [])];
-        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, ...(arm.craft ? { craft: true } : {}), from, ...(others ? { others } : {}), sandbox: o.sandbox } });
+        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, ...(arm.craft ? { craft: true } : {}), ...(arm.passes ? { passes: arm.passes } : {}), ...(arm.spec ? { spec: arm.spec } : {}), ...(arm.sample ? { sample: true } : {}), from, ...(others ? { others } : {}), sandbox: o.sandbox } });
       });
   const todo = planned.filter((p) => readResult(p.dir)?.status !== "done");
   log(`${planned.length} results, ${planned.length - todo.length} already done; running ${todo.length}, ${o.concurrency} at a time → ${runDir}`);
@@ -275,7 +280,9 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
         throw new Error(`arm ${job.arm} starts from ${job.from} but does nothing to it (critique or craft)`);
       }
     } else {
-      const started = await bp.platform.create(USER, { name: c.name, purpose: c.purpose, requirements: c.requirements + othersNote(otherTools(job.others)) });
+      const spec = job.spec ? await specFor(c, job.spec, dir, { log }) : { name: c.name, purpose: c.purpose, requirements: c.requirements };
+      if (job.spec) writeFileSync(join(dir, "spec.md"), `# ${spec.name}\n\n${spec.purpose}\n\n${spec.requirements}\n`);
+      const started = await bp.platform.create(USER, { name: spec.name, purpose: spec.purpose, requirements: spec.requirements + othersNote(otherTools(job.others)) });
       result.capabilityId = started.capabilityId;
       build = await settle(bp.platform, started.buildId);
     }
@@ -295,7 +302,25 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
       const f = join(home, "blobs", "screenshots", from);
       if (existsSync(f)) cpSync(f, join(dir, "shots", to));
     }
-    if (!job.from) {
+    if (!job.from && job.sample) {
+      // The builder's own sample data, replayed as 0.4.9 does: in order, as the owner.
+      try {
+        const file = join(versionDir, "sample", "calls.json");
+        if (!existsSync(file)) throw new Error("no sample/calls.json");
+        const calls = JSON.parse(readFileSync(file, "utf8")) as { operation: string; input?: Record<string, unknown> }[];
+        const call = caller(bp.platform, capabilityId);
+        for (const [i, x] of calls.entries()) {
+          try {
+            await call(x.operation, x.input ?? {});
+          } catch (e) {
+            throw new Error(`sample call ${i + 1} (${x.operation}): ${(e as Error).message}`);
+          }
+        }
+      } catch (e) {
+        result.seedError = (e as Error).message;
+        log(`sample data failed: ${result.seedError}`);
+      }
+    } else if (!job.from) {
       try {
         await c.seed(seedKit(caller(bp.platform, capabilityId), [...job.case].reduce((h, ch) => h * 31 + ch.charCodeAt(0), 7)));
       } catch (e) {
@@ -305,23 +330,33 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
       }
     }
     await capture(dir, bp, capabilityId, result);
-    if (job.critique && !job.from) {
-      // Build, then critique, in one result: the first version's screenshots go to shots-first/ and
-      // the builder reviews them in a change of its own.
-      const first = join(dir, "shots-first");
-      rmSync(first, { recursive: true, force: true });
-      renameSync(join(dir, "shots"), first);
+    const passes: Pass[] = job.passes ?? (job.critique && !job.from ? ["critique"] : []);
+    for (const [i, pass] of passes.entries()) {
+      // Each pass sees screenshots of the version before it; the first version's stay in shots-first/.
+      const before = join(dir, i === 0 ? "shots-first" : `shots-before-${pass}`);
+      rmSync(before, { recursive: true, force: true });
+      renameSync(join(dir, "shots"), before);
       mkdirSync(join(dir, "shots"), { recursive: true });
-      for (const f of ["empty-light", "empty-dark"]) if (existsSync(join(first, `${f}.png`))) cpSync(join(first, `${f}.png`), join(dir, "shots", `${f}.png`));
-      result.first = { ui: result.ui, pageErrors: result.pageErrors, overflowMobile: result.overflowMobile };
+      for (const f of ["empty-light", "empty-dark"]) if (existsSync(join(before, `${f}.png`))) cpSync(join(before, `${f}.png`), join(dir, "shots", `${f}.png`));
+      if (i === 0) result.first = { ui: result.ui, pageErrors: result.pageErrors, overflowMobile: result.overflowMobile };
+      for (const k of Object.keys(bp.extraFiles)) delete bp.extraFiles[k];
       for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
-        if (existsSync(join(first, `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(first, `${f}.png`);
+        if (existsSync(join(before, `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(before, `${f}.png`);
       }
-      const review = await settle(bp.platform, (await bp.platform.modify(USER, { capabilityId, request: CRITIQUE_REQUEST + othersNote(otherTools(job.others)) })).buildId);
+      let request: string;
+      if (pass === "craft") {
+        const defects = await measureDefects(bp, capabilityId, versionDir);
+        result.defectsBefore = defects;
+        log(`defects: ${defects.length ? defects.join(" | ") : "none measured"}`);
+        request = craftRequest(defects);
+      } else {
+        request = CRITIQUE_REQUEST + othersNote(otherTools(job.others));
+      }
+      const review = await settle(bp.platform, (await bp.platform.modify(USER, { capabilityId, request })).buildId);
       result.builds.push(buildSummary(review, join(dir, "transcripts")));
       result.usage = builderUsage(readdirSync(join(dir, "transcripts")).filter((f) => f.endsWith(".jsonl")).map((f) => join(dir, "transcripts", f)));
       if (review.status !== "promoted" || !review.resultVersion) {
-        result.error = `critique build ${review.status}:\n${review.log.slice(-12).join("\n")}`;
+        result.error = `${pass} build ${review.status}:\n${review.log.slice(-12).join("\n")}`;
         save();
         return;
       }

@@ -4,6 +4,8 @@ import { idOf, type SeedKit } from "../../lib/cases.ts";
 
 export const name = "Reading Shelf";
 export const purpose = "Keep the books I'm reading, have read and want to read, with ratings and a yearly goal, so I know where I am with my reading this year.";
+/** How the owner might put it to the intake. */
+export const ask = "A reading log: what I'm reading now, what I've finished and what I want to read, with ratings, and how I'm doing against my goal for the year.";
 
 // title, author, pages, tags, rating, finished (days ago), days it took
 const FINISHED: [string, string, number, string[], number, number, number][] = [

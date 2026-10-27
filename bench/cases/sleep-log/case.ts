@@ -4,6 +4,8 @@ import type { SeedKit } from "../../lib/cases.ts";
 
 export const name = "Sleep Log";
 export const purpose = "Log each night's sleep in a few taps and see how much and how regularly I sleep, against my target, week by week.";
+/** How the owner might put it to the intake. */
+export const ask = "Help me keep an eye on my sleep. I'd log when I went to bed and woke up, and want to see if I'm getting enough and going to bed at regular times.";
 
 const hhmm = (minutes: number) => {
   const m = ((Math.round(minutes) % 1440) + 1440) % 1440;

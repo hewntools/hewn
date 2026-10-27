@@ -3,6 +3,7 @@
 // (spec/builder-brief.md in this checkout) into the brief a build runs on, plus how the build runs.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { SpecSource } from "./intake.ts";
 
 export interface Arm {
   name: string;
@@ -34,7 +35,18 @@ export interface Arm {
    * measures (what sticks out on a phone, text cut short, page errors), fixed without a redesign.
    */
   craft?: boolean;
+  /**
+   * Passes after the build, in the same result and in order, each on screenshots of the version
+   * before it. The first version's screenshots stay in shots-first/ (and are judged on their own).
+   */
+  passes?: Pass[];
+  /** Where the spec comes from (default: the case's frozen requirements). */
+  spec?: SpecSource;
+  /** The builder writes sample/calls.json, which the bench replays instead of the case's seed. */
+  sample?: boolean;
 }
+
+export type Pass = "critique" | "craft";
 
 const ARMS_DIR = join(import.meta.dirname, "..", "arms");
 
@@ -52,6 +64,16 @@ export function replaceSection(brief: string, from: string, to: string, text: st
 }
 
 const section = (file: string) => readFileSync(join(ARMS_DIR, file), "utf8");
+
+/** Put `text` in front of the heading `before` (which must be there). */
+export function insertBefore(brief: string, before: string, text: string): string {
+  const at = brief.indexOf(before);
+  if (at < 0) throw new Error(`brief has no "${before}"`);
+  return brief.slice(0, at) + text.trimEnd() + "\n\n" + brief.slice(at);
+}
+
+const oneshot = (b: string) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("character-oneshot.md"));
+const withSample = (b: string) => insertBefore(oneshot(b), "### Contract rules (enforced)", section("sample-data.md"));
 
 export const ARMS: Arm[] = [
   {
@@ -99,6 +121,30 @@ export const ARMS: Arm[] = [
     brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("character.md")),
     sequential: true,
   },
+  {
+    name: "character-oneshot+craft",
+    about: "character, plus the mistakes the critique passes kept finding as a first-pass checklist (dark mode, one answer first, no data twice, lists, the phone); one build, then only the cheap craft pass.",
+    brief: oneshot,
+    sequential: true,
+    passes: ["craft"],
+  },
+  ...(
+    [
+      ["intake", "today's intake, from the owner's short request (questions answered with the defaults)"],
+      ["intent", "the intake asked for UI intent (what to draw, the subject's world) instead of a UI sketch"],
+      ["thin", "an agent's thin requirements: the owner's request and little else"],
+    ] as const
+  ).map(
+    ([source, how]): Arm => ({
+      name: `spec-${source}+craft`,
+      about: `The spec from ${how}; character-oneshot builds it with its own sample data, then the craft pass.`,
+      brief: withSample,
+      spec: source,
+      sample: true,
+      sequential: true,
+      passes: ["craft"],
+    }),
+  ),
   {
     name: "character+critique+craft",
     about: "character+critique, then a craft pass: fresh screenshots and the measured defects (cut off on the phone, text cut short), fixed without a redesign.",

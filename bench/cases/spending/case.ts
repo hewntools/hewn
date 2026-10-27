@@ -4,6 +4,8 @@ import { idOf, type SeedKit } from "../../lib/cases.ts";
 
 export const name = "Spending";
 export const purpose = "Note what I spend in a few taps and see, during the month, how each category is doing against its budget.";
+/** How the owner might put it to the intake. */
+export const ask = "Track what I spend per category against monthly budgets, so I can see mid-month whether I'm on track.";
 
 // name, budget, [low, high] amount, purchases per week, notes
 const CATEGORIES: [string, number | null, [number, number], number, string[]][] = [

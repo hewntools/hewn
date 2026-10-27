@@ -81,10 +81,10 @@ export function parseJson<T>(text: string): T {
 
 export const total = (s: Pick<Score, "design_quality" | "originality" | "craft" | "usefulness">) => 2 * s.design_quality + 2 * s.originality + s.craft + s.usefulness;
 
-/** Ask Claude Code (read-only, isolated from your settings like the builder) about files in `cwd`. */
-function ask(cwd: string, prompt: string, model?: string): Promise<string> {
+/** Ask Claude Code (read-only, isolated from your settings like the builder), with `tools` allowed, in `cwd`. */
+export function ask(cwd: string, prompt: string, model?: string, tools: string[] = ["Read"]): Promise<string> {
   const home = claudeHome(join(cwd, ".judge-home"));
-  const args = ["-p", prompt, "--output-format", "json", ...(model ? ["--model", model] : []), "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands", "--allowedTools", "Read", "--disallowedTools", "Bash", "Edit", "Write"];
+  const args = ["-p", prompt, "--output-format", "json", ...(model ? ["--model", model] : []), "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands", ...(tools.length ? ["--allowedTools", ...tools] : []), "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task"];
   return new Promise((resolve, reject) =>
     execFile("claude", args, { cwd, env: { ...cleanEnv(), ...home.env }, maxBuffer: 16 << 20, timeout: 10 * 60_000 }, (e, out) => {
       home.done();
@@ -126,6 +126,20 @@ export async function judgeRun(runDir: string, o: { model?: string; again?: bool
       log(`judge failed for ${r.dir}: ${(e as Error).message}`);
     }
   });
+  // The version before a result's passes (shots-first/), scored the same way: what the first build alone was worth.
+  await pool(results.filter((r) => existsSync(join(r.dir, "shots-first", "desktop-light.png"))), o.concurrency ?? 3, async (r) => {
+    const file = join(r.dir, "judge-first.json");
+    if (existsSync(file) && !o.again) return;
+    const c = cases.get(r.result!.case)!;
+    try {
+      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.map((f) => f.replace("shots/", "shots-first/")).filter((f) => existsSync(join(r.dir, f)))), o.model));
+      s.total = total(s);
+      writeFileSync(file, JSON.stringify(s, null, 2));
+      log(`judged ${r.result!.arm} / ${r.result!.case} / r${r.result!.rep} before its passes: ${s.total}/60`);
+    } catch (e) {
+      log(`judge failed for ${r.dir} (before its passes): ${(e as Error).message}`);
+    }
+  });
   // Each arm's tools as a set, per repetition.
   const sets = new Map<string, typeof results>();
   for (const r of results) {
@@ -147,4 +161,4 @@ export async function judgeRun(runDir: string, o: { model?: string; again?: bool
   });
 }
 
-export const readJudge = (dir: string): Score | undefined => (existsSync(join(dir, "judge.json")) ? JSON.parse(readFileSync(join(dir, "judge.json"), "utf8")) : undefined);
+export const readJudge = (dir: string, file = "judge.json"): Score | undefined => (existsSync(join(dir, file)) ? JSON.parse(readFileSync(join(dir, file), "utf8")) : undefined);

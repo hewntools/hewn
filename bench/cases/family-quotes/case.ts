@@ -4,6 +4,8 @@ import { idOf, type SeedKit } from "../../lib/cases.ts";
 
 export const name = "Family Quotes";
 export const purpose = "Catch the funny and wise things the kids say before they're forgotten, with how old they were, and bring one back now and then.";
+/** How the owner might put it to the intake. */
+export const ask = "I want to save the funny things my kids say, with how old they were when they said it, and see an old one now and then.";
 
 // who, what, days ago, context, favourite
 const QUOTES: [number, string, number, string, boolean][] = [

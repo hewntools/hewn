@@ -4,6 +4,8 @@ import { idOf, type SeedKit } from "../../lib/cases.ts";
 
 export const name = "Plant Log";
 export const purpose = "Keep track of the houseplants in the apartment windows: when each one was last watered, fed and repotted, and which ones need water today, so nothing dries out or gets drowned.";
+/** How the owner might put it to the intake. */
+export const ask = "I want to keep track of my houseplants: when I watered them and which ones need water today. They sit in different windows around the flat.";
 
 // name, species, location, water every, feed every, first watering (days ago), last watering (days ago)
 const PLANTS: [string, string, string, number, number | null, number, number][] = [

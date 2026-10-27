@@ -16,6 +16,7 @@ import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle } from "../bench/lib/platform.ts";
 import { checkOut, cleanEnv, otherTools, runOne } from "../bench/lib/run.ts";
 import { summarize } from "../bench/lib/summary.ts";
+import { INTENT_INSTRUCTION, promptFor, SKETCH_INSTRUCTION } from "../bench/lib/intake.ts";
 import { setHidden, writeOwner } from "../bench/lib/view.ts";
 import { startUiServer } from "../bench/lib/ui-server.ts";
 
@@ -62,6 +63,17 @@ describe("bench arms", () => {
   test("an arm that starts from another runs after it", () => {
     assert.deepEqual(runOrder(["design-forward+critique"]).map((a) => a.name), ["design-forward", "design-forward+critique"]);
     assert.throws(() => runOrder(["x"], [{ name: "x", about: "", from: "y" }, { name: "y", about: "", from: "x" }]), /cycle/);
+  });
+});
+
+describe("bench specs", () => {
+  test("the intent variant swaps the intake's UI sketch for UI intent, and nothing else", () => {
+    const messages = [{ role: "user" as const, content: "Track my plants" }];
+    const today = promptFor(messages, "intake");
+    const intent = promptFor(messages, "intent");
+    assert.ok(today.includes(SKETCH_INSTRUCTION));
+    assert.ok(!intent.includes(SKETCH_INSTRUCTION));
+    assert.equal(intent, today.replace(SKETCH_INSTRUCTION, INTENT_INSTRUCTION));
   });
 });
 
