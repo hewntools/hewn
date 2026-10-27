@@ -143,7 +143,7 @@ async function sourceSheet(p, at) {
   // The sheet opens with its first file in (a moment at most), not a skeleton that then grows.
   const browser = codeBrowser({ label: `v${p.version}`, list: () => api(`/bundles/${enc(p.token)}/code`), file: (path) => api(`/bundles/${enc(p.token)}/code?path=${enc(path)}`) }, { at });
   await Promise.race([browser.ready, new Promise((r) => setTimeout(r, 800))]);
-  return modal(
+  const shown = modal(
     (close) => [
       h("div", { class: "row sheet-head" }, bundleTile(p, 44), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Source code · v${p.version}`), h("div", { class: "small faint" }, `${p.name} · read-only`))),
       browser,
@@ -151,6 +151,9 @@ async function sourceSheet(p, at) {
     ],
     { width: 1100, cls: "wide-sheet" },
   );
+  // Show at a line: the line is highlighted already; now that the sheet is open, bring it into view.
+  if (at?.line) requestAnimationFrame(() => browser.querySelector(".code-line.hl")?.scrollIntoView({ block: "center" }));
+  return shown;
 }
 
 /** R3 the install sheet. `from`: the line under the title ("From a file · plant-log.hewn.zip"). */
