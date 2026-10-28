@@ -4,7 +4,7 @@
 // the same grid. A tool's Hub page: its screens, Hewn's reading, its operations, what it needs,
 // Source code, Install (or Open and Install a copy). Installing opens the one install sheet.
 import { api, enc, fail, h, modal, setWallpaper, sheetActions, skeleton } from "../kit.js";
-import { brandTile, hues, page, put, settings, topBar, view } from "./frame.js";
+import { brandTile, hues, page, put, settings, stillHere, topBar, view } from "./frame.js";
 import { bundleTile, installFromFile, installSheet, sourceSheet } from "./install.js";
 import { titleCase } from "./models.js";
 import { openCapability } from "./tool-actions.js";
@@ -63,8 +63,10 @@ async function installFromHub(id) {
 
 /** Q2 the Hub: search, Install from a file, All · Official · popular tags, one grid, paging. */
 async function hubPage(q) {
+  const here = stillHere();
   page("hub", 960, skeleton("30%", "90%", "90%"));
   const [{ tools }, modelReady] = await Promise.all([api("/hub"), modelIsReady()]);
+  if (!here()) return;
   let filter = q?.get("tag") ?? "all";
   let text = "";
   let at = 0;
@@ -109,9 +111,12 @@ const keepsLine = (s) => (/^keeps\b/i.test(s) ? s : `Keeps ${/^[A-Z][a-z]/.test(
 
 /** Q3 a tool's Hub page. */
 async function hubToolPage(id) {
+  const here = stillHere();
   view(topBar("hub", { back: ["Hub", "#/hub"] }), h("main", { class: "column", style: { "--w": "880px" } }, skeleton("40%", "90%", "70%")));
   const [t, all] = await Promise.all([api(`/hub/${enc(id)}`), api("/capabilities").catch(() => [])]);
+  if (!here()) return;
   setWallpaper(await hues([t.icon?.hue ?? 250]));
+  if (!here()) return;
   // Yours, under whatever name you installed it (Hewn says which).
   const mine = t.installedAs && all.find((c) => c.id === t.installedAs);
   // The screen sets out the tool with its widget; the widget alone only when there's no screen.

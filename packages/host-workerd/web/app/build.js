@@ -23,8 +23,11 @@ const STEPS = [
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
-/** Where an install came from, as its build request says: "from Hub", "from a link" or "from a file". */
-const installedFrom = (b) => ({ hub: "from Hub", link: "from a link" })[b.request?.source?.from] ?? "from a file";
+/** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hub", "from <host>" or "from a file". */
+const installedFrom = (b) => {
+  const s = b.request?.source;
+  return s?.from === "hub" ? "from Hub" : s?.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+};
 /** A tool installed from a file or from Hub has no builder: its milestones are the file's (R4). */
 const installSteps = (b) => [
   ["spec", b.request?.source?.from === "hub" ? "From Hub" : "From the file"],

@@ -398,7 +398,7 @@ export class Sharing extends Domain {
   /** An Official tool as a bundle: its files, and Hewn's reading in the sidecar; made by this release. */
   private hubBundle(t: ShelfTool): Uint8Array {
     const m = manifestOf(t.files);
-    return packBundle(t.files, { format: 1, hewn: this.platform.version ?? "dev", abi: abiOf(m), exportedAt: new Date().toISOString(), tool: { id: t.id, version: t.listing.version, hash: contentHash(t.files, "") }, summary: t.listing.summary });
+    return packBundle(t.files, { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(m), exportedAt: new Date().toISOString(), tool: { id: t.id, version: t.listing.version, hash: contentHash(t.files, "") }, summary: t.listing.summary });
   }
 
   /** Your tool that is this one: installed from Hub (under any name) first, else one of the same id. */
