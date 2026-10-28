@@ -3,23 +3,18 @@
 // tools (Official), shipped with the release, so it works offline; 0.5 adds tools from others to
 // the same grid. A tool's Hub page: its screens, Hewn's reading, its operations, what it needs,
 // Source code, Install (or Open and Install a copy). Installing opens the one install sheet.
-import { api, appIcon, enc, fail, h, hueOf, modal, pixelGlyph, satOf, setWallpaper, sheetActions, skeleton } from "../kit.js";
+import { api, enc, fail, h, modal, setWallpaper, sheetActions, skeleton } from "../kit.js";
 import { brandTile, hues, page, put, settings, topBar, view } from "./frame.js";
-import { codeBrowser } from "./files.js";
-import { installFromFile, installSheet } from "./install.js";
+import { bundleTile, installFromFile, installSheet, sourceSheet } from "./install.js";
 import { titleCase } from "./models.js";
 import { openCapability } from "./tool-actions.js";
 
-export { hubCard, hubPage, hubSourceSheet, hubToolPage, installFromHub };
+export { hubCard, hubPage, hubToolPage };
 
 const PER_PAGE = 9;
 
-/** A tool's tile from its card: hue, saturation and glyph from the release (it isn't installed). */
-function cardTile(c, size) {
-  const cap = { id: c.id, name: c.name, hue: c.icon?.hue ?? undefined, saturation: c.icon?.saturation ?? undefined };
-  if (!c.icon?.glyph?.length) return appIcon(cap, { size });
-  return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hueOf(cap), "--s": satOf(cap) }, "aria-hidden": "true" }, pixelGlyph(c.icon.glyph.map(([x, y]) => ({ x, y }))));
-}
+/** A card image's URL: it carries the release, so an upgrade's new screens aren't hidden by a cached old one. */
+const imageUrl = (c, name) => `/api/hub/${enc(c.id)}/image/${name}?v=${enc(c.release)}`;
 
 /**
  * What a tool needs, in words, for its card: nothing shown when it needs nothing; the hosts it
@@ -33,10 +28,10 @@ function needsLine(c, modelReady) {
 /** The Official mark: Hewn's 16px tile and the word, in the accent's ink. */
 const official = () => h("span", { class: "row tight hub-official" }, brandTile(16), h("span", { class: "small" }, "Official"));
 
-/** One card (Q2), the same on the Hub, in ⌘K's Hub rows and on the hosted first run. */
+/** One card (Q2), the same on the Hub and on the hosted first run. */
 function hubCard(c, { modelReady = true } = {}) {
   // The screen fills its 16:9 frame (the shots are taken at 16:9), cut at the bottom if anything.
-  const shot = c.images.includes("screen") ? h("img", { src: `/api/hub/${enc(c.id)}/image/screen`, alt: "", loading: "lazy" }) : h("span", { class: "hub-shot-empty" }, cardTile(c, 48));
+  const shot = c.images.includes("screen") ? h("img", { src: imageUrl(c, "screen"), alt: "", loading: "lazy" }) : h("span", { class: "hub-shot-empty" }, bundleTile(c, 48));
   return h(
     "a",
     { class: "card hub-card", href: `#/hub/${enc(c.id)}` },
@@ -44,7 +39,7 @@ function hubCard(c, { modelReady = true } = {}) {
     h(
       "div",
       { class: "hub-card-body" },
-      h("div", { class: "row tight" }, cardTile(c, 28), h("span", { class: "strong grow clip-1" }, c.name), c.installed && h("span", { class: "pill ok" }, "Installed")),
+      h("div", { class: "row tight" }, bundleTile(c, 28), h("span", { class: "strong grow clip-1" }, c.name), c.installed && h("span", { class: "pill ok" }, "Installed")),
       h("div", { class: "small muted" }, c.line),
       needsLine(c, modelReady),
       h("div", { class: "grow" }),
@@ -109,38 +104,28 @@ async function hubPage(q) {
 const enlarge = (src, alt) =>
   modal((close) => [h("img", { class: "lightbox-img", src, alt, onclick: () => close() }), sheetActions(h("button", { onclick: () => close() }, "Close"))], { width: 1200, cls: "lightbox" });
 
-/** Q5 a Hub tool's source: the code browser, read-only, in the same sheet the install sheet opens. */
-async function hubSourceSheet(t) {
-  // It opens with its first file in (a moment at most), not a skeleton that then grows.
-  const browser = codeBrowser({ label: `v${t.version}`, list: () => api(`/hub/${enc(t.id)}/code`), file: (path) => api(`/hub/${enc(t.id)}/code?path=${enc(path)}`) });
-  await Promise.race([browser.ready, new Promise((r) => setTimeout(r, 800))]);
-  return modal(
-    (close) => [
-      h("div", { class: "row sheet-head" }, cardTile(t, 44), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Source code · v${t.version}`), h("div", { class: "small faint" }, `${t.name} · Official · read-only`))),
-      browser,
-      sheetActions(h("button", { onclick: () => close() }, "Done")),
-    ],
-    { width: 1100, cls: "wide-sheet" },
-  );
-}
+/** What it stores, from Hewn's reading, as "Keeps …" ("Plants with …" reads "Keeps plants with …"). */
+const keepsLine = (s) => (/^keeps\b/i.test(s) ? s : `Keeps ${/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s}`);
 
 /** Q3 a tool's Hub page. */
 async function hubToolPage(id) {
   view(topBar("hub", { back: ["Hub", "#/hub"] }), h("main", { class: "column", style: { "--w": "880px" } }, skeleton("40%", "90%", "70%")));
   const [t, all] = await Promise.all([api(`/hub/${enc(id)}`), api("/capabilities").catch(() => [])]);
   setWallpaper(await hues([t.icon?.hue ?? 250]));
-  const mine = all.find((c) => c.id === t.id || c.source?.id === t.id);
+  // Yours, under whatever name you installed it (Hewn says which).
+  const mine = t.installedAs && all.find((c) => c.id === t.installedAs);
   // The screen sets out the tool with its widget; the widget alone only when there's no screen.
   const shots = t.images.includes("screen") ? ["screen"] : t.images.filter((n) => n === "widget");
   const install = () => installFromHub(t.id).catch(fail);
-  const source = () => hubSourceSheet(t).catch(fail);
+  // Q5 its source: the install sheet's code browser, on the tool as it ships.
+  const source = () => sourceSheet(t, { code: `/hub/${enc(t.id)}/code`, origin: "Official" }).catch(fail);
   const needs = [
     ...t.needs.hosts.map((x) => h("li", {}, h("span", { class: "pill" }, "host"), h("div", { class: "grow" }, h("span", {}, x)))),
     t.needs.model && h("li", {}, h("span", { class: "pill accent" }, "model"), h("div", { class: "grow" }, h("span", {}, "Use a model"), h("span", { class: "sub" }, `${titleCase(t.needs.model)} tier · asked on first use`))),
     ...t.needs.tools.map((x) => h("li", {}, h("span", { class: "pill accent" }, "tool"), h("div", { class: "grow" }, h("span", {}, `Uses ${x}`)))),
   ].filter(Boolean);
   const shot = (n) => {
-    const src = `/api/hub/${enc(t.id)}/image/${n}`;
+    const src = imageUrl(t, n);
     const alt = `${t.name}: ${n === "screen" ? "its screen" : "its widget"}`;
     return h("button", { class: `hub-shot-btn ${n}`, "aria-label": `${alt}, larger`, onclick: () => enlarge(src, alt) }, h("img", { src, alt }));
   };
@@ -153,7 +138,7 @@ async function hubToolPage(id) {
       h(
         "div",
         { class: "info-head" },
-        cardTile(t, 64),
+        bundleTile(t, 64),
         h("div", { class: "grow col" }, h("h1", { class: "title-xl" }, t.name), h("div", { class: "row tight wrap" }, h("span", { class: "pill accent" }, "Official"), h("span", { class: "pill" }, `v${t.version}`), mine && h("span", { class: "pill ok" }, "Installed"))),
         mine ? h("span", { class: "row tight" }, h("button", { onclick: install }, "Install a copy"), h("button", { class: "primary lg", onclick: () => openCapability(mine).catch(fail) }, "Open")) : h("button", { class: "primary lg", onclick: install }, "Install"),
       ),
@@ -163,7 +148,7 @@ async function hubToolPage(id) {
         h(
           "div",
           { class: "stack-md" },
-          h("div", { class: "card info-section hub-what" }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, "What it does")), h("div", { class: "pretty" }, t.summary.message), t.summary.reaches && h("div", { class: "small muted" }, t.summary.reaches), h("button", { class: "link self-start install-source", onclick: source }, "Source code ›")),
+          h("div", { class: "card info-section hub-what" }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, "What it does")), h("div", { class: "pretty" }, t.summary.message), t.summary.keeps && h("div", { class: "small muted" }, keepsLine(t.summary.keeps)), t.summary.reaches && h("div", { class: "small muted" }, t.summary.reaches), h("button", { class: "link self-start install-source", onclick: source }, "Source code ›")),
           h("div", { class: "card info-section" }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, `Operations · ${t.operations.length}`)), h("ul", { class: "list" }, t.operations.map((o) => h("li", {}, h("div", { class: "grow" }, h("span", { class: "mono" }, o.name), o.description && h("span", { class: "sub clip-1" }, o.description)), h("span", { class: `pill ${o.sideEffect === "read" ? "" : o.sideEffect === "destructive" ? "danger" : "accent"}` }, o.sideEffect))))),
         ),
         h(
@@ -175,7 +160,7 @@ async function hubToolPage(id) {
             "div",
             { class: "card info-section" },
             h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, "Versions")),
-            h("ul", { class: "list" }, t.versions.map((v) => h("li", { class: "link", tabindex: 0, onclick: source, onkeydown: (e) => e.key === "Enter" && source() }, h("div", { class: "grow col" }, h("span", {}, `v${v.version}`), h("span", { class: "sub" }, `${v.line} · ${new Date(v.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`)), h("span", { class: "faint" }, "Source code ›")))),
+            h("ul", { class: "list" }, t.versions.map((v) => h("li", { class: "link", tabindex: 0, onclick: source, onkeydown: (e) => e.key === "Enter" && source() }, h("div", { class: "grow col" }, h("span", {}, `v${v.version}`), h("span", { class: "sub" }, `${v.line} · ${new Date(v.date).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}`)), h("span", { class: "faint" }, "Source code ›")))),
           ),
         ),
       ),

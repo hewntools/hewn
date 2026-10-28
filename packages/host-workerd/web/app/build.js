@@ -13,7 +13,7 @@ import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from 
 import { openCapability } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
-export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
+export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, installedFrom, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
 
 // ---------- B3 / B4 / H2–H6: a build (its page, or in the change drawer) ----------
 
@@ -23,18 +23,20 @@ const STEPS = [
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
-/** A tool installed from a file has no builder: its milestones are the file's (R4). */
-const INSTALL_STEPS = [
-  ["spec", "From the file"],
+/** Where an install came from, as its build request says: "from Hub", "from a link" or "from a file". */
+const installedFrom = (b) => ({ hub: "from Hub", link: "from a link" })[b.request?.source?.from] ?? "from a file";
+/** A tool installed from a file or from Hub has no builder: its milestones are the file's (R4). */
+const installSteps = (b) => [
+  ["spec", b.request?.source?.from === "hub" ? "From Hub" : "From the file"],
   ["code", "Unpacked"],
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
-/** No builder runs: an install from a file or a directory, or a change that needs none. */
+/** No builder runs: an install from a file, Hub or a directory, or a change that needs none. */
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
-const stepsOf = (b) => (b.builder === "bundle" ? INSTALL_STEPS : STEPS);
+const stepsOf = (b) => (b.builder === "bundle" ? installSteps(b) : STEPS);
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
 const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
@@ -188,7 +190,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : null,
           clockEl,
         ),
-        !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? "Installed from a file: no builder runs. Its own tests run as for any build." : "No builder runs.") : buildMeta(b)),
+        !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? `Installed ${installedFrom(b)}: no builder runs. Its own tests run as for any build.` : "No builder runs.") : buildMeta(b)),
         convoView,
         h("ol", { class: "steps" }, stepsOf(b).map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,

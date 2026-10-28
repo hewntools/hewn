@@ -78,10 +78,12 @@ async function commandPalette() {
       const render = () => {
         const q = input.value.trim().toLowerCase();
         const words = q.split(/\s+/).filter(Boolean);
-        // Names first ("run" finds Running Log before a tool whose purpose mentions a long run), then the rest.
+        // Names first ("run" finds Running Log before a tool whose purpose mentions a long run), then the rest;
+        // yours first, the Hub last, however well its tools match.
         const named = (it) => words.every((w) => it.label.toLowerCase().includes(w));
         const hits = items.filter((it) => (q ? words.every((w) => it.words.includes(w)) : !it.more));
-        shown = (q ? [...hits.filter(named), ...hits.filter((it) => !named(it))] : hits).slice(0, 40);
+        const ranked = q ? [...hits.filter(named), ...hits.filter((it) => !named(it))] : hits;
+        shown = [...ranked.filter((it) => it.group !== "Hub"), ...ranked.filter((it) => it.group === "Hub")].slice(0, 40);
         at = Math.min(at, Math.max(0, shown.length - 1));
         let group = null;
         put(

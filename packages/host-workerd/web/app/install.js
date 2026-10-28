@@ -9,12 +9,12 @@ import { go, put, settings } from "./frame.js";
 import { codeBrowser } from "./files.js";
 import { titleCase } from "./models.js";
 
-export { bundleTile, installFromFile, installSheet };
+export { bundleTile, installFromFile, installSheet, sourceSheet };
 
 /** A file may be at most this big (Hewn says so too). */
 const MAX_BYTES = 5 * 1024 * 1024;
 
-/** The tile of a tool that isn't installed yet: its hue, saturation and glyph from the file. */
+/** The tile of a tool that isn't installed yet: its hue, saturation and glyph from the file (or its Hub card). */
 function bundleTile(p, size = 48) {
   const cap = { id: p.id, name: p.name, hue: p.icon?.hue ?? undefined, saturation: p.icon?.saturation ?? undefined };
   if (!p.icon?.glyph?.length) return appIcon(cap, { size });
@@ -105,7 +105,7 @@ function readingSheet(p, { from }) {
           {},
           h("span", { class: `dot ${f.kind === "warn" ? "warn" : "ok"}` }),
           h("div", { class: "grow" }, h("span", {}, f.title), (f.detail || f.file) && h("span", { class: "sub" }, f.detail, f.detail && f.file && " · ", f.file && h("span", { class: "mono" }, findingAt(f)))),
-          f.file && h("button", { class: "ghost sm", onclick: () => sourceSheet(p, { path: f.file, line: f.line }).catch(fail) }, "Show"),
+          f.file && h("button", { class: "ghost sm", onclick: () => sourceSheet(p, { at: { path: f.file, line: f.line } }).catch(fail) }, "Show"),
         );
       const show = (r) => {
         put(
@@ -166,14 +166,17 @@ function asksRows(a) {
   return rows.length ? rows : [h("li", {}, h("span", { class: "dot ok" }), h("span", { class: "grow muted" }, "Nothing outside itself"))];
 }
 
-/** Its code, before it's installed: the code browser on the staged file (`at`: a file and line to show). */
-async function sourceSheet(p, at) {
+/**
+ * Its code, before it's installed: the code browser, read-only. `code`: where its files are (the
+ * staged file's, or a Hub tool's); `at`: a file and line to show; `origin`: "Official" for Hewn's own.
+ */
+async function sourceSheet(p, { code = `/bundles/${enc(p.token)}/code`, at, origin } = {}) {
   // The sheet opens with its first file in (a moment at most), not a skeleton that then grows.
-  const browser = codeBrowser({ label: `v${p.version}`, list: () => api(`/bundles/${enc(p.token)}/code`), file: (path) => api(`/bundles/${enc(p.token)}/code?path=${enc(path)}`) }, { at });
+  const browser = codeBrowser({ label: `v${p.version}`, list: () => api(code), file: (path) => api(`${code}?path=${enc(path)}`) }, { at });
   await Promise.race([browser.ready, new Promise((r) => setTimeout(r, 800))]);
   const shown = modal(
     (close) => [
-      h("div", { class: "row sheet-head" }, bundleTile(p, 44), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Source code · v${p.version}`), h("div", { class: "small faint" }, `${p.name} · read-only`))),
+      h("div", { class: "row sheet-head" }, bundleTile(p, 44), h("div", { class: "grow col" }, h("div", { class: "sheet-title" }, `Source code · v${p.version}`), h("div", { class: "small faint" }, [p.name, origin, "read-only"].filter(Boolean).join(" · ")))),
       browser,
       sheetActions(h("button", { onclick: () => close() }, "Done")),
     ],
