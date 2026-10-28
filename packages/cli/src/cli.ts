@@ -13,7 +13,7 @@ import { startMetrics } from "./supervisor/metrics.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
 import { initConfig, readConfig, writeConfig } from "./config.ts";
 import { formatChecks, runDoctor } from "./doctor.ts";
-import { openHome } from "./home.ts";
+import { openHome, writeFileAtomic } from "./home.ts";
 import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
@@ -165,7 +165,7 @@ async function main() {
         log,
       });
       writeFormat(home);
-      writeFileSync(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", { mode: 0o600 });
+      writeFileAtomic(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", 0o600);
       // Off unless set: a host that scrapes Hewn turns it on.
       const metricsPort = Number(process.env.HEWN_METRICS_PORT ?? 0);
       if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log });
