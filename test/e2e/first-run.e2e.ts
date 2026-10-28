@@ -331,6 +331,8 @@ export const operations = {
     await page.screenshot({ path: "/tmp/e2e-fr-share.png" });
     await sheet.getByRole("button", { name: "Done" }).click();
     await page.goto(`${web}/#/c/shared-log/v/1`);
+    // The router holds Info (with its own Share…) until the version page is ready: wait for it.
+    await page.locator("main.version-layout .version-what").waitFor();
     await page.getByRole("button", { name: "Share…" }).click();
     sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
     await sheet.getByText(/sample\/calls\.json/).waitFor();
