@@ -25,7 +25,8 @@ export function readShelf(dir = assetDirs().seeds): Shelf {
     const hub = join(dir, id, ".hub");
     if (!/^[a-z0-9][a-z0-9-]*$/.test(id) || !existsSync(join(hub, "listing.json"))) continue;
     const listing = JSON.parse(readFileSync(join(hub, "listing.json"), "utf8")) as HubListing;
-    out.push({ id, listing, files: versionFiles(readTree(join(dir, id))), images: readdirSync(hub).filter((f) => /^[a-z]+\.png$/.test(f)).map((f) => f.slice(0, -4)) });
+    // .hub/ isn't the tool's (and its images are large): not read with its files.
+    out.push({ id, listing, files: versionFiles(readTree(join(dir, id), (p) => p === ".hub")), images: readdirSync(hub).filter((f) => /^[a-z]+\.png$/.test(f)).map((f) => f.slice(0, -4)) });
   }
   return { tools: out, firstRun: (firstRun ?? []).filter((id) => out.some((t) => t.id === id)) };
 }

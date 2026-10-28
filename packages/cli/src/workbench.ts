@@ -24,14 +24,14 @@ export interface LocalWorkbenchOptions {
   visualCheck?: VisualCheck;
 }
 
-/** Files of a directory as a map, artefacts (node_modules …) excluded. */
-export function readTree(dir: string): Files {
+/** Files of a directory as a map, artefacts (node_modules …) excluded; `skip`: paths (files or folders) not to read either. */
+export function readTree(dir: string, skip: (rel: string) => boolean = () => false): Files {
   const out: Files = {};
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
       const rel = relative(dir, p);
-      if (isArtefact(rel)) continue;
+      if (isArtefact(rel) || skip(rel)) continue;
       if (e.isDirectory()) walk(p);
       else if (e.isFile()) out[rel] = new Uint8Array(readFileSync(p));
     }
