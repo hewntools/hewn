@@ -33,7 +33,7 @@ Builders write sample data when they create a tool, and keep it working when a c
 
 **Install from a file** (Settings › Data, or search for it with `⌘K`) takes a `.hewn.zip`, up to 5 MB.
 
-First, the agent that builds your tools reads its code and says what it does with your data, usually in under a minute: **What it does**, and **What it found**: warnings you should know about before installing (it says one thing and does another, it asks for something it never uses, data leaves for a host or the model without the description saying so), each with **Show** to see the code at that line, and what checks out. It's advice: the code is what runs, and **Source code ›** has all of it. **Install anyway** skips the reading. With no builder set up, there's no reading; the code is still there to read. On a hosted Hewn, the reading uses Credits, as a turn with the intake does.
+First, the agent that builds your tools reads its code and says what it does with your data, usually in under a minute: **What it does** (with what it keeps, and where your data goes), and **What it found**: warnings you should know about before installing (it says one thing and does another, it asks for something it never uses, data leaves for a host or the model without the description saying so), each with **Show** to see the code at that line, and what checks out. It's advice: the code is what runs, and **Source code ›** has all of it. **Install anyway** skips the reading (and stops it). The reader gets the tool's code and nothing else: no tools, no web, and text in the code that tries to steer it is one of its warnings. With no builder set up, there's no reading; the code is still there to read. On a hosted Hewn, the reading uses Credits, as a turn with the intake does.
 
 Then one sheet shows:
 
@@ -50,7 +50,7 @@ A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 
 
 From the terminal: `hewn install <file.hewn.zip> [--name "Plant Log 2"] [--no-sample]`.
 
-Tools from Hub (from Hewn 0.5) and Hewn's own come with Hewn's reading already, so they skip the wait; **Check it yourself** has your builder read them too.
+Tools from Hub (from Hewn 0.5) and Hewn's own come with Hewn's reading already, so they skip the wait; **Check it yourself** has your builder read them too. A file can't bring a reading of its own: whatever it says about itself, your builder reads it.
 
 ## Start over
 
