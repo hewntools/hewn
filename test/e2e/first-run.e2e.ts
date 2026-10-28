@@ -362,7 +362,8 @@ export const operations = {
     await page.locator(".pill", { hasText: "from a file · Running Log v1" }).waitFor();
     await page.getByRole("button", { name: "Share…" }).click();
     let sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
-    await sheet.getByText(/sample\/calls\.json · 1 call · /).waitFor();
+    // v2 is the scripted builder's copy of the Running Log seed, with the seed's own sample data.
+    await sheet.getByText(/sample\/calls\.json · \d+ calls? · /).waitFor();
     if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Info's Share… isn't on the live version");
     if (await sheet.getByRole("button", { name: "Download" }).isDisabled()) throw new Error("Download is off");
     await page.screenshot({ path: "/tmp/e2e-fr-share.png" });
