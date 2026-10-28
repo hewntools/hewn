@@ -179,7 +179,6 @@ body.app-mode #app { height: 100vh; }
 .info-missing button.link { padding: 0; }
 /* U3/U4 versions: under the main top bar, the left menu (as Settings), each part in a panel */
 .version-layout { width: min(960px, calc(100% - var(--s5))); padding-top: var(--s4); }
-.version-layout.wide { width: min(1280px, calc(100% - var(--s5))); }
 .version-head { align-items: flex-start; }
 .version-what { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; text-wrap: pretty; }
 .version-what.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }

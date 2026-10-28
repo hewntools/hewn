@@ -63,7 +63,7 @@ async function versionsPage(id) {
   );
 }
 
-/** The parts of a version, as the left menu (as Settings has). Later releases add to it. */
+/** The parts of a version, as the left menu (as Settings has). */
 const PARTS = [
   ["conversation", "Conversation"],
   ["spec", "Spec"],
@@ -103,13 +103,12 @@ async function versionPage(id, n, q) {
   let part = parts[q?.get("tab")] ? q.get("tab") : "conversation";
   const menu = h("nav", { class: "side-list", "aria-label": `v${v.version}` });
   // The tool on top, as the way back to its Info; then the version's parts.
-  const drawMenu = () => put(menu, backRef(c, id, "side-back"), PARTS.filter(([k]) => parts[k]).map(([k, label]) => h("button", { "aria-pressed": String(k === part), onclick: () => show(k) }, label)));
+  const drawMenu = () => put(menu, backRef(c, id, "side-back"), PARTS.map(([k, label]) => h("button", { "aria-pressed": String(k === part), onclick: () => show(k) }, label)));
   // Switching parts keeps the page (and the URL, for a reload) without a new route.
   const show = async (k) => {
     part = k;
     drawMenu();
     history.replaceState(null, "", `#/c/${enc(id)}/v/${n}${k === "conversation" ? "" : `?tab=${k}`}`);
-    panel.closest("main")?.classList.toggle("wide", k === "files");
     panel.setAttribute("aria-busy", "true");
     try {
       const el = await parts[k]();
