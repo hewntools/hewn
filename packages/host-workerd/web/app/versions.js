@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool's versions (U3) and one version (U4): what led to it, kept for the tool's life (the
-// conversation with the intake, the spec the builder worked from, the builder's log), Continue
-// from here and Restore. Both are pages under the main top bar, as Settings is.
+// conversation with the intake, the spec the builder worked from, the builder's log), its files
+// in the code browser, Continue from here and Restore, under Info's top bar.
 import { actorLabel, ago, api, builderLabel, capRef, caps, confirmDialog, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { buildModelWords } from "./build.js";
+import { codeBrowser, versionSource } from "./files.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
 import { changeHref, rollbackTo, toolActions } from "./tool-actions.js";
@@ -68,12 +69,13 @@ const PARTS = [
   ["conversation", "Conversation"],
   ["spec", "Spec"],
   ["log", "Log"],
+  ["files", "Files"],
 ];
 
 /**
  * U4 One version: Info's top bar with the tool as its back button, the left menu of its parts
- * (Conversation · Spec · Log), each in a panel, and its actions (Continue from here, Restore) with
- * its title, which leads with the version.
+ * (Conversation · Spec · Log · Files), each in a panel, and its actions (Continue from here,
+ * Restore) with its title, which leads with the version.
  */
 async function versionPage(id, n, q) {
   const here = stillHere();
@@ -99,6 +101,7 @@ async function versionPage(id, n, q) {
       const t = v.buildId ? await api(`/builds/${enc(v.buildId)}/transcript`) : null;
       return t?.text ? h("pre", { class: "log version-log" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "muted" }, "No log was kept.");
     },
+    files: async () => codeBrowser(versionSource(id, v.version)),
   };
   let part = parts[q?.get("tab")] ? q.get("tab") : "conversation";
   const menu = h("nav", { class: "side-list", "aria-label": `v${v.version}` });
@@ -109,9 +112,13 @@ async function versionPage(id, n, q) {
     part = k;
     drawMenu();
     history.replaceState(null, "", `#/c/${enc(id)}/v/${n}${k === "conversation" ? "" : `?tab=${k}`}`);
+    // Files (the code browser) widens the page: code reads best with room beside its list of files.
+    panel.closest("main")?.classList.toggle("wide", k === "files");
     panel.setAttribute("aria-busy", "true");
     try {
       const el = await parts[k]();
+      // A part that loads more itself (the code browser) is swapped in once it's ready (or after a moment).
+      if (el?.ready) await Promise.race([el.ready, new Promise((r) => setTimeout(r, 800))]);
       if (part === k) put(panel, el);
     } catch (e) {
       if (part === k) put(panel, h("div", { class: "muted" }, e.message || String(e)));

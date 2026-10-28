@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -86,6 +86,45 @@ describe("trust: rollback, export, purge", () => {
     assert.equal(busy.lastWriteAt, null);
     assert.equal(busy.callsChecked, 500);
     await assert.rejects(t.platform.dataSummary(t.claude, "running-log"), /cannot perform owner actions/);
+  });
+
+  test("code browser: a version's files with what changed since the one before, owner only", async () => {
+    await modifySeed(t, "ALTER TABLE runs ADD COLUMN heart_rate INTEGER;");
+    const v1 = await t.platform.versionCode(USER, "running-log", 1);
+    assert.equal(v1.base, null);
+    assert.ok(v1.files.every((f) => f.status === "same"));
+    const v2 = await t.platform.versionCode(USER, "running-log", 2);
+    assert.equal(v2.base, 1);
+    const changed = v2.files.filter((f) => f.status !== "same");
+    assert.deepEqual(changed.map((f) => [f.path, f.status]), [["capability.json", "changed"], ["migrations/002_more.sql", "added"]], "changed first");
+    assert.deepEqual([changed[1].added, changed[1].removed], [1, 0]);
+    assert.ok(!v2.files.some((f) => f.path === "BUILDER.md"), "workspace-only files never in a version");
+    const manifest = await t.platform.versionFile(USER, "running-log", 2, "capability.json");
+    assert.equal(manifest.status, "changed");
+    assert.ok(manifest.hunks.length >= 1);
+    assert.ok(manifest.hunks[0].lines.some((l) => l.type === "+" && l.text.includes('"v2"')));
+    assert.equal((await t.platform.versionFile(USER, "running-log", 1, "capability.json")).hunks.length, 0);
+    await assert.rejects(t.platform.versionFile(USER, "running-log", 2, "nope.ts"), /no file/);
+    await assert.rejects(t.platform.versionCode(t.claude, "running-log", 2), /cannot perform owner actions/);
+  });
+
+  test("code browser: a version made after a Restore shows what changed since the restored one; old versions aren't kept decoded", async () => {
+    await modifySeed(t);
+    await t.platform.rollback(USER, "running-log", 1);
+    const done = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "running-log", request: "v3" }),
+      (ws) => appendFileSync(join(ws, "src", "index.ts"), "// v3\n"),
+    );
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    const v3 = await t.platform.versionCode(USER, "running-log", 3);
+    assert.equal(v3.base, 1, "built on v1, not v2");
+    assert.deepEqual(v3.files.filter((f) => f.status !== "same").map((f) => [f.path, f.status, f.added, f.removed]), [["src/index.ts", "changed", 1, 0]]);
+    assert.equal((await t.platform.versionFile(USER, "running-log", 3, "capability.json")).status, "same", "v2's description isn't in v3");
+    const loaded = (t.platform as any).d.data.loaded as Map<string, unknown>;
+    loaded.clear();
+    await t.platform.versionCode(USER, "running-log", 2);
+    await t.platform.versionFile(USER, "running-log", 2, "capability.json");
+    assert.equal(loaded.size, 0);
   });
 
   test("purge: only deleted capabilities, with the id typed; everything goes and the id is free", async () => {

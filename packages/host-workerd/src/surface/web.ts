@@ -107,7 +107,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "glyphs", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -325,6 +325,13 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST purge":
         await platform.purge(owner, id, String((await readJson(req)).confirm ?? ""));
         return { ok: true };
+      // The code browser: a version's files with what changed since the one before (?version=N), or one file (&path=…).
+      case "GET code": {
+        const version = Number(url.searchParams.get("version"));
+        if (!Number.isInteger(version) || version < 1) throw new PlatformError("invalid_request", "version must be a version number");
+        const path = url.searchParams.get("path");
+        return path ? platform.versionFile(owner, id, version, path) : platform.versionCode(owner, id, version);
+      }
       // Info › Data: rows per table and the last write.
       case "GET data":
         return platform.dataSummary(owner, id);

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A capability's lifecycle and data, owner only: delete (archive) and restore, roll back to an earlier
-// version, purge for good, and export and import its data.
+// version, purge for good, export and import its data, and its versions' code for the code browser
+// (each file against the version it was built on; the diffing itself is in code.ts).
 import { type Agent, requireOwner } from "../auth.ts";
+import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
@@ -158,6 +160,35 @@ export class Data extends Domain {
     } catch (e) {
       throw new PlatformError("conflict", `import into ${capabilityId} failed: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * The code browser (U4): a version's files, each with what changed since its base (added,
+   * changed, removed, and lines +n −n). Owner only.
+   */
+  async versionCode(owner: Agent, capabilityId: string, version: number): Promise<{ version: number; base: number | null; files: CodeFile[] }> {
+    const { files, base, baseFiles } = await this.codeOf(owner, capabilityId, version);
+    return { version, base, files: codeFiles(files, baseFiles) };
+  }
+
+  /** One file of a version: its text, and the hunks against its base (none for a first version). */
+  async versionFile(owner: Agent, capabilityId: string, version: number, path: string): Promise<CodeText> {
+    const { files, baseFiles } = await this.codeOf(owner, capabilityId, version);
+    return codeText(path, files, baseFiles);
+  }
+
+  /**
+   * A version's files and its base's: the version its build started from (after a Restore, the
+   * restored one), else the one before. Read without keeping them decoded: only what runs stays
+   * in memory, and the owner may look through every version a tool ever had.
+   */
+  private async codeOf(owner: Agent, capabilityId: string, version: number) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    const v = await this.loadVersion(capabilityId, version, { keep: false });
+    const n = this.registry.getBuild(v.row.buildId)?.baseVersion ?? version - 1;
+    const base = n >= 1 && n < version && this.registry.getVersion(capabilityId, n) ? n : null;
+    return { files: v.files, base, baseFiles: base ? (await this.loadVersion(capabilityId, base, { keep: false })).files : null };
   }
 
   /** Deleted (archived) capabilities, newest first: what the owner can restore. */
