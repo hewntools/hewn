@@ -48,9 +48,9 @@ function changeHref(c, { m, send, widget, from, fix } = {}) {
 const openChange = (c, o) => go(changeHref(c, o));
 
 /**
- * "Ask builder to fix this" (V4): a Change to the tool with the failure attached as a file (what
- * ran it, the operation, the error, its input and last log lines) and one line in the box. The
- * owner can open the file, drop it, edit the line; nothing goes until Send.
+ * "Ask builder to fix this" (V4): a Change to the tool with the failure as text in the box (what
+ * ran it, the operation, the error, its input and last log lines), then "Fix it so this works." The
+ * owner can edit or cut it; nothing goes until Send.
  */
 const fixText = (f) => {
   const label = actorLabel(f.caller);

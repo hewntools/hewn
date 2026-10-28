@@ -135,11 +135,11 @@ export function loadTables(db: AbiDb, tables: Record<string, Record<string, unkn
   return n;
 }
 
-/** Every user table as JSON rows (BLOBs as base64). */
 /** A state's own tables (not SQLite's, the host's or the migrations record), by name. */
 const userTables = (db: AbiDb) => db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != '_hewn_migrations' ORDER BY name").all().map((r) => String(r.name));
 const quoted = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
+/** Every user table as JSON rows (BLOBs as base64). */
 export function dumpTables(db: AbiDb): Record<string, Record<string, unknown>[]> {
   const out: Record<string, Record<string, unknown>[]> = {};
   for (const name of userTables(db)) {
