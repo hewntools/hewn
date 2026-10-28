@@ -14,7 +14,7 @@ import type { BuildRow } from "../registry.ts";
 import { randomToken } from "../sha256.ts";
 import { type BuildView, RESERVED_IDS, slugify } from "./builds.ts";
 import { Domain } from "./context.ts";
-import { type CodeFile, codeFiles, type CodeText, codeText } from "./data.ts";
+import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
 
 /** A staged bundle (uploaded, not installed) is dropped after a day. */
