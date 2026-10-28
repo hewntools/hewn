@@ -16,7 +16,7 @@ import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle } from "../bench/lib/platform.ts";
 import { checkOut, cleanEnv, otherTools, runOne } from "../bench/lib/run.ts";
 import { summarize } from "../bench/lib/summary.ts";
-import { INTENT_INSTRUCTION, promptFor, SKETCH_INSTRUCTION } from "../bench/lib/intake.ts";
+import { INTENT_INSTRUCTION, LEAN_INSTRUCTION, ownersWords, promptFor, SKETCH_INSTRUCTION, SPEC_INSTRUCTION } from "../bench/lib/intake.ts";
 import { setHidden, writeOwner } from "../bench/lib/view.ts";
 import { startUiServer } from "../bench/lib/ui-server.ts";
 
@@ -74,6 +74,19 @@ describe("bench specs", () => {
     assert.ok(today.includes(SKETCH_INSTRUCTION));
     assert.ok(!intent.includes(SKETCH_INSTRUCTION));
     assert.equal(intent, today.replace(SKETCH_INSTRUCTION, INTENT_INSTRUCTION));
+    // Lean: a short brief instead of both the spec and the sketch.
+    const lean = promptFor(messages, "lean");
+    assert.ok(lean.includes(LEAN_INSTRUCTION));
+    assert.ok(!lean.includes(SKETCH_INSTRUCTION) && !lean.includes(SPEC_INSTRUCTION));
+    assert.match(lean, /UI INTENT \(what must be visible[^"]*\. Leave "request" empty\./);
+  });
+
+  test("the builder gets the owner's own words, with which to follow when they differ from the brief", () => {
+    assert.equal(ownersWords(undefined), "");
+    const words = ownersWords([{ role: "user", content: "A plant log" }, { role: "intake", content: "One window or several?" }, { role: "user", content: "Several, calm and green" }]);
+    assert.match(words, /THE OWNER'S OWN WORDS/);
+    assert.match(words, /follow the owner's words/);
+    assert.match(words, /OWNER: A plant log\n\nINTAKE: One window or several\?\n\nOWNER: Several, calm and green$/);
   });
 });
 

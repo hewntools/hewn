@@ -6,6 +6,8 @@ export const name = "Reading Shelf";
 export const purpose = "Keep the books I'm reading, have read and want to read, with ratings and a yearly goal, so I know where I am with my reading this year.";
 /** How the owner might put it to the intake. */
 export const ask = "A reading log: what I'm reading now, what I've finished and what I want to read, with ratings, and how I'm doing against my goal for the year.";
+/** What the owner says next, with details and taste. */
+export const talk = ["My goal is 18 books this year. I usually have two books going at once and want to update the page I'm on quickly. When I finish one I rate it 1 to 5. I keep a pile of books I want to read and pick the next one from it. I'd like to see my year at a glance, like books on a shelf, and whether I'm ahead or behind. Cosy, like a library."];
 
 // title, author, pages, tags, rating, finished (days ago), days it took
 const FINISHED: [string, string, number, string[], number, number, number][] = [

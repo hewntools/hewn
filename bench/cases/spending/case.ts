@@ -6,6 +6,8 @@ export const name = "Spending";
 export const purpose = "Note what I spend in a few taps and see, during the month, how each category is doing against its budget.";
 /** How the owner might put it to the intake. */
 export const ask = "Track what I spend per category against monthly budgets, so I can see mid-month whether I'm on track.";
+/** What the owner says next, with details and taste. */
+export const talk = ["Categories like groceries, eating out, transport, home, kids and fun, each with a monthly budget in euros; health has no budget. I add expenses on my phone right after paying, so it has to be a couple of taps. Mid-month I want to see which categories are heading over and how this month compares with last. Clear and honest about money, no cutesy piggy banks."];
 
 // name, budget, [low, high] amount, purchases per week, notes
 const CATEGORIES: [string, number | null, [number, number], number, string[]][] = [

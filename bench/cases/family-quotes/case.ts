@@ -6,6 +6,8 @@ export const name = "Family Quotes";
 export const purpose = "Catch the funny and wise things the kids say before they're forgotten, with how old they were, and bring one back now and then.";
 /** How the owner might put it to the intake. */
 export const ask = "I want to save the funny things my kids say, with how old they were when they said it, and see an old one now and then.";
+/** What the owner says next, with details and taste. */
+export const talk = ["Two kids, Elsa who's 7 and Otto who's 4. I'd add their birthdays so it can work out how old they were. I mostly write a quote down on my phone right after they say it, so adding has to take seconds. I'd love to see one from the same day in an earlier year now and then, and to mark favourites. It should feel warm and playful, like a family scrapbook."];
 
 // who, what, days ago, context, favourite
 const QUOTES: [number, string, number, string, boolean][] = [

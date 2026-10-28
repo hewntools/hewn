@@ -146,6 +146,15 @@ export const ARMS: Arm[] = [
     }),
   ),
   {
+    name: "spec-lean+convo",
+    about: "A real conversation (the owner's details and taste) with a lean intake; the builder gets the lean brief plus the owner's own words, with its own sample data; then the critique pass (also given the owner's words) and the craft pass.",
+    brief: withSample,
+    spec: "lean",
+    sample: true,
+    sequential: true,
+    passes: ["critique", "craft"],
+  },
+  {
     name: "character+critique+craft",
     about: "character+critique, then a craft pass: fresh screenshots and the measured defects (cut off on the phone, text cut short), fixed without a redesign.",
     from: "character+critique",

@@ -20,6 +20,8 @@ export interface CaseModule {
   purpose: string;
   /** The owner's own short request, as they'd type it to the intake (for arms that make their own spec). */
   ask: string;
+  /** What the owner says next, with details and taste (for arms that hold a conversation). */
+  talk?: string[];
   seed: (kit: SeedKit) => Promise<void>;
 }
 
@@ -38,7 +40,7 @@ export async function loadCases(ids?: string[]): Promise<BenchCase[]> {
   return Promise.all(
     pick.map(async (id) => {
       const m = (await import(join(CASES_DIR, id, "case.ts"))) as CaseModule;
-      return { id, name: m.name, purpose: m.purpose, ask: m.ask, seed: m.seed, requirements: readFileSync(join(CASES_DIR, id, "requirements.md"), "utf8").trim() };
+      return { id, name: m.name, purpose: m.purpose, ask: m.ask, talk: m.talk, seed: m.seed, requirements: readFileSync(join(CASES_DIR, id, "requirements.md"), "utf8").trim() };
     }),
   );
 }

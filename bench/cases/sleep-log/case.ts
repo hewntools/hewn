@@ -6,6 +6,8 @@ export const name = "Sleep Log";
 export const purpose = "Log each night's sleep in a few taps and see how much and how regularly I sleep, against my target, week by week.";
 /** How the owner might put it to the intake. */
 export const ask = "Help me keep an eye on my sleep. I'd log when I went to bed and woke up, and want to see if I'm getting enough and going to bed at regular times.";
+/** What the owner says next, with details and taste. */
+export const talk = ["I aim for about 7.5 hours and want to be in bed by 23:00. I'd log it in the morning on my phone, half asleep, so it has to be quick: usually the same times as the night before. I'd also like to note how I slept, 1 to 5, and whether the kids woke me. On Sundays I want to see the week: am I short on sleep, and am I drifting later? Make it feel like night, calm, not clinical."];
 
 const hhmm = (minutes: number) => {
   const m = ((Math.round(minutes) % 1440) + 1440) % 1440;

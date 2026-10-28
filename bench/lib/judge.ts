@@ -112,6 +112,9 @@ async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
   }));
 }
 
+/** What a spec arm's tool is judged against: the owner's own words (all their turns, for a conversation). */
+const askedFor = (spec: string | undefined, c: { ask: string; talk?: string[] }) => (!spec ? undefined : spec === "lean" ? [c.ask, ...(c.talk ?? [])].join(" ") : c.ask);
+
 export async function judgeRun(runDir: string, o: { model?: string; again?: boolean; arms?: string[]; concurrency?: number; log?: (l: string) => void } = {}) {
   const log = o.log ?? console.log;
   const results = visibleResults(runDir).filter((r) => r.result?.status === "done" && (!o.arms || o.arms.includes(r.result.arm)));
@@ -122,7 +125,7 @@ export async function judgeRun(runDir: string, o: { model?: string; again?: bool
     if (existsSync(file) && !o.again) return;
     const c = cases.get(r.result!.case)!;
     try {
-      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.filter((f) => existsSync(join(r.dir, f))), r.job?.spec ? c.ask : undefined), o.model));
+      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.filter((f) => existsSync(join(r.dir, f))), askedFor(r.job?.spec, c)), o.model));
       s.total = total(s);
       writeFileSync(file, JSON.stringify(s, null, 2));
       log(`judged ${r.result!.arm} / ${r.result!.case} / r${r.result!.rep}: ${s.total}/60`);
@@ -136,7 +139,7 @@ export async function judgeRun(runDir: string, o: { model?: string; again?: bool
     if (existsSync(file) && !o.again) return;
     const c = cases.get(r.result!.case)!;
     try {
-      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.map((f) => f.replace("shots/", "shots-first/")).filter((f) => existsSync(join(r.dir, f))), r.job?.spec ? c.ask : undefined), o.model));
+      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.map((f) => f.replace("shots/", "shots-first/")).filter((f) => existsSync(join(r.dir, f))), askedFor(r.job?.spec, c)), o.model));
       s.total = total(s);
       writeFileSync(file, JSON.stringify(s, null, 2));
       log(`judged ${r.result!.arm} / ${r.result!.case} / r${r.result!.rep} before its passes: ${s.total}/60`);

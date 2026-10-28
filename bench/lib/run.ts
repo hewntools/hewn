@@ -9,7 +9,7 @@ import { USER } from "@hewntools/core/auth.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { ARMS, briefFor, craftRequest, CRITIQUE_REQUEST, othersNote, runOrder, type Arm, type Pass } from "./arms.ts";
-import { specFor, type SpecSource } from "./intake.ts";
+import { ownersWords, specFor, type SpecSource } from "./intake.ts";
 import { DESKTOP, launchBrowser, layoutDefects, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
 import { builderUsage, uiMetrics, type BuilderUsage, type UiMetrics } from "./metrics.ts";
@@ -282,7 +282,8 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
     } else {
       const spec = job.spec ? await specFor(c, job.spec, dir, { log }) : { name: c.name, purpose: c.purpose, requirements: c.requirements };
       if (job.spec) writeFileSync(join(dir, "spec.md"), `# ${spec.name}\n\n${spec.purpose}\n\n${spec.requirements}\n`);
-      const started = await bp.platform.create(USER, { name: spec.name, purpose: spec.purpose, requirements: spec.requirements + othersNote(otherTools(job.others)) });
+      if (spec.conversation) writeFileSync(join(dir, "conversation.json"), JSON.stringify(spec.conversation, null, 2));
+      const started = await bp.platform.create(USER, { name: spec.name, purpose: spec.purpose, requirements: spec.requirements + ownersWords(spec.conversation) + othersNote(otherTools(job.others)) });
       result.capabilityId = started.capabilityId;
       build = await settle(bp.platform, started.buildId);
     }
@@ -352,7 +353,8 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
         log(`defects: ${defects.length ? defects.join(" | ") : "none measured"}`);
         request = craftRequest(defects);
       } else {
-        request = CRITIQUE_REQUEST + othersNote(otherTools(job.others));
+        const said = existsSync(join(dir, "conversation.json")) ? JSON.parse(readFileSync(join(dir, "conversation.json"), "utf8")) : undefined;
+        request = CRITIQUE_REQUEST + (said ? "\n\nAlso check the screen against what the owner asked for and how they wanted it to feel:" + ownersWords(said) : "") + othersNote(otherTools(job.others));
       }
       const review = await settle(bp.platform, (await bp.platform.modify(USER, { capabilityId, request })).buildId);
       result.builds.push(buildSummary(review, join(dir, "transcripts")));

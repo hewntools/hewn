@@ -6,6 +6,8 @@ export const name = "Habit Check-ins";
 export const purpose = "A few daily habits checked off with one tap, with streaks and the last 30 days, so I keep them going.";
 /** How the owner might put it to the intake. */
 export const ask = "A few daily habits I can tick off with one tap, like stretching, reading to the kids and no phone after 22, with streaks so I keep them going.";
+/** What the owner says next, with details and taste. */
+export const talk = ["Five habits: stretch, read to the kids and no phone after 22 every day, run three times a week and call a friend once a week. I tick them on my phone, often in the evening. I want to see the last month so gaps jump out, and the streaks should feel motivating, not guilt-tripping. Bold and energetic, but not childish."];
 
 // name, kind, target per week, how likely a day is done, done today
 const HABITS: [string, "daily" | "weekly", number | null, number, boolean][] = [
