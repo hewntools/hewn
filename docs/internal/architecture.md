@@ -62,7 +62,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | --- | --- |
 | `discovery.ts` | `list` and `get`: the capabilities a principal can see |
 | `presentation.ts` | a tool's name, icon, hue and saturation as the owner sets them |
-| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import; the code browser's view of a version: each file against the version its build started from (after a Restore, the restored one, not the one before) |
+| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import, Start over (the data emptied, a copy kept aside first, the sample data replayed when asked); the code browser's view of a version: each file against the version its build started from (after a Restore, the restored one, not the one before) |
 | `grants.ts` | readiness, grants, secrets and config, delegated agents, the owner's confirmation of agents' destructive calls |
 | `connections.ts` | Accounts: a connection's sign-in step and health |
 | `sessions.ts` | tool UI tickets and sessions, web sessions, the public URL, passkeys |
@@ -72,6 +72,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | `schedules.ts` | schedules, and the ones the owner approves with a build |
 | `builds.ts` | builds: requests, the order they run in, the builder's attempts, retries, cancels, the owner's review, what a build keeps |
 | `validation.ts` | `validateAndPromote` ([Builds](#builds)) and promotion |
+| `sharing.ts` | a tool as a file, owner only: Share… (a version's files, the scan, the bundle), Install from a file (staged and checked, then a create build with no builder, `bundle`, through the normal validation), and sample data (replayed after an install or Start over, or written by the owner as a new version) |
 | `attachments.ts` | what the owner attaches in the intake's box |
 | `instructions.ts` | the owner's instructions for building |
 | `housekeeping.ts` | the cleanup at start and daily, and the metrics aggregates |
@@ -132,20 +133,22 @@ What led to a build stays with it for the capability's life: `build_context` hol
 
 **Build feedback.** Once a build is live, the web client asks "Got what you asked for?" when the tool is next opened, once per version in that browser and within a week of the build (`build_feedback`: yes, no with a note, or skip; `setBuildFeedback`, owner session only, shown with `buildContext`). `buildReport` (`hewn feedback`, an admin call; the host's only way in, and read-only) lists recent builds with what they ran on (builder, model, brief hash), attempts, how they ended, the answer, and the signs in the record: a failed build whose retry went live, another change to the tool within a day of going live, a restore within a week, the tool deleted within a day. All of it stays in the owner's database (the service log notes the score, never the note); Hewn never sends it anywhere. A host that wants it reads it as it reads anything else in the machine.
 
+**A tool as a file** (`bundle.ts`, `platform/sharing.ts`). `<id>.hewn.zip` is a version's files as they are plus a sidecar (`hewn-bundle.json`: the format, the Hewn and ABI that made it, the tool, version and hash it came from), in Hewn's own store-only zip (the core runs where `node:zlib` doesn't). Reading one refuses compressed entries, entries out of order or overlapping, more than 1,000 files or 5 MB, a name twice (exactly, case-folded or NFC-normalised), and names with `..`, a leading `/`, a backslash or control characters. Share… scans the files first (`scanFiles`): personal data, key shapes and the owner's own settings warn; the owner's own keys block, and are never sent back whole. An upload is staged (a blob, kept a day) only once its manifest, sidecar and npm dependencies (registry versions only, `dependencyProblems`) check out, so the install sheet can show it before anything is installed.
+
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
 `validateAndPromote` (`platform/validation.ts`), in order:
 
-1. the manifest: schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
-2. bundle `src/index.ts` with its npm dependencies; the bundle exports every declared `name@version`
+1. the manifest: the platform's own fields stamped first (`stampSource`: `source` from the capability's record, or on an install from a file the install's; a builder's `hub` and `minVersion` removed), then schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
+2. bundle `src/index.ts` with its npm dependencies (imports resolve inside the workspace only, links followed, and take no import attribute but `type: "json"`; npm runs on the machine, outside the builder sandbox, so every build asks it for registry versions only and carries no `.npmrc`: `dependencyProblems`, checked on the whole workspace and again by the workbench before npm starts); the bundle exports every declared `name@version`
 3. contract compatibility with the active version; a widgets build changes only widgets; declared callees offer the pinned operations
 4. migrations are append-only and non-destructive
-5. `tests/cases.json` on fresh state through the real runtime; every widget has a case; the UI renders headlessly without errors, in light and dark, and changed widgets render in every size
+5. `tests/cases.json` on fresh state through the real runtime; the sample data (`sample/calls.json`) replays on another fresh state with nothing granted (no network, other tools or model); every widget has a case; the UI renders headlessly without errors, in light and dark, and changed widgets render in every size
 6. migrations dry-run on a copy of live state
 7. freeze the version; an agent's change to a connection, or one that adds operations, stops here as `review` until the owner approves it
-8. back up live state, migrate it, promote, and drop grants the new version no longer asks for; a quick change (manifest only, builder `keep`) keeps the owner's declines for what it still asks for
+8. back up live state, migrate it, promote (an install from a file records where it came from, `setSource`, the record later versions are stamped from), and drop grants the new version no longer asks for; a quick change (manifest only, builder `keep`) keeps the owner's declines for what it still asks for; then an install's sample data replays on the live state when the owner asked (`afterInstall`; a failed call is noted, the tool stays)
 
-A failed build leaves the active version serving. A build whose base is no longer the active version fails with `conflict`. Builds interrupted by a restart are retried once at start. The compatibility rules are in [Writing a tool](../../spec/tools.md#changing-a-published-operation).
+A failed build leaves the active version serving. A build whose base is no longer the active version fails with `conflict`. Builds interrupted by a restart are retried once at start. A build with no builder (an install from a file, the owner's own edit) is never retried: the owner installs or saves again. A build's request keeps only the fields its kind takes (an agent's arguments arrive as it sent them); a retry's marks (`retryOf`, `autoRetryOf`) are Hewn's, and so are `source` and `sample`, trusted only on an install from a file (builder `bundle`). The compatibility rules are in [Writing a tool](../../spec/tools.md#changing-a-published-operation).
 
 **The CLI agents** (`packages/cli/src/builders/cli-agents.ts`). One descriptor per coding-agent CLI Hewn runs (Claude Code, Codex, OpenCode): its names (builder name, harness id, label, binary), how to install and sign in, whether it's signed in, its model list, where a build's home lives, its builder and its intake. The builder wiring (`BUILDERS`), the intake (`cliIntake`), setup's tool status, the harness list, the workbench's cleanup and the model catalogs read it; another agent is one more entry, with its run functions in `cli.ts` and `intake.ts`. (The sandbox profile and the activity formatters still name agents themselves.)
 

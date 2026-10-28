@@ -24,6 +24,7 @@ import {
 import { go, put } from "./frame.js";
 import { grantsSheet } from "./grants.js";
 import { route } from "./router.js";
+import { shareSheet } from "./share.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
 export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo, toolActions };
@@ -68,10 +69,10 @@ const askFix = (c, f) => {
 const askFixLatest = async (c, match, fallback) => askFix(c, (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find(match) ?? fallback);
 const fixButton = (onclick, cls = "sm") => h("button", { class: cls, type: "button", onclick }, "Ask builder to fix this");
 
-/** A tool's actions in a top bar (Info, a version's page): Change… and •••, the same everywhere. */
-function toolActions(c, { rename } = {}) {
+/** A tool's actions in a top bar (Info, a version's page): Change…, then `extra` (Share…), and •••. */
+function toolActions(c, { rename, extra } = {}) {
   const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename })) }, "•••");
-  return h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), more);
+  return h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), extra, more);
 }
 
 /** The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools. */
@@ -89,6 +90,7 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
     "-",
     rename && ["Rename", rename],
     ["Set icon…", () => iconDialog(c).catch(fail)],
+    ["Share…", () => shareSheet(c).catch(fail)],
     ["Export data", () => download(`/api/capabilities/${id}/export`)],
     hidden && show && ["Show on Home", show],
     editHome && ["Edit Home", editHome],

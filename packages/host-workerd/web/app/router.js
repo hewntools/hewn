@@ -15,6 +15,7 @@ import { infoPage } from "./info.js";
 import { intakePage } from "./intake.js";
 import { settingsPage } from "./settings.js";
 import { appPage, runPage } from "./tool.js";
+import { samplePage } from "./share.js";
 import { versionPage, versionsPage } from "./versions.js";
 
 export { route };
@@ -58,6 +59,7 @@ async function route() {
     if (p === "app") return await appPage(id, q);
     if (p === "run") return await runPage(id, q);
     if (p === "c" && sub === "versions") return await versionsPage(id);
+    if (p === "c" && sub === "sample") return await samplePage(id);
     if (p === "c" && sub === "v") return await versionPage(id, Number(arg), q);
     if (p === "c") return await infoPage(id);
     if (p === "new") return await intakePage(q);

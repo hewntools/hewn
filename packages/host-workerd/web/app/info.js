@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
-import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
+import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, modal, setWallpaper, sheetActions, sheetHead, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
+import { retryable } from "./build.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
 import { buildingLabel } from "./home.js";
@@ -12,6 +13,7 @@ import { addScheduleSheet, scheduleRow } from "./schedules.js";
 import { changeHref, download, inlineRename, openCapability, openChange, toolActions } from "./tool-actions.js";
 import { modelSpend, ownCap, quickModelChange, saveOwnCap, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
+import { shareButton } from "./share.js";
 import { madeBy, versionRow } from "./versions.js";
 import { addWidgetSheet, segmented, SIZE_LETTER, widgetPreview } from "./widgets.js";
 
@@ -49,8 +51,42 @@ function statusPills(c, cap, all) {
             ? h("span", { class: "pill with-dot" }, "you said no")
             : h("span", { class: "pill warn with-dot" }, "needs you"),
     latest && h("span", { class: "pill" }, `v${c.version ?? latest.version}`),
-    latest && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
+    // An install from a file says so once, in the origin pill.
+    latest && !(latest.builder === "bundle" && cap.source) && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
     latest && h("span", { class: "pill" }, ago(latest.createdAt)),
+    // T4 Where it came from, when it was installed from outside (Hewn's words): Info only, Home stays clean.
+    cap.origin && h("span", { class: "pill accent" }, cap.origin),
+  );
+}
+
+/** U2 Start over: the Confirm pattern with the id typed, as purge; replays the sample data when asked. */
+function startOverDialog(c, hasSample) {
+  return modal(
+    (close) => {
+      const typed = h("input", { type: "text", autocomplete: "off", placeholder: c.id, "aria-label": `Type ${c.id} to confirm` });
+      const replay = h("input", { type: "checkbox" });
+      const go = h("button", { class: "danger", disabled: true }, "Start over");
+      typed.addEventListener("input", () => (go.disabled = typed.value.trim() !== c.id));
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        try {
+          const r = await api(`/capabilities/${enc(c.id)}/start-over`, { method: "POST", body: { confirm: typed.value.trim(), sample: hasSample && replay.checked } });
+          toast(r.sample?.failed ? `${c.name} started over; sample data stopped at ${r.sample.failed.operation}: ${r.sample.failed.error}` : r.sample ? `${c.name} started over with its sample data` : `${c.name} started over`);
+          close(true);
+        } catch (e) {
+          go.disabled = false;
+          fail(e);
+        }
+      });
+      return [
+        sheetHead(appIcon(c, { size: 44 }), `Start ${c.name} over?`),
+        h("p", { class: "muted" }, "Its data is emptied and the tool stays. A copy of its data is kept aside first."),
+        h("label", { class: "field flush" }, h("span", { class: "label" }, `Type ${c.id} to confirm`), typed),
+        hasSample && h("label", { class: "check" }, replay, " And replay the sample data"),
+        sheetActions(h("button", { onclick: () => close(false) }, "Cancel"), go),
+      ];
+    },
+    { width: 440 },
   );
 }
 
@@ -133,7 +169,7 @@ async function infoPage(id) {
   else if (saidNo.length > 1)
     notices.push(h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `You said no to ${plural(saidNo.length, "thing")} it asks for. It won't run until you allow them or it changes.`), h("button", { class: "sm", onclick: () => withoutIt(saidNo) }, "Ask builder to work without them")));
   if (c.lastBuild?.status === "failed" && !c.building)
-    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), retryable(c.lastBuild) && h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
   if (cap.status.retiredModel) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `${cap.status.retiredModel.model} is no longer available.`), h("button", { class: "sm primary", onclick: () => toolModelSheet(c, { replace: true }).then((ok) => ok || route()) }, "Replace…")));
   else if (cap.status.missingModel && !pending.length) notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, cap.status.missingModel), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set a model")));
   if (cap.status.missingDependencies?.length > 0) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "Depends on operations that no longer exist."), h("a", { class: "btn sm", href: changeHref(c) }, "Change it")));
@@ -291,6 +327,7 @@ async function infoPage(id) {
   // The last write comes from the latest calls in the log (up to 500): when none of them wrote, it says how many it looked at.
   const lastWrite = (d) =>
     !d ? "Couldn't count it right now" : d.lastWriteAt ? `Last write ${ago(d.lastWriteAt)}` : !d.rows ? "Nothing written yet" : d.callsChecked ? `No writes in the last ${d.callsChecked === 1 ? "call" : `${d.callsChecked} calls`}` : "No recent writes";
+  const hasSample = !!data?.sample;
   const dataSection = section(
     "Data",
     h(
@@ -301,6 +338,12 @@ async function infoPage(id) {
         {},
         h("div", { class: "grow" }, h("span", {}, data ? `${plural(data.rows, "row")} · ${plural(tableCount, "table")}` : "Its data"), h("span", { class: "sub" }, lastWrite(data))),
         h("button", { class: "sm", onclick: () => download(`/api/capabilities/${enc(id)}/export`) }, "Export"),
+      ),
+      h(
+        "li",
+        {},
+        h("div", { class: "grow" }, h("span", {}, "Start over"), h("span", { class: "sub" }, "Empty it, keep the tool · a backup is kept")),
+        h("button", { class: "sm danger", onclick: () => startOverDialog(c, hasSample).then((ok) => ok && route()) }, "Start over…"),
       ),
     ),
     { order: 7 },
@@ -365,7 +408,7 @@ async function infoPage(id) {
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
-    backBar("Home", "#/", toolActions(c, { rename: () => inlineRename(c, name) })),
+    backBar("Home", "#/", toolActions(c, { rename: () => inlineRename(c, name), extra: shareButton(c) })),
     sandboxNotice(),
     h(
       "main",
@@ -417,7 +460,7 @@ async function connectionPage(c, cap, all) {
   });
   const needsSetup = !cap.status.ready && (cap.status.pendingGrants.length || cap.status.missingConfig.length);
   view(
-    backBar("Accounts", "#/accounts", toolActions(c, { rename: () => inlineRename(c, name) })),
+    backBar("Accounts", "#/accounts", toolActions(c, { rename: () => inlineRename(c, name), extra: shareButton(c) })),
     sandboxNotice(),
     h(
       "main",

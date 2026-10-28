@@ -6,7 +6,7 @@
 import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { ABI } from "@hewntools/core/manifest.ts";
+import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
@@ -107,7 +107,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -244,14 +244,18 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "capabilities" && id) {
     switch (`${method} ${sub ?? ""}`) {
-      case "GET ":
+      case "GET ": {
+        const m = platform.get(owner, id);
         return {
-          ...platform.get(owner, id),
+          ...m,
+          // Where it came from, when it was installed from outside, in Hewn's words (Info's pill).
+          origin: m.source ? sourceWords(m.source, true) : null,
           versions: platform.registry.versions(id),
           grants: [...platform.registry.grants(id)],
           authorization: platform.authorization(id),
           usedBy: platform.usedBy(id),
         };
+      }
       case "POST invoke": {
         const body = await readJson(req);
         return platform.invoke(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input });
@@ -332,6 +336,22 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const path = url.searchParams.get("path");
         return path ? platform.versionFile(owner, id, version, path) : platform.versionCode(owner, id, version);
       }
+      // Share…: what a version would ship (?version=N), or the file itself (share/download).
+      case "GET share": {
+        const v = url.searchParams.get("version");
+        const version = v ? Number(v) : undefined;
+        if (arg !== "download") return platform.shareCheck(owner, id, version);
+        const { name, bundle } = await platform.shareBundle(owner, id, version);
+        return new Response(body(bundle), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+      }
+      // Info › Data › Start over: empty the data, keep the tool (a backup is kept).
+      case "POST start-over": {
+        const b = await readJson(req);
+        return platform.startOver(owner, id, { confirm: String(b.confirm ?? ""), sample: !!b.sample });
+      }
+      // Write it yourself: sample/calls.json as a new version.
+      case "POST sample":
+        return platform.setSample(owner, id, String((await readJson(req)).text ?? ""));
       // Info › Data: rows per table and the last write.
       case "GET data":
         return platform.dataSummary(owner, id);
@@ -384,6 +404,24 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   if (resource === "accounts") return platform.accounts(owner);
+
+  // Install from a file: upload (staged, read before anything is installed), its code, install, or drop it.
+  if (resource === "bundles") {
+    if (!id && method === "POST") return platform.stageBundle(owner, fromBase64(String((await readJson(req)).data ?? "")), { from: "file" });
+    if (id && !sub && method === "GET") return platform.stagedBundle(owner, id);
+    if (id && sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.bundleFile(owner, id, path) : platform.bundleCode(owner, id);
+    }
+    if (id && sub === "install" && method === "POST") {
+      const b = await readJson(req);
+      return platform.installBundle(owner, id, { name: String(b.name ?? ""), sample: !!b.sample });
+    }
+    if (id && !sub && method === "DELETE") {
+      await platform.dropStaged(owner, id);
+      return { ok: true };
+    }
+  }
 
   if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");
 
@@ -715,7 +753,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status } : null,
+      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder } : null,
       building: building(c.id),
     });
   }
@@ -914,6 +952,8 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildId: b.buildId,
       buildKind: b.kind,
       builder: b.builder,
+      // An install from a file: "from a file", "from Hub" (Activity says "Installed from a file · v1").
+      ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
       ...(b.model ? { buildModel: b.model } : {}),
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,

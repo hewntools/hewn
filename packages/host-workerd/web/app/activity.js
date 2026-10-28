@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Activity: All · Builds · Calls · Access.
 import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, clock, empty, enc, fail, h, kindTag, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
-import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures, waitingPill } from "./build.js";
+import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill } from "./build.js";
 import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
@@ -83,7 +83,7 @@ function activityRow(g, all, showCap) {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
-    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
@@ -91,8 +91,8 @@ function activityRow(g, all, showCap) {
     // Schedule details read "created <id>: op@1 daily 07:00" / "paused <id> after 3 failures": drop the id.
     const sm = /^(\w+) [\w-]+:? ?(.*)$/.exec(g.detail ?? "");
     const schedule = sm ? `Schedule ${sm[1]}${sm[2] ? `: ${sm[2].replace(/@\d+/, "")}` : ""}` : "Schedule";
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule };
-    dot = g.outcome === "purge" || g.outcome === "delete" ? "warn" : "";
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}` };
+    dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
     const subject = actorLabel(g.subject, all);
@@ -229,7 +229,7 @@ async function buildsView(head, only, all0) {
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
-          ? failed.has(b.buildId)
+          ? failed.has(b.buildId) && retryable(b)
             ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
             : kindTag("failed", "danger")
           : b.status === "review"

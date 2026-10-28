@@ -7,6 +7,7 @@ import { grantsSheet } from "./grants.js";
 import { askFeedbackOnOpen, intakeView } from "./intake.js";
 import { route } from "./router.js";
 import { runFailure } from "./schedules.js";
+import { shareButton } from "./share.js";
 import { askFix, capabilityMenu, fixButton, inlineRename, rollbackTo } from "./tool-actions.js";
 
 export { appPage, field, runnableOps, runPage, sidePill };
@@ -15,7 +16,7 @@ export { appPage, field, runnableOps, runPage, sidePill };
 
 /**
  * Bar for an opened tool (its own UI, or the Run view): back, icon + name + version, Change… (pressed
- * while the drawer is open) and •••.
+ * while the drawer is open), Share… and •••, as Info has.
  */
 function appBar(c, { onChange } = {}) {
   const name = h("span", {}, c.name);
@@ -24,7 +25,7 @@ function appBar(c, { onChange } = {}) {
   const el = bar({
     left: c.kind === "connection" ? glassBack(c.name, `#/c/${enc(c.id)}`) : glassBack("Home", "#/"),
     center: h("div", { class: "app-title" }, appIcon(c, { size: 28 }), name, c.version && h("span", { class: "pill" }, `v${c.version}`)),
-    right: h("div", { class: "glass-bar" }, change, more),
+    right: h("div", { class: "glass-bar" }, change, shareButton(c), more),
   });
   return { el, change };
 }

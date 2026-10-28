@@ -7,6 +7,7 @@ import { buildModelWords } from "./build.js";
 import { codeBrowser, versionSource } from "./files.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
+import { shareButton } from "./share.js";
 import { changeHref, rollbackTo, toolActions } from "./tool-actions.js";
 
 export { madeBy, versionRow, versionPage, versionsPage };
@@ -18,7 +19,7 @@ const changed = (v) => String(v.request?.request ?? v.request?.purpose ?? "").sp
  * files (no builder ran), or a quick change (a new tier or model, no builder either).
  */
 const madeBy = (v, all) =>
-  v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;
+  v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "bundle" ? "installed from a file" : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;
 const capital = (s) => s[0].toUpperCase() + s.slice(1);
 
 /** One version as a list row: "v4 · live", what it changed, when and by what; Details opens it. */
@@ -40,8 +41,8 @@ async function load(id) {
   return { cap, all, c, active: c.version ?? cap.versions[0]?.version };
 }
 
-/** Info's top bar, the same on a tool's version pages. */
-const toolBar = (c) => backBar("Home", "#/", toolActions(c));
+/** Info's top bar, the same on a tool's version pages (where Share… opens on the version on screen). */
+const toolBar = (c, version) => backBar("Home", "#/", toolActions(c, { extra: shareButton(c, { version }) }));
 /** Back to the tool's Info: the tool itself, at the top left of the page. */
 const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), href: `#/c/${enc(id)}` }, "‹", capRef(c, id, { size: 28 }));
 
@@ -146,7 +147,7 @@ async function versionPage(id, n, q) {
   if (long) what.addEventListener("click", () => what.classList.toggle("clamped"));
   if (long) what.title = "Click to show all of it, or less";
   frame(
-    toolBar(c),
+    toolBar(c, v.version),
     menu,
     h(
       "div",

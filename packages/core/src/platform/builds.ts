@@ -7,7 +7,7 @@ import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
-import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection } from "../manifest.ts";
+import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { Files } from "../ports.ts";
@@ -84,8 +84,16 @@ type CreateRequest = {
   kind?: "capability" | "connection";
   /** The build it waited for. */
   after?: string;
-  retryOf?: string;
-} & ModelAsk;
+  schedules?: ApprovedSchedule[];
+  /** Installed from a file (or the hub; builder "bundle" only): where it came from, kept as the capability's record once it promotes. */
+  source?: ToolSource;
+  /** Replay its sample data once it's live (builder "bundle" only). */
+  sample?: boolean;
+} & ModelAsk &
+  RetryMarks;
+
+/** What only Hewn writes on a build's request, never its requester: the build it retries. */
+type RetryMarks = { retryOf?: string; autoRetryOf?: string };
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
@@ -173,7 +181,8 @@ export class Builds extends Domain {
     for (const id of this.registry.failInterruptedBuilds()) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
-      if (!b.builder || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
+      // An install from a file has no builder to run again: the owner installs the file again.
+      if (!b.builder || b.builder === "bundle" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
       const requester: Agent = { id: b.requestedBy, kind: owner ? "user" : "agent", scopes: new Set([scopeOf(b.kind)]), capabilities: "*" };
       try {
@@ -340,6 +349,26 @@ export class Builds extends Domain {
     return this.buildView(this.registry.getBuild(buildId)!);
   }
 
+  /**
+   * Platform-internal: a new version with the active version's files and `changes` (path →
+   * contents), through the normal validation and promotion, no builder ("keep"). The owner's own
+   * edit to a file that isn't code: sample data, written by hand.
+   */
+  async filesOnlyModify(owner: Agent, capabilityId: string, changes: Files, request: string): Promise<BuildView> {
+    requireOwner(owner);
+    const cap = this.registry.getCapability(capabilityId);
+    if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${capabilityId} is not active`);
+    this.noChangeOnItsWay(capabilityId, "write the sample data");
+    const base = await this.loadVersion(cap.id, cap.activeVersion);
+    const buildId = newBuildId();
+    this.registry.insertBuild({ id: buildId, capabilityId, kind: "modify", request: { capabilityId, request, filesOnly: Object.keys(changes) }, requestedBy: owner.id, baseVersion: cap.activeVersion, builder: "keep" });
+    await this.workbench.open(buildId, { ...base.files, ...changes });
+    this.buildEvent(buildId, `opened from v${cap.activeVersion}: ${Object.keys(changes).join(", ")} (${request})`, `build ${buildId} [modify ${capabilityId} by ${owner.id}]`);
+    this.setStep(buildId, capabilityId, "spec");
+    this.startBuilder(buildId, "keep");
+    return this.buildView(this.registry.getBuild(buildId)!);
+  }
+
   // ---------- creation / modification ----------
 
   /**
@@ -349,12 +378,11 @@ export class Builds extends Domain {
    */
   async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
     await this.checkEffort(agent, req);
-    const { widgets, conversation: turns, ...rest } = req;
-    const conversation = this.checkConversation(agent, turns);
+    const conversation = this.checkConversation(agent, req.conversation);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
-    if (widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
-    const b = await this.createBuild(agent, rest, conversation);
-    if (!widgets) return b;
+    if (req.widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
+    const b = await this.createBuild(agent, req, conversation);
+    if (!req.widgets) return b;
     // Widgets are their own build, chained after this one: a broken widget never blocks the capability.
     const w = await this.addWidgets(agent, { capabilityId: b.capabilityId, after: b.buildId, ...pickAsk(req), ...(conversation ? { conversation } : {}) });
     return { ...b, widgetsBuildId: w.buildId };
@@ -402,8 +430,18 @@ export class Builds extends Domain {
     if (existing) throw new PlatformError("conflict", `capability '${id}' already exists`);
     if (req.kind !== undefined && req.kind !== "capability" && req.kind !== "connection") throw new PlatformError("invalid_request", 'kind must be "capability" or "connection"');
     const dependsOn = this.dependency(agent, req.after);
-    const { after: _after, ...request } = req;
-    return this.openCreateBuild(agent, id, { ...request, ...(dependsOn ? { after: dependsOn } : {}) }, true, undefined, undefined, dependsOn, conversation);
+    // What a create asks for, and nothing else: an agent's arguments arrive as it sent them, and
+    // where a tool came from (`source`) or its sample data are Hewn's to write, on an install.
+    const request: CreateRequest = {
+      name: req.name,
+      purpose: req.purpose,
+      requirements: req.requirements,
+      ...(req.kind !== undefined ? { kind: req.kind } : {}),
+      ...(req.schedules !== undefined ? { schedules: req.schedules } : {}),
+      ...pickAsk(req),
+      ...(dependsOn ? { after: dependsOn } : {}),
+    };
+    return this.openCreateBuild(agent, id, request, true, undefined, undefined, dependsOn, conversation);
   }
 
   /** The build a new one should wait for (`after`, following retries), or undefined to start now. */
@@ -424,8 +462,8 @@ export class Builds extends Domain {
    * automatic retry: it takes the place of the build it retries, and what queued behind that one
    * waits for it.
    */
-  private queueBehind(capabilityId: string, req: object): string | undefined {
-    if ("autoRetryOf" in req) return undefined;
+  private queueBehind(capabilityId: string, marks: RetryMarks): string | undefined {
+    if (marks.autoRetryOf) return undefined;
     return this.registry.unfinishedBuild(capabilityId)?.id;
   }
 
@@ -501,7 +539,7 @@ export class Builds extends Domain {
    * a name it may not use is an error listing the ones it may, never a quiet default.
    */
   private modelFor(agent: Agent, builder: string, ask: ModelAsk): { model?: string; effort?: string } {
-    if (builder === "keep" || builder.startsWith("copy:")) return {};
+    if (builder === "keep" || builder === "bundle" || builder.startsWith("copy:")) return {};
     const { model, effort } = ask;
     if (model === undefined && effort === undefined) return this.buildModelFor(builder);
     if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) throw new PlatformError("invalid_request", "model must be a model name, like fable or claude-fable-5-1, or default");
@@ -594,16 +632,17 @@ export class Builds extends Domain {
    * Install a capability from a directory the host knows how to copy (`hewn install <dir>`):
    * a create build whose builder copies the files in, then the normal validation. Owner only.
    */
-  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string }): Promise<BuildView> {
+  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean }): Promise<BuildView> {
     requireOwner(owner);
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
     if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
-    return this.openCreateBuild(owner, id, { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})` }, !existing, req.builder, req.seed);
+    const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}) };
+    return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
   }
 
-  /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). */
-  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> {
+  /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). `marks`: a retry's, from `retryBuild`. */
+  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
@@ -612,9 +651,9 @@ export class Builds extends Domain {
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const after = this.dependency(agent, req.after);
-    const dependsOn = after ?? this.queueBehind(cap.id, req);
-    const { after: _after, conversation: _turns, ...rest } = req;
-    const request = { ...rest, ...(after ? { after } : {}) };
+    const dependsOn = after ?? this.queueBehind(cap.id, marks);
+    // What a change asks for, and nothing else (as in createBuild).
+    const request = { capabilityId: cap.id, request: req.request, ...(req.schedules !== undefined ? { schedules: req.schedules } : {}), ...pickAsk(req), ...(after ? { after } : {}), ...marks };
     const buildId = newBuildId();
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
@@ -632,7 +671,7 @@ export class Builds extends Domain {
    * says what to show; without one the builder proposes 1–3 widgets from the capability's data.
    * `after`: the build to wait for (e.g. the create build of the capability itself).
    */
-  async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> {
+  async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation);
@@ -642,9 +681,8 @@ export class Builds extends Domain {
     if (cap.activeVersion && isConnection(this.activeManifest(cap.id))) throw new PlatformError("invalid_request", `${cap.id} is a connection; connections have no widgets`);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
-    const dependsOn = after ?? this.queueBehind(cap.id, req);
-    const { after: _after, conversation: _turns, ...rest } = req;
-    const request = { ...rest, capabilityId: cap.id, request: rest.request?.trim() ?? "", ...(after ? { after } : {}) };
+    const dependsOn = after ?? this.queueBehind(cap.id, marks);
+    const request = { capabilityId: cap.id, request: req.request?.trim() ?? "", ...pickAsk(req), ...(after ? { after } : {}), ...marks };
     const buildId = newBuildId();
     this.registry.transaction(() => {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
@@ -707,12 +745,16 @@ export class Builds extends Domain {
       const ended = cur.status === "failed" || cur.status === "cancelled";
       throw new PlatformError("conflict", `build ${old.id} was already retried as ${cur.id}${ended ? `, which ${cur.status}; retry ${cur.id} instead` : ` (${cur.status}); wait for that one`}`);
     }
-    const req: Record<string, any> = { ...old.request, retryOf: old.id };
+    // No builder ran, so none can run again: an install from a file is installed again, the owner's own edit saved again.
+    if (old.builder === "bundle") throw new PlatformError("conflict", "this was an install from a file; install the file again instead of retrying");
+    if (old.request.filesOnly) throw new PlatformError("conflict", "this saved files you wrote; save them again instead of retrying");
+    const req: Record<string, any> = { ...old.request };
+    delete req.retryOf;
     delete req.autoRetryOf;
+    const marks: RetryMarks = { retryOf: old.id, ...(opts.auto ? { autoRetryOf: old.id } : {}) };
     // An automatic retry (after a restart) runs on what was asked; an agent's own retry is checked
     // again, so a model the owner has unticked since isn't used.
     if (opts.auto) this.trustedAsks.add(req);
-    if (opts.auto) req.autoRetryOf = old.id;
     if (opts.fix) {
       // "Ask builder to fix": the same request plus why the last build failed.
       const f = explainFailure(old.log);
@@ -722,8 +764,8 @@ export class Builds extends Domain {
     }
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
     const next = await (async () => {
-      if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string });
-      if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string });
+      if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string }, marks);
+      if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
       if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
       // An install retries with the same copy builder.
@@ -731,6 +773,7 @@ export class Builds extends Domain {
       const dependsOn = this.dependency(agent, req.after);
       if (!dependsOn) delete req.after;
       else req.after = dependsOn;
+      Object.assign(req, marks);
       return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn);
     })();
     // The conversation that led to the first try goes with the retry.
@@ -891,6 +934,7 @@ export class Builds extends Domain {
       const version = r.version;
       step(`promoted: implementation v${version} is now active`);
       this.d.schedules.applyApprovedSchedules(build, step);
+      await this.d.sharing.afterInstall(build, step);
       this.setStep(build.id, build.capabilityId, this.platform.readiness(build.capabilityId).ready ? "done" : "auth", this.steps.get(build.id)?.tests);
       return { version, log };
     } catch (e) {

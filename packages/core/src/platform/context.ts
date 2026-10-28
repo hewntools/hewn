@@ -21,6 +21,7 @@ import type { Connections } from "./connections.ts";
 import type { Models } from "./models.ts";
 import type { Invocation } from "./invocation.ts";
 import type { Schedules } from "./schedules.ts";
+import type { Sharing } from "./sharing.ts";
 import type { Builds } from "./builds.ts";
 import type { Validation } from "./validation.ts";
 import type { Widgets } from "./widgets.ts";
@@ -66,6 +67,7 @@ export interface Domains {
   models: Models;
   presentation: Presentation;
   schedules: Schedules;
+  sharing: Sharing;
   sessions: Sessions;
   validation: Validation;
   widgets: Widgets;

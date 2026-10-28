@@ -3,14 +3,15 @@
 // tests, the UI and widgets, an upgrade dry run), frozen, and promoted, or held for the owner's review.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { contentHash, encodeVersion, text, versionFiles } from "../files.ts";
-import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, validateManifest } from "../manifest.ts";
+import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
+import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
+import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CodeRef, ExecutionTarget, Files, StateRef } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
-import type { TestCase } from "@hewntools/spec/cases.ts";
+import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
 import { Domain } from "./context.ts";
 
@@ -30,12 +31,24 @@ export class Validation extends Domain {
     } catch (e) {
       return fail(`capability.json is not valid JSON: ${(e as Error).message}`);
     }
+    // The platform's own fields come from its record (or, installing from a file, the install's), never the builder.
+    const source = this.registry.getCapability(id)?.source ?? installedFrom(build) ?? null;
+    const stamped = stampSource(manifest, source);
+    if (JSON.stringify(stamped) !== JSON.stringify(manifest)) {
+      manifest = stamped;
+      workspace["capability.json"] = bytes(JSON.stringify(manifest, null, 2) + "\n");
+      step(source ? `source kept: ${source.id} v${source.version}, ${sourceWords(source)}` : "removed fields the platform writes (source, hub, minVersion)");
+    }
     const manifestErrors = validateManifest(manifest, id);
     if (manifest?.ui?.available && !workspace["ui/index.html"]) manifestErrors.push("ui.available but ui/index.html is missing");
     if (manifestErrors.length) fail("manifest invalid", manifestErrors);
     step("manifest valid");
 
-    // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares
+    // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares.
+    // npm runs on the machine, outside the builder's sandbox: registry versions only, and no npm settings
+    // (read from the whole workspace: an .npmrc never becomes part of a version, but npm would read it).
+    const npmProblems = dependencyProblems(workspace);
+    if (npmProblems.length) fail("npm won't install this tool's dependencies", npmProblems);
     const files = versionFiles(workspace);
     let bundled: { js: string; log: string[] };
     try {
@@ -87,6 +100,7 @@ export class Validation extends Domain {
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };
     const visualState: StateRef = { capabilityId: id, scratch: `visual:${build.id}` };
     const dryRun: StateRef = { capabilityId: id, scratch: `dryrun:${build.id}` };
+    const sampleState: StateRef = { capabilityId: id, scratch: `sample:${build.id}` };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
     try {
@@ -111,6 +125,26 @@ export class Validation extends Domain {
       }
       if (failed.length) fail(`${failed.length} of ${cases.length} test cases failed`, failed);
       step(`${cases.length} test cases passed`);
+
+      // 5a. sample data replays on a fresh state, as installing (or starting over) with it does
+      let sample;
+      try {
+        sample = readSample(files);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+      if (sample) {
+        await this.runtime.dropState(sampleState);
+        await this.runtime.migrate(sampleState, migrations, code);
+        for (const [i, c] of sample.entries()) {
+          try {
+            await this.replayCall(manifest, { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } }, c);
+          } catch (e) {
+            fail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
+          }
+        }
+        step(`sample data replays (${sample.length} calls)`);
+      }
 
       // 5b. the UI renders without errors (on fresh, empty state), with a screenshot for the owner
       let shot = false;
@@ -169,7 +203,7 @@ export class Validation extends Domain {
         step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
       }
     } finally {
-      for (const s of [testState, visualState, dryRun]) await this.runtime.dropState(s).catch(() => {});
+      for (const s of [testState, visualState, dryRun, sampleState]) await this.runtime.dropState(s).catch(() => {});
     }
 
     // 7. freeze; an agent's change that adds operations or changes a connection waits for the owner
@@ -203,9 +237,12 @@ export class Validation extends Domain {
     if (applied.length) step(`migrations applied: ${applied.join(", ")}`);
 
     const before = this.registry.getCapability(id)?.activeVersion ?? null;
+    const installed = installedFrom(build);
     this.registry.transaction(() => {
       this.registry.insertVersion({ capabilityId: id, version: next, manifest, contentHash: code.hash, buildId: build.id });
       this.registry.promote({ id, name: manifest.name, purpose: manifest.purpose, version: next });
+      // Installed from a file: where it came from becomes the record every later version is stamped from.
+      if (installed && !this.registry.getCapability(id)?.source) this.registry.setSource(id, installed);
     });
     // Grants this version no longer asks for go: asking again later means asking the owner again.
     const wanted = new Set(wantedGrants(manifest));
@@ -221,6 +258,27 @@ export class Validation extends Domain {
     if (build.kind === "modify" && build.request.manifestOnly && before) this.registry.carryDeclines(id, before, next, wanted);
     await this.workbench.remove(build.id).catch(() => {});
     return next;
+  }
+
+  /**
+   * One sample call (sample/calls.json), through the contract, with nothing granted: the target
+   * has no hosts (no network), and other tools and the model refuse. Validation and installs both
+   * replay sample data this way.
+   */
+  async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall) {
+    return this.d.invocation.execute(
+      manifest,
+      target,
+      { capabilityId: manifest.id, operation: c.operation, operationVersion: c.version, input: c.input ?? {} },
+      async (call) => {
+        throw new PlatformError("forbidden", `sample data can't call other tools (${call.capabilityId})`);
+      },
+      manifest.requires?.model && abiAtLeast(manifest, "2.2")
+        ? async () => {
+            throw new PlatformError("forbidden", "sample data can't use the model");
+          }
+        : undefined,
+    );
   }
 
   private async runCase(manifest: CapabilityManifest, target: ExecutionTarget, c: TestCase) {
@@ -346,4 +404,12 @@ function shortJson(v: unknown, max = 1200): string {
   };
   const out = JSON.stringify(trim(v, 0), null, 2) ?? "null";
   return out.length > max ? `${out.slice(0, max)}\n…` : out;
+}
+
+/**
+ * Where a build's tool came from: only an install from a file (builder "bundle", which only the
+ * owner's install makes) says, never what an agent put in its request.
+ */
+function installedFrom(build: BuildRow): ToolSource | undefined {
+  return build.builder === "bundle" ? (build.request as { source?: ToolSource }).source : undefined;
 }

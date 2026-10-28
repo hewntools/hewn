@@ -3,12 +3,13 @@
 // (optionally OS-sandboxed), bundles are built with esbuild. Used by the Node host and by the
 // supervisor on behalf of the workerd host.
 import { spawn } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { build as esbuild } from "esbuild";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
+import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
 import { CLI_AGENTS } from "./builders/cli-agents.ts";
 import { forgetSession } from "./builders/cli.ts";
+import { dependencyProblems } from "@hewntools/core/bundle.ts";
 import { isArtefact } from "@hewntools/core/files.ts";
 import type { BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
 import type { VisualCheck } from "./visual.ts";
@@ -59,7 +60,19 @@ export const copyBuilder = (from: string): CapabilityBuilder => ({
   },
 });
 
+/** What npm reads from a project before it installs: its settings (only the root's `.npmrc`), package.json and lockfiles. */
+const NPM_READS = [".npmrc", "package.json", "package-lock.json", "npm-shrinkwrap.json"];
+
+/**
+ * npm runs on the machine itself, not in the builder's sandbox: it doesn't start unless every
+ * dependency comes from the npm registry and the tool carries no npm settings (an `.npmrc` could
+ * name the `git` npm runs). Validation refuses these first, with the reason; this is the last line.
+ */
 function npmInstall(cwd: string): Promise<string[]> {
+  const files: Files = {};
+  for (const p of NPM_READS) if (existsSync(join(cwd, p))) files[p] = new Uint8Array(readFileSync(join(cwd, p)));
+  const problems = dependencyProblems(files);
+  if (problems.length) return Promise.reject(new Error(`npm won't run for this tool: ${problems.join("; ")}`));
   return new Promise((resolve, reject) => {
     const out: string[] = [];
     const child = spawn("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], { cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -68,6 +81,42 @@ function npmInstall(cwd: string): Promise<string[]> {
     child.once("error", reject);
     child.once("close", (code) => (code === 0 ? resolve(["dependencies installed (npm)"]) : reject(new Error(`npm install failed: ${out.join("").slice(-800)}`))));
   });
+}
+
+/** Marks the resolve call `insideWorkspace` makes itself, so it doesn't check its own lookup. */
+const CHECKING = Symbol("inside-workspace");
+
+/**
+ * Keeps a bundle to the workspace's own files: an import that resolves (links followed) outside it
+ * is refused, and so is an import attribute other than `type: "json"` (`with { type: "text" }`
+ * would inline any file as a string). Without it, a tool's code (a builder's, or a shared file's)
+ * could pull the machine's files into its bundle: Hewn's own settings, a key, `~/.ssh`. Its
+ * `node_modules` is inside it, so npm dependencies bundle as before.
+ */
+function insideWorkspace(ws: string): Plugin {
+  const root = realpathSync(ws);
+  return {
+    name: "inside-workspace",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, async (args) => {
+        if (args.pluginData === CHECKING) return undefined;
+        const attrs = Object.entries(args.with ?? {});
+        if (attrs.some(([k, v]) => k !== "type" || v !== "json")) return { errors: [{ text: `import "${args.path}" with { ${attrs.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }: a tool may import JSON with { type: "json" }, nothing else` }] };
+        const r = await build.resolve(args.path, { kind: args.kind, importer: args.importer, namespace: args.namespace, resolveDir: args.resolveDir, with: args.with, pluginData: CHECKING });
+        if (r.errors.length) return { errors: r.errors };
+        if (!r.external && r.namespace === "file") {
+          let real = "";
+          try {
+            real = realpathSync(r.path);
+          } catch {
+            // Not there: refused below, as outside.
+          }
+          if (real !== root && !real.startsWith(root + sep)) return { errors: [{ text: `"${args.path}" is outside the tool's files: a tool's code may only import its own files and its npm dependencies` }] };
+        }
+        return { path: r.path, external: r.external, namespace: r.namespace, sideEffects: r.sideEffects, suffix: r.suffix, pluginData: r.pluginData };
+      });
+    },
+  };
 }
 
 /** Bundle a workspace's src/index.ts (+ npm dependencies) into one ESM module for the isolate runtime. */
@@ -92,6 +141,7 @@ export async function bundleWorkspace(ws: string): Promise<{ js: string; log: st
     external: ["node:*", "cloudflare:*"],
     logLevel: "silent",
     absWorkingDir: ws,
+    plugins: [insideWorkspace(ws)],
   }).catch((e: { errors?: { text: string; location?: { file: string; line: number } }[] }) => {
     throw new Error((e.errors ?? []).map((x) => `${x.location ? `${x.location.file}:${x.location.line}: ` : ""}${x.text}`).join("; ") || String(e));
   });
@@ -127,8 +177,8 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
       forgetSession(buildId);
     },
     async build(job: BuildJob, hooks) {
-      // "keep": the workspace is already the candidate (e.g. an install from given files).
-      if (job.builder === "keep") return;
+      // "keep": the workspace is already the candidate (an install from given files, an owner's edit); "bundle": a tool installed from a file.
+      if (job.builder === "keep" || job.builder === "bundle") return;
       const builder = job.builder.startsWith("copy:") ? copyBuilder(job.builder.slice("copy:".length)) : builders()[job.builder];
       if (!builder) throw Object.assign(new Error(`unknown builder '${job.builder}'`), { unavailable: true });
       await builder.build({

@@ -15,6 +15,7 @@ New to Hewn? Read the [quickstart](quickstart.md), then [concepts](concepts.md).
 - [Connections](connections.md): tools that use your accounts elsewhere (Todoist, GitHub, your bank)
 - [Models](models.md): tools that think, with your own API key and a monthly budget
 - [Your data](data.md): backups, export, restore, moving to a new machine
+- [Sharing tools](sharing.md): a tool as a file, sample data, installing one someone shared, starting over
 - [Using Hewn from anywhere](remote-access.md): a public URL, your phone, passkeys
 
 ## Reference

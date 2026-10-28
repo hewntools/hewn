@@ -195,6 +195,25 @@ body.app-mode #app { height: 100vh; }
 .version-panel[aria-busy] > * { opacity: .6; transition: opacity .15s var(--ease) .2s; }
 .version-panel .thread.kept { max-height: none; overflow: visible; margin-top: 0; }
 .version-log { max-height: none; }
+/* S1/S2 Share…, R1/R3 install, Write it yourself (design pass 3). */
+label.field.flush { margin: 0; }
+.pretty { text-wrap: pretty; }
+.share-eyebrow { padding-bottom: 4px; }
+.share-never { padding-top: 6px; }
+.share-ways.off { opacity: .45; }
+.share-version { width: 90px; }
+.install-source { padding: 0; }
+.drop-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 140px; border: 1.5px dashed var(--border-strong, var(--border)); border-radius: var(--radius-lg); background: var(--surface-2); }
+.drop-zone.over { border-color: var(--accent); background: var(--accent-soft); }
+.code-edit { display: block; width: 100%; min-height: 360px; margin: 0; padding: 10px 14px; border: 0; border-radius: 0; resize: vertical; font: 12.5px/1.75 var(--mono); background: var(--log-bg); color: var(--log-text); }
+dialog.wide-sheet .code-body { max-height: 56vh; }
+.sample-cols { display: flex; gap: var(--s4); align-items: flex-start; }
+.sample-guide { width: 360px; flex: none; }
+.sample-example { max-height: none; margin-bottom: 8px; font-size: 11.5px; white-space: pre; overflow-x: auto; }
+.code-pane > textarea.code-edit { background: var(--log-bg); color: var(--log-text); border: 0; box-shadow: none; }
+.sample-fields { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.sample-field { white-space: nowrap; }
+@media (max-width: 900px) { .sample-cols { flex-direction: column; } .sample-guide { width: 100%; } }
 .list-card { padding: var(--s2) 18px; }
 .list-card > .eyebrow { padding: 10px 0 var(--s1); }
 
