@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { codeFiles, codeText } from "@hewntools/core/code.ts";
 import { diffLines, diffStats, splitLines, toHunks } from "@hewntools/core/diff.ts";
 
 /** Apply a diff to its old side: the result must be the new side. */
@@ -53,4 +54,17 @@ test("hunks: three lines of context, nearby changes merged, git-style starts and
   assert.deepEqual([h[0].oldStart, h[0].oldLines, h[0].newStart, h[0].newLines], [2, 10, 2, 10]);
   assert.deepEqual([h[1].oldStart, h[1].oldLines, h[1].newStart, h[1].newLines], [23, 6, 23, 7]);
   assert.equal(h[1].lines.filter((l) => l.type === "+").length, 1);
+});
+
+test("code: a file changed only in its line endings or final newline is changed, with no lines to show", () => {
+  const enc = (text: string) => new TextEncoder().encode(text);
+  const base = { "a.ts": enc("one\ntwo\n"), "b.ts": enc("x\n"), "c.ts": enc("same\n") };
+  const files = { "a.ts": enc("one\r\ntwo\r\n"), "b.ts": enc("x"), "c.ts": enc("same\n") };
+  assert.deepEqual(codeFiles(files, base).map((f) => [f.path, f.status, f.added, f.removed]), [["a.ts", "changed", 0, 0], ["b.ts", "changed", 0, 0], ["c.ts", "same", 0, 0]]);
+  for (const path of ["a.ts", "b.ts"]) assert.deepEqual([codeText(path, files, base).status, codeText(path, files, base).hunks], ["changed", []]);
+});
+
+test("code: only a set's own paths are files (toString, __proto__ are not)", () => {
+  const files = { "a.ts": new TextEncoder().encode("a") };
+  for (const path of ["toString", "__proto__", "constructor"]) assert.throws(() => codeText(path, files, files), /no file/);
 });

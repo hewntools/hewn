@@ -258,6 +258,22 @@ describe("web client (owner surface)", () => {
       assert.ok(logs.json.lines.some((l: string) => / web record_run ok /.test(l)), "calls attributed to the web owner");
     });
 
+    test("code browser: a version's files, or one of them (&path=); owner only", async () => {
+      const code = (q: string, o: Parameters<typeof api>[1] = {}) => api(`/capabilities/running-log/code?${q}`, o);
+      assert.equal((await code("version=1", { cookie: "" })).status, 401, "owner only");
+      for (const q of ["", "version=", "version=abc", "version=0", "version=1.5"]) assert.equal((await code(q)).status, 400, q);
+      const list = await code("version=1");
+      assert.equal(list.status, 200, JSON.stringify(list.json));
+      assert.deepEqual([list.json.version, list.json.base], [1, null]);
+      assert.ok(list.json.files.some((f: any) => f.path === "src/index.ts" && f.status === "same" && !f.binary));
+      const file = await code("version=1&path=src%2Findex.ts");
+      assert.equal(file.status, 200);
+      assert.deepEqual([file.json.path, file.json.status, file.json.hunks], ["src/index.ts", "same", []]);
+      assert.match(file.json.text, /export const operations/);
+      for (const path of ["nope.ts", "toString"]) assert.equal((await code(`version=1&path=${path}`)).status, 404, path);
+      assert.equal((await code("version=99")).status, 404);
+    });
+
     test("secrets and grants from the web: set, approve, revoke", async () => {
       assert.equal((await api("/capabilities/secret-echo/secrets/API_TOKEN", { method: "PUT", body: { value: "s3cret" } })).status, 200);
       const page = await api("/capabilities/secret-echo");

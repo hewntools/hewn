@@ -62,7 +62,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | --- | --- |
 | `discovery.ts` | `list` and `get`: the capabilities a principal can see |
 | `presentation.ts` | a tool's name, icon, hue and saturation as the owner sets them |
-| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import |
+| `data.ts` | a tool's lifecycle and data, owner only: delete (archive) and restore, rollback, purge, export and import; the code browser's view of a version: each file against the version its build started from (after a Restore, the restored one, not the one before) |
 | `grants.ts` | readiness, grants, secrets and config, delegated agents, the owner's confirmation of agents' destructive calls |
 | `connections.ts` | Accounts: a connection's sign-in step and health |
 | `sessions.ts` | tool UI tickets and sessions, web sessions, the public URL, passkeys |
@@ -78,7 +78,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 
 Each extends `Domain` (`context.ts`): the ports, the event bus, the cache of loaded versions, and the lookups every domain makes (`activeManifest`, `loadVersion` …). A domain calls another domain's public methods through the facade (`this.platform.readiness()`), so a wrapper on a `Platform` method sees every call from another domain (a domain's calls to its own methods stay inside it), and reaches what `Platform` doesn't offer through `this.d` (`this.d.grants.offers()`). Settings a host or a test may change after start (`confirmWaitMs`, `logRetentionDays` …) stay on `Platform` and are read from it each time.
 
-The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store), `docs.ts` (Hewn's docs for `hewn_docs` and the intake: sections and search) and the rest. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
+The lower-level modules sit next to `platform.ts`: `registry.ts` (the owner's database), `models.ts` (provider adapters, the catalog), `widgets.ts` (templates), `schedules.ts` (cadences, the store), `docs.ts` (Hewn's docs for `hewn_docs` and the intake: sections and search), `diff.ts` (a line diff and git-style hunks), `code.ts` (the code browser's files against a base: status, lines +n −n, one file's hunks) and the rest. `platform.ts` re-exports the domains' types and helpers, so hosts and tests import from `@hewntools/core/platform.ts` only.
 
 Principals (`auth.ts`): `user` (the owner, from the web client or the CLI), `agent` (an MCP client), `ui` (a tool's own UI, limited to that tool), `capability` (a `ctx.call`), `schedule` and `widget`.
 

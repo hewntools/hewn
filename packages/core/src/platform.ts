@@ -44,6 +44,7 @@ export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState
 export { matches } from "./platform/validation.ts";
 export { ATTACHMENT_LIMITS, type AttachmentWithData, attachmentRefs } from "./platform/attachments.ts";
 export { type InstructionScope, type Instruction } from "./platform/instructions.ts";
+export { type CodeFile, type CodeText, codeFiles, codeText } from "./code.ts";
 
 export interface PlatformOptions {
   /** Platform metadata (registry, agents in the workerd host). */

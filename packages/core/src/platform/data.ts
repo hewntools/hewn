@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A capability's lifecycle and data, owner only: delete (archive) and restore, roll back to an earlier
-// version, purge for good, and export and import its data.
+// version, purge for good, export and import its data, and its versions' code for the code browser
+// (each file against the version it was built on; the diffing itself is in code.ts).
 import { type Agent, requireOwner } from "../auth.ts";
+import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
-import { diffLines, diffStats, type Hunk, splitLines, toHunks } from "../diff.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
 import { Domain } from "./context.ts";
@@ -162,24 +163,32 @@ export class Data extends Domain {
   }
 
   /**
-   * The code browser (U4): a version's files, each with what changed since the version before
-   * (added, changed, removed, and lines +n −n). Owner only.
+   * The code browser (U4): a version's files, each with what changed since its base (added,
+   * changed, removed, and lines +n −n). Owner only.
    */
   async versionCode(owner: Agent, capabilityId: string, version: number): Promise<{ version: number; base: number | null; files: CodeFile[] }> {
-    requireOwner(owner);
-    this.visibleActive(owner, capabilityId);
-    const v = await this.loadVersion(capabilityId, version);
-    const base = version > 1 && this.registry.getVersion(capabilityId, version - 1) ? await this.loadVersion(capabilityId, version - 1) : null;
-    return { version, base: base ? version - 1 : null, files: codeFiles(v.files, base?.files ?? null) };
+    const { files, base, baseFiles } = await this.codeOf(owner, capabilityId, version);
+    return { version, base, files: codeFiles(files, baseFiles) };
   }
 
-  /** One file of a version: its text, and the hunks against the version before (none for a first version). */
+  /** One file of a version: its text, and the hunks against its base (none for a first version). */
   async versionFile(owner: Agent, capabilityId: string, version: number, path: string): Promise<CodeText> {
+    const { files, baseFiles } = await this.codeOf(owner, capabilityId, version);
+    return codeText(path, files, baseFiles);
+  }
+
+  /**
+   * A version's files and its base's: the version its build started from (after a Restore, the
+   * restored one), else the one before. Read without keeping them decoded: only what runs stays
+   * in memory, and the owner may look through every version a tool ever had.
+   */
+  private async codeOf(owner: Agent, capabilityId: string, version: number) {
     requireOwner(owner);
     this.visibleActive(owner, capabilityId);
-    const v = await this.loadVersion(capabilityId, version);
-    const base = version > 1 && this.registry.getVersion(capabilityId, version - 1) ? await this.loadVersion(capabilityId, version - 1) : null;
-    return codeText(path, v.files, base?.files ?? null);
+    const v = await this.loadVersion(capabilityId, version, { keep: false });
+    const n = this.registry.getBuild(v.row.buildId)?.baseVersion ?? version - 1;
+    const base = n >= 1 && n < version && this.registry.getVersion(capabilityId, n) ? n : null;
+    return { files: v.files, base, baseFiles: base ? (await this.loadVersion(capabilityId, base, { keep: false })).files : null };
   }
 
   /** Deleted (archived) capabilities, newest first: what the owner can restore. */
@@ -200,65 +209,3 @@ export class Data extends Domain {
 }
 
 const latestOp = (m: CapabilityManifest, name: string) => m.operations.filter((o) => o.name === name).sort((a, b) => b.version - a.version)[0];
-
-// ---------- the code browser's view of a set of files ----------
-
-export interface CodeFile {
-  path: string;
-  size: number;
-  binary: boolean;
-  /** Against the base: "same" when there's no base. */
-  status: "added" | "changed" | "removed" | "same";
-  added: number;
-  removed: number;
-}
-
-export interface CodeText {
-  path: string;
-  binary: boolean;
-  /** The file as it is (empty for a removed one). */
-  text: string;
-  hunks: Hunk[];
-  status: CodeFile["status"];
-}
-
-const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
-/** Text, or null for a file that isn't (images, fonts). */
-function asText(b: Uint8Array | undefined): string | null {
-  if (!b) return "";
-  if (b.includes(0)) return null;
-  try {
-    return strict.decode(b);
-  } catch {
-    return null;
-  }
-}
-
-const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
-
-/** Every file (and every file the base had that's gone), sorted with the changed ones first. */
-export function codeFiles(files: Record<string, Uint8Array>, base: Record<string, Uint8Array> | null): CodeFile[] {
-  const paths = [...new Set([...Object.keys(files), ...Object.keys(base ?? {})])].sort();
-  const out = paths.map((path): CodeFile => {
-    const now = files[path];
-    const before = base?.[path];
-    const status: CodeFile["status"] = !base ? "same" : !before ? "added" : !now ? "removed" : same(now, before) ? "same" : "changed";
-    const t = asText(now);
-    const binary = t === null || asText(before) === null;
-    const stats = status === "same" || binary ? { added: 0, removed: 0 } : diffStats(diffLines(splitLines(asText(before) ?? ""), splitLines(t ?? "")));
-    return { path, size: (now ?? before)!.length, binary, status, ...stats };
-  });
-  return [...out.filter((f) => f.status !== "same"), ...out.filter((f) => f.status === "same")];
-}
-
-/** One file's text and its hunks against the base. */
-export function codeText(path: string, files: Record<string, Uint8Array>, base: Record<string, Uint8Array> | null): CodeText {
-  const now = files[path];
-  const before = base?.[path];
-  if (!now && !before) throw new PlatformError("not_found", `no file ${path}`);
-  const t = asText(now);
-  const b = asText(before);
-  const status: CodeFile["status"] = !base ? "same" : !before ? "added" : !now ? "removed" : same(now, before) ? "same" : "changed";
-  if (t === null || b === null) return { path, binary: true, text: "", hunks: [], status };
-  return { path, binary: false, text: t, hunks: base && status !== "same" ? toHunks(diffLines(splitLines(b), splitLines(t))) : [], status };
-}
