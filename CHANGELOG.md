@@ -31,6 +31,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - A change waiting for the one before it says so the same way in the change panel, the Inbox and Activity: "waiting for the change before it".
 - Docs: [Sharing tools](docs/sharing.md) is new; concepts, your data (Export or Share…), the web client, building tools, the threat model and the internal architecture and security notes cover sharing and the Hub.
 - For hosts: `GET /api/capabilities/:id/data` (owner only) gives a tool's rows per table, counted without reading them, and its last write in its latest 500 calls (`callsChecked` says how many there were); the runtime port gains `countState`. `POST /api/schedules/:id/run` runs a schedule once now.
+- **Fixed:** `hewn serve` that can't start workerd (its port taken, say) stops with "workerd did not start" instead of staying up without it, restarting workerd every 30 seconds. Hewn stopped hard while starting no longer leaves a half-written `format.json` that kept it from starting again ("Unexpected end of JSON input"), and the CLI never reads a half-written `supervisor.json`.
 
 ## 0.4.8 (2026-10-24)
 

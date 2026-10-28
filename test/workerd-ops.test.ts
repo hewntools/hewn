@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Operations on the real workerd host: restarts mid-build, backup/restore, a killed supervisor, data format.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +28,7 @@ describe("operations on the workerd host", () => {
     const seed = await h.sv.admin("install", { name: "Running Log", purpose: "runs", dir: SEED, wait: true });
     assert.equal(seed.status, "promoted");
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("workerd restarted mid-build: the build is failed as interrupted and retried once, and finishes", async () => {
     const claude = await h.agent("claude-code", ["discover", "invoke", "create", "modify"]);
@@ -74,25 +74,54 @@ describe("hewn serve killed hard", () => {
   test("a new hewn serve clears the workerd the dead one left behind and starts", async () => {
     const root = mkdtempSync(join(tmpdir(), "hewn-kill-"));
     const port = await freePort();
-    const env = { ...process.env, HEWN_HOME: root, HEWN_PORT: String(port), HEWN_KEY_SOURCE: "file" };
+    // A public port of its own, checked free: the default (port + 1) can be another process's on a busy machine.
+    const env = { ...process.env, HEWN_HOME: root, HEWN_PORT: String(port), HEWN_PUBLIC_PORT: String(await freePort()), HEWN_KEY_SOURCE: "file" };
     const cli = join(import.meta.dirname, "..", "packages", "cli", "src", "cli.ts");
-    const serve = () => spawn(process.execPath, ["--disable-warning=ExperimentalWarning", cli, "serve", "--no-sandbox"], { env, stdio: "ignore" });
+    const output: string[] = [];
+    const serve = () => {
+      const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", cli, "serve", "--no-sandbox"], { env, stdio: ["ignore", "ignore", "pipe"] });
+      child.stderr!.on("data", (b) => output.push(String(b)));
+      return child;
+    };
+    const gone = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+    const exited = (child: ChildProcess) => (gone(child) ? Promise.resolve() : new Promise((r) => child.once("exit", r)));
+    // Started once supervisor.json names it: hewn serve writes it last, whole. Killed before that, it would
+    // die mid-start, which isn't what this is about. A loaded machine gets a minute.
+    const started = (child: ChildProcess) =>
+      until(() => {
+        if (gone(child)) throw new Error(`hewn serve exited (${child.exitCode ?? child.signalCode})`);
+        try {
+          return JSON.parse(readFileSync(join(root, "supervisor.json"), "utf8")).pid === child.pid;
+        } catch {
+          return false; // not written yet
+        }
+      }, 60_000).catch((e) => {
+        throw new Error(`${(e as Error).message}; its log:\n${output.join("")}`);
+      });
     // The test home uses a file key, not the Keychain.
     mkdirSync(root, { recursive: true });
     const first = serve();
+    let second: ChildProcess | undefined;
     try {
-      await until(() => health(`http://127.0.0.1:${port}`));
+      await started(first);
       first.kill("SIGKILL");
-      await new Promise((r) => setTimeout(r, 300));
-      const second = serve();
-      try {
-        await until(() => existsSync(join(root, "supervisor.json")) && JSON.parse(readFileSync(join(root, "supervisor.json"), "utf8")).pid === second.pid, 20_000);
-        assert.ok(await health(`http://127.0.0.1:${port}`));
-      } finally {
-        second.kill("SIGTERM");
-        await new Promise((r) => second.once("exit", r));
-      }
+      await exited(first);
+      second = serve();
+      await started(second);
+      assert.ok(await health(`http://127.0.0.1:${port}`));
     } finally {
+      for (const c of [first, second]) {
+        if (!c || gone(c)) continue;
+        c.kill("SIGTERM");
+        await exited(c);
+      }
+      // The dead one's workerd, if no second hewn serve got to clear it: it would run on, orphaned.
+      try {
+        const left = Number(readFileSync(join(root, "workerd", "workerd.pid"), "utf8"));
+        if (spawnSync("ps", ["-p", String(left), "-o", "command="], { encoding: "utf8" }).stdout.includes(root)) process.kill(left, "SIGKILL");
+      } catch {
+        // none, or gone already
+      }
       rmSync(root, { recursive: true, force: true });
     }
   });

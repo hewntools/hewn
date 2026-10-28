@@ -9,7 +9,7 @@
   },
   "scripts": {
     "hewn": "node --disable-warning=ExperimentalWarning packages/cli/src/cli.ts",
-    "test": "node --disable-warning=ExperimentalWarning --test --test-timeout=180000 'test/**/*.test.ts'",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-timeout=180000 --test-force-exit 'test/**/*.test.ts'",
     "typecheck": "tsc && tsc -p tsconfig.workerd.json",
     "e2e": "node --disable-warning=ExperimentalWarning test/e2e/first-run.e2e.ts",
     "spec:schemas": "node --disable-warning=ExperimentalWarning spec/build-schemas.ts",

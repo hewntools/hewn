@@ -98,7 +98,7 @@ describe("composition on the workerd host", () => {
     const seed = await h.sv.admin("install", { name: "Running Log", purpose: "runs", dir: SEED, wait: true });
     assert.equal(seed.status, "promoted", seed.log.join("\n"));
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("write composition: not ready until authorized; then idempotent, provenance recorded, chain logged", async () => {
     const r = await build(feeder, FEEDER_TS, feederCases);

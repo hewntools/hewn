@@ -37,7 +37,7 @@ describe("trust on the workerd host", () => {
       assert.equal(b.status, "promoted", b.log.join("\n"));
     }
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("secrets: encrypted at rest, delivered to the capability, survive a restart; the key isn't in the data dir", async () => {
     const value = "TOPSECRET-" + "x".repeat(20);
