@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.10 (unreleased)
+
+- For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
+
 ## 0.4.9 (2026-10-28)
 
 - **Share a tool as a file.** **Share…** (in the top bar of Info and of the open tool, or the tool's menu; connections too) shows what the file would hold before you download it: anything that looks personal or like a key, by file and line, partly hidden. One of your own stored keys in the code stops it (Share… lists each, and **Change…** asks the builder to take them out); your other settings found in it are flagged for you to look at. The file holds one version's code, tests, migrations, screens and sample data; Hewn never puts your data, keys, settings, conversations or logs in it. `hewn share <id>`. See [Sharing tools](docs/sharing.md).

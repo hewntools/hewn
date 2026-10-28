@@ -330,6 +330,20 @@ describe("platform-assigned builder", () => {
     await assert.rejects(platform.retryBuild(t.claude, retried.buildId), (e) => e instanceof PlatformError && e.code === "conflict");
   });
 
+  test("each retry tells the builder the first build it retries, so a host can count the chain as one", async () => {
+    let tries = 0;
+    const builder = fakeBuilder("fake", (job) => {
+      if (++tries < 3) throw Object.assign(new Error("not logged in"), { unavailable: true });
+      cpSync(SEED, job.workspace, { recursive: true });
+    });
+    useBuilder(builder);
+    const first = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
+    const second = await platform.settle((await platform.retryBuild(t.claude, first.buildId)).buildId);
+    const third = await platform.settle((await platform.retryBuild(t.claude, second.buildId)).buildId);
+    assert.deepEqual([first.status, second.status, third.status], ["failed", "failed", "promoted"]);
+    assert.deepEqual(builder.jobs.map((j) => j.retryOf), [undefined, first.buildId, first.buildId]);
+  });
+
   test("retrying a failed modify starts from the current version", async () => {
     await installSeed(t.platform);
     let fail = true;

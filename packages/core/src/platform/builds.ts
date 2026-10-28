@@ -1016,6 +1016,9 @@ export class Builds extends Domain {
     const history: string[] = [];
     let feedback: string | undefined;
     const tag = `build ${buildId} [${build.kind} ${build.capabilityId}, requested by ${build.requestedBy}]`;
+    // The first build of the chain this one retries, so a host can count the chain as one build.
+    let retryOf: string | undefined;
+    for (let id = build.request.retryOf; typeof id === "string"; id = this.registry.getBuild(id)?.request.retryOf) retryOf = id;
 
     // Cancelled: cancelBuild already recorded it; just stop.
     const cancelled = () => signal.aborted;
@@ -1039,7 +1042,7 @@ export class Builds extends Domain {
       try {
         const asked = this.registry.buildModel(buildId);
         await this.workbench.build(
-          { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}) },
+          { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(retryOf ? { retryOf } : {}), feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}) },
           {
             signal,
             onActivity: (line) => {

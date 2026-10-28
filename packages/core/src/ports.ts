@@ -117,6 +117,8 @@ export interface BuildJob {
   /** Which builder ("claude", "codex", or a host-provided one such as "copy:<dir>"). */
   builder: string;
   attempt: number;
+  /** The first build of the chain this one retries (Retry or Ask builder to fix, by hand or after a restart). Unset: not a retry. */
+  retryOf?: string;
   /** Validation log from the previous attempt, if it failed. */
   feedback?: string;
   /** The model to build with: a name the builder's CLI takes (an alias or a full name). Unset: the CLI's default. */
