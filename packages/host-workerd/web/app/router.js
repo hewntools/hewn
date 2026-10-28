@@ -3,7 +3,7 @@
 import { empty, errorBox, h, setWallpaper } from "../kit.js";
 // No module reads another's binding as it loads, so the order below is free; the client starts at the end of this module.
 import "./appearance.js";
-import { holdFirstDraw, hues, leaving, loadSettings, page, releaseHeld } from "./frame.js";
+import { holdDraws, hues, leaving, loadSettings, page, releaseHeld } from "./frame.js";
 import { accountsPage } from "./accounts.js";
 import { activityPage } from "./activity.js";
 import { passkeyPage } from "./add-passkey.js";
@@ -48,10 +48,11 @@ async function route() {
   if (p !== "" && !refresh) setWallpaper(await hues(), { dim: true });
   if (n !== routing) return;
   // Any page (a new one, or this one again) keeps the one on screen until it's ready: no skeleton
-  // flashed in between. A refresh waits for its content however long it takes.
-  holdFirstDraw(true);
+  // flashed in between. A refresh waits for its content however long it takes. The hold is this
+  // route's: a later one takes it over, and only this one's timer or end lets it go.
+  holdDraws(n);
   const bar = setTimeout(() => n === routing && document.body.classList.add("routing"), BAR_MS);
-  if (!refresh) setTimeout(() => n === routing && releaseHeld(), HOLD_MS);
+  if (!refresh) setTimeout(() => releaseHeld(n), HOLD_MS);
   try {
     if (p === "") return await home();
     if (p === "app") return await appPage(id, q);
@@ -71,7 +72,7 @@ async function route() {
     if (n === routing) page("", 680, errorBox(e), h("a", { class: "btn self-start", href: "#/" }, "‹ Home"));
   } finally {
     clearTimeout(bar);
-    if (n === routing) (releaseHeld(), document.body.classList.remove("routing"), (shown = location.hash));
+    if (n === routing) (releaseHeld(n), document.body.classList.remove("routing"), (shown = location.hash));
   }
 }
 

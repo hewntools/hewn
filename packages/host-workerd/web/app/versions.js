@@ -4,7 +4,7 @@
 // from here and Restore. Both are pages under the main top bar, as Settings is.
 import { actorLabel, ago, api, builderLabel, capRef, caps, confirmDialog, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { buildModelWords } from "./build.js";
-import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
+import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
 import { changeHref, rollbackTo, toolActions } from "./tool-actions.js";
 
@@ -46,8 +46,10 @@ const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), h
 
 /** U3 Every version of a tool, newest first. */
 async function versionsPage(id) {
+  const here = stillHere();
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("40%", "90%", "90%")));
   const { cap, all, c, active } = await load(id);
+  if (!here()) return;
   view(
     toolBar(c),
     sandboxNotice(),
@@ -74,12 +76,14 @@ const PARTS = [
  * its title, which leads with the version.
  */
 async function versionPage(id, n, q) {
+  const here = stillHere();
   const frame = (top, side, ...content) => view(top, sandboxNotice(), h("main", { class: "settings-layout version-layout" }, side, h("div", { class: "settings-main" }, content)));
   frame(backBar("Home", "#/"), h("nav", { class: "side-list" }), skeleton("40%", "30%", "90%", "70%"));
   const { cap, all, c, active } = await load(id);
   const v = cap.versions.find((x) => x.version === n);
   if (!v) throw new Error(`${cap.name} has no version ${n}`);
   const build = v.buildId ? await api(`/builds/${enc(v.buildId)}`).catch(() => null) : null;
+  if (!here()) return;
   const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
   const who = actorLabel(v.requestedBy, all);
   const panel = h("div", { class: "card version-panel" });

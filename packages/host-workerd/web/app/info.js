@@ -2,7 +2,7 @@
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
 import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
-import { backBar, go, hues, put, sandboxNotice, view } from "./frame.js";
+import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
 import { buildingLabel } from "./home.js";
 import { plural } from "./intake.js";
@@ -59,10 +59,13 @@ const section = (title, body, { action, order } = {}) => h("section", { class: "
 
 
 async function infoPage(id) {
+  const here = stillHere();
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("50%", "30%", "90%", "70%")));
   const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
+  if (!here()) return;
   const c = all.get(id) ?? { id, name: cap.name, ui: !!cap.ui?.available, ready: cap.status.ready, kind: cap.kind };
   setWallpaper(await hues([tintOf(c)]));
+  if (!here()) return;
   if (cap.kind === "connection") return connectionPage(c, cap, all);
   const req = cap.requires?.model;
   const [scheds, home, m, instr, data] = await Promise.all([
@@ -72,6 +75,7 @@ async function infoPage(id) {
     api(`/capabilities/${enc(id)}/instructions`).catch(() => ({ lines: [] })),
     api(`/capabilities/${enc(id)}/data`).catch(() => null),
   ]);
+  if (!here()) return;
   const ops = runnableOps(cap);
   const items = cap.authorization?.items ?? [];
   const config = cap.authorization?.config ?? [];

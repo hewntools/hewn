@@ -3,7 +3,7 @@
 import { api, appIcon, caps, enc, fail, glyphCells, h, invalidateCaps, menuFrom, openMenu, setWallpaper, skeleton, tintOf, withContextMenu } from "../kit.js";
 import { agentTile, agentTileOf, buildJobs, jobPicker } from "./agents.js";
 import { connectDialog } from "./connect.js";
-import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, topBar, view } from "./frame.js";
+import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, stillHere, topBar, view } from "./frame.js";
 import { inboxBtn } from "./inbox.js";
 import { modelChip } from "./intake.js";
 import { capabilityMenu, inlineRename, openCapability } from "./tool-actions.js";
@@ -41,11 +41,15 @@ const modelWords = (m = {}, catalog) => {
 async function home({ editing = false } = {}) {
   // Redrawn in place (a layout save, a build starting or ending): stop the last drawing's timers first.
   for (const fn of leaving.splice(0)) fn();
-  // A loading draw (held back while the page before stays on screen, see view()).
-  view(topBar("home"), h("main", { class: "home", "aria-busy": "true" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
+  const here = stillHere();
+  // A loading draw (held back while the page before stays on screen, see view()). Redrawn in place,
+  // the grid on screen stays until the new one is ready instead.
+  if (!document.querySelector("#app > main.home:not([aria-busy]) .home-grid"))
+    view(topBar("home"), h("main", { class: "home", "aria-busy": "true" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
   // Connections live under Accounts, not on Home.
   const onHome = (cs) => [...cs.values()].filter((c) => c.kind !== "connection");
   const [all0, homeData] = await Promise.all([caps(true), api("/home").catch(() => ({ layout: [], gallery: [] }))]);
+  if (!here()) return;
   const list = onHome(all0);
   setWallpaper(list.map(tintOf), { dim: !list.length });
   // The first run's moment screen, until a tool exists (even after leaving it once).
@@ -53,6 +57,7 @@ async function home({ editing = false } = {}) {
   // Home arrives in one step: the icons' glyphs and the widget renderer first (a moment at most),
   // instead of empty tiles, then glyphs, then widgets.
   await Promise.race([Promise.all([...list.filter((c) => c.iconKind === "glyph").map(glyphCells), widgetRenderer()]), new Promise((r) => setTimeout(r, 400))]).catch(() => {});
+  if (!here()) return;
 
   // One grid: the owner's layout of icons and widgets, then whatever it doesn't place yet (new
   // tools land last, next to "New"). Tools hidden from Home keep their place, hidden, for search.
@@ -271,8 +276,10 @@ const STARTERS = [
  * No Skip: leaving without building shows it again until a tool exists.
  */
 async function firstRun() {
+  const here = stillHere();
   setWallpaper([125, 250], { dim: true });
   const machine = await hewnMachine();
+  if (!here()) return;
   const agentsCard = h("div", { class: "card first-card" }, skeleton("60%"));
   const jobsCard = h("div", { class: "card first-card" }, skeleton("50%"));
   const make = h("div", { class: "stack-sm first-make" });

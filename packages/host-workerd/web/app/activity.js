@@ -2,7 +2,7 @@
 // Activity: All · Builds · Calls · Access.
 import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, clock, empty, enc, fail, h, kindTag, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures, waitingPill } from "./build.js";
-import { go, hues, onLeave, page, put } from "./frame.js";
+import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
 export { activityPage, activityRow, groupItems };
@@ -148,12 +148,15 @@ const ACTIVITY_VIEWS = [
 ];
 
 async function activityPage(q) {
+  const here = stillHere();
   page("", 760, skeleton());
   const capability = q.get("capability") ?? "";
   const agent = q.get("agent") ?? "";
   const viewKey = ACTIVITY_VIEWS.some(([k]) => k === q.get("view")) ? q.get("view") : "all";
   const [all, agents] = await Promise.all([caps(true), api("/agents").catch(() => [])]);
+  if (!here()) return;
   setWallpaper(await hues(capability && all.get(capability) ? [tintOf(all.get(capability))] : []));
+  if (!here()) return;
   const setQ = (k, v) => {
     const p = new URLSearchParams({ view: viewKey, capability, agent });
     v ? p.set(k, v) : p.delete(k);
@@ -205,6 +208,7 @@ async function activityPage(q) {
  * progress bars. Live while something builds.
  */
 async function buildsView(head, only, all0) {
+  const here = stillHere();
   const load = () => Promise.all([api("/builds?n=200&brief=1"), caps(true).catch(() => all0)]);
   const root = h("div", { class: "card timeline builds" });
   const render = (builds, all) => {
@@ -252,6 +256,7 @@ async function buildsView(head, only, all0) {
     return live.length > 0;
   };
   const [b0, a0] = await load();
+  if (!here()) return;
   page("", 760, head, root);
   let timer;
   const poll = async () => {

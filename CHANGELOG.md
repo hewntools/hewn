@@ -11,7 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **The change drawer's width drags** by the handle on its left edge (no narrower than its box needs), and stays as you left it. **Continue** on the last conversation lands at the box, however long the conversation.
 - **The authorize sheet's button says Deny** when every switch is off.
 - **Try again on a schedule's failed run** runs it once now, as the schedule does, to see whether it was a passing problem or a fix worked. A success clears its failures; one paused after failing stays paused until you switch it on.
-- **Pages change in one step:** the page on screen stays until the next one is ready (up to 0.6 s, with a thin bar moving along the top; then its loading state), instead of a skeleton flashing in between and the page building downwards.
+- **Pages change in one step:** the page on screen stays until the next one is ready (up to 0.6 s, with a thin bar moving along the top; then its loading state), instead of a skeleton flashing in between and the page building downwards. A slow page you've already left no longer draws over the one you went to, and Home redrawing itself keeps its grid on screen.
 - **Changing a tool's model tier waits until the new version is live,** so Info shows the new tier (it showed the old one until a reload).
 - **Delete asks you to type the tool's id,** as Start over does.
 - **Got what you asked for?** is a quiet strip at the foot of the tool instead of a toast.

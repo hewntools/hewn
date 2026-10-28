@@ -29,7 +29,7 @@ import {
 } from "../kit.js";
 import { mmss } from "./build.js";
 import { connectDialog } from "./connect.js";
-import { brandTile, go, hewnMachine, hues, page, put, setSettings, settings } from "./frame.js";
+import { brandTile, go, hewnMachine, hues, page, put, setSettings, settings, stillHere } from "./frame.js";
 import { glyphTile, PALETTE_GLYPHS } from "./glyphs.js";
 import { buildsChosen, jobModelOf, modelWords, saveBuildModel } from "./home.js";
 import { pollInbox } from "./inbox.js";
@@ -256,10 +256,13 @@ async function agentModelsSheet(t) {
 
 /** L1 Agents: one row per agent identity, with the parts it plays (role chips). */
 async function agentsPage() {
+  const here = stillHere();
   page("agents", 720, skeleton());
   const [agents, all, jobs, machine] = await Promise.all([api("/agents"), caps().catch(() => new Map()), buildJobs(), hewnMachine()]);
+  if (!here()) return;
   rememberAgents(agents);
   setWallpaper(await hues([300, 125]));
+  if (!here()) return;
   const { settings: s } = jobs;
   const from = (a) => (a.via === "local" ? `On ${machine.word}` : a.via === "tunnel" ? `Through ${a.address ?? "the public address"}` : "Connected");
   const roleChips = (a) => {

@@ -2,7 +2,7 @@
 // An opened tool (its own UI, or the Run view) and the change drawer beside it.
 import { api, appIcon, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { buildPanel } from "./build.js";
-import { bar, glassBack, hues, onLeave, put, sandboxNotice, view } from "./frame.js";
+import { bar, glassBack, hues, onLeave, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet } from "./grants.js";
 import { askFeedbackOnOpen, intakeView } from "./intake.js";
 import { route } from "./router.js";
@@ -139,11 +139,13 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
 }
 
 async function appPage(id, q) {
+  const here = stillHere();
   document.body.classList.add("app-mode");
   // ?at=<section>: a widget's tap opens the UI there ("open": "ui#today").
   const at = q?.get("at");
   const openUrl = async () => (await api(`/capabilities/${enc(id)}/open`, { method: "POST", ...(at ? { body: { section: at } } : {}) })).url;
   const [all, url] = await Promise.all([caps(true), openUrl()]);
+  if (!here()) return;
   const c = all.get(id) ?? { id, name: id };
   // Sandboxed without allow-same-origin (the server's CSP says the same): the app runs on an
   // opaque origin and cannot touch or navigate the web client.
@@ -323,10 +325,13 @@ const runnableOps = (cap) => latestOps(cap.operations).filter((o) => !(cap.kind 
 const sidePill = (sideEffect) => h("span", { class: `pill ${sideEffect === "read" ? "" : sideEffect === "destructive" ? "danger" : "accent"}` }, sideEffect);
 
 async function runPage(id, q) {
+  const here = stillHere();
   document.body.classList.add("app-mode");
   const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
+  if (!here()) return;
   const c = all.get(id) ?? { id, name: cap.name, kind: cap.kind };
   setWallpaper(await hues([tintOf(c)]));
+  if (!here()) return;
   const ops = runnableOps(cap);
   let selected = ops.find((o) => o.name === q.get("op")) ?? ops[0];
   const right = h("div", { class: "run-main" });

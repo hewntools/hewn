@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
 import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
-import { backBar, go, hues, moment, onLeave, put, settings, view } from "./frame.js";
+import { backBar, go, hues, moment, onLeave, put, settings, stillHere, view } from "./frame.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
 import { cadenceText } from "./schedules.js";
 import { memoryNotice } from "./tool-actions.js";
@@ -20,8 +20,10 @@ const slug = (s) =>
 
 /** #/new: the intake as a moment screen. `?connection=<service>` asks for a connection only. */
 async function intakePage(q) {
+  const here = stillHere();
   const service = q.get("connection");
   setWallpaper(await hues(service ? [260, 200] : [125, 250]));
+  if (!here()) return;
   const intake = intakeView({ mode: "create", q, connection: service, onBuilt: (b) => go(`#/b/${enc(b.buildId)}`) });
   view(...moment({ right: "-20px", top: "60px" }, backBar(service ? "Accounts" : "Home", service ? "#/accounts" : "#/"), h("div", { class: "moment-col" }, intake.el)));
   intake.focus();

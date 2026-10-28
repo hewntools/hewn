@@ -2,14 +2,16 @@
 // Add a passkey on this device (after a sign-in link on the public address).
 import { api, h, toast } from "../kit.js";
 import { addPasskey, passkeyError, passkeysSupported } from "../passkey.js";
-import { go, onLeave, view } from "./frame.js";
+import { go, onLeave, stillHere, view } from "./frame.js";
 
 export { deviceName, passkeyPage };
 
 // ---------- M3: add a passkey (after a sign-in link on the public address) ----------
 
 async function passkeyPage() {
+  const here = stillHere();
   const remote = await api("/remote").catch(() => null);
+  if (!here()) return;
   if (remote?.here !== "public") return go("#/");
   const name = h("input", { type: "text", value: deviceName(navigator.userAgent), "aria-label": "Name", maxLength: 40 });
   const status = h("div", { class: "small danger-text", role: "status" });
