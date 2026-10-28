@@ -8,7 +8,7 @@ The top bar has Search, **Home · Hub · Agents · Accounts · Settings**, and t
 
 Home holds your tools as icons, and the widgets you've put there. Click a tool to open it: its own screen if it has one, otherwise its operations as forms. The **New** tile asks for a new tool ([Building tools](building-tools.md)).
 
-![Home with six tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
+![Home with seven tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather, Tasks Today) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
 
 Right-click a tool for its menu:
 - **Open**, **Change…** and **Info**
@@ -30,7 +30,7 @@ A widget shows a tool's data at a glance: today's habits, tonight's aurora forec
 
 New also offers it under the box: **Or start from** a tool in Hub, or a file someone shared ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
 
-![The Hub: search, Install from a file, the Official and tag filters, and a grid of Hewn's own tools, each with a screenshot, what it needs and the Official mark](images/hub.png)
+![The Hub: search, Install from a file, the Official and tag filters, and Hewn's seven own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
 
 ## Search and commands
 
@@ -50,7 +50,7 @@ The **Inbox** button on the right of the top bar holds everything that needs you
 
 Each row has one action. **Activity** in the Inbox shows what just happened, and builds in progress pulse.
 
-![The Inbox open over Home: a failed build to show, an agent that wants to connect, and a tool that wants to reach a host, each with one button, then the recent calls](images/inbox.png)
+![The Inbox open over Home: a failed build to show, an agent that wants to connect, a tool that wants to reach a host, and a connection to sign in to again, each with one button, then the recent calls](images/inbox.png)
 
 One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it.
 
@@ -58,7 +58,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 
 **Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
 - **Operations:** each with **Run**, which opens it as a form and shows the result; the first five, then **Show all**
-- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for (a no is kept until its next version, and through a quick change such as another tier; it can't run without it, so Info offers **Ask builder to work without it**), **Revoke** what it has. The model's row has its tier (or **A specific model…**) in a menu, what it spent this month, and its own monthly cap ([Models](models.md))
+- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** a host, another tool or the model it asks for (a no is kept until its next version, and through a quick change such as another tier; it can't run without it, so Info offers **Ask builder to work without it**), **Set…** a key it asks for, **Revoke** what it has. The model's row has its tier (or **A specific model…**) in a menu, what it spent this month, and its own monthly cap ([Models](models.md))
 - **Data:** how many rows it keeps, when it last wrote, **Export**, and **Start over** (empty it, keep the tool: [Sharing tools](sharing.md#start-over))
 - **Schedules:** a switch each, **+ Add schedule**, and **Try again** on a failed run (one run now, as the schedule runs; if it works, one paused after failing stays paused until you switch it on)
 - **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**

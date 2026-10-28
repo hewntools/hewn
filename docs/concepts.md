@@ -62,6 +62,12 @@ A **connection** is a tool that wraps one service you have an account with (Todo
 
 You can run an operation on a timetable, e.g. "daily 07:00", in your time zone. Agents can only **propose** a schedule; nothing runs until you enable it. Read and write operations only. A schedule pauses itself after three failures in a row.
 
+## Sharing and the Hub
+
+A tool can travel as a file (`<tool>.hewn.zip`). **Share…** makes one from any version of yours; **Install from a file** turns someone else's into a new tool of yours. The file holds the tool's code, tests, migrations, screens and **sample data** (made-up entries it can start with). Hewn never puts your data, keys or settings in it, and checks the code for them before you share: one of your own keys stops the share, and anything else that looks personal is a warning. Before you install one, your builder reads its code and says what it does with your data.
+
+The **Hub** holds tools ready to install: today Hewn's own (**Official**), which ship with Hewn and come with Hewn's reading of their code. However it arrives, a tool goes through the same checks as a build, runs in the same sandbox, and asks for its [grants](#grants) once it's installed. It's yours from then on: nothing updates it from where it came from. See [Sharing tools](sharing.md).
+
 ## The Inbox and Activity
 
 The **Inbox** holds what needs you: grants, agents waiting, schedule proposals, failed builds, connections to sign in again, model spend. **Activity** holds everything that happened: calls, builds, and access changes (agents connected or disconnected, scopes, secrets, destructive calls allowed or stopped), with who did it and when. See [The web client](using-hewn.md).
