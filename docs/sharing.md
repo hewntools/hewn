@@ -48,7 +48,7 @@ From the terminal: `hewn install <file.hewn.zip> [--name "Plant Log 2"] [--no-sa
 
 ## Start over
 
-Info › Data › **Start over** empties a tool's data and keeps the tool: after trying it with sample data, or any time you want it empty. You type the tool's id to confirm, and can tick **And replay the sample data**. A backup of the data is kept (the newest three). From the terminal: `hewn data reset <id> [--sample]`.
+Info › Data › **Start over** empties a tool's data and keeps the tool: after trying it with sample data, or any time you want it empty. You type the tool's id to confirm, and can tick **And replay the sample data** (when it has some). A copy of its data is kept aside first (the newest three). From the terminal: `hewn data reset <id> [--sample]`.
 
 ## Is it safe to install a tool from someone else?
 

@@ -376,6 +376,11 @@ describe("sharing: a tool as a file", () => {
   });
 
   test("Start over: a backup is kept, the data is empty, the sample data comes back on request", async () => {
+    // Asked for sample data it hasn't got: refused before anything is emptied.
+    await t.platform.invoke(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 3, durationSeconds: 900 } });
+    await assert.rejects(t.platform.startOver(USER, "running-log", { confirm: "running-log", sample: true }), /has no sample data to replay/);
+    assert.equal(await runs(t), 1, "nothing emptied");
+    assert.equal((await t.platform.runtime.listStates("running-log", "backup:start-over-")).length, 0);
     await withSample();
     await t.platform.invoke(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 3, durationSeconds: 900 } });
     await assert.rejects(t.platform.startOver(USER, "running-log", { confirm: "nope" }), /type the id/);

@@ -70,7 +70,7 @@ function startOverDialog(c, hasSample) {
   return modal(
     (close) => {
       const typed = h("input", { type: "text", autocomplete: "off", placeholder: c.id, "aria-label": `Type ${c.id} to confirm` });
-      const replay = h("input", { type: "checkbox", checked: hasSample });
+      const replay = h("input", { type: "checkbox" });
       const go = h("button", { class: "danger", disabled: true }, "Start over");
       typed.addEventListener("input", () => (go.disabled = typed.value.trim() !== c.id));
       go.addEventListener("click", async () => {
@@ -86,7 +86,7 @@ function startOverDialog(c, hasSample) {
       });
       return [
         sheetHead(appIcon(c, { size: 44 }), `Start ${c.name} over?`),
-        h("p", { class: "muted" }, "Its data is emptied and the tool stays. A backup of the data is kept, so this can be undone from the command line."),
+        h("p", { class: "muted" }, "Its data is emptied and the tool stays. A copy of its data is kept aside first."),
         h("label", { class: "field flush" }, h("span", { class: "label" }, `Type ${c.id} to confirm`), typed),
         hasSample && h("label", { class: "check" }, replay, " And replay the sample data"),
         sheetActions(h("button", { onclick: () => close(false) }, "Cancel"), go),

@@ -205,6 +205,8 @@ export class Data extends Domain {
     const cap = this.visibleActive(owner, capabilityId);
     if (req.confirm !== capabilityId) throw new PlatformError("invalid_request", `type the id '${capabilityId}' to confirm`);
     const active = await this.loadVersion(capabilityId, cap.activeVersion!);
+    // Asked to replay sample data it hasn't got: refused before anything is emptied.
+    if (req.sample && !sampleOrNull(active.files)) throw new PlatformError("invalid_request", `${capabilityId} has no sample data to replay; start over without it`);
     const live = { capabilityId };
     let backup: string | null = null;
     if (await this.runtime.hasState(live)) {

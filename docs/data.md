@@ -28,7 +28,7 @@ Restoring replaces the data and keeps Hewn running: it stops and starts its runt
 
 ## Start over
 
-Info › Data › **Start over** empties a tool's data and keeps the tool, with a backup of the data kept. `hewn data reset <id>` from the terminal. See [Sharing tools](sharing.md#start-over).
+Info › Data › **Start over** empties a tool's data and keeps the tool; a copy of its data is kept aside first. `hewn data reset <id>` from the terminal. See [Sharing tools](sharing.md#start-over).
 
 ## Versions and rollback
 
