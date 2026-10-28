@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake role's request/reply shapes (shared by the surface on every host; the CLI
 // implementation lives in src/intake.ts).
+import type { BundleSummary } from "@hewntools/core/bundle.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
+import type { SummaryInput } from "@hewntools/core/platform.ts";
 
 /**
  * An image or text file the owner attached with a message: a ref into the owner's attachments
@@ -27,8 +29,12 @@ export interface IntakeMessage {
 }
 
 export interface IntakeRequest {
-  /** "modify" also covers widgets: the reply may propose widgets-only builds instead of a draft. */
-  mode: "create" | "modify";
+  /**
+   * "modify" also covers widgets: the reply may propose widgets-only builds instead of a draft.
+   * "summarize": read a tool someone shared (`bundle`) and say what it does with the owner's data,
+   * before it's installed; no conversation, no docs and no web, the reply is kind "summary".
+   */
+  mode: "create" | "modify" | "summarize";
   capabilityId?: string;
   /** Modifying with one of its widgets in mind (its name): opened from that widget's Change…. */
   widget?: string;
@@ -47,6 +53,8 @@ export interface IntakeRequest {
   earlier?: { buildId: string; version?: number; messages?: IntakeMessage[] };
   /** The owner's standing rules for building (the platform fills these in): for every tool, and for this one when modifying. */
   instructions?: { global: string[]; tool?: string[] };
+  /** Summarizing: the tool's manifest and its text files (each line numbered), cut to a size; `cut` names what was left out or shortened. */
+  bundle?: SummaryInput;
 }
 
 /** A standing rule the intake remembers (or drops) for the owner: for every tool, or for this one. */
@@ -137,6 +145,8 @@ export type IntakeReply = (
   | { kind: "schedules"; message: string; schedules: ScheduleSuggestion[] }
   | { kind: "draft"; message: string; draft: CreateDraft }
   | { kind: "draft"; message: string; draft: { request: string; spec?: DraftSpec; connection?: ConnectionStep; schedules?: ScheduleSuggestion[] } }
+  /** Summarizing: what the tool does, what it keeps, where data goes, and what the owner should know. */
+  | ({ kind: "summary" } & Required<BundleSummary>)
 ) &
   IntakeMemory;
 

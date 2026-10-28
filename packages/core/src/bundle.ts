@@ -37,6 +37,34 @@ export interface Sidecar {
   summary?: BundleSummary;
 }
 
+/** One thing a reading found: a warning the owner should know before installing, or something that checks out. */
+export type SummaryFinding = NonNullable<BundleSummary["findings"]>[number];
+
+/** The most of a reading that's kept (longer text is cut, not refused): what the install sheet has room for. */
+const SUMMARY_MAX = { message: 600, keeps: 300, reaches: 500, title: 160, detail: 400, file: 200, findings: 6 };
+
+/**
+ * A reading, checked and cut to size: its message (none: null), what it keeps and where data goes,
+ * and its well-formed findings, warnings first, at most six. For the intake's reply, and for the one
+ * a tool from the Hub ships with (a file's own is never read: it could say anything).
+ */
+export function readSummary(v: unknown): Required<BundleSummary> | null {
+  const j = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  const str = (x: unknown, max: number) => (typeof x === "string" ? x.trim().slice(0, max) : "");
+  const message = str(j.message, SUMMARY_MAX.message);
+  if (!message) return null;
+  const findings = (Array.isArray(j.findings) ? j.findings : [])
+    .filter((f) => f && (f.kind === "warn" || f.kind === "ok") && str(f.title, SUMMARY_MAX.title))
+    .map((f): SummaryFinding => {
+      const detail = str(f.detail, SUMMARY_MAX.detail);
+      const file = str(f.file, SUMMARY_MAX.file);
+      return { kind: f.kind, title: str(f.title, SUMMARY_MAX.title), ...(detail ? { detail } : {}), ...(file ? { file } : {}), ...(Number.isInteger(f.line) && f.line > 0 ? { line: f.line } : {}) };
+    })
+    .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "warn" ? -1 : 1))
+    .slice(0, SUMMARY_MAX.findings);
+  return { message, keeps: str(j.keeps, SUMMARY_MAX.keeps), reaches: str(j.reaches, SUMMARY_MAX.reaches), findings };
+}
+
 const checkSample = compileSchema(SAMPLE_SCHEMA);
 
 /** sample/calls.json, checked: null when there's none; throws with the reason when it's malformed. */

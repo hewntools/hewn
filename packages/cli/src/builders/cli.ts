@@ -177,7 +177,9 @@ export const UNAVAILABLE = /failed to authenticate|not logged in|please (run \/l
  * over a project `opencode.json`, which the builder could write). The builder: read and write the
  * workspace, nothing else (no shell, no web, no subagents, no skills, no questions: the run can't
  * answer them). The intake: read, and fetch web pages to check what the owner mentions, nothing else.
- * Both names of the shell permission, for OpenCode versions on either side of its rename.
+ * The intake reading a tool someone shared: nothing at all (its code is in the prompt, and nothing in
+ * that code may send it to the web). Both names of the shell permission, for OpenCode versions on
+ * either side of its rename.
  */
 export interface OpencodeRules {
   permission: Record<string, string>;
@@ -192,6 +194,10 @@ export const OPENCODE_BUILDER_RULES: OpencodeRules = {
 export const OPENCODE_INTAKE_RULES: OpencodeRules = {
   permission: { read: "allow", glob: "allow", grep: "allow", webfetch: "allow", doom_loop: "allow", ...deny(["edit", "bash", "shell", "websearch", "task", "skill", "lsp", "question", "external_directory"]) },
   tools: off(["edit", "write", "patch", "bash", "shell", "websearch", "task", "skill", "question"]),
+};
+export const OPENCODE_READER_RULES: OpencodeRules = {
+  permission: deny(["read", "glob", "grep", "list", "webfetch", "edit", "bash", "shell", "websearch", "task", "skill", "lsp", "question", "external_directory"]),
+  tools: off(["read", "glob", "grep", "list", "webfetch", "edit", "write", "patch", "bash", "shell", "websearch", "task", "skill", "question"]),
 };
 
 /** Your own OpenCode directories (XDG, honoured for your own home only), where its logins, config and caches live. */

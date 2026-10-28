@@ -34,6 +34,9 @@ describe("web client (owner surface)", () => {
   let cookie: string;
   const intakeCalls: IntakeRequest[] = [];
   const setupRan: string[] = [];
+  /** How the next reading of a shared tool goes: done, ending only after the owner moved on, or with no agent to run it. */
+  let reading: "done" | "late" | "missing" = "done";
+  let lateEnded: () => void = () => {};
 
   const http = (path: string, o: { method?: string; host?: string; cookie?: string; headers?: Record<string, string>; body?: unknown } = {}) =>
     new Promise<Res>((res, rej) => {
@@ -81,9 +84,17 @@ describe("web client (owner surface)", () => {
     };
     platform = platformWith(t.home, () => builder);
     server = await serve(platform, t.home, {
-      intake: async (req, onProgress) => {
+      intake: async (req, onProgress, signal) => {
         intakeCalls.push(req);
         onProgress?.({ activity: "Thinking" });
+        // Reading a tool someone shared, before it's installed.
+        if (req.mode === "summarize") {
+          if (reading === "missing") throw new Error("intake claude exited 71: sandbox-exec: execvp() of 'claude' failed: No such file or directory");
+          // An agent that finishes anyway, after the request closed.
+          if (reading === "late") await new Promise((r) => signal?.addEventListener("abort", r, { once: true }));
+          setImmediate(() => lateEnded());
+          return { kind: "summary", message: "Logs your runs and sums them up.", keeps: "Keeps runs: date, distance, time, notes.", reaches: "", findings: [{ kind: "ok", title: "Keeps your data inside the tool" }, { kind: "warn", title: "Agents can delete runs", file: "src/index.ts", line: 3 }] };
+        }
         // A rule stated in passing is remembered (global, or for the tool when modifying); "forget" drops one.
         const last = req.messages.at(-1)?.content ?? "";
         const memory = /always Swedish/.test(last) ? { remember: [{ scope: "global" as const, text: "Swedish copy in every screen" }, { scope: "tool" as const, text: "One screen only" }] } : /drop the Swedish rule/.test(last) ? { forget: [{ scope: "global" as const, text: "Swedish copy in every screen" }] } : {};
@@ -403,6 +414,95 @@ describe("web client (owner surface)", () => {
       assert.deepEqual(c.json, { kind: "answer", message: "Through a connection: it holds the sign-in." });
       const m = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "How do I see its old versions?" }] } });
       assert.equal(m.json.kind, "answer");
+    });
+
+    test("install from a file: staged, read by your builder first (kept with the install), then installed with its sample data", async () => {
+      const sample = JSON.stringify([{ operation: "record_run", input: { distanceKm: 6, durationSeconds: 2000, date: "2026-10-02" } }]);
+      assert.equal((await platform.settle((await platform.setSample(USER, "running-log", sample)).buildId)).status, "promoted");
+      const { bundle } = await platform.shareBundle(USER, "running-log");
+      const staged = await api("/bundles", { method: "POST", body: { data: Buffer.from(bundle).toString("base64") } });
+      assert.equal(staged.status, 200, JSON.stringify(staged.json));
+      assert.equal(staged.json.summary, null);
+      assert.equal(staged.json.suggestedName, "Running Log 2");
+      assert.equal(staged.json.sample, 1);
+      const code = await api(`/bundles/${staged.json.token}/code?path=src/index.ts`);
+      assert.ok(code.json.text.length > 0);
+      const read = await api(`/bundles/${staged.json.token}/summary`, { method: "POST" });
+      assert.equal(read.status, 200, JSON.stringify(read.json));
+      assert.equal(read.json.summary.message, "Logs your runs and sums them up.");
+      assert.deepEqual(read.json.summary.findings.map((f: any) => f.kind), ["warn", "ok"], "checked again here: warnings first");
+      const asked = intakeCalls.at(-1)!;
+      assert.equal(asked.mode, "summarize");
+      assert.equal(asked.bundle!.files[0].path, "capability.json", "the manifest first");
+      assert.match(asked.bundle!.files.find((f) => f.path === "src/index.ts")!.text, /^ {3}1\| /, "lines numbered");
+      assert.equal((await api(`/bundles/${staged.json.token}`)).json.summaryBy, "yours");
+      const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Read Log", sample: true } });
+      const done = await platform.settle(started.json.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.equal((done.request as any).summary.message, "Logs your runs and sums them up.", "the reading is kept with the install");
+      assert.equal((await api("/capabilities/read-log")).json.source.from, "file");
+      assert.equal((await api(`/bundles/${staged.json.token}`)).status, 404, "installed: gone");
+      const refused = await api("/bundles", { method: "POST", body: { data: Buffer.from("not a zip").toString("base64") } });
+      assert.equal(refused.status, 400);
+      assert.match(refused.json.message, /isn't a zip file/);
+    });
+
+    test("the reading streams like the intake (progress, then it, read by the builder's agent); one that ends after the owner moved on isn't kept; no agent: no builder", async () => {
+      const sample = JSON.stringify([{ operation: "record_run", input: { distanceKm: 6, durationSeconds: 2000, date: "2026-10-02" } }]);
+      assert.equal((await platform.settle((await platform.setSample(USER, "running-log", sample)).buildId)).status, "promoted");
+      const data = Buffer.from((await platform.shareBundle(USER, "running-log")).bundle).toString("base64");
+      const stage = async () => (await api("/bundles", { method: "POST", body: { data } })).json.token as string;
+      // The intake runs on the builder's agent, whatever an older intake setting says.
+      await api("/settings", { method: "PUT", body: { builder: "codex", intake: "claude" } });
+      try {
+        const token = await stage();
+        const r = await http(`/api/bundles/${token}/summary`, { method: "POST", headers: { "x-hewn-ui": "1", accept: "text/event-stream" } });
+        assert.equal(r.headers["content-type"], "text/event-stream");
+        assert.match(r.body, /event: progress\ndata: \{"activity":"Thinking"\}/);
+        const done = JSON.parse(/event: reply\ndata: (.*)/.exec(r.body)![1]);
+        assert.equal(done.summary.keeps, "Keeps runs: date, distance, time, notes.");
+        assert.equal(done.by, "codex");
+        assert.equal((await api(`/bundles/${token}`)).json.summaryBy, "yours");
+      } finally {
+        await api("/settings", { method: "PUT", body: { builder: "claude", intake: "claude" } });
+      }
+      // Install anyway (or Cancel) closes the request: the agent is stopped, and what it says after isn't kept.
+      reading = "late";
+      try {
+        const token = await stage();
+        const calls = intakeCalls.length;
+        const ended = new Promise<void>((r) => (lateEnded = r));
+        const req = request({ host: "127.0.0.1", port, path: `/api/bundles/${token}/summary`, method: "POST", headers: { host: `hewn.localhost:${port}`, cookie, "x-hewn-ui": "1", accept: "text/event-stream" } });
+        req.on("error", () => {});
+        req.end();
+        while (intakeCalls.length === calls) await new Promise((r) => setTimeout(r, 10));
+        req.destroy();
+        await ended;
+        await new Promise((r) => setTimeout(r, 50));
+        const after = (await api(`/bundles/${token}`)).json;
+        assert.deepEqual([after.summary, after.summaryBy], [null, null]);
+        // The client also says so (a closed request doesn't always reach this far): the reading stops, the stream says so.
+        const again = await stage();
+        const ended2 = new Promise<void>((r) => (lateEnded = r));
+        const before = intakeCalls.length;
+        const streamed = http(`/api/bundles/${again}/summary`, { method: "POST", headers: { "x-hewn-ui": "1", accept: "text/event-stream" } });
+        while (intakeCalls.length === before) await new Promise((r) => setTimeout(r, 10));
+        assert.equal((await api(`/bundles/${again}/summary`, { method: "DELETE" })).status, 200);
+        await ended2;
+        assert.match((await streamed).body, /event: error\ndata: \{"message":"stopped"\}/);
+        assert.equal((await api(`/bundles/${again}`)).json.summaryBy, null, "not kept");
+      } finally {
+        reading = "done";
+      }
+      // No agent to read it (its CLI isn't installed): said as such, not as the sandbox's error.
+      reading = "missing";
+      try {
+        const r = await api(`/bundles/${await stage()}/summary`, { method: "POST" });
+        assert.equal(r.status, 404);
+        assert.match(r.json.message, /^No builder is set up/);
+      } finally {
+        reading = "done";
+      }
     });
 
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {

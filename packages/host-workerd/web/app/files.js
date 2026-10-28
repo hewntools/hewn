@@ -59,12 +59,13 @@ function changesView(file, path) {
   return [out, more(total - (MAX_LINES - room))];
 }
 
-/** Source: the file with one gutter. */
-function sourceView(file, path, text = file.text) {
+/** Source: the file with one gutter; `through`: a line that must be drawn (Show at a line past the cap). */
+function sourceView(file, path, text = file.text, through = 0) {
   if (text === "") return h("div", { class: "code-empty" }, "An empty file.");
   const hl = highlighter(path);
   const lines = linesOf(text);
-  return [lines.slice(0, MAX_LINES).map((t, i) => codeLine("", null, i + 1, null, hl.line(t))), more(lines.length - MAX_LINES)];
+  const cap = Math.max(MAX_LINES, through + 50);
+  return [lines.slice(0, cap).map((t, i) => codeLine("", null, i + 1, null, hl.line(t))), more(lines.length - cap)];
 }
 
 /** A JSON file laid out (two-space indents), when that isn't how it was written and fits in what's drawn; else null. */
@@ -80,9 +81,10 @@ function prettyJson(path, text) {
 
 /**
  * The browser itself, for a source ({ label, list, file }): Changes when there's a version before
- * and something changed, else Source.
+ * and something changed, else Source. `at`: open this file at this line (a finding's "Show"),
+ * highlighted, in Source.
  */
-function codeBrowser(src) {
+function codeBrowser(src, { at } = {}) {
   const side = h("nav", { class: "side-list code-files", "aria-label": "Files" }, skeleton("80%", "60%", "70%"));
   const path = h("span", { class: "mono small grow clip-1" });
   const toggle = h("span", {});
@@ -122,10 +124,16 @@ function codeBrowser(src) {
       if (current !== p) return;
       const meta = data.files.find((x) => x.path === p);
       body.classList.toggle("source", mode === "source");
-      const laidOut = mode === "source" && !f.binary ? prettyJson(p, f.text) : null;
+      // Show at a line is the file's own lines: no layout then.
+      const laidOut = mode === "source" && !f.binary && !(at?.line && p === at.path) ? prettyJson(p, f.text) : null;
       put(jsonToggle, laidOut && segmented([["pretty", "Pretty"], ["raw", "As written"]], pretty ? "pretty" : "raw", (k) => ((pretty = k === "pretty"), open(p)), { label: "JSON" }));
-      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text));
+      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text, p === at?.path ? at.line : 0));
       body.scrollTop = 0;
+      if (at?.line && p === at.path && mode === "source") {
+        const line = body.querySelectorAll(".code-line")[at.line - 1];
+        line?.classList.add("hl");
+        line?.scrollIntoView({ block: "center" });
+      }
     } catch (e) {
       if (current !== p) return;
       put(body, h("div", { class: "code-empty" }, e.message || String(e)));
@@ -144,10 +152,10 @@ function codeBrowser(src) {
     try {
       data = await src.list();
       if (data.base && data.files.some((f) => f.status !== "same")) {
-        mode = "changes";
+        if (!at) mode = "changes";
         put(toggle, segmented([["changes", "Changes"], ["source", "Source"]], mode, setMode, { label: "Show" }));
       }
-      const first = shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
+      const first = (at && shown().find((f) => f.path === at.path)) ?? shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
       if (first) await open(first.path);
       else put(side, h("div", { class: "eyebrow" }, "No files"));
     } catch (e) {

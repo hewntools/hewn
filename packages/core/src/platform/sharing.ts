@@ -4,7 +4,7 @@
 // a create build with no builder ("bundle") through the normal validation. Sample data: replayed
 // after an install or Start over, and written by the owner as a new version. Owner only.
 import { type Agent, requireOwner } from "../auth.ts";
-import { BUNDLE_FORMAT, BundleError, dependencyProblems, type Finding, type OwnValue, packBundle, readSample, SAMPLE_FILE, sampleOrNull, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
+import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, type Finding, type OwnValue, packBundle, readSample, readSummary, SAMPLE_FILE, type SampleCall, sampleOrNull, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, text } from "../files.ts";
@@ -46,7 +46,9 @@ export interface BundlePreview {
   version: number;
   from: ToolSource["from"];
   host: string | null;
-  summary: Sidecar["summary"] | null;
+  summary: BundleSummary | null;
+  /** Whose reading `summary` is: Hewn's, shipped with a tool from the Hub, or the owner's own builder's. */
+  summaryBy: "hewn" | "yours" | null;
   /** What it will ask for once installed (grants still happen then). */
   asks: { hosts: string[]; model: { tier?: string; model?: string; images: boolean } | null; tools: { id: string; operations: string[] }[]; secrets: string[]; config: string[] };
   /** Sample calls it ships with. */
@@ -63,7 +65,20 @@ interface Staged {
   at: number;
   from: ToolSource["from"];
   host?: string;
+  /** The owner's own reading of it (the intake's summary), once asked for. */
+  summary?: BundleSummary;
 }
+
+/** What the intake reads to summarize a staged tool: its manifest, its text files (each line numbered), and what was left out or shortened. */
+export interface SummaryInput {
+  manifest: CapabilityManifest;
+  files: { path: string; text: string }[];
+  cut: string[];
+}
+
+/** What the intake reads, at most, counted as it's sent (numbered): 40 KB of a file, 200 KB in all. */
+const SUMMARY_FILE_BYTES = 40_000;
+const SUMMARY_TOTAL_BYTES = 200_000;
 
 export class Sharing extends Domain {
   // ---------- Share… ----------
@@ -178,6 +193,46 @@ export class Sharing extends Domain {
     return codeText(path, (await this.loadStaged(token)).files, null);
   }
 
+  /**
+   * What the intake reads to summarize a staged tool: its manifest and its text files, each line
+   * numbered, migrations and code first, at most 40 KB of each and 200 KB in all as sent; `cut`
+   * names what was left out (a file that isn't text, or no room left) or cut short (and where).
+   */
+  async summaryInput(owner: Agent, token: string): Promise<SummaryInput> {
+    requireOwner(owner);
+    const s = await this.loadStaged(token);
+    const rank = (p: string) => ["capability.json", "migrations/", "src/", "sample/", "tests/", "ui/"].findIndex((d) => p.startsWith(d)) + 1 || 9;
+    const paths = Object.keys(s.files).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    const files: SummaryInput["files"] = [];
+    const cut: string[] = [];
+    let total = 0;
+    for (const path of paths) {
+      const b = s.files[path];
+      if (b.includes(0)) {
+        cut.push(`${path} (not text)`);
+        continue;
+      }
+      const n = numbered(text(b), Math.min(SUMMARY_FILE_BYTES, SUMMARY_TOTAL_BYTES - total));
+      if (!n.lines) {
+        cut.push(path);
+        continue;
+      }
+      files.push({ path, text: n.text });
+      if (n.short) cut.push(`${path} (cut at line ${n.lines})`);
+      total += n.bytes;
+    }
+    return { manifest: s.manifest, files, cut };
+  }
+
+  /** Keep the owner's reading of a staged tool: the sheet shows it, and the install keeps it with its build. */
+  async keepSummary(owner: Agent, token: string, summary: BundleSummary) {
+    requireOwner(owner);
+    await this.loadStaged(token);
+    const staged = this.registry.getKv<Record<string, Staged>>("bundles:staged") ?? {};
+    if (staged[token]) staged[token].summary = summary;
+    this.registry.setKv("bundles:staged", staged);
+  }
+
   /** Forget a staged bundle (the sheet was cancelled). */
   async dropStaged(owner: Agent, token: string) {
     requireOwner(owner);
@@ -205,7 +260,8 @@ export class Sharing extends Domain {
     const manifest = stampSource({ ...s.manifest, id, name }, source);
     const seed: Files = { ...s.files, "capability.json": bytes(JSON.stringify(manifest, null, 2) + "\n") };
     const sample = !!req.sample && !!s.files[SAMPLE_FILE];
-    const build = await this.platform.install(owner, { name, purpose: manifest.purpose, builder: "bundle", id, seed, requirements: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample });
+    const summary = s.staged.summary ?? hewnReading(s.sidecar, s.staged);
+    const build = await this.platform.install(owner, { name, purpose: manifest.purpose, builder: "bundle", id, seed, requirements: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample, ...(summary ? { summary } : {}) });
     await this.dropStaged(owner, token);
     return build;
   }
@@ -213,6 +269,7 @@ export class Sharing extends Domain {
   private preview(token: string, files: Files, sidecar: Sidecar, m: CapabilityManifest, staged: Staged): BundlePreview {
     const sample = sampleOrNull(files);
     const model = m.requires?.model;
+    const hewn = hewnReading(sidecar, staged);
     return {
       token,
       id: m.id,
@@ -223,7 +280,8 @@ export class Sharing extends Domain {
       version: sidecar.tool?.version ?? 1,
       from: staged.from,
       host: staged.host ?? null,
-      summary: sidecar.summary ?? null,
+      summary: staged.summary ?? hewn,
+      summaryBy: staged.summary ? "yours" : hewn ? "hewn" : null,
       asks: {
         hosts: (m.requires?.hosts ?? []).filter((x) => !x.startsWith("config:")),
         model: model ? { ...(model.tier ? { tier: model.tier } : {}), ...(model.model ? { model: model.model } : {}), images: !!model.input?.includes("image") } : null,
@@ -314,6 +372,40 @@ export class Sharing extends Domain {
     }
     return this.d.builds.filesOnlyModify(owner, capabilityId, { [SAMPLE_FILE]: bytes(json.trimEnd() + "\n") }, "sample data, written by you");
   }
+}
+
+/**
+ * Hewn's own reading, shipped with a tool from the Hub (where it's Hewn's to write; staged as such by
+ * Hewn itself), when it's well-formed. A file's or a link's hewn-bundle.json could say anything, so
+ * theirs is never shown as Hewn's: the owner's builder reads those.
+ */
+function hewnReading(sidecar: Sidecar, staged: Staged): BundleSummary | null {
+  return staged.from === "hub" ? readSummary(sidecar.summary) : null;
+}
+
+/**
+ * A file's text with each line numbered ("  12| …"), up to `room` bytes as sent: how many lines went
+ * in, and whether it was cut. When not even its first line fits (minified code), as much of that line
+ * as there's room for; with less than 1 KB left, nothing.
+ */
+function numbered(raw: string, room: number): { text: string; bytes: number; lines: number; short: boolean } {
+  const out: string[] = [];
+  let used = 0;
+  for (const [i, line] of raw.split("\n").entries()) {
+    const row = `${String(i + 1).padStart(4)}| ${line}`;
+    const size = bytes(row).length + 1;
+    if (used + size <= room) {
+      out.push(row);
+      used += size;
+      continue;
+    }
+    if (!out.length && room >= 1_000) {
+      out.push(text(bytes(row).subarray(0, room)));
+      used = room;
+    }
+    return { text: out.join("\n"), bytes: used, lines: out.length, short: true };
+  }
+  return { text: out.join("\n"), bytes: used, lines: out.length, short: false };
 }
 
 /** A bundle's files, sidecar and manifest, or the reason it can't be installed here. */
