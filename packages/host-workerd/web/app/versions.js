@@ -112,6 +112,8 @@ async function versionPage(id, n, q) {
     part = k;
     drawMenu();
     history.replaceState(null, "", `#/c/${enc(id)}/v/${n}${k === "conversation" ? "" : `?tab=${k}`}`);
+    // Files (the code browser) widens the page: code reads best with room beside its list of files.
+    panel.closest("main")?.classList.toggle("wide", k === "files");
     panel.setAttribute("aria-busy", "true");
     try {
       const el = await parts[k]();
