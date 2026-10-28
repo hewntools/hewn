@@ -44,11 +44,15 @@ export interface Sameness {
 
 const uiSketch = (requirements: string) => requirements.split(/\n(?=UI sketch)/)[1]?.trim() ?? "";
 
-export function scorePrompt(c: { name: string; purpose: string; requirements: string }, shots: string[]): string {
+/**
+ * `asked`: judge against the owner's own words instead of the case's UI sketch (for tools built from a
+ * spec of their own, which the frozen sketch would penalise for following).
+ */
+export function scorePrompt(c: { name: string; purpose: string; requirements: string }, shots: string[], asked?: string): string {
   return [
     "You are a demanding senior product designer reviewing the screen of a small personal tool, built for one person who uses it often.",
     `The tool: ${c.name}. ${c.purpose}`,
-    uiSketch(c.requirements) ? `What the owner asked the screen to do:\n${uiSketch(c.requirements)}` : "",
+    asked ? `What the owner asked for, in their own words: ${asked}` : uiSketch(c.requirements) ? `What the owner asked the screen to do:\n${uiSketch(c.requirements)}` : "",
     `Open each of these screenshots with the Read tool (they show the screen filled with realistic data): ${shots.join(", ")}.`,
     "Score each criterion from 1 to 10, where 5 is competent but generic, 7 is good work, 8 would impress a design-literate user and 10 is best in class. Be sceptical: most screens are 4 to 6.",
     "- design_quality: does it feel like a coherent whole: hierarchy, composition, typography, colour, spacing, in light and dark?",
@@ -108,9 +112,9 @@ async function pool<T>(items: T[], n: number, fn: (x: T) => Promise<void>) {
   }));
 }
 
-export async function judgeRun(runDir: string, o: { model?: string; again?: boolean; concurrency?: number; log?: (l: string) => void } = {}) {
+export async function judgeRun(runDir: string, o: { model?: string; again?: boolean; arms?: string[]; concurrency?: number; log?: (l: string) => void } = {}) {
   const log = o.log ?? console.log;
-  const results = visibleResults(runDir).filter((r) => r.result?.status === "done");
+  const results = visibleResults(runDir).filter((r) => r.result?.status === "done" && (!o.arms || o.arms.includes(r.result.arm)));
   const cases = new Map((await loadCases()).map((c) => [c.id, c]));
   const SHOTS = ["shots/desktop-light.png", "shots/desktop-dark.png", "shots/mobile-light.png"];
   await pool(results, o.concurrency ?? 3, async (r) => {
@@ -118,7 +122,7 @@ export async function judgeRun(runDir: string, o: { model?: string; again?: bool
     if (existsSync(file) && !o.again) return;
     const c = cases.get(r.result!.case)!;
     try {
-      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.filter((f) => existsSync(join(r.dir, f)))), o.model));
+      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.filter((f) => existsSync(join(r.dir, f))), r.job?.spec ? c.ask : undefined), o.model));
       s.total = total(s);
       writeFileSync(file, JSON.stringify(s, null, 2));
       log(`judged ${r.result!.arm} / ${r.result!.case} / r${r.result!.rep}: ${s.total}/60`);
@@ -132,7 +136,7 @@ export async function judgeRun(runDir: string, o: { model?: string; again?: bool
     if (existsSync(file) && !o.again) return;
     const c = cases.get(r.result!.case)!;
     try {
-      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.map((f) => f.replace("shots/", "shots-first/")).filter((f) => existsSync(join(r.dir, f)))), o.model));
+      const s = parseJson<Score>(await ask(r.dir, scorePrompt(c, SHOTS.map((f) => f.replace("shots/", "shots-first/")).filter((f) => existsSync(join(r.dir, f))), r.job?.spec ? c.ask : undefined), o.model));
       s.total = total(s);
       writeFileSync(file, JSON.stringify(s, null, 2));
       log(`judged ${r.result!.arm} / ${r.result!.case} / r${r.result!.rep} before its passes: ${s.total}/60`);

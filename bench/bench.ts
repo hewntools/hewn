@@ -18,7 +18,8 @@ const USAGE = `usage: npm run bench -- <command>
   run [--arms a,b] [--cases x,y] [--reps N] [--concurrency N] [--name NAME] [--out DIR] [--no-sandbox]
         build every case under every arm (default: all arms, all cases, 1 repetition, 3 at a time);
         a run that's started again with the same name keeps what's done
-  judge <run> [--model M] [--again]    score the screenshots with a model (and each arm's sameness)
+  judge <run> [--model M] [--again] [--arms a,b]
+                                       score the screenshots with a model (and each arm's sameness)
   serve <run> [--port N]               the gallery, live tools, the blind vote and the summary
   report <run>                         write <run>/summary.md
   recheck <run>                        redo the phone-overflow check and the click-through on finished, visible results
@@ -74,7 +75,7 @@ try {
     console.log(`\nnext: npm run bench -- judge ${dir}\n      npm run bench -- serve ${dir}`);
   } else if (command === "judge") {
     const dir = runDir(arg);
-    await judgeRun(dir, { model: o.model, again: o.again });
+    await judgeRun(dir, { model: o.model, again: o.again, arms: list(o.arms) });
     writeFileSync(join(dir, "summary.md"), summaryMarkdown(dir));
   } else if (command === "serve") {
     const server = await serveRun(runDir(arg), { port: o.port ? Number(o.port) : 7790 });

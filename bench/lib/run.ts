@@ -294,6 +294,8 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
       return;
     }
     const capabilityId = build.capabilityId;
+    // What the owner approves on the build card (hosts, grants), so the tool is ready to use.
+    bp.platform.approveGrants(USER, capabilityId);
     await exportVersion(bp.platform, capabilityId, build.resultVersion, versionDir);
     result.ui = uiMetrics(join(versionDir, "ui"));
     mkdirSync(join(dir, "shots"), { recursive: true });
@@ -360,6 +362,7 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
         save();
         return;
       }
+      bp.platform.approveGrants(USER, capabilityId);
       await exportVersion(bp.platform, capabilityId, review.resultVersion, versionDir);
       result.ui = uiMetrics(join(versionDir, "ui"));
       await capture(dir, bp, capabilityId, result);
