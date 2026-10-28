@@ -3,6 +3,7 @@
 // Node implements these in-process; the workerd host forwards the machine-bound ones
 // (intake, connecting local agents, backups) to the supervisor.
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
+import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
 
 export interface Settings {
@@ -144,6 +145,11 @@ export interface SurfaceHost {
   hosted?: Hosted;
   /** The public address agents in the cloud use (hewn tunnel). Absent: no tunnel support here. */
   tunnel?: () => Promise<TunnelStatus>;
+  /** Hewn's own tools (the Official shelf), as this release ships them. Absent: an empty shelf. */
+  shelf?: {
+    tools(): Promise<{ tools: ShelfTool[]; firstRun: string[] }>;
+    image(id: string, name: string): Promise<Uint8Array | undefined>;
+  };
   backups?: {
     location(): Promise<string>;
     list(): Promise<unknown[]>;

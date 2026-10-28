@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
 import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
-import { backBar, go, hues, moment, onLeave, put, settings, stillHere, view } from "./frame.js";
+import { brandTile, go, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
+import { installFromFile } from "./install.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
 import { cadenceText } from "./schedules.js";
 import { memoryNotice } from "./tool-actions.js";
@@ -25,7 +26,8 @@ async function intakePage(q) {
   setWallpaper(await hues(service ? [260, 200] : [125, 250]));
   if (!here()) return;
   const intake = intakeView({ mode: "create", q, connection: service, onBuilt: (b) => go(`#/b/${enc(b.buildId)}`) });
-  view(...moment({ right: "-20px", top: "60px" }, backBar(service ? "Accounts" : "Home", service ? "#/accounts" : "#/"), h("div", { class: "moment-col" }, intake.el)));
+  // The normal top bar, its back button where the brand is.
+  view(...moment({ right: "-20px", top: "60px" }, topBar(service ? "accounts" : "", { back: service ? ["Accounts", "#/accounts"] : ["Home", "#/"] }), h("div", { class: "moment-col" }, intake.el)));
   intake.focus();
 }
 
@@ -143,9 +145,25 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+  // Q1 New: or start from a tool someone made: one in Hub, or a file someone shared (gone once you're talking).
+  const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
+  const hubLink =
+    mode === "create" &&
+    !connection &&
+    h(
+      "div",
+      { class: "start-from" },
+      h("div", { class: "eyebrow" }, "Or start from"),
+      h(
+        "div",
+        { class: "start-options" },
+        option(brandTile(32), "A tool in Hub", "Hewn's own, ready to install", { href: "#/hub" }),
+        option(h("span", { class: "start-file", "aria-hidden": "true" }, ".zip"), "A file someone shared", "A .hewn.zip, up to 5 MB", { type: "button", onclick: () => installFromFile().catch(fail) }),
+      ),
+    );
   // Continue the last conversation? sits above the box, not in it.
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer));
-  const say = (who, text, attachments) => thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, hubLink));
+  const say = (who, text, attachments) => (hubLink && (hubLink.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
   syncSend();

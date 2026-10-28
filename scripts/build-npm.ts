@@ -2,7 +2,7 @@
 // Build the npm packages into build/npm/ (nothing is published here; see docs/internal/releasing.md):
 //   cli/   @hewntools/cli: the CLI bundled to dist/cli.js, the workerd host prebuilt (dist/host/),
 //          the web client (dist/web/), the UI kit (dist/platform-ui/) and the docs pages agents and
-//          the intake read (dist/docs/, the spec's in dist/docs/spec/)
+//          the intake read (dist/docs/, the spec's in dist/docs/spec/), and the Official shelf (dist/seeds/)
 //   spec/  @hewntools/spec: the contract compiled to JavaScript with type declarations, and its JSON Schemas
 // Run: npm run build:npm   Then: npm pack build/npm/cli (a tarball, local only).
 import { spawnSync } from "node:child_process";
@@ -47,6 +47,8 @@ async function cli() {
   // As they are (hewn_docs and the intake read them, links and all); assetDirs() finds them there.
   for (const page of DOC_PAGES) write(join(out, "dist", "docs", page.replace(/^docs\//, "")), readFileSync(join(ROOT, page), "utf8"));
   copyFileSync(join(ROOT, "spec", "LICENSE"), join(out, "dist", "docs", "spec", "LICENSE"));
+  // The Official shelf the Hub shows (each tool's source and its .hub/ listing and images), and its license.
+  cpSync(join(ROOT, "seeds"), join(out, "dist", "seeds"), { recursive: true, filter: (src) => !/(^|\/)(node_modules|\.DS_Store)$/.test(src) });
   for (const f of ["LICENSE", "LICENSING.md"]) copyFileSync(join(ROOT, f), join(out, f));
   for (const f of ["README.md", "CHANGELOG.md"]) write(join(out, f), absoluteLinks(readFileSync(join(ROOT, f), "utf8")));
 

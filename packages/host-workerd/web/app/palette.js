@@ -22,7 +22,8 @@ export { commandPalette };
  * (pages and Settings sections) and actions. Each: [label, group, run, icon?, words?, more?].
  */
 async function paletteItems() {
-  const all = [...(await caps().catch(() => new Map())).values()].filter((c) => c.version || c.building);
+  const [capsMap, hub] = await Promise.all([caps().catch(() => new Map()), api("/hub").catch(() => ({ tools: [] }))]);
+  const all = [...capsMap.values()].filter((c) => c.version || c.building);
   const tools = all.filter((c) => c.kind !== "connection");
   const tile = (key) => glyphTile(PALETTE_GLYPHS[key], 24);
   const place = (label, href, words = "", glyph = "settings") => [label, "Go to", () => go(href), tile(glyph), words];
@@ -55,9 +56,12 @@ async function paletteItems() {
     place("Accounts", "#/accounts", "connections", "key"),
     ...SECTIONS.map(([k, label]) => place(`Settings › ${label}`, `#/settings/${k}`)),
     place("Settings › AI › Models", "#/settings/ai/models", "provider key budget spend tier", "chip"),
+    // The Hub comes last: Hewn's own tools you don't have yet, each with Install (to its Hub page; nothing installs at once).
+    place("Hub", "#/hub", "official install tools shelf", "plus"),
+    ...hub.tools.filter((t) => !t.installed).map((t) => [t.name, "Hub", () => go(`#/hub/${enc(t.id)}`), appIcon({ id: t.id, name: t.name, hue: t.icon?.hue ?? undefined, saturation: t.icon?.saturation ?? undefined }, { size: 24 }), `${t.line} ${t.tags.join(" ")} hub official install`, true, h("span", { class: "btn sm palette-tail" }, "Install")]),
   ]
     .filter(Boolean)
-    .map(([label, group, run, icon, words = "", more = false]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more }));
+    .map(([label, group, run, icon, words = "", more = false, tail = null]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more, tail }));
 }
 
 /** ⌘K: one search over tools, places and actions. Arrows move, Enter runs, Esc closes. */
@@ -74,17 +78,19 @@ async function commandPalette() {
       const render = () => {
         const q = input.value.trim().toLowerCase();
         const words = q.split(/\s+/).filter(Boolean);
-        // Names first ("run" finds Running Log before a tool whose purpose mentions a long run), then the rest.
+        // Names first ("run" finds Running Log before a tool whose purpose mentions a long run), then the rest;
+        // yours first, the Hub last, however well its tools match.
         const named = (it) => words.every((w) => it.label.toLowerCase().includes(w));
         const hits = items.filter((it) => (q ? words.every((w) => it.words.includes(w)) : !it.more));
-        shown = (q ? [...hits.filter(named), ...hits.filter((it) => !named(it))] : hits).slice(0, 40);
+        const ranked = q ? [...hits.filter(named), ...hits.filter((it) => !named(it))] : hits;
+        shown = [...ranked.filter((it) => it.group !== "Hub"), ...ranked.filter((it) => it.group === "Hub")].slice(0, 40);
         at = Math.min(at, Math.max(0, shown.length - 1));
         let group = null;
         put(
           list,
           shown.flatMap((it, i) => [
             it.group !== group && ((group = it.group), h("li", { class: "eyebrow palette-group", role: "presentation" }, it.group)),
-            h("li", { class: `palette-item ${i === at ? "active" : ""}`, role: "option", "aria-selected": String(i === at), onclick: () => run(it), onmousemove: () => i !== at && ((at = i), render()) }, it.icon ?? h("span", { class: "palette-dot" }), h("span", { class: "grow" }, it.label)),
+            h("li", { class: `palette-item ${i === at ? "active" : ""}`, role: "option", "aria-selected": String(i === at), onclick: () => run(it), onmousemove: () => i !== at && ((at = i), render()) }, it.icon ?? h("span", { class: "palette-dot" }), h("span", { class: "grow" }, it.label), it.tail),
           ]),
           !shown.length && h("li", { class: "muted small palette-empty" }, "Nothing matches."),
         );

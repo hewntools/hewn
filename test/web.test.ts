@@ -505,6 +505,56 @@ describe("web client (owner surface)", () => {
       }
     });
 
+    test("the Hub: Hewn's own tools from the release, a tool's page, its image and code; installed from Hub with its sample data", async () => {
+      const hub = await api("/hub");
+      assert.equal(hub.status, 200, JSON.stringify(hub.json));
+      const ids = hub.json.tools.map((t: any) => t.id);
+      assert.ok(ids.includes("plant-log") && ids.includes("habits"), ids.join());
+      assert.deepEqual(hub.json.firstRun.length, 3);
+      const plant = hub.json.tools.find((t: any) => t.id === "plant-log");
+      assert.equal(plant.official, true);
+      assert.equal(plant.needs.model, "light");
+      assert.equal(plant.installed, false);
+      assert.ok(plant.images.includes("screen"));
+      // Its images' URLs carry the release (cached for a day; an upgrade's new screens show at once).
+      assert.equal(plant.release, platform.version ?? "dev");
+      const detail = await api("/hub/plant-log");
+      assert.ok(detail.json.summary.findings.some((f: any) => f.kind === "warn"), "Hewn's reading ships with it");
+      assert.ok(detail.json.operations.some((o: any) => o.name === "add_plant"));
+      assert.equal(detail.json.installedAs, null);
+      const img = await http(`/api/hub/plant-log/image/screen?v=${plant.release}`, { headers: { "x-hewn-ui": "1" } });
+      assert.equal(img.status, 200);
+      assert.equal(img.headers["content-type"], "image/png");
+      assert.equal((await http("/api/hub/plant-log/image/nope", { headers: { "x-hewn-ui": "1" } })).status, 404);
+      // Only the images the tool has: a path in the name reaches nothing.
+      for (const name of ["..%2F..", "..%2Fcapability.json", "..%2F..%2Fshelf.json"]) assert.equal((await http(`/api/hub/plant-log/image/${name}`, { headers: { "x-hewn-ui": "1" } })).status, 404, name);
+      // No Download: an Official tool leaves the Hub only through the install sheet.
+      assert.equal((await api("/hub/plant-log/download")).status, 404);
+      const code = await api("/hub/plant-log/code");
+      assert.ok(code.json.files.some((f: any) => f.path === "sample/calls.json"));
+      assert.ok(!code.json.files.some((f: any) => f.path.startsWith(".hub/")), "the listing never travels with the tool");
+      assert.match((await api("/hub/plant-log/code?path=capability.json")).json.text, /"id": "plant-log"/);
+      assert.equal((await api("/hub/nope/code")).status, 404);
+      // Idea Tracker has three versions of most operations: its page lists the newest of each, once.
+      const ideas = await api("/hub/idea-tracker");
+      const names = ideas.json.operations.map((o: any) => o.name);
+      assert.deepEqual(names, [...new Set(names)]);
+      assert.ok(names.includes("add_idea") && names.includes("list_tags"), names.join());
+      // Installed from Hub under another name: still the Hub's Idea Tracker (Installed, and Open opens yours).
+      const preview = await api("/hub/idea-tracker/stage", { method: "POST" });
+      assert.equal(preview.json.summaryBy, "hewn");
+      assert.equal(preview.json.from, "hub");
+      assert.deepEqual(preview.json.operations.map((o: any) => o.name), names);
+      const done = await platform.settle((await api(`/bundles/${preview.json.token}/install`, { method: "POST", body: { name: "My Ideas", sample: true } })).json.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.equal((await api("/capabilities/my-ideas")).json.source.from, "hub");
+      assert.equal((await api("/hub")).json.tools.find((t: any) => t.id === "idea-tracker").installed, true);
+      assert.equal((await api("/hub/idea-tracker")).json.installedAs, "my-ideas");
+      // One of the same id counts too (the owner's own Running Log).
+      assert.equal((await api("/hub/running-log")).json.installedAs, "running-log");
+      assert.equal((await api("/hub/nope")).status, 404);
+    });
+
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {
       const r = await http("/api/intake", {
         method: "POST",

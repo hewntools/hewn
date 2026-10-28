@@ -3,7 +3,7 @@
 // conversation with the intake, the spec the builder worked from, the builder's log), its files
 // in the code browser, Continue from here and Restore, under Info's top bar.
 import { actorLabel, ago, api, builderLabel, capRef, caps, confirmDialog, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
-import { buildModelWords } from "./build.js";
+import { buildModelWords, installedFrom } from "./build.js";
 import { codeBrowser, versionSource } from "./files.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { conversationThread } from "./intake.js";
@@ -16,10 +16,10 @@ export { madeBy, versionRow, versionPage, versionsPage };
 const changed = (v) => String(v.request?.request ?? v.request?.purpose ?? "").split("\n")[0].trim();
 /**
  * How a version came to be, in words: built with a builder, asked for by an agent, installed from
- * files (no builder ran), or a quick change (a new tier or model, no builder either).
+ * a file, Hub or files (no builder ran), or a quick change (a new tier or model, no builder either).
  */
 const madeBy = (v, all) =>
-  v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "bundle" ? "installed from a file" : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;
+  v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "bundle" ? `installed ${installedFrom(v)}` : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;
 const capital = (s) => s[0].toUpperCase() + s.slice(1);
 
 /** One version as a list row: "v4 · live", what it changed, when and by what; Details opens it. */

@@ -72,7 +72,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | `schedules.ts` | schedules, and the ones the owner approves with a build |
 | `builds.ts` | builds: requests, the order they run in, the builder's attempts, retries, cancels, the owner's review, what a build keeps |
 | `validation.ts` | `validateAndPromote` ([Builds](#builds)) and promotion |
-| `sharing.ts` | a tool as a file, owner only: Share… (a version's files, the scan, the bundle), Install from a file (staged and checked, then a create build with no builder, `bundle`, through the normal validation), and sample data (replayed after an install or Start over, or written by the owner as a new version) |
+| `sharing.ts` | a tool as a file, owner only: Share… (a version's files, the scan, the bundle), Install from a file (staged and checked, then a create build with no builder, `bundle`, through the normal validation), and sample data (replayed after an install or Start over, or written by the owner as a new version); the Hub's Official shelf, which the host hands over (`SurfaceHost.shelf`, read from the release's `seeds/`): its cards, a tool's page, code and images, and staging one to install |
 | `attachments.ts` | what the owner attaches in the intake's box |
 | `instructions.ts` | the owner's instructions for building |
 | `housekeeping.ts` | the cleanup at start and daily, and the metrics aggregates |

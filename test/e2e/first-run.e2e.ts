@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Real-browser E2E on a fresh workerd host (not part of npm test): the first run, an agent's
-// approval (from the Inbox), choosing who builds, a starter build, schedules, Info's own actions (Run,
-// a rule, Deny then Authorize, Restore… cancelled), a version's Files, a destructive call confirmed
-// from the banner, Share… on a tool installed from a file, and the authority trail on Activity. The
-// builder is scripted (copies the Running Log seed; a change adds a line); builder/intake checks are
-// stubbed as installed and signed in, so it runs anywhere.
+// approval (from the Inbox), choosing who builds, a starter build, the Hub, schedules, Info's own
+// actions (Run, a rule, Deny then Authorize, Restore… cancelled), a version's Files, a destructive
+// call confirmed from the banner, Share… on a tool installed from a file, and the authority trail on
+// Activity. The builder is scripted (copies the Running Log seed; a change adds a line);
+// builder/intake checks are stubbed as installed and signed in, so it runs anywhere.
 //
 //   PLAYWRIGHT_NODE_MODULES=/path/to/node_modules/ node test/e2e/first-run.e2e.ts
 // With E2E_REAL_BUILDER=1 the starter is built by the real builder (Claude Code, signed in on this
@@ -173,6 +173,43 @@ try {
     await page.screenshot({ path: "/tmp/e2e-fr-home.png" });
   });
 
+  await step("the Hub: the Official tools, a tool's page, its Source code, Install opens the install sheet (cancelled); ⌘K has the Hub last", async () => {
+    await page.locator("nav.main-nav").getByRole("link", { name: "Hub" }).click();
+    await page.waitForURL(/#\/hub$/);
+    await page.locator(".hub-card", { hasText: "Plant Log" }).waitFor();
+    const cards = await page.locator(".hub-card").count();
+    if (cards < 7) throw new Error(`${cards} tools on the Hub`);
+    // The starter is a Reading List: the Hub's counts as yours (same id), so it offers Open and Install a copy.
+    await page.locator(".hub-card", { hasText: "Reading List" }).getByText("Installed").waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-hub.png" });
+    await page.locator(".hub-card", { hasText: "Plant Log" }).click();
+    await page.waitForURL(/#\/hub\/plant-log$/);
+    await page.getByRole("heading", { name: "Plant Log" }).waitFor();
+    await page.locator(".hub-what").getByText(/^Keeps plants/).waitFor();
+    await page.locator(".hub-what").getByRole("button", { name: "Source code ›" }).click();
+    const code = page.locator("dialog[open]", { hasText: "Source code · v" });
+    await code.getByText("Plant Log · Official · read-only").waitFor();
+    await code.locator(".code-line").first().waitFor();
+    await code.getByRole("button", { name: "Done" }).click();
+    await code.waitFor({ state: "detached" });
+    await page.locator(".info-head").getByRole("button", { name: "Install", exact: true }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "Install Plant Log" });
+    await sheet.getByText(/From Hub · Official/).waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-hub-install.png" });
+    await sheet.getByRole("button", { name: "Cancel" }).click();
+    await sheet.waitFor({ state: "detached" });
+    await page.goto(`${web}/#/hub/reading-list`);
+    await page.locator(".info-head").getByRole("button", { name: "Install a copy" }).waitFor();
+    await page.locator(".info-head").getByRole("button", { name: "Open", exact: true }).waitFor();
+    // ⌘K: "log" names Hub tools (Plant Log, Running Log) and finds Activity by its words; yours first, the Hub last.
+    await page.getByRole("button", { name: "Search and commands" }).click();
+    await page.getByPlaceholder("Search tools, pages and actions").fill("log");
+    await page.locator(".palette-item", { hasText: "Plant Log" }).waitFor();
+    const groups = await page.locator(".palette-group").allTextContents();
+    if (groups.at(-1) !== "Hub" || groups.indexOf("Hub") !== groups.length - 1 || groups.length < 2) throw new Error(`groups: ${groups.join(", ")}`);
+    await page.keyboard.press("Escape");
+  });
+
   await step("schedules: Info › Schedules › + Add schedule, add one daily, see the next run, pause it", async () => {
     await page.goto(`${web}/#/c/reading-list`);
     await page.locator(".info-section", { hasText: "Schedules" }).getByRole("button", { name: "+ Add schedule" }).click();
@@ -325,7 +362,8 @@ export const operations = {
     await page.locator(".pill", { hasText: "from a file · Running Log v1" }).waitFor();
     await page.getByRole("button", { name: "Share…" }).click();
     let sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
-    await sheet.getByText(/sample\/calls\.json · 1 call · /).waitFor();
+    // v2 is the scripted builder's copy of the Running Log seed, with the seed's own sample data.
+    await sheet.getByText(/sample\/calls\.json · \d+ calls? · /).waitFor();
     if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Info's Share… isn't on the live version");
     if (await sheet.getByRole("button", { name: "Download" }).isDisabled()) throw new Error("Download is off");
     await page.screenshot({ path: "/tmp/e2e-fr-share.png" });

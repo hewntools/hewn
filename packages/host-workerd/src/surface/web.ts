@@ -108,7 +108,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "hub", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -405,6 +405,25 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   if (resource === "accounts") return platform.accounts(owner);
+
+  // The Hub (0.4.9: Hewn's own tools, Official, shipped with the release; offline): cards, a tool's page, its images and code, and staging one to install.
+  if (resource === "hub") {
+    const shelf = host.shelf ? await host.shelf.tools() : { tools: [], firstRun: [] };
+    if (!id && method === "GET") return { tools: platform.hubCards(owner, shelf.tools), firstRun: shelf.firstRun };
+    if (id && !sub && method === "GET") return platform.hubDetail(owner, shelf.tools, id);
+    if (id && sub === "image" && method === "GET") {
+      const image = platform.hubImage(owner, shelf.tools, id, arg ?? "");
+      const png = await host.shelf?.image(image.id, image.name);
+      if (!png) throw new PlatformError("not_found", "no such image");
+      // Its URL carries the release (?v=), so a day's caching never outlives an upgrade.
+      return new Response(body(png), { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" } });
+    }
+    if (id && sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.hubFile(owner, shelf.tools, id, path) : platform.hubCode(owner, shelf.tools, id);
+    }
+    if (id && sub === "stage" && method === "POST") return platform.hubStage(owner, shelf.tools, id);
+  }
 
   // Install from a file: upload (staged, read before anything is installed), its code, install, or drop it.
   if (resource === "bundles") {

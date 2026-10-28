@@ -1,0 +1,6 @@
+[
+  {"operation": "add_habit", "input": {"name": "Stretch for ten minutes"}},
+  {"operation": "add_habit", "input": {"name": "Read to the kids"}},
+  {"operation": "add_habit", "input": {"name": "No phone after 22:00"}},
+  {"operation": "add_habit", "input": {"name": "Drink a glass of water first thing"}}
+]

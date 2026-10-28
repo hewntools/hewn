@@ -1,0 +1,16 @@
+{
+  "tools": [
+    "habits",
+    "plant-log",
+    "gift-ideas",
+    "kid-quotes",
+    "idea-tracker",
+    "reading-list",
+    "running-log"
+  ],
+  "firstRun": [
+    "habits",
+    "gift-ideas",
+    "idea-tracker"
+  ]
+}

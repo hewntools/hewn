@@ -1,0 +1,517 @@
+[
+  { "name": "list_tags starts empty", "operation": "list_tags", "version": 1, "input": {}, "expect": { "tags": [] } },
+  { "name": "list_ideas starts empty", "operation": "list_ideas", "version": 1, "input": {}, "expect": { "ideas": [], "total": 0 } },
+
+  {
+    "name": "add_idea with only a title gives defaults",
+    "operation": "add_idea", "version": 1,
+    "input": { "id": "t1", "title": "  Only a title  " },
+    "expect": {
+      "id": "t1", "title": "Only a title", "pitch": null, "status": "raw", "rating": null,
+      "tags": [], "note_count": 0, "notes": [],
+      "created_at": "$any", "updated_at": "$any", "status_changed_at": "$any"
+    }
+  },
+  {
+    "name": "add_idea without id generates one",
+    "operation": "add_idea", "version": 1,
+    "input": { "title": "Random id idea", "tags": ["gen"] },
+    "expect": { "id": "$any", "title": "Random id idea", "status": "raw" }
+  },
+  {
+    "name": "add_idea with a note has note_count 1",
+    "operation": "add_idea", "version": 1,
+    "input": { "id": "t2", "title": "Has a note", "note": "First thought" },
+    "expect": { "id": "t2", "note_count": 1, "notes": [{ "id": "t2.1", "body": "First thought", "created_at": "$any" }] }
+  },
+  {
+    "name": "add_idea normalizes tags and converts pitch newlines",
+    "operation": "add_idea", "version": 1,
+    "input": { "id": "t3", "title": "Tagged", "pitch": "line one\nline two", "tags": [" SaaS ", "saas", "B2B Tools", ""], "rating": 3, "status": "exploring" },
+    "expect": { "id": "t3", "pitch": "line one line two", "tags": ["saas", "b2b-tools"], "rating": 3, "status": "exploring" }
+  },
+  {
+    "name": "add_idea fourth with tags",
+    "operation": "add_idea", "version": 1,
+    "input": { "id": "t4", "title": "Fourth", "tags": ["saas", "fun"] },
+    "expect": { "id": "t4", "tags": ["saas", "fun"] }
+  },
+  {
+    "name": "list_tags counts",
+    "operation": "list_tags", "version": 1, "input": {},
+    "expect": { "tags": [{ "tag": "saas", "count": 2 }, { "tag": "b2b-tools", "count": 1 }, { "tag": "fun", "count": 1 }, { "tag": "gen", "count": 1 }] }
+  },
+  {
+    "name": "update_idea tags replaces the set",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "t4", "tags": ["Fun"] },
+    "expect": { "id": "t4", "title": "Fourth", "tags": ["fun"] }
+  },
+  {
+    "name": "list_tags after update",
+    "operation": "list_tags", "version": 1, "input": {},
+    "expect": { "tags": [{ "tag": "b2b-tools", "count": 1 }, { "tag": "fun", "count": 1 }, { "tag": "gen", "count": 1 }, { "tag": "saas", "count": 1 }] }
+  },
+  { "name": "delete_idea t3", "operation": "delete_idea", "version": 1, "input": { "id": "t3" }, "expect": { "deleted": true } },
+  {
+    "name": "list_tags after delete",
+    "operation": "list_tags", "version": 1, "input": {},
+    "expect": { "tags": [{ "tag": "fun", "count": 1 }, { "tag": "gen", "count": 1 }] }
+  },
+  { "name": "get_idea after delete is NOT_FOUND", "operation": "get_idea", "version": 1, "input": { "id": "t3" }, "expectError": true },
+
+  { "name": "rejects empty title", "operation": "add_idea", "version": 1, "input": { "title": "" }, "expectError": true },
+  { "name": "rejects whitespace-only title", "operation": "add_idea", "version": 1, "input": { "title": "   " }, "expectError": true },
+  { "name": "rejects missing title", "operation": "add_idea", "version": 1, "input": { "pitch": "no title" }, "expectError": true },
+  { "name": "rejects rating 0", "operation": "add_idea", "version": 1, "input": { "title": "x", "rating": 0 }, "expectError": true },
+  { "name": "rejects rating 6", "operation": "add_idea", "version": 1, "input": { "title": "x", "rating": 6 }, "expectError": true },
+  { "name": "rejects rating 2.5", "operation": "add_idea", "version": 1, "input": { "title": "x", "rating": 2.5 }, "expectError": true },
+  { "name": "rejects unknown status", "operation": "add_idea", "version": 1, "input": { "title": "x", "status": "done" }, "expectError": true },
+  { "name": "rejects unknown status on update", "operation": "update_idea", "version": 1, "input": { "id": "t1", "status": "done" }, "expectError": true },
+  { "name": "rejects rating 6 on update", "operation": "update_idea", "version": 1, "input": { "id": "t1", "rating": 6 }, "expectError": true },
+  { "name": "rejects duplicate id", "operation": "add_idea", "version": 1, "input": { "id": "t1", "title": "dup" }, "expectError": true },
+
+  {
+    "name": "update_idea rating only",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "t1", "rating": 4 },
+    "expect": { "id": "t1", "title": "Only a title", "rating": 4, "status": "raw", "pitch": null, "updated_at": "$any" }
+  },
+  {
+    "name": "update_idea pitch keeps rating",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "t1", "pitch": "A pitch\r\nwith a break" },
+    "expect": { "id": "t1", "rating": 4, "pitch": "A pitch with a break", "title": "Only a title" }
+  },
+  {
+    "name": "update_idea pitch '' clears it",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "t1", "pitch": "" },
+    "expect": { "id": "t1", "pitch": null, "rating": 4 }
+  },
+  {
+    "name": "update_idea rating null clears it",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "t1", "rating": null },
+    "expect": { "id": "t1", "rating": null, "title": "Only a title" }
+  },
+  {
+    "name": "update_idea title and status",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "t1", "title": "Renamed", "status": "validating" },
+    "expect": { "id": "t1", "title": "Renamed", "status": "validating", "status_changed_at": "$any" }
+  },
+
+  {
+    "name": "add_note appends newest first",
+    "operation": "add_note", "version": 1,
+    "input": { "id": "t2", "body": "Second thought" },
+    "expect": {
+      "id": "t2", "note_count": 2,
+      "notes": [{ "id": "t2.2", "body": "Second thought" }, { "id": "t2.1", "body": "First thought" }]
+    }
+  },
+  { "name": "delete_note", "operation": "delete_note", "version": 1, "input": { "id": "t2", "note_id": "t2.1" }, "expect": { "deleted": true } },
+  {
+    "name": "get_idea after delete_note",
+    "operation": "get_idea", "version": 1,
+    "input": { "id": "t2" },
+    "expect": { "id": "t2", "title": "Has a note", "note_count": 1, "notes": [{ "id": "t2.2", "body": "Second thought" }] }
+  },
+  { "name": "delete_note unknown note_id is NOT_FOUND", "operation": "delete_note", "version": 1, "input": { "id": "t2", "note_id": "t2.99" }, "expectError": true },
+  { "name": "delete_note already deleted is NOT_FOUND", "operation": "delete_note", "version": 1, "input": { "id": "t2", "note_id": "t2.1" }, "expectError": true },
+  { "name": "add_note rejects empty body", "operation": "add_note", "version": 1, "input": { "id": "t2", "body": "  " }, "expectError": true },
+
+  { "name": "get unknown id", "operation": "get_idea", "version": 1, "input": { "id": "nope" }, "expectError": true },
+  { "name": "update unknown id", "operation": "update_idea", "version": 1, "input": { "id": "nope", "title": "x" }, "expectError": true },
+  { "name": "add_note unknown id", "operation": "add_note", "version": 1, "input": { "id": "nope", "body": "x" }, "expectError": true },
+  { "name": "delete unknown id", "operation": "delete_idea", "version": 1, "input": { "id": "nope" }, "expectError": true },
+  { "name": "delete_note unknown idea", "operation": "delete_note", "version": 1, "input": { "id": "nope", "note_id": "nope.1" }, "expectError": true },
+
+  { "name": "sort seed s1 (3)", "operation": "add_idea", "version": 1, "input": { "id": "s1", "title": "Sort three old", "rating": 3, "tags": ["sorttest"] }, "expect": { "id": "s1" } },
+  { "name": "sort seed s2 (5)", "operation": "add_idea", "version": 1, "input": { "id": "s2", "title": "Sort five", "rating": 5, "tags": ["sorttest"] }, "expect": { "id": "s2" } },
+  { "name": "sort seed s3 (unrated)", "operation": "add_idea", "version": 1, "input": { "id": "s3", "title": "Sort unrated", "tags": ["sorttest"] }, "expect": { "id": "s3" } },
+  { "name": "sort seed s4 (3)", "operation": "add_idea", "version": 1, "input": { "id": "s4", "title": "Sort three new", "rating": 3, "tags": ["sorttest"] }, "expect": { "id": "s4" } },
+  { "name": "sort seed s5 (1)", "operation": "add_idea", "version": 1, "input": { "id": "s5", "title": "Sort one", "rating": 1, "tags": ["sorttest"] }, "expect": { "id": "s5" } },
+  {
+    "name": "list_ideas default sort: stars desc, unrated last, ties by most recently updated",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "sorttest" },
+    "expect": { "total": 5, "ideas": [{ "id": "s2" }, { "id": "s4" }, { "id": "s1" }, { "id": "s5" }, { "id": "s3" }] }
+  },
+  { "name": "touch s1 via note", "operation": "add_note", "version": 1, "input": { "id": "s1", "body": "bump" }, "expect": { "id": "s1", "note_count": 1 } },
+  {
+    "name": "list_ideas tie order follows updated_at",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "SortTest" },
+    "expect": { "total": 5, "ideas": [{ "id": "s2" }, { "id": "s1" }, { "id": "s4" }, { "id": "s5" }, { "id": "s3" }] }
+  },
+  {
+    "name": "list_ideas pagination",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "sorttest", "limit": 2, "offset": 2 },
+    "expect": { "total": 5, "ideas": [{ "id": "s4" }, { "id": "s5" }] }
+  },
+  {
+    "name": "list_ideas min_rating",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "sorttest", "min_rating": 3 },
+    "expect": { "total": 3, "ideas": [{ "id": "s2" }, { "id": "s1" }, { "id": "s4" }] }
+  },
+  {
+    "name": "list_ideas sort created",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "sorttest", "sort": "created", "limit": 1 },
+    "expect": { "total": 5, "ideas": [{ "id": "s5" }] }
+  },
+  {
+    "name": "list_ideas sort updated",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "sorttest", "sort": "updated", "limit": 1 },
+    "expect": { "total": 5, "ideas": [{ "id": "s1", "note_count": 1 }] }
+  },
+  { "name": "rejects limit 0", "operation": "list_ideas", "version": 1, "input": { "limit": 0 }, "expectError": true },
+  { "name": "rejects limit 501", "operation": "list_ideas", "version": 1, "input": { "limit": 501 }, "expectError": true },
+
+  { "name": "closed seed c1 raw", "operation": "add_idea", "version": 1, "input": { "id": "c1", "title": "Open one", "tags": ["closedtest"] }, "expect": { "id": "c1" } },
+  { "name": "closed seed c2 parked", "operation": "add_idea", "version": 1, "input": { "id": "c2", "title": "Parked one", "status": "parked", "tags": ["closedtest"] }, "expect": { "status": "parked" } },
+  { "name": "closed seed c3", "operation": "add_idea", "version": 1, "input": { "id": "c3", "title": "Soon killed", "tags": ["closedtest"] }, "expect": { "status": "raw" } },
+  { "name": "kill c3", "operation": "update_idea", "version": 1, "input": { "id": "c3", "status": "killed" }, "expect": { "status": "killed" } },
+  {
+    "name": "list_ideas hides parked and killed by default",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "closedtest" },
+    "expect": { "total": 1, "ideas": [{ "id": "c1" }] }
+  },
+  {
+    "name": "list_ideas include_closed shows all",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "closedtest", "include_closed": true, "sort": "created" },
+    "expect": { "total": 3, "ideas": [{ "id": "c3" }, { "id": "c2" }, { "id": "c1" }] }
+  },
+  {
+    "name": "list_ideas explicit status filter shows parked",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "closedtest", "status": ["parked"] },
+    "expect": { "total": 1, "ideas": [{ "id": "c2", "status": "parked" }] }
+  },
+  {
+    "name": "list_ideas explicit status filter shows killed",
+    "operation": "list_ideas", "version": 1,
+    "input": { "status": ["killed"] },
+    "expect": { "total": 1, "ideas": [{ "id": "c3", "status": "killed" }] }
+  },
+
+  {
+    "name": "query seed",
+    "operation": "add_idea", "version": 1,
+    "input": { "id": "q1", "title": "Plain title", "pitch": "Nothing special", "note": "Partner with the Zebracorn guild" },
+    "expect": { "id": "q1" }
+  },
+  {
+    "name": "list_ideas query matches note text case-insensitively",
+    "operation": "list_ideas", "version": 1,
+    "input": { "query": "zEBRACORN" },
+    "expect": { "total": 1, "ideas": [{ "id": "q1", "note_count": 1 }] }
+  },
+  {
+    "name": "list_ideas query matches title",
+    "operation": "list_ideas", "version": 1,
+    "input": { "query": "sort FIVE" },
+    "expect": { "total": 1, "ideas": [{ "id": "s2" }] }
+  },
+  {
+    "name": "list_ideas query matches pitch",
+    "operation": "list_ideas", "version": 1,
+    "input": { "query": "nothing spec" },
+    "expect": { "total": 1, "ideas": [{ "id": "q1" }] }
+  },
+
+  { "name": "delete_idea cascades", "operation": "delete_idea", "version": 1, "input": { "id": "q1" }, "expect": { "deleted": true } },
+  { "name": "get_idea after cascade delete", "operation": "get_idea", "version": 1, "input": { "id": "q1" }, "expectError": true },
+  {
+    "name": "notes of deleted idea are gone from search",
+    "operation": "list_ideas", "version": 1,
+    "input": { "query": "zebracorn", "include_closed": true },
+    "expect": { "total": 0, "ideas": [] }
+  },
+  {
+    "name": "tags of deleted idea are gone",
+    "operation": "delete_idea", "version": 1,
+    "input": { "id": "c1" },
+    "expect": { "deleted": true }
+  },
+  {
+    "name": "list_ideas by tag after delete",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "closedtest", "include_closed": true },
+    "expect": { "total": 2 }
+  },
+
+  {
+    "name": "v2 add_idea returns url null and full status",
+    "operation": "add_idea", "version": 2,
+    "input": { "id": "sh1", "title": "Open ship test", "tags": ["shiptest"] },
+    "expect": { "id": "sh1", "url": null, "status": "raw", "notes": [], "created_at": "$any" }
+  },
+  {
+    "name": "v2 add_idea shipped with url",
+    "operation": "add_idea", "version": 2,
+    "input": { "id": "sh2", "title": "Live product", "status": "shipped", "url": "  https://example.com/live?a=1  ", "tags": ["shiptest"], "rating": 5 },
+    "expect": { "id": "sh2", "status": "shipped", "url": "https://example.com/live?a=1", "rating": 5 }
+  },
+  {
+    "name": "v2 add_idea then ship via update",
+    "operation": "add_idea", "version": 2,
+    "input": { "id": "sh3", "title": "Soon shipped", "tags": ["shiptest"] },
+    "expect": { "id": "sh3", "status": "raw" }
+  },
+  {
+    "name": "v2 update_idea to shipped",
+    "operation": "update_idea", "version": 2,
+    "input": { "id": "sh3", "status": "shipped" },
+    "expect": { "id": "sh3", "status": "shipped", "url": null, "status_changed_at": "$any" }
+  },
+  {
+    "name": "v2 list_ideas hides shipped by default",
+    "operation": "list_ideas", "version": 2,
+    "input": { "tag": "shiptest" },
+    "expect": { "total": 1, "ideas": [{ "id": "sh1", "url": null }] }
+  },
+  {
+    "name": "v2 list_ideas include_closed shows shipped",
+    "operation": "list_ideas", "version": 2,
+    "input": { "tag": "shiptest", "include_closed": true, "sort": "created" },
+    "expect": { "total": 3, "ideas": [{ "id": "sh3", "status": "shipped" }, { "id": "sh2", "status": "shipped", "url": "https://example.com/live?a=1" }, { "id": "sh1", "status": "raw" }] }
+  },
+  {
+    "name": "v2 list_ideas status filter shipped",
+    "operation": "list_ideas", "version": 2,
+    "input": { "status": ["shipped"], "sort": "created" },
+    "expect": { "total": 2, "ideas": [{ "id": "sh3" }, { "id": "sh2" }] }
+  },
+  {
+    "name": "v2 list_ideas status filter parked excludes shipped",
+    "operation": "list_ideas", "version": 2,
+    "input": { "status": ["parked"] },
+    "expect": { "total": 1, "ideas": [{ "id": "c2", "status": "parked" }] }
+  },
+  {
+    "name": "v2 list_ideas status filter mixes open and shipped",
+    "operation": "list_ideas", "version": 2,
+    "input": { "tag": "shiptest", "status": ["raw", "shipped"] },
+    "expect": { "total": 3 }
+  },
+  {
+    "name": "v1 list_ideas still hides shipped by default",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "shiptest" },
+    "expect": { "total": 1, "ideas": [{ "id": "sh1", "status": "raw" }] }
+  },
+  {
+    "name": "v1 list_ideas include_closed reports shipped as parked",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "shiptest", "include_closed": true, "sort": "created" },
+    "expect": { "total": 3, "ideas": [{ "id": "sh3", "status": "parked" }, { "id": "sh2", "status": "parked", "url": "https://example.com/live?a=1" }, { "id": "sh1", "status": "raw" }] }
+  },
+  {
+    "name": "v1 list_ideas parked filter includes shipped",
+    "operation": "list_ideas", "version": 1,
+    "input": { "status": ["parked"], "sort": "created" },
+    "expect": { "total": 3, "ideas": [{ "id": "sh3", "status": "parked" }, { "id": "sh2", "status": "parked" }, { "id": "c2", "status": "parked" }] }
+  },
+  { "name": "v1 list_ideas rejects shipped filter", "operation": "list_ideas", "version": 1, "input": { "status": ["shipped"] }, "expectError": true },
+  { "name": "v1 add_idea rejects shipped", "operation": "add_idea", "version": 1, "input": { "title": "x", "status": "shipped" }, "expectError": true },
+  { "name": "v1 update_idea rejects shipped", "operation": "update_idea", "version": 1, "input": { "id": "sh1", "status": "shipped" }, "expectError": true },
+  {
+    "name": "v1 get_idea reports shipped as parked",
+    "operation": "get_idea", "version": 1,
+    "input": { "id": "sh2" },
+    "expect": { "id": "sh2", "status": "parked", "url": "https://example.com/live?a=1", "rating": 5 }
+  },
+  {
+    "name": "v2 get_idea shows shipped",
+    "operation": "get_idea", "version": 2,
+    "input": { "id": "sh2" },
+    "expect": { "id": "sh2", "status": "shipped", "url": "https://example.com/live?a=1", "notes": [] }
+  },
+  {
+    "name": "v1 add_note on shipped keeps it shipped",
+    "operation": "add_note", "version": 1,
+    "input": { "id": "sh2", "body": "Launched" },
+    "expect": { "id": "sh2", "status": "parked", "note_count": 1 }
+  },
+  {
+    "name": "v1 update_idea without status keeps shipped",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "sh2", "rating": 4 },
+    "expect": { "id": "sh2", "status": "parked", "rating": 4 }
+  },
+  {
+    "name": "v2 add_note shows shipped",
+    "operation": "add_note", "version": 2,
+    "input": { "id": "sh2", "body": "Still live" },
+    "expect": { "id": "sh2", "status": "shipped", "note_count": 2, "rating": 4, "url": "https://example.com/live?a=1" }
+  },
+
+  {
+    "name": "v2 update_idea sets url",
+    "operation": "update_idea", "version": 2,
+    "input": { "id": "sh1", "url": "http://localhost:3000/demo" },
+    "expect": { "id": "sh1", "url": "http://localhost:3000/demo", "title": "Open ship test" }
+  },
+  {
+    "name": "v2 update_idea without url keeps it",
+    "operation": "update_idea", "version": 2,
+    "input": { "id": "sh1", "rating": 2 },
+    "expect": { "id": "sh1", "url": "http://localhost:3000/demo", "rating": 2 }
+  },
+  {
+    "name": "v2 update_idea url '' clears it",
+    "operation": "update_idea", "version": 2,
+    "input": { "id": "sh1", "url": "" },
+    "expect": { "id": "sh1", "url": null, "rating": 2 }
+  },
+  {
+    "name": "v2 update_idea url null clears it",
+    "operation": "update_idea", "version": 2,
+    "input": { "id": "sh2", "url": null },
+    "expect": { "id": "sh2", "url": null, "status": "shipped" }
+  },
+  {
+    "name": "v1 update_idea sets url",
+    "operation": "update_idea", "version": 1,
+    "input": { "id": "sh1", "url": "HTTPS://Example.org" },
+    "expect": { "id": "sh1", "url": "HTTPS://Example.org", "status": "raw" }
+  },
+  {
+    "name": "v2 add_idea url '' means none",
+    "operation": "add_idea", "version": 2,
+    "input": { "id": "sh4", "title": "Blank url", "url": "   " },
+    "expect": { "id": "sh4", "url": null }
+  },
+  { "name": "rejects ftp url", "operation": "add_idea", "version": 2, "input": { "title": "x", "url": "ftp://example.com/file" }, "expectError": true },
+  { "name": "rejects javascript url", "operation": "update_idea", "version": 2, "input": { "id": "sh1", "url": "javascript:alert(1)" }, "expectError": true },
+  { "name": "rejects url without scheme", "operation": "update_idea", "version": 2, "input": { "id": "sh1", "url": "example.com" }, "expectError": true },
+  { "name": "rejects url with spaces", "operation": "add_idea", "version": 2, "input": { "title": "x", "url": "https://exa mple.com" }, "expectError": true },
+  { "name": "rejects url without host", "operation": "add_idea", "version": 2, "input": { "title": "x", "url": "https://" }, "expectError": true },
+  { "name": "rejects url over 500 chars", "operation": "add_idea", "version": 2, "input": { "title": "x", "url": "https://example.com/01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789" }, "expectError": true },
+  {
+    "name": "url validation failure leaves idea unchanged",
+    "operation": "get_idea", "version": 2,
+    "input": { "id": "sh1" },
+    "expect": { "id": "sh1", "url": "HTTPS://Example.org" }
+  },
+
+  {
+    "name": "v3 add_idea active",
+    "operation": "add_idea", "version": 3,
+    "input": { "id": "a1", "title": "Building it", "status": "active", "rating": 3, "tags": ["activetest"] },
+    "expect": { "id": "a1", "status": "active", "rating": 3, "url": null, "notes": [], "status_changed_at": "$any" }
+  },
+  { "name": "v2 get_idea reports active as validating", "operation": "get_idea", "version": 2, "input": { "id": "a1" }, "expect": { "id": "a1", "status": "validating" } },
+  { "name": "v1 get_idea reports active as validating", "operation": "get_idea", "version": 1, "input": { "id": "a1" }, "expect": { "id": "a1", "status": "validating" } },
+  { "name": "v1 add_note reports active as validating", "operation": "add_note", "version": 1, "input": { "id": "a1", "body": "Started" }, "expect": { "id": "a1", "status": "validating", "note_count": 1 } },
+  { "name": "v2 add_note reports active as validating", "operation": "add_note", "version": 2, "input": { "id": "a1", "body": "Going" }, "expect": { "id": "a1", "status": "validating", "note_count": 2 } },
+  { "name": "v2 update_idea without status keeps active", "operation": "update_idea", "version": 2, "input": { "id": "a1", "rating": 4 }, "expect": { "id": "a1", "status": "validating", "rating": 4 } },
+  { "name": "v1 update_idea without status keeps active", "operation": "update_idea", "version": 1, "input": { "id": "a1", "title": "Active one" }, "expect": { "id": "a1", "status": "validating", "title": "Active one" } },
+  { "name": "v2 update_idea status validating keeps active", "operation": "update_idea", "version": 2, "input": { "id": "a1", "status": "validating" }, "expect": { "id": "a1", "status": "validating" } },
+  {
+    "name": "v3 get_idea still active after v1/v2 updates",
+    "operation": "get_idea", "version": 3,
+    "input": { "id": "a1" },
+    "expect": { "id": "a1", "status": "active", "title": "Active one", "rating": 4, "note_count": 2 }
+  },
+  { "name": "v3 add_note shows active", "operation": "add_note", "version": 3, "input": { "id": "a1", "body": "Still going" }, "expect": { "id": "a1", "status": "active", "note_count": 3, "notes": [{ "body": "Still going" }, { "body": "Going" }, { "body": "Started" }] } },
+  { "name": "v1 update_idea rejects active", "operation": "update_idea", "version": 1, "input": { "id": "a1", "status": "active" }, "expectError": true },
+  { "name": "v2 update_idea rejects active", "operation": "update_idea", "version": 2, "input": { "id": "a1", "status": "active" }, "expectError": true },
+  { "name": "v1 add_idea rejects active", "operation": "add_idea", "version": 1, "input": { "title": "x", "status": "active" }, "expectError": true },
+  { "name": "v2 add_idea rejects active", "operation": "add_idea", "version": 2, "input": { "title": "x", "status": "active" }, "expectError": true },
+  { "name": "v2 list_ideas rejects active filter", "operation": "list_ideas", "version": 2, "input": { "status": ["active"] }, "expectError": true },
+  { "name": "v2 list_ideas rejects status sort", "operation": "list_ideas", "version": 2, "input": { "sort": "status" }, "expectError": true },
+  { "name": "v3 add_idea rejects unknown status", "operation": "add_idea", "version": 3, "input": { "title": "x", "status": "done" }, "expectError": true },
+
+  { "name": "active seed a2 parked", "operation": "add_idea", "version": 3, "input": { "id": "a2", "title": "On hold", "status": "parked", "rating": 5, "tags": ["activetest"] }, "expect": { "id": "a2", "status": "parked" } },
+  { "name": "active seed a3 raw", "operation": "add_idea", "version": 3, "input": { "id": "a3", "title": "Fresh", "rating": 2, "tags": ["activetest"] }, "expect": { "id": "a3", "status": "raw" } },
+  { "name": "active seed a4 shipped", "operation": "add_idea", "version": 3, "input": { "id": "a4", "title": "Live", "status": "shipped", "rating": 5, "tags": ["activetest"] }, "expect": { "id": "a4", "status": "shipped" } },
+  { "name": "active seed a5 killed", "operation": "add_idea", "version": 3, "input": { "id": "a5", "title": "Dead", "status": "killed", "rating": 4, "tags": ["activetest"] }, "expect": { "id": "a5", "status": "killed" } },
+  { "name": "active seed a6 exploring", "operation": "add_idea", "version": 3, "input": { "id": "a6", "title": "Looking", "status": "exploring", "tags": ["activetest"] }, "expect": { "id": "a6", "status": "exploring" } },
+
+  {
+    "name": "v3 list_ideas default shows parked as open, below live statuses",
+    "operation": "list_ideas", "version": 3,
+    "input": { "tag": "activetest" },
+    "expect": { "total": 4, "ideas": [{ "id": "a1", "status": "active" }, { "id": "a3" }, { "id": "a6" }, { "id": "a2", "status": "parked" }] }
+  },
+  {
+    "name": "v3 list_ideas include_closed adds only shipped and killed, after parked",
+    "operation": "list_ideas", "version": 3,
+    "input": { "tag": "activetest", "include_closed": true },
+    "expect": { "total": 6, "ideas": [{ "id": "a1" }, { "id": "a3" }, { "id": "a6" }, { "id": "a2" }, { "id": "a4", "status": "shipped" }, { "id": "a5", "status": "killed" }] }
+  },
+  {
+    "name": "v3 list_ideas closed filter",
+    "operation": "list_ideas", "version": 3,
+    "input": { "tag": "activetest", "status": ["shipped", "killed"] },
+    "expect": { "total": 2, "ideas": [{ "id": "a4" }, { "id": "a5" }] }
+  },
+  {
+    "name": "v3 list_ideas sort status follows lifecycle order",
+    "operation": "list_ideas", "version": 3,
+    "input": { "tag": "activetest", "include_closed": true, "sort": "status" },
+    "expect": { "total": 6, "ideas": [{ "id": "a3", "status": "raw" }, { "id": "a6", "status": "exploring" }, { "id": "a1", "status": "active" }, { "id": "a2", "status": "parked" }, { "id": "a4", "status": "shipped" }, { "id": "a5", "status": "killed" }] }
+  },
+  { "name": "v3 list_ideas active filter", "operation": "list_ideas", "version": 3, "input": { "status": ["active"] }, "expect": { "total": 1, "ideas": [{ "id": "a1", "status": "active" }] } },
+  {
+    "name": "v3 list_ideas counts older parked idea as open, hides killed",
+    "operation": "list_ideas", "version": 3,
+    "input": { "tag": "closedtest" },
+    "expect": { "total": 1, "ideas": [{ "id": "c2", "status": "parked" }] }
+  },
+  {
+    "name": "v2 list_ideas default still hides parked, shows active as validating",
+    "operation": "list_ideas", "version": 2,
+    "input": { "tag": "activetest" },
+    "expect": { "total": 3, "ideas": [{ "id": "a1", "status": "validating" }, { "id": "a3" }, { "id": "a6" }] }
+  },
+  {
+    "name": "v2 list_ideas validating filter includes active",
+    "operation": "list_ideas", "version": 2,
+    "input": { "tag": "activetest", "status": ["validating"] },
+    "expect": { "total": 1, "ideas": [{ "id": "a1", "status": "validating" }] }
+  },
+  {
+    "name": "v1 list_ideas default still hides parked",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "activetest" },
+    "expect": { "total": 3, "ideas": [{ "id": "a1", "status": "validating" }, { "id": "a3" }, { "id": "a6" }] }
+  },
+  {
+    "name": "v1 list_ideas parked filter still includes shipped",
+    "operation": "list_ideas", "version": 1,
+    "input": { "tag": "activetest", "status": ["parked"], "sort": "created" },
+    "expect": { "total": 2, "ideas": [{ "id": "a4", "status": "parked" }, { "id": "a2", "status": "parked" }] }
+  },
+  { "name": "v1 get_idea still reports shipped as parked", "operation": "get_idea", "version": 1, "input": { "id": "a4" }, "expect": { "id": "a4", "status": "parked" } },
+  { "name": "v2 get_idea shows shipped", "operation": "get_idea", "version": 2, "input": { "id": "a4" }, "expect": { "id": "a4", "status": "shipped" } },
+
+  { "name": "v3 update_idea active to validating", "operation": "update_idea", "version": 3, "input": { "id": "a1", "status": "validating" }, "expect": { "id": "a1", "status": "validating" } },
+  { "name": "v3 list_ideas active filter after demotion", "operation": "list_ideas", "version": 3, "input": { "status": ["active"] }, "expect": { "total": 0, "ideas": [] } },
+  { "name": "v3 update_idea back to active", "operation": "update_idea", "version": 3, "input": { "id": "a1", "status": "active", "url": "https://example.com/a1" }, "expect": { "id": "a1", "status": "active", "url": "https://example.com/a1" } },
+  { "name": "v3 update_idea parked", "operation": "update_idea", "version": 3, "input": { "id": "a3", "status": "parked" }, "expect": { "id": "a3", "status": "parked" } },
+  { "name": "v3 update_idea rejects unknown status", "operation": "update_idea", "version": 3, "input": { "id": "a1", "status": "done" }, "expectError": true },
+  { "name": "v3 get_idea unknown id", "operation": "get_idea", "version": 3, "input": { "id": "nope" }, "expectError": true },
+
+  {
+    "name": "line and paragraph separators round-trip",
+    "operation": "add_idea", "version": 2,
+    "input": { "id": "ls1", "title": "Line sep", "pitch": "Para sep", "note": "a b c", "tags": ["shiptest"] },
+    "expect": { "id": "ls1", "title": "Line sep", "pitch": "Para sep", "notes": [{ "body": "a b c" }] }
+  },
+  {
+    "name": "separators survive list output",
+    "operation": "list_ideas", "version": 2,
+    "input": { "query": "line sep" },
+    "expect": { "total": 1, "ideas": [{ "id": "ls1", "title": "Line sep", "pitch": "Para sep" }] }
+  }
+]
