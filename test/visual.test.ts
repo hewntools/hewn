@@ -134,6 +134,22 @@ describe("visual validation", () => {
     assert.equal(api.status, "promoted", api.log.join("\n"));
     platform.close();
   });
+
+  test("a real headless browser: a tool's own CSS wins over ui.css, its dark tokens and a plain rule for a control too", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+    const render = async (style: string, button: string) => {
+      const uiDir = mkdtempSync(join(tmpdir(), "hewn-ui-"));
+      writeFileSync(join(uiDir, "index.html"), `<!doctype html><html><head><link rel="stylesheet" href="/_platform/ui.css"><style>${style}</style></head><body><main class="page"><button ${button}>Save</button></main></body></html>`);
+      const r = await chromiumCheck(browser)({ uiDir, manifest: {}, invoke: async () => ({}) });
+      assert.deepEqual(r.errors, []);
+      return [r.screenshot, r.screenshotDark];
+    };
+    // The tool's own tokens, light and dark, and a rule for every button (ui.css's `button.primary` is more specific).
+    const own = await render(":root { --bg: rgb(0 0 255); } @media (prefers-color-scheme: dark) { :root { --bg: rgb(255 0 0); } } button { background: rgb(0 160 0); }", `class="primary"`);
+    // The same colours, set where nothing in ui.css can outrank them.
+    const fixed = await render("body { background: rgb(0 0 255); } @media (prefers-color-scheme: dark) { body { background: rgb(255 0 0); } }", `class="primary" style="background: rgb(0 160 0)"`);
+    assert.deepEqual(own[0], fixed[0], "light: the tool's background and button");
+    assert.deepEqual(own[1], fixed[1], "dark: the tool's dark background wins over ui.css's dark tokens");
+  });
 });
 
 test("a browser that won't start skips the check (with the reason) instead of failing the build", async () => {

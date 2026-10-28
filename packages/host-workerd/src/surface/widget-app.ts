@@ -87,7 +87,8 @@ export async function widgetAppHtml(asset: (path: string) => Promise<Uint8Array 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hewn widget</title>
-<style>${css}${CSS}</style>
+<style>${css}
+@layer hewn {${CSS}}</style>
 </head>
 <body>
 <div id="w"></div>

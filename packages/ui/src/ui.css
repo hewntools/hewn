@@ -8,7 +8,12 @@
  *
  * Accent rule: --accent is a FILL (buttons, live dots, progress). For accent-coloured
  * text or lines use --accent-ink (it stays readable in light mode).
+ *
+ * Everything here is in the cascade layer "hewn", so a page's own CSS (outside any layer)
+ * always wins, whatever its selectors: its own tokens, light and dark, or a plain rule
+ * for a control.
  */
+@layer hewn {
 
 /* ======================= tokens: light ======================= */
 :root, [data-theme="light"] {
@@ -619,3 +624,5 @@ body.resizing iframe { pointer-events: none; }
 .command-block > span { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; }
 /* Small app icons: square pixels (no rounding under 56px) and the glyph at ~56% of the tile. */
 .app-icon svg.glyph rect { rx: 0; }
+
+} /* @layer hewn */
