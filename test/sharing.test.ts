@@ -127,6 +127,16 @@ describe("bundles: the zip and the scan", () => {
     assert.throws(() => unpackBundle(new Uint8Array(MAX_BUNDLE_BYTES + 1)), /at most 5 MB/);
   });
 
+  test("the scan: a long line is scanned quickly and to its end", () => {
+    const line = "a.".repeat(200_000) + " sk-abcdefghijklmnopqrstuvwxyz";
+    const started = Date.now();
+    const found = scanFiles({ "src/min.js": bytes(line) });
+    assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+    assert.deepEqual(found.filter((f) => f.label === "Looks like an API key").map((f) => f.text), ["sk-abcdefghijklmnopqrstuvwxyz"]);
+    const digits = scanFiles({ "src/n.js": bytes("1".repeat(300_000) + ".") });
+    assert.deepEqual(digits.filter((f) => f.kind === "pii"), []);
+  });
+
   test("the scan: personal data and key shapes warn, the owner's own values block, everyday text passes", () => {
     const files = {
       "tests/cases.json": bytes(['{ "email": "anna.berg@example.com", "phone": "+46 70 123 45 67", "at": "63.8258, 20.2630" }', '{ "date": "2026-10-20", "id": "1234567890", "time": "07:30" }'].join("\n")),
@@ -182,17 +192,38 @@ describe("sharing: a tool as a file", () => {
     await assert.rejects(t.platform.shareCheck(t.claude, "running-log"), /cannot perform owner actions/);
   });
 
-  test("one of the owner's own stored values blocks sharing, with where it is", async () => {
+  test("the owner's own keys block sharing, each listed and never sent back whole; a setting only warns", async () => {
     await withSample();
-    t.platform.registry.setConfig("running-log", "SITE", "https://my-private-site.example", "user");
+    await installFrom(t.platform, resolve(FIX, "site-connection"));
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", "my-own-api-key-123456");
+    t.platform.registry.setConfig("running-log", "CITY", "Umeå city centre", "user");
     const b = await t.build(
-      () => t.platform.modify(USER, { capabilityId: "running-log", request: "hardcode the site" }),
-      (ws) => editJson(join(ws, "capability.json"), (m) => (m.description = "Posts to https://my-private-site.example")),
+      () => t.platform.modify(USER, { capabilityId: "running-log", request: "hardcode things" }),
+      (ws) => {
+        editJson(join(ws, "capability.json"), (m) => (m.description = "Runs around Umeå city centre"));
+        writeFileSync(join(ws, "notes.md"), "first line\nkey: my-own-api-key-123456\n");
+        writeFileSync(join(ws, "blob.bin"), new Uint8Array([0, 1, 2, ...bytes("my-own-api-key-123456"), 0]));
+      },
     );
     assert.equal(b.status, "promoted", b.log.join("\n"));
     const check = await t.platform.shareCheck(USER, "running-log");
-    assert.deepEqual(check.blocked, { kind: "secret", file: "capability.json", line: check.blocked!.kind === "secret" ? check.blocked!.line : 0, label: "your Running Log setting SITE" });
-    await assert.rejects(t.platform.shareBundle(USER, "running-log"), /capability\.json:\d+ is your Running Log setting SITE\. Remove it/);
+    const keys = check.findings.filter((f) => f.kind === "secret");
+    assert.deepEqual(keys.map((f) => `${f.file}:${f.line}`), ["blob.bin:1", "notes.md:2"], "a binary file is searched for them too");
+    assert.ok(keys.every((f) => f.label === "your Site Connection key (API_KEY)" && f.text === f.masked && !f.text.includes("123456")));
+    assert.deepEqual(check.blocked, { kind: "secret", file: "blob.bin", line: 1, label: "your Site Connection key (API_KEY)" });
+    await assert.rejects(t.platform.shareBundle(USER, "running-log"), /blob\.bin:1 is your Site Connection key \(API_KEY\); notes\.md:2 is your Site Connection key \(API_KEY\)\. Remove them/);
+    const setting = check.findings.find((f) => f.kind === "setting")!;
+    assert.equal(setting.file, "capability.json");
+    assert.equal(setting.label, "your Running Log setting CITY");
+    // Without the key, the setting alone doesn't stop it.
+    const fixed = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "running-log", request: "take the key out" }),
+      (ws) => (rmSync(join(ws, "notes.md")), rmSync(join(ws, "blob.bin"))),
+    );
+    assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
+    const again = await t.platform.shareCheck(USER, "running-log");
+    assert.equal(again.blocked, null);
+    assert.ok(again.findings.some((f) => f.kind === "setting"));
   });
 
   test("a connection shares without sample data, and installs signed out", async () => {

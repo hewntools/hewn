@@ -4,7 +4,7 @@
 // a create build with no builder ("bundle") through the normal validation. Sample data: replayed
 // after an install or Start over, and written by the owner as a new version. Owner only.
 import { type Agent, requireOwner } from "../auth.ts";
-import { BUNDLE_FORMAT, BundleError, dependencyProblems, type Finding, packBundle, readSample, SAMPLE_FILE, sampleOrNull, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
+import { BUNDLE_FORMAT, BundleError, dependencyProblems, type Finding, type OwnValue, packBundle, readSample, SAMPLE_FILE, sampleOrNull, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, text } from "../files.ts";
@@ -30,7 +30,7 @@ export interface ShareCheck {
   sample: { calls: number } | null;
   /** A connection: it shares without sample data. */
   connection: boolean;
-  /** Why it can't be shared: one of the owner's own values in it, or no sample data. */
+  /** Why it can't be shared: one of the owner's own keys in it (the first; `findings` has every one), or no sample data. */
   blocked: { kind: "secret"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
 }
 
@@ -74,7 +74,8 @@ export class Sharing extends Domain {
     const cap = this.visibleActive(owner, capabilityId);
     const v = version ?? cap.activeVersion!;
     const files = await this.shareFiles(capabilityId, v);
-    const findings = scanFiles(files, this.ownValues());
+    // The owner's own keys are never sent back whole, not even to the owner: masked only.
+    const findings = scanFiles(files, this.ownValues()).map((f) => (f.kind === "secret" ? { ...f, text: f.masked } : f));
     const sample = sampleOrNull(files);
     const secret = findings.find((f) => f.kind === "secret");
     // A connection has no data of its own to show (its sign-in never travels), so it shares without sample data.
@@ -95,7 +96,10 @@ export class Sharing extends Domain {
   /** The bundle (`<id>.hewn.zip`): refused while the check blocks it. */
   async shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> {
     const check = await this.shareCheck(owner, capabilityId, version);
-    if (check.blocked?.kind === "secret") throw new PlatformError("conflict", `${check.blocked.file}:${check.blocked.line} is ${check.blocked.label}. Remove it, then share again.`, { blocked: check.blocked });
+    if (check.blocked?.kind === "secret") {
+      const keys = check.findings.filter((f) => f.kind === "secret");
+      throw new PlatformError("conflict", `${keys.map((f) => `${f.file}:${f.line} is ${f.label}`).join("; ")}. Remove ${keys.length > 1 ? "them" : "it"}, then share again.`, { blocked: check.blocked });
+    }
     if (check.blocked?.kind === "no-sample") throw new PlatformError("conflict", `${capabilityId} has no sample data (${SAMPLE_FILE}), and a tool needs it to be shared. Ask the builder to add some, or write it yourself.`, { blocked: check.blocked });
     const files = await this.shareFiles(capabilityId, check.version);
     const row = this.registry.getVersion(capabilityId, check.version)!;
@@ -114,21 +118,25 @@ export class Sharing extends Domain {
     return { ...v.files, "capability.json": bytes(JSON.stringify(rest, null, 2) + "\n") };
   }
 
-  /** The owner's own stored values, each named: every tool's secrets and settings, and the model providers' keys. */
-  private ownValues(): { value: string; label: string }[] {
-    const out: { value: string; label: string }[] = [];
+  /**
+   * The owner's own stored values, each named: every tool's keys and the model providers' (these
+   * block a share), and every tool's settings (these warn: a setting may well be a city or a site
+   * anyone could write, and it's the owner's call).
+   */
+  private ownValues(): OwnValue[] {
+    const out: OwnValue[] = [];
     for (const c of [...this.registry.listActiveCapabilities(), ...this.registry.listArchivedCapabilities()]) {
       const name = c.displayName ?? c.name;
-      for (const [k, value] of Object.entries(this.registry.config(c.id))) out.push({ value, label: `your ${name} setting ${k}` });
+      for (const [k, value] of Object.entries(this.registry.config(c.id))) out.push({ value, label: `your ${name} setting ${k}`, kind: "setting" });
       const m = this.registry.getVersion(c.id, c.activeVersion!)?.manifest;
       for (const s of m?.requires?.secrets ?? []) {
         const value = this.secrets.get(c.id, s.name);
-        if (value) out.push({ value, label: `your ${name} key (${s.name})` });
+        if (value) out.push({ value, label: `your ${name} key (${s.name})`, kind: "secret" });
       }
     }
     for (const p of MODEL_PROVIDERS) {
       const value = this.secrets.get(MODEL_KEYS, p);
-      if (value) out.push({ value, label: `your ${p === "openai" ? "OpenAI" : p === "openrouter" ? "OpenRouter" : "Anthropic"} API key` });
+      if (value) out.push({ value, label: `your ${p === "openai" ? "OpenAI" : p === "openrouter" ? "OpenRouter" : "Anthropic"} API key`, kind: "secret" });
     }
     return out;
   }

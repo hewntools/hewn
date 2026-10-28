@@ -37,20 +37,24 @@ async function shareSheet(c, { version } = {}) {
           fail(e);
         }
       });
+      // One of your own keys is a danger row (it stops the share) and stays masked; the rest warn, with Show.
       const finding = (f) => {
+        const key = f.kind === "secret";
         const sub = h("span", { class: "sub" }, `${f.label} · ${f.masked}`);
-        const show = h("button", { class: "ghost sm" }, "Show");
-        show.addEventListener("click", () => {
-          const open = show.textContent === "Show";
-          sub.textContent = `${f.label} · ${open ? f.text : f.masked}`;
-          show.textContent = open ? "Hide" : "Show";
-        });
-        return h("li", {}, h("span", { class: "dot warn" }), h("div", { class: "grow" }, h("span", { class: "mono small" }, `${f.file}:${f.line}`), sub), show);
+        const show = !key && h("button", { class: "ghost sm" }, "Show");
+        if (show)
+          show.addEventListener("click", () => {
+            const open = show.textContent === "Show";
+            sub.textContent = `${f.label} · ${open ? f.text : f.masked}`;
+            show.textContent = open ? "Hide" : "Show";
+          });
+        return h("li", {}, h("span", { class: `dot ${key ? "danger" : "warn"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, `${f.file}:${f.line}`), sub), show);
       };
       const draw = () => {
         put(pick, check.versions.map((v) => h("option", { value: v, selected: v === check.version }, `v${v}`)));
-        const secret = check.blocked?.kind === "secret" ? check.blocked : null;
+        const keys = check.findings.filter((f) => f.kind === "secret");
         const warnings = check.findings.filter((f) => f.kind !== "secret");
+        const where = [...new Set(keys.map((f) => `${f.file}:${f.line}`))];
         const sampleRow = check.sample
           ? h("li", {}, h("span", { class: "dot ok" }), h("div", { class: "grow" }, h("span", {}, "Sample data"), h("span", { class: "sub" }, `sample/calls.json · ${check.sample.calls} calls · always included`)))
           : check.connection
@@ -67,18 +71,18 @@ async function shareSheet(c, { version } = {}) {
         const name = `${c.id}.hewn.zip`;
         put(
           body,
-          secret &&
+          keys.length > 0 &&
             h(
               "div",
               { class: "notice danger info-notice" },
-              h("span", { class: "grow" }, h("span", { class: "mono" }, `${secret.file}:${secret.line}`), ` is ${secret.label}. Remove it, then share again.`),
-              h("button", { class: "sm", onclick: () => (close(), openChange(c, { m: `Remove the value hard-coded in ${secret.file}:${secret.line}; it must not be in the code. Read it from a setting or a key the tool asks for instead.` })) }, "Change…"),
+              h("span", { class: "grow" }, keys.length === 1 ? [h("span", { class: "mono" }, where[0]), ` is ${keys[0].label}. Remove it, then share again.`] : `${keys.length} of your own keys are in it (below). Remove them, then share again.`),
+              h("button", { class: "sm", onclick: () => (close(), openChange(c, { m: `Remove the ${where.length > 1 ? "values" : "value"} hard-coded in ${where.join(", ")}; ${where.length > 1 ? "they" : "it"} must not be in the code. Read ${where.length > 1 ? "them" : "it"} from a setting or a key the tool asks for instead.` })) }, "Change…"),
             ),
           h(
             "div",
             {},
             h("div", { class: "eyebrow share-eyebrow" }, `What's in it · ${check.files} files`),
-            h("ul", { class: "list" }, warnings.map(finding), sampleRow),
+            h("ul", { class: "list" }, keys.map(finding), warnings.map(finding), sampleRow),
             h("div", { class: "small faint share-never" }, "Never in it: your data, keys, settings, conversations, logs."),
           ),
           h(

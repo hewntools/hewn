@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool as a file (`<id>.hewn.zip`): the version's files as they are, plus one sidecar,
 // hewn-bundle.json. Our own store-only zip (no compression, CRC32): bundles are small, and the
-// core runs where node:zlib doesn't. Also the scan run before a tool is shared: personal data and
-// key-shaped strings warn, the owner's own stored secret and config values block.
+// core runs where node:zlib doesn't. Also the scan run before a tool is shared: personal data,
+// key-shaped strings and the owner's own settings warn, the owner's own stored keys block.
 import { SAMPLE_SCHEMA } from "@hewntools/spec/schemas.ts";
 import type { SampleCall } from "@hewntools/spec/cases.ts";
 import { compileSchema, schemaErrors } from "./manifest.ts";
@@ -304,8 +304,11 @@ export function unpackBundle(zip: Uint8Array): { files: Files; sidecar: Sidecar 
 export interface Finding {
   file: string;
   line: number;
-  /** "pii": personal data (warns); "key": a key shape or a long random string (warns); "secret": one of the owner's own stored values (blocks). */
-  kind: "pii" | "key" | "secret";
+  /**
+   * "pii": personal data; "key": a key shape or a long random string; "setting": one of the
+   * owner's own settings (all three warn); "secret": one of the owner's own stored keys (blocks).
+   */
+  kind: "pii" | "key" | "setting" | "secret";
   label: string;
   /** The match with most of it hidden. */
   masked: string;
@@ -313,14 +316,18 @@ export interface Finding {
   text: string;
 }
 
+/** One of the owner's own stored values: a key ("secret", blocks a share) or a setting (warns). A plain string is a key. */
+export type OwnValue = string | { value: string; label: string; kind?: "secret" | "setting" };
+
 /** A phone number: 9–15 digits, written with a leading + or with spaces, dashes or brackets; never a date. */
 const phoneLike = (m: string) => {
   const digits = m.replace(/\D/g, "").length;
   return digits >= 9 && digits <= 15 && !/^\d{4}-\d\d-\d\d/.test(m) && (m.startsWith("+") || /[ ()-]/.test(m));
 };
+// Bounded, and anchored where a run starts, so no line makes them backtrack for long.
 const PII: [string, RegExp, ((m: string) => boolean)?][] = [
-  ["Looks like an email", /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g],
-  ["Looks like a phone number", /(?<![\w.:])\+?\d[\d ()-]{7,}\d(?![\w.:])/g, phoneLike],
+  ["Looks like an email", /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}\b/g],
+  ["Looks like a phone number", /(?<![\w.:])\+?\d[\d ()-]{7,24}\d(?![\w.:])/g, phoneLike],
   ["Looks like a place (coordinates)", /\b-?\d{1,2}\.\d{3,},\s*-?\d{1,3}\.\d{3,}\b/g],
 ];
 const KEYS: [string, RegExp][] = [
@@ -333,6 +340,9 @@ const KEYS: [string, RegExp][] = [
 ];
 /** Long runs of base64/hex-ish characters: hashes in fixtures make false positives, so they only warn. */
 const LONG = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
+/** The patterns look at a line this much at a time (overlapping by OVERLAP), however long it is (minified code). */
+const SCAN_PIECE = 4096;
+const OVERLAP = 256;
 
 function entropy(s: string): number {
   const counts = new Map<string, number>();
@@ -350,21 +360,43 @@ export function mask(s: string): string {
   return `${s.slice(0, keep)}••••`;
 }
 
+/** Where `needle` is in `data`, byte for byte. */
+function indexOfBytes(data: Uint8Array, needle: Uint8Array, from = 0): number {
+  for (let i = data.indexOf(needle[0], from); i >= 0 && i + needle.length <= data.length; i = data.indexOf(needle[0], i + 1)) {
+    let j = 1;
+    while (j < needle.length && data[i + j] === needle[j]) j++;
+    if (j === needle.length) return i;
+  }
+  return -1;
+}
+
 /**
- * What's in the files to share: personal data and key shapes (warnings), and exact matches of
- * the owner's own stored secret and config values (`own`: these block). Values shorter than 6
- * characters are left out of the exact match: too common to mean anything.
+ * What's in the files to share: personal data and key shapes, and exact matches of the owner's
+ * own stored values (`own`: keys block, settings warn). Values shorter than 6 characters are left
+ * out of the exact match: too common to mean anything. A binary file (one with a NUL byte) is
+ * searched for the owner's own values only, byte for byte.
  */
-export function scanFiles(files: Files, own: (string | { value: string; label: string })[] = []): Finding[] {
+export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
   const out: Finding[] = [];
-  const named = new Map<string, string>();
+  const named = new Map<string, { label: string; kind: "secret" | "setting" }>();
   for (const o of own) {
-    const [value, label] = typeof o === "string" ? [o, "One of your own stored values"] : [o.value, o.label];
-    if (value.length >= 6 && !named.has(value)) named.set(value, label);
+    const v = typeof o === "string" ? { value: o, label: "One of your own stored values", kind: "secret" as const } : { value: o.value, label: o.label, kind: o.kind ?? "secret" };
+    // The same value as a key and as a setting: a key, so it blocks.
+    if (v.value.length >= 6 && (!named.has(v.value) || (v.kind === "secret" && named.get(v.value)!.kind !== "secret"))) named.set(v.value, { label: v.label, kind: v.kind });
   }
   const mine = [...named.keys()].sort((a, b) => b.length - a.length);
   for (const [file, data] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
-    if (data.includes(0)) continue;
+    if (data.includes(0)) {
+      for (const v of mine) {
+        const at = indexOfBytes(data, enc.encode(v));
+        if (at < 0) continue;
+        let line = 1;
+        for (let i = data.indexOf(10); i >= 0 && i < at; i = data.indexOf(10, i + 1)) line++;
+        const { label, kind } = named.get(v)!;
+        out.push({ file, line, kind, label, masked: mask(v), text: v });
+      }
+      continue;
+    }
     const lines = dec.decode(data).split("\n");
     lines.forEach((text, i) => {
       const line = i + 1;
@@ -374,10 +406,13 @@ export function scanFiles(files: Files, own: (string | { value: string; label: s
         seen.add(match);
         out.push({ file, line, kind, label, masked: mask(match), text: match });
       };
-      for (const v of mine) if (text.includes(v)) add("secret", named.get(v)!, v);
-      for (const [label, re] of KEYS) for (const m of text.matchAll(re)) add("key", label, m[0]);
-      for (const m of text.matchAll(LONG)) if (!seen.has(m[0]) && !/^[a-z_]+$/i.test(m[0]) && entropy(m[0]) > 3.5) add("key", "Long random string", m[0]);
-      for (const [label, re, keep] of PII) for (const m of text.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());
+      for (const v of mine) if (text.includes(v)) add(named.get(v)!.kind, named.get(v)!.label, v);
+      for (let at = 0; at === 0 || at + OVERLAP < text.length; at += SCAN_PIECE - OVERLAP) {
+        const piece = text.slice(at, at + SCAN_PIECE);
+        for (const [label, re] of KEYS) for (const m of piece.matchAll(re)) add("key", label, m[0]);
+        for (const m of piece.matchAll(LONG)) if (!seen.has(m[0]) && !/^[a-z_]+$/i.test(m[0]) && entropy(m[0]) > 3.5) add("key", "Long random string", m[0]);
+        for (const [label, re, keep] of PII) for (const m of piece.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());
+      }
     });
   }
   return out;

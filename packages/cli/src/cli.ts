@@ -57,8 +57,8 @@ Use it (as the owner; talks to the running Hewn)
   install <dir | file.hewn.zip> [--name <name>] [--no-sample]
                       install a tool from a source dir, or from a file someone shared (with its sample data)
   share <id> [--version N] [--out file.hewn.zip]
-                      a tool as a file to give someone: what's in it (personal data, keys) first;
-                      refused if it holds one of your own stored values or has no sample data
+                      a tool as a file to give someone: what's in it (personal data, keys, your settings) first;
+                      refused if it holds one of your own keys or has no sample data
   connect <id>        give a tool what it needs: config, secrets (hidden prompt or --from <path>) + approval;
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
   accounts            connections to external services: health and what uses them
@@ -463,7 +463,7 @@ async function main() {
       console.log("  never in it: your data, keys, settings, conversations, logs");
       if (check.blocked?.kind === "secret") {
         process.exitCode = 1;
-        return void console.error(`✖ ${check.blocked.file}:${check.blocked.line} is one of your own stored values (a key or a setting). Remove it, then share again.`);
+        return void console.error(`✖ your own keys are in it (✖ above: ${check.findings.filter((f: any) => f.kind === "secret").map((f: any) => `${f.file}:${f.line}`).join(", ")}). Remove them, then share again.`);
       }
       if (check.blocked?.kind === "no-sample") {
         process.exitCode = 1;

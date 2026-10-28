@@ -12,13 +12,13 @@ A shared tool is one file, `<tool>.hewn.zip`, with one version's files as they a
 
 **Share…** on a tool (in the top bar of Info and of the open tool, or the tool's menu) shows what the file would hold before you download it:
 
-- **What's in it:** anything in the files that looks personal (an email address, a phone number, coordinates) or like a key (`sk-…`, a GitHub or AWS token, a long random string), each with the file and line, partly hidden; **Show** reveals it. These are warnings: test data often trips them, so read them and decide.
+- **What's in it:** anything in the files that looks personal (an email address, a phone number, coordinates) or like a key (`sk-…`, a GitHub or AWS token, a long random string), and any of your own settings (a value you gave one of your tools, such as a city or a site), each with the file and line, partly hidden; **Show** reveals it. These are warnings: test data often trips them, and a setting may well be something anyone could write, so read them and decide.
 - **Sample data:** how many calls it holds. Sharing needs it (below).
 - **Download:** the file. Pick any version, not only the live one.
 
 Two things stop a share:
 
-- **One of your own stored values is in the code:** a key or a setting you gave any of your tools, or a model provider's key. Share… says which file and line, and **Change…** asks the builder to take it out. Share again once the new version is live.
+- **One of your own keys is in the code:** a key you gave any of your tools, or a model provider's key. Share… lists each by file and line, and **Change…** asks the builder to take them all out. Share again once the new version is live.
 - **No sample data.** **Ask builder** adds it (the usual way: it writes made-up entries that fit the tool), or **Write it yourself**. A connection shares without it: it has no data of its own to show, and its sign-in never travels (whoever installs it signs in with their own account).
 
 From the terminal: `hewn share <id> [--version N] [--out file]` prints the same findings and writes the file unless something stops it.
