@@ -59,12 +59,13 @@ function changesView(file, path) {
   return [out, more(total - (MAX_LINES - room))];
 }
 
-/** Source: the file with one gutter. */
-function sourceView(file, path, text = file.text) {
+/** Source: the file with one gutter; `through`: a line that must be drawn (Show at a line past the cap). */
+function sourceView(file, path, text = file.text, through = 0) {
   if (text === "") return h("div", { class: "code-empty" }, "An empty file.");
   const hl = highlighter(path);
   const lines = linesOf(text);
-  return [lines.slice(0, MAX_LINES).map((t, i) => codeLine("", null, i + 1, null, hl.line(t))), more(lines.length - MAX_LINES)];
+  const cap = Math.max(MAX_LINES, through + 50);
+  return [lines.slice(0, cap).map((t, i) => codeLine("", null, i + 1, null, hl.line(t))), more(lines.length - cap)];
 }
 
 /** A JSON file laid out (two-space indents), when that isn't how it was written and fits in what's drawn; else null. */
@@ -126,7 +127,7 @@ function codeBrowser(src, { at } = {}) {
       // Show at a line is the file's own lines: no layout then.
       const laidOut = mode === "source" && !f.binary && !(at?.line && p === at.path) ? prettyJson(p, f.text) : null;
       put(jsonToggle, laidOut && segmented([["pretty", "Pretty"], ["raw", "As written"]], pretty ? "pretty" : "raw", (k) => ((pretty = k === "pretty"), open(p)), { label: "JSON" }));
-      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text));
+      put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text, p === at?.path ? at.line : 0));
       body.scrollTop = 0;
       if (at?.line && p === at.path && mode === "source") {
         const line = body.querySelectorAll(".code-line")[at.line - 1];
