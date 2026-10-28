@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Real-browser E2E on a fresh workerd host (not part of npm test): the first run, an agent's
 // approval (from the Inbox), choosing who builds, a starter build, schedules, Info's own actions (Run,
-// a rule, Deny then Authorize, Restore… cancelled), a destructive call confirmed from the banner,
-// and the authority trail on Activity. The builder is scripted (copies the Running Log seed);
-// builder/intake checks are stubbed as installed and signed in, so it runs anywhere.
+// a rule, Deny then Authorize, Restore… cancelled), a version's Files, a destructive call confirmed
+// from the banner, and the authority trail on Activity. The builder is scripted (copies the Running
+// Log seed; a change adds a line); builder/intake checks are stubbed as installed and signed in, so
+// it runs anywhere.
 //
 //   PLAYWRIGHT_NODE_MODULES=/path/to/node_modules/ node test/e2e/first-run.e2e.ts
 // With E2E_REAL_BUILDER=1 the starter is built by the real builder (Claude Code, signed in on this
 // machine) and the builder check is the real one: the first run as a new user has it.
 // A Chromium-based browser must be installed (see `hewn doctor`, Visual check). Screenshots go to /tmp/e2e-fr-*.png.
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,7 +30,7 @@ const pw = createRequire(process.env.PLAYWRIGHT_NODE_MODULES ?? import.meta.url)
 const root = mkdtempSync(join(tmpdir(), "hewn-e2e-"));
 const port = await freePort();
 
-// The builder: the Running Log seed, renamed to whatever was asked for.
+// The builder: the Running Log seed, renamed to whatever was asked for; a change adds a line to it.
 const builder: CapabilityBuilder = {
   name: "claude",
   build: async (job) => {
@@ -38,6 +39,7 @@ const builder: CapabilityBuilder = {
       m.id = job.capabilityId;
       m.name = job.capabilityId.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
     });
+    if (job.kind === "modify") appendFileSync(join(job.workspace, "src", "index.ts"), "// Changed by request.\n");
   },
 };
 const real = process.env.E2E_REAL_BUILDER === "1";
@@ -254,6 +256,27 @@ try {
     const status = await sv.admin("status", {});
     if (status.capabilities.find((c: any) => c.id === "reading-list")?.version !== 2) throw new Error("Cancel restored it");
   });
+
+  // v2 comes from the step before; only the scripted builder's change is known (it adds a line).
+  if (!real)
+    await step("a version's Files: what changed since the one before as a diff, every file in Source; v1 in Source", async () => {
+      await page.goto(`${web}/#/c/reading-list/v/2?tab=files`);
+      const files = page.locator(".code-browser");
+      await files.getByText("Changed since v1").waitFor();
+      await page.locator("main.version-layout.wide").waitFor();
+      await files.locator(".code-files button", { hasText: "src/index.ts" }).locator(".add-n", { hasText: "+1" }).waitFor();
+      await files.locator(".code-line.hunk", { hasText: /^@@ -\d+,\d+ \+\d+,\d+ @@$/ }).first().waitFor();
+      await files.locator(".code-line.add", { hasText: "Changed by request." }).waitFor();
+      await page.screenshot({ path: "/tmp/e2e-fr-files.png" });
+      await files.getByRole("button", { name: "Source" }).click();
+      const first = files.locator(".code-body.source .code-line").first();
+      await first.waitFor();
+      if ((await first.locator(".no").count()) !== 1) throw new Error("Source has more than one gutter");
+      await page.goto(`${web}/#/c/reading-list/v/1?tab=files`);
+      await files.locator(".code-body.source .code-line").first().waitFor();
+      await files.getByText(/^v1 · \d+ files$/).waitFor();
+      if (await files.getByRole("button", { name: "Changes" }).count()) throw new Error("v1 offers Changes");
+    });
 
   await step("an agent's destructive call waits for the owner, who allows it once", async () => {
     // A counter with a destructive reset, installed by the owner.
