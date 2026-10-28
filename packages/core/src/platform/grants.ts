@@ -19,6 +19,11 @@ export interface Readiness {
   pendingGrants: string[];
   /** Pending grants the owner said no to for this version (Deny): nothing asks for them again until a new version. */
   declinedGrants?: string[];
+  /**
+   * Set when what the owner said no to is all that stands in the way (nothing else is missing):
+   * nothing asks the owner about it (Home, the Inbox), and agents' access requests are refused.
+   */
+  onlySaidNo?: boolean;
   /** Declared callee operations that don't exist (callee missing, archived, or lacks that op@version). */
   missingDependencies: string[];
   /** Set when the active version needs a newer Hewn ABI than this Hewn has (e.g. after a downgrade). */
@@ -49,12 +54,14 @@ export class Grants extends Domain {
     const unsupportedAbi = abiUnsupported(abiOf(manifest));
     const missingModel = req.model ? this.platform.modelProblem(req.model) : undefined;
     const ready = !pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
+    const onlySaidNo = declinedGrants.length > 0 && declinedGrants.length === pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
     return {
       ready,
       missingSecrets,
       missingConfig,
       pendingGrants,
       ...(declinedGrants.length ? { declinedGrants } : {}),
+      ...(onlySaidNo ? { onlySaidNo } : {}),
       missingDependencies,
       ...(unsupportedAbi ? { unsupportedAbi } : {}),
       ...(missingModel ? { missingModel } : {}),
@@ -70,7 +77,7 @@ export class Grants extends Domain {
               ? `It depends on operations that no longer exist (${missingDependencies.join(", ")}); it needs a change.`
               : connectOperation(manifest) && !pendingGrants.length && !missingConfig.length
                 ? `Needs the owner to sign in to the service (never in an agent): Accounts in the Hewn web client.`
-                : declinedGrants.length && declinedGrants.length === pendingGrants.length && !missingConfig.length && !missingSecrets.length
+                : onlySaidNo
                 ? `The owner said no to ${declinedGrants.join(", ")} for this version. It won't run until they allow it in the Hewn web client, or a change makes it work without it. Don't request access again.`
                 : `Needs authorization by the owner (never paste secrets into an agent): open it in the Hewn web client. You can file a request with capabilities_request_access.`,
           }),
@@ -151,8 +158,9 @@ export class Grants extends Domain {
   requestAccess(agent: Agent, capabilityId: string, note: string) {
     requireScope(agent, "invoke", "create", "modify");
     this.visibleActive(agent, capabilityId);
+    // The owner already answered: what they said no to is all it lacks.
     const status = this.readiness(capabilityId);
-    if (status.declinedGrants?.length === status.pendingGrants.length && status.pendingGrants.length) throw new PlatformError("forbidden", status.userAction ?? `the owner said no to ${status.pendingGrants.join(", ")}`);
+    if (status.onlySaidNo) throw new PlatformError("forbidden", status.userAction!);
     this.registry.addAccessRequest(capabilityId, agent.id, note.slice(0, 500));
     this.registry.addGrantEvent(capabilityId, "request", this.readiness(capabilityId).pendingGrants.join(", "), agent.id);
     this.logger(`${agent.id} requests access for ${capabilityId}: ${note.slice(0, 120)}`);
@@ -185,7 +193,8 @@ export class Grants extends Domain {
     this.registry.clearDecline(capabilityId, grant);
     this.registry.addGrantEvent(capabilityId, "approve", grant, owner.id);
     this.logger(`grant ${grant} approved for ${capabilityId} by ${owner.id}`);
-    if (!this.readiness(capabilityId).pendingGrants.length) this.registry.clearAccessRequests(capabilityId);
+    const after = this.readiness(capabilityId);
+    if (!after.pendingGrants.length || after.onlySaidNo) this.registry.clearAccessRequests(capabilityId);
   }
 
   /**
@@ -195,14 +204,15 @@ export class Grants extends Domain {
    */
   declineGrant(owner: Agent, capabilityId: string, grant: string) {
     requireOwner(owner);
+    // A secret is set or not: there's nothing to say no to (Revoke or `hewn secrets rm` removes one).
+    if (!/^(host|capability|model):./.test(grant)) throw new PlatformError("invalid_request", `only a host, another tool's operation or a model can be declined, not '${grant}'`);
     const { pendingGrants } = this.readiness(capabilityId);
     if (!pendingGrants.includes(grant)) throw new PlatformError("invalid_request", `${capabilityId} doesn't request '${grant}' (or it's already approved)`);
     this.registry.declineGrant(capabilityId, grant, this.registry.getCapability(capabilityId)!.activeVersion!, owner.id);
     this.registry.addGrantEvent(capabilityId, "decline", grant, owner.id);
     this.logger(`grant ${grant} declined for ${capabilityId} by ${owner.id}`);
-    // Agents' requests are answered once nothing it asks for is left undecided.
-    const after = this.readiness(capabilityId);
-    if (after.declinedGrants?.length === after.pendingGrants.length) this.registry.clearAccessRequests(capabilityId);
+    // Agents' requests are answered once what the owner said no to is all it lacks.
+    if (this.readiness(capabilityId).onlySaidNo) this.registry.clearAccessRequests(capabilityId);
   }
 
   /** Revoke one approved grant ("secret:NAME" / "host:x"), owner only. The capability goes not ready. */

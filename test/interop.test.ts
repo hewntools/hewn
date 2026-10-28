@@ -265,6 +265,32 @@ describe("capability ↔ capability interop", () => {
     assert.equal(t.platform.readiness("run-feeder").declinedGrants, undefined);
   });
 
+  test("said no only: just what the owner said no to stands in the way; a secret can't be declined", async () => {
+    const r = await build({ ...feederManifest, abi: "2.1", config: [{ name: "TEAM", description: "Which team's runs" }] }, { ts: FEEDER_TS }, feederCases);
+    assert.equal(r.status, "promoted", r.log.join("\n"));
+    const [write, read] = ["capability:running-log/record_run@1", "capability:running-log/list_runs@1"];
+    assert.throws(() => t.platform.declineGrant(USER, "run-feeder", "secret:TOKEN"), /only a host, another tool's operation or a model/);
+    t.platform.requestAccess(t.codex, "run-feeder", "Needed to sync runs");
+    t.platform.declineGrant(USER, "run-feeder", write);
+    t.platform.declineGrant(USER, "run-feeder", read);
+    // Its setting is still missing: the owner has more to do, so it isn't "said no only".
+    let st = t.platform.readiness("run-feeder");
+    assert.deepEqual(st.declinedGrants, [write, read]);
+    assert.equal(st.onlySaidNo, undefined);
+    assert.doesNotMatch(st.userAction!, /said no/);
+    assert.equal(t.platform.authorization("run-feeder").requests.length, 1, "the agent's request stands");
+    assert.equal(t.platform.requestAccess(t.codex, "run-feeder", "the setting, please").requested, true, "not refused");
+    t.platform.setConfig(USER, "run-feeder", "TEAM", "red");
+    st = t.platform.readiness("run-feeder");
+    assert.equal(st.onlySaidNo, true);
+    assert.match(st.userAction!, /owner said no to .*Don't request access again/);
+    assert.throws(() => t.platform.requestAccess(t.codex, "run-feeder", "please"), code("forbidden"));
+    // Authorizing one of them leaves only the other no: the agents' requests are answered.
+    t.platform.approveGrant(USER, "run-feeder", read);
+    assert.equal(t.platform.readiness("run-feeder").onlySaidNo, true);
+    assert.deepEqual(t.platform.authorization("run-feeder").requests, []);
+  });
+
   test("a capability cannot call itself", async () => {
     const r = await build({ ...feederManifest, requires: { capabilities: [{ id: "run-feeder", operations: ["feed@1"] }] } }, { ts: FEEDER_TS }, feederCases);
     assert.equal(r.status, "failed");

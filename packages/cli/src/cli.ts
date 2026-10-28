@@ -895,6 +895,8 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     if (pos[0] === "approve") return approve(pos[1] ?? "", pos[2]);
     if (pos[0] === "deny") {
       if (!pos[2]) throw new Error("usage: hewn grants deny <id> <grant>   (the grant as hewn grants <id> shows it, e.g. host:api.example.com)");
+      // A secret is set or not: there's nothing to say no to.
+      if (pos[2].startsWith("secret:")) throw new Error(`a secret can't be denied: leave it unset, or remove it (hewn secrets rm ${pos[1]} ${pos[2].slice(7)})`);
       await c.call("declineGrant", pos[1], pos[2]);
       return console.log(`✔ said no to ${pos[2]}: nothing asks for it again until a new version (hewn grants approve ${pos[1]} ${pos[2]} allows it)`);
     }

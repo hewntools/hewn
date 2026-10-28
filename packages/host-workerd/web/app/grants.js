@@ -142,11 +142,9 @@ async function grantsSheet(capId) {
           const modelGrant = items.find((i) => i.kind === "model")?.grant;
           if (!left.length && !otherTier) await api(`/capabilities/${id}/grants/approve`, { method: "POST" });
           else for (const i of pending) if (!i.approved && !left.includes(i.grant) && !(otherTier && i.grant === modelGrant)) await api(`/capabilities/${id}/grants/approve`, { method: "POST", body: { grant: i.grant } });
+          if (otherTier && (await quickModelChange(c, { tier }))) toast(`${c.name} will use the ${tier} tier`);
+          // After the quick change, so each no is said to the version that's live by then.
           for (const g of left) if (!declined.has(g)) await api(`/capabilities/${id}/grants/decline`, { method: "POST", body: { grant: g } });
-          if (otherTier) {
-            await quickModelChange(c, { tier });
-            toast(`${c.name} will use the ${tier} tier`);
-          }
           invalidateCaps();
           const now = await api(`/capabilities/${id}`);
           // What was said: a switch left off is a no, so "Authorized" only when something was.

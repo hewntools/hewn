@@ -202,6 +202,7 @@ export class Validation extends Domain {
     const applied = await this.runtime.migrate(live, migrations, code);
     if (applied.length) step(`migrations applied: ${applied.join(", ")}`);
 
+    const before = this.registry.getCapability(id)?.activeVersion ?? null;
     this.registry.transaction(() => {
       this.registry.insertVersion({ capabilityId: id, version: next, manifest, contentHash: code.hash, buildId: build.id });
       this.registry.promote({ id, name: manifest.name, purpose: manifest.purpose, version: next });
@@ -215,6 +216,9 @@ export class Validation extends Domain {
       this.registry.addGrantEvent(id, "revoke", g, "platform");
       step(`grant ${g} dropped: v${next} doesn't ask for it`);
     }
+    // A quick change (the manifest only, no builder: another tier, a widget removed) isn't a new
+    // ask: what the owner said no to stays said no to, for what this version still asks for.
+    if (build.builder === "keep" && before) this.registry.carryDeclines(id, before, next, wanted);
     await this.workbench.remove(build.id).catch(() => {});
     return next;
   }

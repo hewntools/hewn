@@ -931,6 +931,13 @@ export class Registry {
     this.db.prepare("DELETE FROM grant_declines WHERE capability_id = ? AND grant_ref = ?").run(capabilityId, grant);
   }
 
+  /** The owner's no to `grants` for version `from`, kept for version `to` (a quick change isn't a new ask). */
+  carryDeclines(capabilityId: string, from: number, to: number, grants: Set<string>) {
+    for (const g of this.declinedGrants(capabilityId, from)) {
+      if (grants.has(g)) this.db.prepare("UPDATE grant_declines SET version = ? WHERE capability_id = ? AND grant_ref = ?").run(to, capabilityId, g);
+    }
+  }
+
   /** The owner's values for a capability's declared config (non-secret settings). */
   config(capabilityId: string): Record<string, string> {
     return Object.fromEntries(this.db.prepare("SELECT name, value FROM config_values WHERE capability_id = ?").all(capabilityId).map((r) => [r.name as string, r.value as string]));
