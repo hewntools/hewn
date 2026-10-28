@@ -2,7 +2,7 @@
 // Appearance (client-only): the owner's choice of light or dark, else the system's.
 import { BRAND, enc } from "../kit.js";
 
-export { applyTheme, isDark, shotUrl, THEME_KEY };
+export { applyTheme, isDark, shotUrl, THEME_KEY, themeNow, withTheme };
 
 // ---------- appearance (client-only) ----------
 /** Dark mode now: the owner's choice in Settings, else the system's. */
@@ -14,6 +14,15 @@ const THEME_KEY = "hewn.theme";
 function applyTheme(t = localStorage.getItem(THEME_KEY) ?? "system") {
   if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  // An open tool follows (tool.js tells its frame).
+  dispatchEvent(new Event("hewn:theme"));
 }
+/**
+ * The owner's light or dark for a tool's frame, where session.js puts it on the page's <html> for
+ * ui.css (a sandboxed frame doesn't see the web client's choice). "system": the browser's.
+ */
+const themeNow = () => document.documentElement.dataset.theme ?? "system";
+/** A tool's address with that in its fragment, so its first paint is already in it. */
+const withTheme = (url) => (themeNow() === "system" ? url : `${url}${url.includes("#") ? "&" : "#"}theme=${themeNow()}`);
 applyTheme();
 document.title = BRAND;

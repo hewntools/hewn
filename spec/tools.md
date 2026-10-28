@@ -382,6 +382,8 @@ A tool can ship a UI for the owner: static files under `ui/`, with `ui/index.htm
 
 **Signing in.** The owner opens the UI from the host, which hands the page a one-time ticket; the page gets a session token (bound to this one tool, valid 12 hours) in its URL fragment. `session.js` takes it from there, keeps it for the tab, and removes it from the address bar.
 
+**Light and dark.** The page follows the owner's appearance in Hewn. On System, that's the browser's `prefers-color-scheme`. When they pick Light or Dark, `session.js` sets `data-theme="light"` or `"dark"` on the page's `<html>` (a sandboxed frame can't see the choice otherwise) and changes it when they switch. `ui.css` follows both. For colours of your own, use `light-dark(<light>, <dark>)`: it follows `ui.css`'s `color-scheme`, so both; a plain `@media (prefers-color-scheme: dark)` follows only the browser's.
+
 **Calling operations.** The UI is just another client: it calls its own tool's operations, and nothing else. `session.js` patches `fetch`, so a request to `api/…` or `/api/…` goes to `<host>/tools/<id>/api/…` with the session token (`Authorization: Hewn <token>`) and the `x-hewn-ui: 1` header the API requires. Or use the helper it defines:
 
 ```js
