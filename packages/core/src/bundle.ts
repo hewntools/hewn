@@ -62,7 +62,7 @@ export function sampleOrNull(files: Files): SampleCall[] | null {
   }
 }
 
-// ---------- what npm may install for a shared tool ----------
+// ---------- what npm may install for a tool ----------
 
 /**
  * A version, range or tag npm resolves on the registry ("^1.2.0", "1.x", "latest"), or an alias
@@ -76,11 +76,15 @@ export function registrySpec(spec: unknown): boolean {
   return /^[\w.^~<>=*|+ -]*$/.test(range) && !range.startsWith(".") && !/\.(tgz|tar|tar\.gz)$/i.test(range);
 }
 
+const ONLY_REGISTRY = 'only versions from the npm registry are allowed (like "^1.2.0")';
+
 /**
- * Why npm shouldn't install a tool's dependencies as a file someone shared has them: a spec that
+ * Why npm, which runs on the machine itself and not in the builder's sandbox, mustn't install a
+ * tool's dependencies as they are: npm settings in the tool (`.npmrc`: npm reads the one at the
+ * project's root, and its `git`, `cache` or `registry` would be the tool's to choose), a spec that
  * isn't the registry's (package.json's dependencies of any kind, and overrides), workspaces, or a
- * lockfile entry that is a link or isn't fetched over https. A tool installed from a file is
- * refused with these. (An `.npmrc` never gets that far: dotfiles never become part of a version.)
+ * lockfile entry that is a link or isn't fetched over https. Every build is refused with these,
+ * and so is a tool's file before it's staged; each says what to change.
  */
 export function dependencyProblems(files: Files): string[] {
   const out: string[] = [];
@@ -92,17 +96,18 @@ export function dependencyProblems(files: Files): string[] {
       return null;
     }
   };
+  for (const path of Object.keys(files)) if (path === ".npmrc" || path.endsWith("/.npmrc")) out.push(`${path}: tools can't carry npm settings (.npmrc); remove it`);
   const pkg = files["package.json"] ? json("package.json") : null;
   if (pkg) {
-    if (pkg.workspaces !== undefined) out.push("package.json has workspaces");
+    if (pkg.workspaces !== undefined) out.push('package.json: tools can\'t use npm workspaces; remove "workspaces"');
     for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
-      for (const [name, spec] of Object.entries(pkg[field] ?? {})) if (!registrySpec(spec)) out.push(`package.json ${field}: ${name} is ${JSON.stringify(spec)}, not a version from the npm registry`);
+      for (const [name, spec] of Object.entries(pkg[field] ?? {})) if (!registrySpec(spec)) out.push(`package.json ${field}: ${name} is ${JSON.stringify(spec)}; ${ONLY_REGISTRY}`);
     }
     // Overrides nest ({ "a": { "b": "1.0.0" } }); "$a" points at a dependency's own spec.
     const overrides = (o: unknown, at: string) => {
       for (const [name, spec] of Object.entries(o ?? {})) {
         if (spec && typeof spec === "object") overrides(spec, `${at}${name} › `);
-        else if (!(typeof spec === "string" && spec.startsWith("$")) && !registrySpec(spec)) out.push(`package.json overrides: ${at}${name} is ${JSON.stringify(spec)}, not a version from the npm registry`);
+        else if (!(typeof spec === "string" && spec.startsWith("$")) && !registrySpec(spec)) out.push(`package.json overrides: ${at}${name} is ${JSON.stringify(spec)}; ${ONLY_REGISTRY}`);
       }
     };
     overrides(pkg.overrides, "");
@@ -113,9 +118,9 @@ export function dependencyProblems(files: Files): string[] {
     // lockfileVersion 2 and 3 list `packages` by path; 1 nests `dependencies`.
     const entry = (name: string, e: any) => {
       if (!e || typeof e !== "object") return;
-      if (e.link) out.push(`${path}: ${name} is a link`);
-      else if (e.resolved !== undefined && !/^https:\/\//.test(String(e.resolved))) out.push(`${path}: ${name} comes from ${JSON.stringify(e.resolved)}, not over https`);
-      else if (e.version !== undefined && !registrySpec(e.version)) out.push(`${path}: ${name} is ${JSON.stringify(e.version)}, not a version from the npm registry`);
+      if (e.link) out.push(`${path}: ${name} is a link; ${ONLY_REGISTRY} (or remove ${path})`);
+      else if (e.resolved !== undefined && !/^https:\/\//.test(String(e.resolved))) out.push(`${path}: ${name} comes from ${JSON.stringify(e.resolved)}; ${ONLY_REGISTRY} (or remove ${path})`);
+      else if (e.version !== undefined && !registrySpec(e.version)) out.push(`${path}: ${name} is ${JSON.stringify(e.version)}; ${ONLY_REGISTRY} (or remove ${path})`);
       for (const [n, d] of Object.entries(e.dependencies ?? {})) if (d && typeof d === "object") entry(n, d);
     };
     for (const [p, e] of Object.entries(lock.packages ?? {})) if (p) entry(p, e);

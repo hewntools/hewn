@@ -140,7 +140,7 @@ The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the re
 `validateAndPromote` (`platform/validation.ts`), in order:
 
 1. the manifest: the platform's own fields stamped first (`stampSource`: `source` from the capability's record, or on an install from a file the install's; a builder's `hub` and `minVersion` removed), then schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
-2. bundle `src/index.ts` with its npm dependencies (imports resolve inside the workspace only, links followed, and take no import attribute but `type: "json"`; a tool installed from a file asks npm for registry versions only, `dependencyProblems`); the bundle exports every declared `name@version`
+2. bundle `src/index.ts` with its npm dependencies (imports resolve inside the workspace only, links followed, and take no import attribute but `type: "json"`; npm runs on the machine, outside the builder sandbox, so every build asks it for registry versions only and carries no `.npmrc`: `dependencyProblems`, checked on the whole workspace and again by the workbench before npm starts); the bundle exports every declared `name@version`
 3. contract compatibility with the active version; a widgets build changes only widgets; declared callees offer the pinned operations
 4. migrations are append-only and non-destructive
 5. `tests/cases.json` on fresh state through the real runtime; the sample data (`sample/calls.json`) replays on another fresh state with nothing granted (no network, other tools or model); every widget has a case; the UI renders headlessly without errors, in light and dark, and changed widgets render in every size

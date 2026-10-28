@@ -343,6 +343,6 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
   const tool = unpacked.sidecar.tool;
   if (typeof tool?.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(tool.id) || !Number.isInteger(tool.version) || tool.version < 1 || typeof tool.hash !== "string" || !/^[0-9a-f]{64}$/.test(tool.hash)) refuse("Its hewn-bundle.json doesn't say which tool and version it is.");
   const deps = dependencyProblems(unpacked.files);
-  if (deps.length) refuse(`${manifest.name} asks npm for what isn't on the npm registry, so Hewn won't install it: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
+  if (deps.length) refuse(`Hewn won't install ${manifest.name}: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
   return { ...unpacked, manifest };
 }

@@ -44,13 +44,12 @@ export class Validation extends Domain {
     if (manifestErrors.length) fail("manifest invalid", manifestErrors);
     step("manifest valid");
 
-    // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares
+    // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares.
+    // npm runs on the machine, outside the builder's sandbox: registry versions only, and no npm settings
+    // (read from the whole workspace: an .npmrc never becomes part of a version, but npm would read it).
+    const npmProblems = dependencyProblems(workspace);
+    if (npmProblems.length) fail("npm won't install this tool's dependencies", npmProblems);
     const files = versionFiles(workspace);
-    // Installed from a file: npm installs from the registry only (no paths, links, git or URLs).
-    if (build.builder === "bundle") {
-      const problems = dependencyProblems(files);
-      if (problems.length) fail("its dependencies aren't all from the npm registry", problems);
-    }
     let bundled: { js: string; log: string[] };
     try {
       bundled = await this.workbench.bundle(build.id);

@@ -9,6 +9,7 @@ import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
 import { CLI_AGENTS } from "./builders/cli-agents.ts";
 import { forgetSession } from "./builders/cli.ts";
+import { dependencyProblems } from "@hewntools/core/bundle.ts";
 import { isArtefact } from "@hewntools/core/files.ts";
 import type { BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
 import type { VisualCheck } from "./visual.ts";
@@ -59,7 +60,19 @@ export const copyBuilder = (from: string): CapabilityBuilder => ({
   },
 });
 
+/** What npm reads from a project before it installs: its settings (only the root's `.npmrc`), package.json and lockfiles. */
+const NPM_READS = [".npmrc", "package.json", "package-lock.json", "npm-shrinkwrap.json"];
+
+/**
+ * npm runs on the machine itself, not in the builder's sandbox: it doesn't start unless every
+ * dependency comes from the npm registry and the tool carries no npm settings (an `.npmrc` could
+ * name the `git` npm runs). Validation refuses these first, with the reason; this is the last line.
+ */
 function npmInstall(cwd: string): Promise<string[]> {
+  const files: Files = {};
+  for (const p of NPM_READS) if (existsSync(join(cwd, p))) files[p] = new Uint8Array(readFileSync(join(cwd, p)));
+  const problems = dependencyProblems(files);
+  if (problems.length) return Promise.reject(new Error(`npm won't run for this tool: ${problems.join("; ")}`));
   return new Promise((resolve, reject) => {
     const out: string[] = [];
     const child = spawn("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], { cwd, stdio: ["ignore", "pipe", "pipe"] });

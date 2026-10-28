@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { gzipSync } from "node:zlib";
 import { USER } from "@hewntools/core/auth.ts";
 import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
-import { editJson, installFrom, installSeed, platformWith, SEED, setup } from "./helpers.ts";
+import { bundleWorkspace } from "@hewntools/cli/workbench.ts";
+import { editJson, editText, installFrom, installSeed, platformWith, SEED, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([
   { operation: "record_run", input: { distanceKm: 5.2, durationSeconds: 1700, date: "2026-10-01", notes: "Easy loop by the river" } },
@@ -487,11 +492,109 @@ describe("code from outside stays outside", () => {
     await t.platform.setSample(USER, "running-log", SAMPLE).then((b) => t.platform.settle(b.buildId));
     const { files, sidecar } = unpackBundle((await t.platform.shareBundle(USER, "running-log")).bundle);
     const withDep = { ...files, "package.json": bytes(JSON.stringify({ dependencies: { secrets: "file:/etc" } })) };
-    await assert.rejects(t.platform.stageBundle(USER, packBundle(withDep, sidecar)), (e: any) => /isn't on the npm registry.*secrets is "file:\/etc"/.test(e.message) && e.details?.refusal === "dependencies");
+    await assert.rejects(t.platform.stageBundle(USER, packBundle(withDep, sidecar)), (e: any) => /secrets is "file:\/etc"; only versions from the npm registry are allowed/.test(e.message) && e.details?.refusal === "dependencies");
+    // npm settings in the file are refused too, though they'd never reach a version.
+    await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, ".npmrc": bytes("git=/tmp/run-me\n") }, sidecar)), /\.npmrc: tools can't carry npm settings \(\.npmrc\); remove it/);
     // Installed with no builder from given files, the same rule holds in validation.
     const manifest = { ...JSON.parse(text(files["capability.json"])), id: "dep-tool", name: "Dep Tool" };
     const b = await t.platform.settle((await t.platform.install(USER, { name: "Dep Tool", purpose: "x", builder: "bundle", id: "dep-tool", seed: { ...withDep, "capability.json": bytes(JSON.stringify(manifest)) } })).buildId);
     assert.equal(b.status, "failed");
-    assert.ok(b.log.some((l) => /aren't all from the npm registry/.test(l) && /secrets is "file:\/etc"/.test(l)), b.log.join("\n"));
+    assert.ok(b.log.some((l) => /npm won't install this tool's dependencies/.test(l) && /secrets is "file:\/etc"/.test(l)), b.log.join("\n"));
   });
 });
+
+describe("npm, which runs outside the builder's sandbox, gets registry versions and no settings", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(async () => {
+    t = setup();
+    await installSeed(t.platform);
+  });
+  afterEach(() => t.cleanup());
+
+  const change = (script: (ws: string) => void) => t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "use a package" }), script);
+  const usesTiny = (ws: string, spec: string) => {
+    writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": spec } }));
+    editText(join(ws, "src/index.ts"), (src) => `import tiny from "tiny-dep";\nvoid tiny;\n${src}`);
+  };
+
+  test("a builder's .npmrc is refused, saying to remove it, and npm never runs", async () => {
+    const marker = join(t.home.root, "npm-ran-git");
+    const b = await change((ws) => {
+      writeFileSync(join(ws, ".npmrc"), `git=${join(ws, "git.sh")}\n`);
+      writeFileSync(join(ws, "git.sh"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+      usesTiny(ws, "^1.0.0");
+    });
+    assert.equal(b.status, "failed");
+    assert.ok(b.log.some((l) => /npm won't install this tool's dependencies/.test(l) && /\.npmrc: tools can't carry npm settings \(\.npmrc\); remove it/.test(l)), b.log.join("\n"));
+    assert.ok(!existsSync(marker));
+  });
+
+  test("a builder's git dependency is refused, naming it", async () => {
+    const b = await change((ws) => usesTiny(ws, "git+ssh://git@github.com/someone/tiny-dep.git"));
+    assert.equal(b.status, "failed");
+    assert.ok(b.log.some((l) => /package\.json dependencies: tiny-dep is "git\+ssh:\/\/git@github\.com\/someone\/tiny-dep\.git"; only versions from the npm registry are allowed/.test(l)), b.log.join("\n"));
+  });
+
+  test("the workbench won't run npm on its own either", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "hewn-npm-"));
+    try {
+      mkdirSync(join(ws, "src"));
+      writeFileSync(join(ws, "src/index.ts"), "export const operations = {};\n");
+      writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": "^1.0.0" } }));
+      writeFileSync(join(ws, ".npmrc"), "git=/tmp/run-me\n");
+      await assert.rejects(bundleWorkspace(ws), /npm won't run for this tool: \.npmrc: tools can't carry npm settings/);
+      rmSync(join(ws, ".npmrc"));
+      writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": "github:someone/tiny-dep" } }));
+      await assert.rejects(bundleWorkspace(ws), /npm won't run for this tool: package\.json dependencies: tiny-dep is "github:someone\/tiny-dep"/);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test("registry dependencies still install and bundle", async () => {
+    // A registry of one package, on this machine: npm installs from it as from the real one.
+    const tgz = gzipSync(tar({ "package/package.json": JSON.stringify({ name: "tiny-dep", version: "1.0.0", main: "index.js" }), "package/index.js": "module.exports = 42;\n" }));
+    const server = createServer((req, res) => {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      if (req.url === "/tiny-dep") {
+        const dist = { tarball: `${base}/tiny-dep/-/tiny-dep-1.0.0.tgz`, shasum: createHash("sha1").update(tgz).digest("hex"), integrity: `sha512-${createHash("sha512").update(tgz).digest("base64")}` };
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ name: "tiny-dep", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": { name: "tiny-dep", version: "1.0.0", main: "index.js", dist } } }));
+      } else if (req.url === "/tiny-dep/-/tiny-dep-1.0.0.tgz") res.writeHead(200, { "content-type": "application/octet-stream" }).end(tgz);
+      else res.writeHead(404).end("{}");
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const env = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    process.env.npm_config_cache = join(t.home.root, "npm-cache");
+    try {
+      const b = await change((ws) => usesTiny(ws, "^1.0.0"));
+      assert.equal(b.status, "promoted", b.log.join("\n"));
+      assert.ok(b.log.some((l) => /dependencies installed \(npm\)/.test(l)), b.log.join("\n"));
+    } finally {
+      for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
+      server.close();
+    }
+  });
+});
+
+/** A tar of `files` (path → text), as npm packs a package. */
+function tar(files: Record<string, string>): Buffer {
+  const blocks: Buffer[] = [];
+  for (const [path, body] of Object.entries(files)) {
+    const data = Buffer.from(body);
+    const h = Buffer.alloc(512);
+    h.write(path, 0);
+    h.write("0000644\0", 100);
+    h.write("0000000\0", 108);
+    h.write("0000000\0", 116);
+    h.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124);
+    h.write(`${Math.floor(Date.now() / 1000).toString(8).padStart(11, "0")}\0`, 136);
+    h.write("        ", 148);
+    h.write("0", 156);
+    h.write("ustar\0", 257);
+    h.write("00", 263);
+    h.write(`${h.reduce((n, b) => n + b, 0).toString(8).padStart(6, "0")}\0 `, 148);
+    blocks.push(h, data, Buffer.alloc((512 - (data.length % 512)) % 512));
+  }
+  return Buffer.concat([...blocks, Buffer.alloc(1024)]);
+}

@@ -125,6 +125,8 @@ export const operations = {
   raw sockets, environment variables. Keep everything you need in the database.
 - npm packages: list them in `package.json` `dependencies` and import them normally. Pick packages
   that run in browsers or Workers (no native addons, no `fs`-heavy tooling). Don't commit `node_modules`.
+  Versions from the npm registry only (`"^1.2.0"`): a git, `file:`, `link:` or URL dependency, or an
+  `.npmrc`, fails the build.
 - `console.log` / `console.error` are the capability's logs (the owner sees them). The return
   value is the result.
 

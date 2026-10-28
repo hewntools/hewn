@@ -13,7 +13,7 @@ A tool is a directory:
 ```
 capability.json        the manifest: what the tool is and what it offers
 src/index.ts           the implementation (TypeScript or JavaScript; the entry point the host bundles)
-package.json           optional: npm dependencies, bundled with the code
+package.json           optional: npm dependencies (registry versions only), bundled with the code
 migrations/NNN_*.sql   the database schema, append-only
 tests/cases.json       test cases the host runs before it promotes a version
 sample/calls.json      sample data (since 2.5): calls replayed on an empty tool, on request
@@ -159,7 +159,7 @@ Each handler gets `(input, ctx)`. The types are [`src/ctx.ts`](src/ctx.ts); `CTX
 
 ## Runtime
 
-- **An isolate, not a process.** Code runs as JavaScript in a V8 isolate (like a Cloudflare Worker). The host bundles `src/index.ts` and its imports, including npm packages from `package.json`, into one ES module. Pick packages that run in browsers or Workers.
+- **An isolate, not a process.** Code runs as JavaScript in a V8 isolate (like a Cloudflare Worker). The host bundles `src/index.ts` and its imports, including npm packages from `package.json`, into one ES module. Pick packages that run in browsers or Workers, at versions from the npm registry: a git, `file:`, `link:` or URL dependency, or an `.npmrc` (npm settings), fails the build. Code imports only the tool's own files and its packages.
 - **Available:** standard web APIs (`fetch`, `crypto`, `URL`, `TextEncoder`, `Date`, …) and Node built-ins that need no host (`node:crypto`, `node:buffer`, `node:util`, …).
 - **Not available:** a filesystem (`node:fs` sees an empty, throwaway disk), child processes, raw sockets, environment variables.
 - **Network:** `fetch` reaches only the hosts in `requires.hosts` that the owner approved; any other request gets a `403` response. `*.example.com` matches subdomains of `example.com`, not `example.com` itself.
