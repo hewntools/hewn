@@ -604,9 +604,12 @@ export class Registry {
     this.db.prepare("INSERT INTO capability_logs (capability_id, at, entry) VALUES (?, ?, ?)").run(capabilityId, at, [header, ...lines.map((l) => `  ${l}`)].join("\n"));
   }
 
-  /** The header lines of a capability's last `n` calls, newest first ("<at> <caller> <op> <outcome> <ms>ms"). */
+  /** The header lines of a capability's last `n` calls, newest first ("<at> <caller> <op> <outcome> <ms>ms"); the rest of each entry stays in the database. */
   capabilityLogHeaders(capabilityId: string, n: number): string[] {
-    return this.db.prepare("SELECT entry FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?").all(capabilityId, n).map((r) => String(r.entry).split("\n", 1)[0]);
+    return this.db
+      .prepare("SELECT CASE WHEN instr(entry, char(10)) > 0 THEN substr(entry, 1, instr(entry, char(10)) - 1) ELSE entry END AS header FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?")
+      .all(capabilityId, n)
+      .map((r) => String(r.header));
   }
 
   /** The last `n` log lines of a capability, oldest first. */

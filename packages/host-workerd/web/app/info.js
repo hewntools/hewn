@@ -288,6 +288,9 @@ async function infoPage(id) {
   );
 
   const tableCount = data ? Object.keys(data.tables).length : 0;
+  // The last write comes from the latest calls in the log (up to 500): when none of them wrote, it says how many it looked at.
+  const lastWrite = (d) =>
+    !d ? "Couldn't count it right now" : d.lastWriteAt ? `Last write ${ago(d.lastWriteAt)}` : !d.rows ? "Nothing written yet" : d.callsChecked ? `No writes in the last ${d.callsChecked === 1 ? "call" : `${d.callsChecked} calls`}` : "No recent writes";
   const dataSection = section(
     "Data",
     h(
@@ -296,7 +299,7 @@ async function infoPage(id) {
       h(
         "li",
         {},
-        h("div", { class: "grow" }, h("span", {}, data ? `${plural(data.rows, "row")} · ${plural(tableCount, "table")}` : "Its data"), h("span", { class: "sub" }, !data ? "Couldn't count it right now" : data.lastWriteAt ? `Last write ${ago(data.lastWriteAt)}` : data.rows ? "No recent writes" : "Nothing written yet")),
+        h("div", { class: "grow" }, h("span", {}, data ? `${plural(data.rows, "row")} · ${plural(tableCount, "table")}` : "Its data"), h("span", { class: "sub" }, lastWrite(data))),
         h("button", { class: "sm", onclick: () => download(`/api/capabilities/${enc(id)}/export`) }, "Export"),
       ),
     ),

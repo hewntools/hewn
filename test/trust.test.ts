@@ -75,6 +75,16 @@ describe("trust: rollback, export, purge", () => {
     assert.ok(after.lastWriteAt && Date.now() - Date.parse(after.lastWriteAt) < 60_000, "a write, not the later read");
     const reads = (await t.platform.dataSummary(USER, "running-log")).lastWriteAt;
     assert.equal(reads, after.lastWriteAt, "reads don't move it");
+    assert.equal(after.callsChecked, 3);
+    // Only the latest 500 calls are looked through: none of them wrote, and it says how many.
+    const later = Date.now() + 1000;
+    for (let i = 0; i < 500; i++) {
+      const at = new Date(later + i).toISOString();
+      t.platform.registry.addCapabilityLog("running-log", at, `${at} agent:claude-code list_runs@1 ok 2ms`, ["read the runs", "x".repeat(2000)]);
+    }
+    const busy = await t.platform.dataSummary(USER, "running-log");
+    assert.equal(busy.lastWriteAt, null);
+    assert.equal(busy.callsChecked, 500);
     await assert.rejects(t.platform.dataSummary(t.claude, "running-log"), /cannot perform owner actions/);
   });
 
