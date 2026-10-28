@@ -1190,11 +1190,11 @@ export class Registry {
   }
 
   /** The most recent build per capability (for Home badges). */
-  latestBuilds(): Map<string, { id: string; status: BuildStatus }> {
-    const out = new Map<string, { id: string; status: BuildStatus }>();
-    for (const r of this.db.prepare("SELECT id, capability_id, status FROM builds ORDER BY created_at ASC").all()) {
+  latestBuilds(): Map<string, { id: string; status: BuildStatus; builder: string | null }> {
+    const out = new Map<string, { id: string; status: BuildStatus; builder: string | null }>();
+    for (const r of this.db.prepare("SELECT id, capability_id, status, builder FROM builds ORDER BY created_at ASC").all()) {
       const x = r as Row;
-      out.set(x.capability_id, { id: x.id, status: x.status });
+      out.set(x.capability_id, { id: x.id, status: x.status, builder: x.builder ?? null });
     }
     return out;
   }

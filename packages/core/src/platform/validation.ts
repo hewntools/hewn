@@ -32,7 +32,7 @@ export class Validation extends Domain {
       return fail(`capability.json is not valid JSON: ${(e as Error).message}`);
     }
     // The platform's own fields come from its record (or, installing from a file, the install's), never the builder.
-    const source = this.registry.getCapability(id)?.source ?? (build.request as { source?: ToolSource }).source ?? null;
+    const source = this.registry.getCapability(id)?.source ?? installedFrom(build) ?? null;
     const stamped = stampSource(manifest, source);
     if (JSON.stringify(stamped) !== JSON.stringify(manifest)) {
       manifest = stamped;
@@ -238,7 +238,7 @@ export class Validation extends Domain {
     if (applied.length) step(`migrations applied: ${applied.join(", ")}`);
 
     const before = this.registry.getCapability(id)?.activeVersion ?? null;
-    const installed = (build.request as { source?: ToolSource }).source;
+    const installed = installedFrom(build);
     this.registry.transaction(() => {
       this.registry.insertVersion({ capabilityId: id, version: next, manifest, contentHash: code.hash, buildId: build.id });
       this.registry.promote({ id, name: manifest.name, purpose: manifest.purpose, version: next });
@@ -405,4 +405,12 @@ function shortJson(v: unknown, max = 1200): string {
   };
   const out = JSON.stringify(trim(v, 0), null, 2) ?? "null";
   return out.length > max ? `${out.slice(0, max)}\n…` : out;
+}
+
+/**
+ * Where a build's tool came from: only an install from a file (builder "bundle", which only the
+ * owner's install makes) says, never what an agent put in its request.
+ */
+function installedFrom(build: BuildRow): ToolSource | undefined {
+  return build.builder === "bundle" ? (build.request as { source?: ToolSource }).source : undefined;
 }

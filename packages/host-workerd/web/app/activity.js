@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Activity: All · Builds · Calls · Access.
 import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, clock, empty, enc, fail, h, kindTag, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
-import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures, waitingPill } from "./build.js";
+import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill } from "./build.js";
 import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
@@ -229,7 +229,7 @@ async function buildsView(head, only, all0) {
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
-          ? failed.has(b.buildId)
+          ? failed.has(b.buildId) && retryable(b)
             ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
             : kindTag("failed", "danger")
           : b.status === "review"

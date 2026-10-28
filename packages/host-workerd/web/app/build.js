@@ -13,7 +13,7 @@ import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from 
 import { openCapability } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
-export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures, waitingPill };
+export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
 
 // ---------- B3 / B4 / H2–H6: a build (its page, or in the change drawer) ----------
 
@@ -32,6 +32,8 @@ const INSTALL_STEPS = [
 ];
 /** No builder runs: an install from a file or a directory, or a change that needs none. */
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
+/** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
+const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
 const stepsOf = (b) => (b.builder === "bundle" ? INSTALL_STEPS : STEPS);
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
@@ -265,8 +267,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
       // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
       const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
-      const fix = !refused && h("button", { class: "primary" }, "Ask builder to fix");
-      const retry = h("button", { class: refused ? "primary" : "" }, "Retry");
+      const fix = !refused && !noBuilder(b) && h("button", { class: "primary" }, "Ask builder to fix");
+      const retry = retryable(b) && h("button", { class: refused || !fix ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {
         btn.disabled = true;
         try {
@@ -278,7 +280,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         }
       };
       if (fix) fix.addEventListener("click", again("fix", fix));
-      retry.addEventListener("click", again("retry", retry));
+      if (retry) retry.addEventListener("click", again("retry", retry));
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
@@ -288,15 +290,15 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         convoView,
         specView,
-        h("div", { class: "row tight" }, fix, retry),
+        retry ? h("div", { class: "row tight" }, fix, retry) : h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : "No builder ran: make the change again to try once more."),
         logBlock(true),
       );
       requestAnimationFrame(keepScroll);
     };
 
     const cancelled = () => {
-      const retry = h("button", { class: "primary" }, "Start again");
-      retry.addEventListener("click", async () => {
+      const retry = retryable(b) && h("button", { class: "primary" }, "Start again");
+      if (retry) retry.addEventListener("click", async () => {
         retry.disabled = true;
         try {
           go(`#/b/${(await api(`/builds/${enc(id)}/retry`, { method: "POST" })).buildId}`);

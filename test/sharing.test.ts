@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -8,7 +8,7 @@ import { USER } from "@hewntools/core/auth.ts";
 import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
-import { editJson, installFrom, installSeed, setup } from "./helpers.ts";
+import { editJson, installFrom, installSeed, platformWith, SEED, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([
   { operation: "record_run", input: { distanceKm: 5.2, durationSeconds: 1700, date: "2026-10-01", notes: "Easy loop by the river" } },
@@ -276,6 +276,38 @@ describe("sharing: a tool as a file", () => {
     assert.equal(t.platform.activeManifest("running-log-2").name, "Running Log 2");
     assert.equal(await runs(t, "running-log-2"), 0, "no sample data unless asked");
     await assert.rejects(t.platform.stagedBundle(USER, preview.token), /is gone/, "installed: no longer staged");
+  });
+
+  test("an agent can't say where a tool came from: source and sample in its request are dropped", async () => {
+    const fake = { id: "elsewhere", name: "Elsewhere", version: 1, hash: "d".repeat(64), from: "hub" };
+    const created = await t.build(
+      () => t.platform.create(t.claude, { name: "Faked Log", purpose: "p", requirements: "r", source: fake, sample: true } as any),
+      (ws) => (cpSync(SEED, ws, { recursive: true }), editJson(join(ws, "capability.json"), (m) => ((m.id = "faked-log"), (m.name = "Faked Log")))),
+    );
+    assert.equal(created.status, "promoted", created.log.join("\n"));
+    assert.ok(!("source" in created.request) && !("sample" in created.request), JSON.stringify(created.request));
+    assert.equal(t.platform.registry.getCapability("faked-log")!.source, null);
+    assert.equal(t.platform.activeManifest("faked-log").source, undefined, "not shown as from Hub");
+    const changed = await t.build(
+      () => t.platform.modify(t.claude, { capabilityId: "faked-log", request: "say more", source: fake, retryOf: created.buildId } as any),
+      (ws) => editJson(join(ws, "capability.json"), (m) => (m.description = "More")),
+    );
+    assert.equal(changed.status, "promoted", changed.log.join("\n"));
+    assert.deepEqual(Object.keys(changed.request).sort(), ["capabilityId", "request"]);
+    assert.equal(t.platform.activeManifest("faked-log").source, undefined);
+  });
+
+  test("an install from a file is never retried with a builder: by hand it's refused, and a restart leaves it failed", async () => {
+    const failed = await t.platform.settle((await t.platform.install(USER, { name: "Broken", purpose: "x", builder: "bundle", id: "broken", seed: { "capability.json": bytes("{}") } })).buildId);
+    assert.equal(failed.status, "failed");
+    await assert.rejects(t.platform.retryBuild(USER, failed.buildId), /install the file again/);
+    // One cut off by a restart: no builder runs it from an empty tool.
+    t.platform.registry.insertCapability({ id: "half", name: "Half", purpose: "x", createdBy: "web" });
+    t.platform.registry.insertBuild({ id: "b-half", capabilityId: "half", kind: "create", request: { name: "Half", purpose: "x", requirements: "Installed from a file", source: { id: "half", name: "Half", version: 1, hash: "e".repeat(64), from: "file" } }, requestedBy: "web", baseVersion: null, builder: "bundle" });
+    const restarted = platformWith(t.home, () => ({ name: "script", build: async () => assert.fail("no builder runs an install from a file") }));
+    assert.deepEqual(await restarted.recoverInterruptedBuilds(), []);
+    assert.equal(restarted.registry.getBuild("b-half")!.status, "failed");
+    restarted.close();
   });
 
   test("install refuses a tool that needs a newer Hewn, with the reason", async () => {

@@ -749,7 +749,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status } : null,
+      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder } : null,
       building: building(c.id),
     });
   }

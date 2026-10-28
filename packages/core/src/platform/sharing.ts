@@ -270,9 +270,9 @@ export class Sharing extends Domain {
 
   // ---------- sample data ----------
 
-  /** After an install build went live: replay its sample data if the owner asked for it. Never fails the build. */
+  /** After an install from a file went live: replay its sample data if the owner asked for it. Never fails the build. */
   async afterInstall(build: BuildRow, step: (message: string) => void) {
-    if (build.kind !== "create" || !(build.request as { sample?: boolean }).sample) return;
+    if (build.kind !== "create" || build.builder !== "bundle" || !(build.request as { sample?: boolean }).sample) return;
     const r = await this.replaySample(build.capabilityId, build.requestedBy).catch((e) => ({ calls: 0, of: 0, failed: { index: 0, operation: "", error: (e as Error).message } }));
     step(r.failed ? `sample data stopped at call ${r.failed.index + 1} (${r.failed.operation}): ${r.failed.error}` : `sample data: ${r.calls} calls`);
   }

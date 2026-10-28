@@ -2,6 +2,7 @@
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
 import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, modal, setWallpaper, sheetActions, sheetHead, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
+import { retryable } from "./build.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
 import { buildingLabel } from "./home.js";
@@ -174,7 +175,7 @@ async function infoPage(id) {
   else if (saidNo.length > 1)
     notices.push(h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `You said no to ${plural(saidNo.length, "thing")} it asks for. It won't run until you allow them or it changes.`), h("button", { class: "sm", onclick: () => withoutIt(saidNo) }, "Ask builder to work without them")));
   if (c.lastBuild?.status === "failed" && !c.building)
-    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), retryable(c.lastBuild) && h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
   if (cap.status.retiredModel) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `${cap.status.retiredModel.model} is no longer available.`), h("button", { class: "sm primary", onclick: () => toolModelSheet(c, { replace: true }).then((ok) => ok || route()) }, "Replace…")));
   else if (cap.status.missingModel && !pending.length) notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, cap.status.missingModel), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set a model")));
   if (cap.status.missingDependencies?.length > 0) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "Depends on operations that no longer exist."), h("a", { class: "btn sm", href: changeHref(c) }, "Change it")));
