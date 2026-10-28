@@ -614,13 +614,17 @@ export class Builds extends Domain {
     // kind is an ABI 2.1 field.
     const skeleton: CapabilityManifest = { id, name: req.name, purpose: req.purpose, abi: connection ? "2.1" : DEFAULT_ABI, ...(connection ? { kind: "connection" as const } : {}), operations: [] };
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
+    // The intake's brief leaves operations to the builder, but an approved schedule calls one by name.
+    const scheduled = req.schedules?.length
+      ? `\n\nThe owner approved these schedules, set up once the tool is live: ${req.schedules.map((x) => `\`${x.operation.split("@")[0]}\` (${x.cadence})`).join(", ")}. Each calls the operation by that name with no input (\`{}\`): give the tool operations named exactly so that accept it.`
+      : "";
     await this.workbench.open(buildId, {
       ...(seed ? versionFiles(seed) : {
         "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId))),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduled}${attached.note}`, this.registry.buildContext(buildId))),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),

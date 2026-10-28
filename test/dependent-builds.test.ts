@@ -339,7 +339,8 @@ describe("schedules approved with a build", () => {
 
   test("the owner's approved schedules are set up when the build promotes; one that doesn't fit is skipped", async () => {
     const { USER } = await import("@hewntools/core/auth.ts");
-    t.queue(writeConnection);
+    let brief = "";
+    t.queue((ws, job) => ((brief = readFileSync(join(ws, "BUILDER.md"), "utf8")), writeConnection(ws, job)));
     const b = await t.platform.create(USER, { ...connReq, schedules: [{ operation: "site@1", cadence: "daily 07:00" }, { operation: "nope", cadence: "hourly" }] });
     assert.equal(t.platform.listSchedules(USER).length, 0, "nothing before it promotes");
     const done = await t.platform.settle(b.buildId);
@@ -351,6 +352,8 @@ describe("schedules approved with a build", () => {
     assert.equal(s.status, "active");
     assert.ok(done.log.some((l) => /schedule .* set: site daily 07:00/.test(l)));
     assert.ok(done.log.some((l) => /schedule skipped \(nope hourly\)/.test(l)));
+    // The builder is told the names: the intake's brief leaves operations to it.
+    assert.match(brief, /The owner approved these schedules, set up once the tool is live: `site` \(daily 07:00\), `nope` \(hourly\)\. Each calls the operation by that name with no input/);
   });
 
   test("only the owner attaches schedules (agents propose them), and cadences are checked up front", async () => {

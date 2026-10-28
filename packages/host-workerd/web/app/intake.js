@@ -608,6 +608,21 @@ const conversationNodes = (turns, ctx = {}) =>
   });
 
 /** A draft (or one idea) in full, as the intake's own turn in the conversation. */
+/**
+ * A new tool's brief by its parts (FOR, KEEPS, DECIDED, PLATFORM, UI INTENT: each a heading on a line of
+ * its own, as the intake writes it), for the card. Any other text: none.
+ */
+const briefParts = (text = "") => {
+  const parts = {};
+  let at;
+  for (const line of text.split("\n").map((l) => l.trim())) {
+    const m = /^(FOR|KEEPS|DECIDED|PLATFORM|UI INTENT):?(?:\s+(.*))?$/.exec(line);
+    if (m) (at = m[1]), (parts[at] = m[2] ? [m[2]] : []);
+    else if (at && line) parts[at].push(line);
+  }
+  return Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, v.join(" ")]));
+};
+
 const draftText = (d) =>
   [
     d.name && `${d.name}: ${d.purpose}`,
@@ -728,7 +743,8 @@ function proposalCard(kind, list, ctx) {
     const spec = d.spec ?? { operations: [], uses: [], hosts: [], secrets: [] };
     const on = plan ? plan.needs(d) : [];
     return [
-      spec.operations.length > 0 && kindTag(plural(spec.operations.length, "operation")),
+      // A new tool's operations are the builder's to design (the intake writes a brief): only a change lists them.
+      mode === "modify" && spec.operations.length > 0 && kindTag(plural(spec.operations.length, "operation")),
       (spec.widgets ?? []).length > 0 && kindTag(plural(spec.widgets.length, "widget"), "accent"),
       ...on.map((u) => kindTag(`builds on ${byId.get(u).d.name}`, "warn")),
       d.schedules?.length > 0 && kindTag(plural(d.schedules.length, "schedule"), "accent"),
@@ -744,12 +760,15 @@ function proposalCard(kind, list, ctx) {
     const on = plan ? plan.needs(d) : [];
     const existing = spec.uses.filter((u) => !on.includes(u));
     const details = h("pre", { class: "spec-text", hidden: true }, d.requirements ?? d.request);
+    const brief = mode === "modify" ? {} : briefParts(d.requirements);
     return [
       on.length > 0 && h("div", { class: "small row tight wrap" }, h("span", { class: "dot warn" }), "Builds on ", on.map((u) => capRef({ id: u, name: byId.get(u).d.name })), ", so it's built after"),
       existing.length > 0 && h("div", { class: "small row tight wrap" }, "Uses ", existing.map((u) => capRef(all.get(u), u))),
       (spec.hosts.length > 0 || spec.secrets.length > 0) && h("div", { class: "small row tight wrap" }, "Needs ", spec.hosts.map((x) => kindTag(x)), spec.secrets.map((x) => kindTag(`secret ${x}`))),
       connectionLine(d.connection, all),
-      spec.operations.length > 0 && h("div", { class: "row tight wrap" }, spec.operations.map((o) => kindTag(o.name, o.sideEffect === "read" ? "" : "accent"))),
+      brief.KEEPS && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, "Keeps "), brief.KEEPS),
+      brief.DECIDED && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, "Decided "), brief.DECIDED),
+      mode === "modify" && spec.operations.length > 0 && h("div", { class: "row tight wrap" }, spec.operations.map((o) => kindTag(o.name, o.sideEffect === "read" ? "" : "accent"))),
       r.ticks.el,
       (spec.widgets ?? []).map((w) => h("div", { class: "small" }, `Widget: ${w}`)),
       spec.model && h("div", { class: "small" }, `Model: ${spec.model} tier`),

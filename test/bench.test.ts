@@ -67,18 +67,14 @@ describe("bench arms", () => {
 });
 
 describe("bench specs", () => {
-  test("the intent variant swaps the intake's UI sketch for UI intent, and nothing else", () => {
+  test("today's intake writes the lean brief; the intent variant is 0.4.9's spec with UI intent", () => {
     const messages = [{ role: "user" as const, content: "Track my plants" }];
     const today = promptFor(messages, "intake");
-    const intent = promptFor(messages, "intent");
-    assert.ok(today.includes(SKETCH_INSTRUCTION));
-    assert.ok(!intent.includes(SKETCH_INSTRUCTION));
-    assert.equal(intent, today.replace(SKETCH_INSTRUCTION, INTENT_INSTRUCTION));
-    // Lean: a short brief instead of both the spec and the sketch.
-    const lean = promptFor(messages, "lean");
-    assert.ok(lean.includes(LEAN_INSTRUCTION));
-    assert.ok(!lean.includes(SKETCH_INSTRUCTION) && !lean.includes(SPEC_INSTRUCTION));
-    assert.match(lean, /UI INTENT \(what must be visible[^"]*\. Leave "request" empty\./);
+    assert.ok(today.includes(LEAN_INSTRUCTION));
+    assert.ok(!today.includes(SPEC_INSTRUCTION) && !today.includes(SKETCH_INSTRUCTION));
+    assert.match(today, /UI INTENT \(what must be visible[^"]*\. Leave "request" empty\./);
+    assert.equal(promptFor(messages, "lean"), today);
+    assert.equal(promptFor(messages, "intent"), today.replace(LEAN_INSTRUCTION, `${SPEC_INSTRUCTION} ${INTENT_INSTRUCTION}`));
   });
 
   test("the builder gets the owner's own words, with which to follow when they differ from the brief", () => {
