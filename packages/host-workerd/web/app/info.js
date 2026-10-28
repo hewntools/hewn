@@ -10,7 +10,7 @@ import { modelPicker, titleCase } from "./models.js";
 import { route } from "./router.js";
 import { addScheduleSheet, scheduleRow } from "./schedules.js";
 import { changeHref, download, inlineRename, openCapability, openChange, toolActions } from "./tool-actions.js";
-import { modelSpend, quickModelChange, toolModelSheet } from "./tool-model.js";
+import { modelSpend, ownCap, quickModelChange, saveOwnCap, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
 import { madeBy, versionRow } from "./versions.js";
 import { addWidgetSheet, segmented, SIZE_LETTER, widgetPreview } from "./widgets.js";
@@ -207,7 +207,7 @@ async function infoPage(id) {
   // until it's live), this month's spend, and its own monthly cap. A missing key goes through the sheet.
   const modelRow = (i, isPending) => {
     const spend = m && modelSpend(m, id);
-    const sub = [req.tier ? null : req.model, spend && `${spend.text(spend)} this month`].filter(Boolean).join(" · ");
+    const sub = [req.tier ? null : req.model, spend && `${spend.text} this month`].filter(Boolean).join(" · ");
     const subEl = h("span", { class: "sub" }, sub);
     let control;
     if (isPending && needsKey) control = h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set up…");
@@ -235,7 +235,8 @@ async function infoPage(id) {
         select.disabled = true;
         subEl.textContent = `Changing to ${what}…`;
         try {
-          await quickModelChange(c, body);
+          // Left for another page meanwhile: that page stays as it is.
+          if (!(await quickModelChange(c, body))) return;
           toast(`${cap.name} uses ${what}`);
           refresh();
         } catch (e) {
@@ -252,20 +253,15 @@ async function infoPage(id) {
   };
   // Its own monthly cap, besides the one for all tools: blank is none.
   const capRow = () => {
-    const capsKey = m.host ? "capabilityCapsHost" : "capabilityCapsUsd";
-    const own = m[capsKey]?.[id];
+    const own = ownCap(m, id);
     const unit = modelSpend(m, id).unit;
     const input = h("input", { type: "number", min: 0, step: 1, value: own ?? "", placeholder: "None", class: "model-cap", "aria-label": m.host ? `Monthly cap in ${unit}` : "Monthly cap in USD" });
     const save = h("button", { class: "sm", disabled: true }, "Save");
     input.addEventListener("input", () => (save.disabled = input.value.trim() === String(own ?? "")));
     save.addEventListener("click", async () => {
-      const caps = { ...m[capsKey] };
-      if (input.value.trim() === "") delete caps[id];
-      else caps[id] = Number(input.value);
       try {
         save.disabled = true;
-        await api("/models", { method: "PUT", body: { [capsKey]: caps } });
-        toast(input.value.trim() === "" ? `${cap.name}: no cap of its own` : m.host ? `${cap.name}: at most ${Number(input.value)} ${unit} a month` : `${cap.name}: at most $${Number(input.value)} a month`);
+        await saveOwnCap(c, m, input.value);
         refresh();
       } catch (e) {
         save.disabled = false;
