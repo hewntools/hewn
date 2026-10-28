@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The docs screenshots that the UI changes touch, from a test host with a stub builder and intake:
 // PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/docs-shots.ts → /tmp/shots/*.png, then copy into docs/images/.
-import { cpSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -190,6 +190,54 @@ try {
     return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
   });
   await shot("build-failed", { width: 1280, height: 1000, clip: { x: card.x - 20, y: card.y - 20, width: card.width + 40, height: card.height + 40 } });
+
+  // 6. The Hub: Hewn's own tools, every card in the shot.
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto(`${web}/#/hub`);
+  await page.locator(".hub-card").first().waitFor();
+  await page.waitForTimeout(800);
+  const hubH = await page.evaluate(() => Math.ceil(Math.max(...[...document.querySelectorAll(".hub-card")].map((el) => el.getBoundingClientRect().bottom + window.scrollY)) + 40));
+  await shot("hub", { width: 1280, height: Math.max(hubH, 800) });
+
+  // 7. Share…: Running Log with two more runs in its sample data, written by hand (a new version, v3).
+  const seedSample = readFileSync(join(SEED, "sample/calls.json"), "utf8").trimEnd();
+  const more = [
+    { operation: "record_run", version: 1, input: { distanceKm: 4.6, durationSeconds: 1500, notes: "Recovery jog" } },
+    { operation: "record_run", version: 1, input: { distanceKm: 10.2, durationSeconds: 3240, notes: "Tempo, last 3 km hard" } },
+  ];
+  // Written the way the seed's lines are: one call per line, a space after each colon and comma.
+  const line = (c: unknown) => JSON.stringify(c).replace(/":/g, '": ').replace(/,"/g, ', "');
+  const sample = `${seedSample.replace(/\s*\]$/, "")},\n${more.map((c) => `  ${line(c)}`).join(",\n")}\n]\n`;
+  const sb = await post("/capabilities/running-log/sample", { text: sample });
+  const sampled = await settle(sb.buildId);
+  if (sampled.status !== "promoted") throw new Error(`the sample data didn't go live: ${sampled.status} ${sampled.failure?.title ?? ""} ${sampled.failure?.detail ?? ""}`);
+  // The sheets are measured at the size they're shot at (a centred dialog moves when the window does).
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto(`${web}/#/c/running-log`);
+  await page.locator(".info-section").first().waitFor();
+  await page.getByRole("button", { name: "Share…" }).click();
+  await page.locator("dialog[open]").getByText("always included").waitFor();
+  await page.waitForTimeout(400);
+  const dialog = async () => {
+    const r = await page.locator("dialog[open]").last().boundingBox();
+    return { x: r!.x - 16, y: r!.y - 16, width: r!.width + 32, height: r!.height + 32 };
+  };
+  await shot("share", { width: 1280, height: 1000, clip: await dialog() });
+  await page.keyboard.press("Escape");
+
+  // 8. Installing from the Hub: Hewn's reading, what it will ask for, the name, sample data.
+  await page.goto(`${web}/#/hub/plant-log`);
+  await page.getByRole("button", { name: "Install" }).click();
+  await page.locator("dialog[open]").getByText("It will ask for").waitFor();
+  await page.waitForTimeout(400);
+  await shot("install", { width: 1280, height: 1000, clip: await dialog() });
+  await page.keyboard.press("Escape");
+
+  // 9. A version's files: what v3 changed (its sample data).
+  await page.goto(`${web}/#/c/running-log/v/3?tab=files`);
+  await page.locator(".code-line").first().waitFor();
+  await page.waitForTimeout(400);
+  await shot("version-files", { width: 1280, height: 760 });
 } finally {
   await browser.close();
   await sv.stop();

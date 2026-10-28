@@ -26,6 +26,8 @@ Restoring replaces the data and keeps Hewn running: it stops and starts its runt
 
 **Export data** in a tool's menu, or **Export** in Info › Data, downloads all its data as JSON. Or `hewn export <id> --out file.json`. Info › Data also shows how many rows the tool keeps, in how many tables, and when it last wrote.
 
+Export is your data, for you. **Share…** is the tool, for someone else: its code and its made-up sample data, never your data ([Sharing tools](sharing.md)). To take your tools and their data to another machine, use a backup ([below](#moving-to-a-new-machine)).
+
 ## Start over
 
 Info › Data › **Start over** empties a tool's data and keeps the tool; a copy of its data is kept aside first. `hewn data reset <id>` from the terminal. See [Sharing tools](sharing.md#start-over).
