@@ -620,7 +620,7 @@ export class Builds extends Domain {
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId)?.instructions)),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId))),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
@@ -719,7 +719,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1223,10 +1223,11 @@ export class Builds extends Domain {
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
-  private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
+  /** BUILDER.md: the request, the owner's own words and instructions as the build recorded them (`build_context`), the brief, the catalog. */
+  private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
-    return `# Build: ${kind} \`${id}\`\n\n${request}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
+    const instructions = context?.instructions;
+    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWords(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {
@@ -1300,6 +1301,43 @@ export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
 
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
+
+/** The most of the owner's conversation BUILDER.md carries: the first turn, then the latest that fit. */
+const MAX_OWNERS_WORDS = 40_000;
+
+/**
+ * BUILDER.md's "THE OWNER'S OWN WORDS": the conversation that led to the build (the owner's builds
+ * only), oldest first, after the request. The request is the plan; the owner's words win where it's
+ * silent, vague or differs. An empty string when there's none (an agent's build).
+ */
+export function ownersWords(conversation: BuildTurn[] | undefined): string {
+  if (!conversation?.length) return "";
+  const turns = conversation.map((t) => `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`);
+  let kept = turns;
+  if (turns.join("\n\n").length > MAX_OWNERS_WORDS) {
+    const latest: string[] = [];
+    let room = MAX_OWNERS_WORDS - turns[0].length;
+    for (let i = turns.length - 1; i > 0 && turns[i].length <= room; i--) latest.unshift(turns[i]), (room -= turns[i].length);
+    kept = [turns[0], `(${turns.length - 1 - latest.length} turns left out)`, ...latest];
+  }
+  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously.\n\n${kept.join("\n\n")}`;
+}
+
+/** A turn as the builder reads it. A draft or ideas the intake offered come down to their name and purpose: the request above is the one agreed. */
+function turnText(t: BuildTurn): string {
+  const attached = t.attachments?.length ? `\n(attached: ${t.attachments.map((a) => a.name).join(", ")})` : "";
+  // The reply is the intake's own (opaque to the platform elsewhere); anything else, the turn as written.
+  const r = t.reply as { kind?: unknown; message?: unknown; draft?: unknown; ideas?: unknown } | undefined;
+  const named = (d: unknown) => {
+    const { name, purpose } = (d ?? {}) as { name?: unknown; purpose?: unknown };
+    return typeof name === "string" ? `${name}${typeof purpose === "string" ? `: ${purpose}` : ""}` : undefined;
+  };
+  const message = typeof r?.message === "string" ? r.message.trim() : "";
+  let text = t.content.trim();
+  if (r?.kind === "draft" && named(r.draft)) text = [message, `(It drafted ${named(r.draft)})`].filter(Boolean).join("\n");
+  else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered: ${r.ideas.map(named).join("; ")})`].filter(Boolean).join("\n");
+  return text + attached;
+}
 
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>

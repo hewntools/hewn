@@ -20,7 +20,7 @@ You can also ask an agent ("make me a reading list in Hewn"), if you allowed it 
 
 ## The build
 
-The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. Then Hewn:
+The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. It works from the spec and, for a tool you asked for in the chat, from your conversation with the intake too, in your own words: where the spec is silent or vague, or you changed your mind along the way, what you said wins. Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data

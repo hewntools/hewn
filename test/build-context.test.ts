@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync } from "node:fs";
+import { cpSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
+import { ownersWords } from "@hewntools/core/platform/builds.ts";
 import { SEED, setup } from "./helpers.ts";
 
 const seed = (ws: string) => cpSync(SEED, ws, { recursive: true });
@@ -81,6 +83,41 @@ describe("what a build keeps", () => {
     await t.platform.cleanup(Date.now() + 31 * 86400_000);
     assert.equal(await t.platform.workbench.transcript(m.buildId), undefined);
     assert.equal(await t.platform.buildTranscript(USER, m.buildId), kept);
+  });
+
+  test("BUILDER.md carries the owner's own words after the request, with the rule; an agent's build doesn't", async () => {
+    const said = [
+      { role: "user" as const, content: "track my runs, and I care about pace per km" },
+      { role: "intake" as const, content: "DRAFT\nRunning Log: runs, with pace\nrecord_run@1 …", reply: { kind: "draft", message: "Here's a first go.", draft: { name: "Running Log", purpose: "runs, with pace", requirements: "record_run@1 …" } } },
+      { role: "user" as const, content: "make it orange, not green" },
+    ];
+    let brief = "";
+    const read = (ws: string) => void (brief = readFileSync(join(ws, "BUILDER.md"), "utf8"));
+    await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "record runs", conversation: said }), (ws) => (read(ws), seed(ws)));
+    const words = brief.indexOf("THE OWNER'S OWN WORDS");
+    assert.ok(brief.indexOf("Requirements: record runs") < words && words < brief.indexOf("## Implementation contract"), "after the request, before the contract");
+    assert.match(brief, /The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word/);
+    assert.match(brief, /OWNER: track my runs, and I care about pace per km\n\nINTAKE: Here's a first go\.\n\(It drafted Running Log: runs, with pace\)\n\nOWNER: make it orange, not green/);
+    assert.doesNotMatch(brief, /record_run@1 …/, "a draft comes down to its name and purpose");
+
+    await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add notes", conversation: turns }), read);
+    assert.match(brief, /Requested change: add notes\n\nTHE OWNER'S OWN WORDS/, "a change's too");
+
+    brief = "";
+    const a = await t.build(() => t.platform.create(t.claude, { name: "Reading List", purpose: "books", requirements: "track books" }), read);
+    assert.match(brief, /Requirements: track books/, a.log.join("\n"));
+    assert.doesNotMatch(brief, /OWNER'S OWN WORDS/, "an agent's build has no conversation");
+  });
+
+  test("the owner's words: ideas come down to their names, anything else is kept as written; a long conversation keeps its first turn and the latest", () => {
+    assert.equal(ownersWords(undefined), "");
+    assert.match(ownersWords([{ role: "intake", content: "IDEAS\n1. A\n…", reply: { kind: "ideas", message: "Two ways:", ideas: [{ name: "A", purpose: "a" }, { name: "B", purpose: "b" }] } }]), /INTAKE: Two ways:\n\(It offered: A: a; B: b\)$/);
+    assert.match(ownersWords([{ role: "intake", content: "SCHEDULES\n…", reply: { kind: "schedules" } }]), /INTAKE: SCHEDULES\n…$/);
+    const long = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"x".repeat(1000)}` }));
+    const w = ownersWords(long);
+    assert.ok(w.length < 42_000, `capped (${w.length})`);
+    assert.match(w, /OWNER: turn 0 x+\n\n\(\d+ turns left out\)\n\n(OWNER|INTAKE): turn \d+ x+/);
+    assert.match(w, /INTAKE: turn 59 x+$/, "ends with the latest");
   });
 
   test("purging a deleted capability removes what its builds kept", async () => {
