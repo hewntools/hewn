@@ -101,6 +101,8 @@ export class Validation extends Domain {
     const visualState: StateRef = { capabilityId: id, scratch: `visual:${build.id}` };
     const dryRun: StateRef = { capabilityId: id, scratch: `dryrun:${build.id}` };
     const sampleState: StateRef = { capabilityId: id, scratch: `sample:${build.id}` };
+    // Sample calls run as they do after an install: nothing granted (no secrets, settings, hosts, other tools or model).
+    const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
     try {
@@ -138,13 +140,20 @@ export class Validation extends Domain {
         await this.runtime.migrate(sampleState, migrations, code);
         for (const [i, c] of sample.entries()) {
           try {
-            await this.replayCall(manifest, { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } }, c);
+            await this.replayCall(manifest, sampleTarget, c);
           } catch (e) {
             fail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
           }
         }
         step(`sample data replays (${sample.length} calls)`);
       }
+
+      // The screenshot the build page shows, kept whether the check passed or not (a failed one shows
+      // what broke). "(screenshot attached" in the log is what tells the build page there's one.
+      const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
+        if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
+        if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+      };
 
       // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
       // data, again on a tool filled with it, and that's the screenshot (the tool in use, not empty)
@@ -175,20 +184,21 @@ export class Validation extends Domain {
               return { result };
             },
           });
-        const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
-          if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-          if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
-        };
         const empty = await check(visualState);
         if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
         else {
-          // A failed check keeps its screenshot: the owner sees what broke.
-          if (empty.errors.length) await keep(empty), fail("UI didn't render cleanly", empty.errors);
+          if (empty.errors.length) {
+            await keep(empty);
+            if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
+            fail("UI didn't render cleanly", empty.errors);
+          }
           const filled = sample ? await check(sampleState) : undefined;
           const v = filled && !filled.skipped ? filled : empty;
           await keep(v);
-          if (filled?.errors.length) fail("UI didn't render cleanly with its sample data", filled.errors);
-          // "(screenshot attached" is what tells the build page there's one to show.
+          if (filled?.errors.length) {
+            if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
+            fail("UI didn't render cleanly with its sample data", filled.errors);
+          }
           step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
@@ -202,17 +212,20 @@ export class Validation extends Domain {
         if (sample)
           for (const w of manifest.widgets!) {
             const [operation, version] = w.operation.split("@");
-            const r = await this.replayCall(manifest, { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } }, { operation, version: Number(version) }).catch(() => undefined);
+            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
           }
         const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: sampled.get(w.operation) ?? views.get(w.operation) ?? null }));
         const v = await visualCheck(build.id, { manifest, widgets, invoke: async () => ({ result: null }) });
         if (v.skipped) step(`widget check skipped: ${v.skipped}`);
         else {
-          if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-          if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
-          if (v.errors.length) fail("widgets didn't render cleanly", v.errors);
-          step(`widgets render in every size (screenshot attached${sampled.size ? ", with the sample data" : ""})`);
+          await keep(v);
+          const filled = sampled.size ? ", with the sample data" : "";
+          if (v.errors.length) {
+            if (v.screenshot) step(`widgets rendered with errors (screenshot attached${filled})`);
+            fail("widgets didn't render cleanly", v.errors);
+          }
+          step(`widgets render in every size (screenshot attached${filled})`);
         }
       }
 

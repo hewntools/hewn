@@ -53,6 +53,7 @@ describe("visual validation", () => {
     assert.deepEqual(seen, ['{"result":{"count":0}}'], "the UI's API runs the candidate on fresh state");
     assert.equal(done.failure?.title, "Its screen shows errors");
     assert.equal(screenshot(done.buildId).toString(), "png");
+    assert.equal(done.screenshot, true, "the build page shows what broke");
     platform.close();
   });
 
@@ -70,15 +71,21 @@ describe("visual validation", () => {
     assert.ok(done.log.some((l) => /empty and with its sample data/.test(l)));
     assert.equal(done.screenshot, true, "the build page shows it");
     assert.deepEqual((await platform.invoke(USER, { capabilityId: "ui-counter", operation: "get", input: {} })).result, { count: 0 }, "the check's state isn't the tool's");
-    // A screen that breaks only with data fails the build too.
-    let n = 0;
-    const onlyFilled = platformFor(t.home, async () => ({ errors: ++n % 2 === 0 ? ["uncaught: TypeError: rows[0] is undefined"] : [], screenshot: Buffer.from("png") }));
-    builder = counter(undefined, taps(1));
-    const broken = await onlyFilled.settle((await onlyFilled.modify(USER, { capabilityId: "ui-counter", request: "x" })).buildId);
+    platform.close();
+  });
+
+  test("a screen that breaks only with sample data fails the build, and the build page shows it filled", async () => {
+    const fake: VisualCheck = async (req) => {
+      const { result } = (await req.invoke({ operation: "get", input: {} })) as { result: { count: number } };
+      return { errors: result.count ? ["uncaught: TypeError: rows[0] is undefined"] : [], screenshot: Buffer.from(`png ${result.count}`) };
+    };
+    const platform = platformFor(t.home, fake);
+    const broken = await buildCounter(platform, undefined, taps(2));
     assert.equal(broken.status, "failed");
-    assert.match(broken.log.join("\n"), /with its sample data/);
+    assert.match(broken.log.join("\n"), /didn't render cleanly with its sample data/);
     assert.equal(broken.failure?.title, "Its screen shows errors");
-    onlyFilled.close();
+    assert.equal(screenshot(broken.buildId).toString(), "png 2", "the filled screen, where it broke");
+    assert.equal(broken.screenshot, true, "the build page shows it");
     platform.close();
   });
 
@@ -153,6 +160,15 @@ describe("visual validation: widgets", () => {
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.deepEqual(seen, [{ name: "count", title: "Count", sizes: ["small", "medium"], view: { template: "stat", value: 1, caption: "taps", buttons: [{ label: "Add one", operation: "increment@1" }] } }]);
     assert.ok(done.log.some((l) => /widgets render in every size/.test(l)));
+    assert.equal(done.screenshot, true);
+    platform.close();
+  });
+
+  test("widgets that don't render fail the build, and the build page shows them", async () => {
+    const platform = platformWith(t.home, () => widgetCounter, { attempts: 1, visualCheck: async () => ({ errors: ["count (small): the content is cut off"], screenshot: Buffer.from("png") }) });
+    const done = await build(platform);
+    assert.equal(done.status, "failed");
+    assert.match(done.log.join("\n"), /widgets didn't render cleanly/);
     assert.equal(done.screenshot, true);
     platform.close();
   });
