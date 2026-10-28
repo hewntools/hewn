@@ -4,11 +4,11 @@
 // a create build with no builder ("bundle") through the normal validation. Sample data: replayed
 // after an install or Start over, and written by the owner as a new version. Owner only.
 import { type Agent, requireOwner } from "../auth.ts";
-import { BundleError, dependencyProblems, type Finding, packBundle, readSample, SAMPLE_FILE, type SampleCall, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
+import { BUNDLE_FORMAT, BundleError, dependencyProblems, type Finding, packBundle, readSample, SAMPLE_FILE, sampleOrNull, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, text } from "../files.ts";
-import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, stampSource, type ToolSource } from "../manifest.ts";
+import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import type { Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
 import { randomToken } from "../sha256.ts";
@@ -75,12 +75,7 @@ export class Sharing extends Domain {
     const v = version ?? cap.activeVersion!;
     const files = await this.shareFiles(capabilityId, v);
     const findings = scanFiles(files, this.ownValues());
-    let sample: SampleCall[] | null = null;
-    try {
-      sample = readSample(files);
-    } catch {
-      sample = null;
-    }
+    const sample = sampleOrNull(files);
     const secret = findings.find((f) => f.kind === "secret");
     // A connection has no data of its own to show (its sign-in never travels), so it shares without sample data.
     const connection = isConnection(this.registry.getVersion(capabilityId, v)!.manifest);
@@ -105,7 +100,7 @@ export class Sharing extends Domain {
     const files = await this.shareFiles(capabilityId, check.version);
     const row = this.registry.getVersion(capabilityId, check.version)!;
     const manifest = JSON.parse(text(files["capability.json"])) as CapabilityManifest;
-    const sidecar: Sidecar = { format: 1, hewn: this.platform.version ?? "dev", abi: abiOf(manifest), exportedAt: new Date().toISOString(), tool: { id: capabilityId, version: check.version, hash: row.contentHash } };
+    const sidecar: Sidecar = { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(manifest), exportedAt: new Date().toISOString(), tool: { id: capabilityId, version: check.version, hash: row.contentHash } };
     this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a file`, owner.id);
     return { name: `${capabilityId}.hewn.zip`, bundle: packBundle(files, sidecar) };
   }
@@ -146,11 +141,14 @@ export class Sharing extends Domain {
     const { files, sidecar, manifest } = refuseUnreadable(zip);
     await this.dropOldStaged();
     const token = randomToken(24);
+    const entry: Staged = { at: Date.now(), from: origin.from, ...(origin.host ? { host: origin.host } : {}) };
+    // The preview first: nothing is kept of a file that can't be shown.
+    const preview = this.preview(token, files, sidecar, manifest, entry);
     await this.blobs.put(`bundles/${token}.zip`, zip);
     const staged = this.registry.getKv<Record<string, Staged>>("bundles:staged") ?? {};
-    staged[token] = { at: Date.now(), from: origin.from, ...(origin.host ? { host: origin.host } : {}) };
+    staged[token] = entry;
     this.registry.setKv("bundles:staged", staged);
-    return this.preview(token, files, sidecar, manifest, staged[token]);
+    return preview;
   }
 
   /** A staged bundle's preview again (the install sheet, reopened). */
@@ -199,19 +197,13 @@ export class Sharing extends Domain {
     const manifest = stampSource({ ...s.manifest, id, name }, source);
     const seed: Files = { ...s.files, "capability.json": bytes(JSON.stringify(manifest, null, 2) + "\n") };
     const sample = !!req.sample && !!s.files[SAMPLE_FILE];
-    const where = s.staged.from === "hub" ? "from Hub" : s.staged.from === "link" ? `from ${s.staged.host}` : "from a file";
-    const build = await this.d.builds.install(owner, { name, purpose: manifest.purpose, builder: "bundle", id, seed, requirements: `Installed ${where}: ${s.manifest.name} v${source.version}`, source, sample });
+    const build = await this.platform.install(owner, { name, purpose: manifest.purpose, builder: "bundle", id, seed, requirements: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample });
     await this.dropStaged(owner, token);
     return build;
   }
 
   private preview(token: string, files: Files, sidecar: Sidecar, m: CapabilityManifest, staged: Staged): BundlePreview {
-    let sample: SampleCall[] | null = null;
-    try {
-      sample = readSample(files);
-    } catch {
-      sample = null;
-    }
+    const sample = sampleOrNull(files);
     const model = m.requires?.model;
     return {
       token,
@@ -318,24 +310,31 @@ export class Sharing extends Domain {
 
 /** A bundle's files, sidecar and manifest, or the reason it can't be installed here. */
 function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; manifest: CapabilityManifest } {
+  const refuse = (message: string, details: Record<string, unknown> = {}): never => {
+    throw new PlatformError("invalid_request", message, { refusal: "unreadable", ...details });
+  };
   let unpacked;
   try {
     unpacked = unpackBundle(zip);
   } catch (e) {
-    if (e instanceof BundleError) throw new PlatformError("invalid_request", e.message, { refusal: "unreadable" });
+    if (e instanceof BundleError) refuse(e.message, e.newer ? { refusal: "newer" } : {});
     throw e;
   }
   let manifest: CapabilityManifest;
   try {
     manifest = JSON.parse(text(unpacked.files["capability.json"]));
   } catch {
-    throw new PlatformError("invalid_request", "Its capability.json isn't valid JSON.", { refusal: "unreadable" });
+    return refuse("Its capability.json isn't valid JSON.");
   }
-  if (typeof manifest?.id !== "string" || typeof manifest?.name !== "string") throw new PlatformError("invalid_request", "Its capability.json has no id or name.", { refusal: "unreadable" });
+  if (typeof manifest?.id !== "string" || typeof manifest?.name !== "string") refuse("Its capability.json has no id or name.");
   const tooNew = abiUnsupported(abiOf(manifest));
-  if (tooNew) throw new PlatformError("invalid_request", `${manifest.name} ${tooNew.replace(/^needs/, "needs")}. Upgrade Hewn to install it.`, { refusal: "newer", abi: abiOf(manifest) });
-  if (!unpacked.sidecar.tool?.id || !Number.isInteger(unpacked.sidecar.tool?.version) || !/^[0-9a-f]{64}$/.test(unpacked.sidecar.tool?.hash ?? "")) throw new PlatformError("invalid_request", "Its hewn-bundle.json doesn't say which tool and version it is.", { refusal: "unreadable" });
+  if (tooNew) refuse(`${manifest.name} ${tooNew}. Upgrade Hewn to install it.`, { refusal: "newer", abi: abiOf(manifest) });
+  // Checked as the install will see it: the platform's own fields (source, hub, minVersion) are written there.
+  const problems = validateManifest(stampSource(manifest, null), manifest.id);
+  if (problems.length) refuse(`Its capability.json isn't one Hewn can install: ${problems.slice(0, 3).map((p) => p.replace(/\.$/, "")).join("; ")}${problems.length > 3 ? ` (and ${problems.length - 3} more)` : ""}.`, { problems });
+  const tool = unpacked.sidecar.tool;
+  if (typeof tool?.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(tool.id) || !Number.isInteger(tool.version) || tool.version < 1 || typeof tool.hash !== "string" || !/^[0-9a-f]{64}$/.test(tool.hash)) refuse("Its hewn-bundle.json doesn't say which tool and version it is.");
   const deps = dependencyProblems(unpacked.files);
-  if (deps.length) throw new PlatformError("invalid_request", `${manifest.name} asks npm for what isn't on the npm registry, so Hewn won't install it: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
+  if (deps.length) refuse(`${manifest.name} asks npm for what isn't on the npm registry, so Hewn won't install it: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
   return { ...unpacked, manifest };
 }

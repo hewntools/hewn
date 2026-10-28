@@ -5,7 +5,7 @@ import { AgentStore, type AgentDetails, type PendingRequest } from "./agents.ts"
 import type { Agent, Scope } from "./auth.ts";
 import type { Cells } from "./glyph.ts";
 import type { Deadline } from "./deadline.ts";
-import type { CapabilityManifest, ModelRequirement, WidgetManifest } from "./manifest.ts";
+import type { CapabilityManifest, ModelRequirement, ToolSource, WidgetManifest } from "./manifest.ts";
 import type { HostModels, ModelSettings } from "./models.ts";
 import type { Blobs, CapabilityRuntime, Files, SecretStore, Sql, Workbench } from "./ports.ts";
 import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry } from "./registry.ts";
@@ -346,7 +346,7 @@ export class Platform {
   activeBuilds(): { buildId: string; capabilityId: string; kind: BuildKind; name: string; purpose: string; connection: boolean; state: BuildStepState }[] { return this.d.builds.activeBuilds(); }
   create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> { return this.d.builds.create(agent, req); }
   agentModelChoices(builder?: string): string[] { return this.d.builds.agentModelChoices(builder); }
-  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string }): Promise<BuildView> { return this.d.builds.install(owner, req); }
+  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean }): Promise<BuildView> { return this.d.builds.install(owner, req); }
   modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.modify(agent, req); }
   addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.addWidgets(agent, req); }
   changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] { return this.d.builds.changesComing(agent, capabilityId); }

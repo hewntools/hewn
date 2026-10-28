@@ -86,6 +86,9 @@ export function stampSource(m: CapabilityManifest, source: ToolSource | null): C
   return out;
 }
 
+/** Where an installed tool came from, in words: "from Hub", "from example.com" (a link), "from a file". */
+export const sourceWords = (s: Pick<ToolSource, "from" | "host">): string => (s.from === "hub" ? "from Hub" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file");
+
 /** A compiled JSON Schema check. `errors` holds the last failure's messages. */
 export interface SchemaCheck {
   (value: unknown): boolean;

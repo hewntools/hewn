@@ -53,6 +53,15 @@ export function readSample(files: Files): SampleCall[] | null {
   return calls as SampleCall[];
 }
 
+/** sample/calls.json's calls, or null when there's none or it doesn't read (where the reason isn't needed). */
+export function sampleOrNull(files: Files): SampleCall[] | null {
+  try {
+    return readSample(files);
+  } catch {
+    return null;
+  }
+}
+
 // ---------- what npm may install for a shared tool ----------
 
 /**
@@ -199,8 +208,14 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** Why a file isn't a bundle Hewn can read: thrown with a message for the owner. */
-export class BundleError extends Error {}
+/** Why a file isn't a bundle Hewn can read: thrown with a message for the owner. `newer`: a newer Hewn reads it. */
+export class BundleError extends Error {
+  newer: boolean;
+  constructor(message: string, newer = false) {
+    super(message);
+    this.newer = newer;
+  }
+}
 
 /** A bundle holds at most this many files. */
 export const MAX_BUNDLE_FILES = 1000;
@@ -278,7 +293,7 @@ export function unpackBundle(zip: Uint8Array): { files: Files; sidecar: Sidecar 
     throw new BundleError(`${SIDECAR} isn't valid JSON.`);
   }
   if (typeof sidecar?.format !== "number") throw new BundleError(`${SIDECAR} has no format.`);
-  if (sidecar.format > BUNDLE_FORMAT) throw new BundleError(`This tool was shared from a newer Hewn (bundle format ${sidecar.format}; this Hewn reads ${BUNDLE_FORMAT}).`);
+  if (sidecar.format > BUNDLE_FORMAT) throw new BundleError(`This tool was shared from a newer Hewn (bundle format ${sidecar.format}; this Hewn reads ${BUNDLE_FORMAT}).`, true);
   if (!files["capability.json"]) throw new BundleError("This zip has no capability.json.");
   delete files[SIDECAR];
   return { files, sidecar };

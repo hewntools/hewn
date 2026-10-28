@@ -5,7 +5,7 @@
 import { type Agent, requireOwner } from "../auth.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
-import { readSample } from "../bundle.ts";
+import { sampleOrNull } from "../bundle.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
 import { Domain, type Domains } from "./context.ts";
@@ -145,13 +145,7 @@ export class Data extends Domain {
         break;
       }
     }
-    let sample: number | null = null;
-    try {
-      sample = readSample(active.files)?.length ?? null;
-    } catch {
-      sample = null;
-    }
-    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt, callsChecked: headers.length, sample };
+    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt, callsChecked: headers.length, sample: sampleOrNull(active.files)?.length ?? null };
   }
 
   /**

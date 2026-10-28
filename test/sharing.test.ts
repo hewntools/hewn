@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -315,6 +315,33 @@ describe("sharing: a tool as a file", () => {
     const manifest = { id: "future", name: "Future Tool", purpose: "x", abi: "2.9", operations: [] };
     const zip = packBundle({ "capability.json": bytes(JSON.stringify(manifest)) }, sidecar);
     await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.5\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
+    // A newer bundle format is the same case: the sheet offers hewn upgrade, not "unreadable".
+    const format2 = packBundle({ "capability.json": bytes(JSON.stringify({ ...manifest, abi: "2.0" })) }, { ...sidecar, format: 2 });
+    await assert.rejects(t.platform.stageBundle(USER, format2), (e: any) => /shared from a newer Hewn \(bundle format 2/.test(e.message) && e.details?.refusal === "newer");
+  });
+
+  test("a malformed manifest or sidecar is refused with the reason before anything is kept", async () => {
+    const sidecar: Sidecar = { format: 1, hewn: "test", abi: "2.0", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "odd", version: 1, hash: "c".repeat(64) } };
+    const op = { name: "get", description: "x", version: 1, sideEffect: "read", inputSchema: { type: "object" }, outputSchema: { type: "object" } };
+    const manifest = { id: "odd", name: "Odd Tool", purpose: "x", abi: "2.0", operations: [op] };
+    const noOps = packBundle({ "capability.json": bytes(JSON.stringify({ ...manifest, operations: undefined })) }, sidecar);
+    await assert.rejects(t.platform.stageBundle(USER, noOps), (e: any) => /capability\.json isn't one Hewn can install: manifest .*operations/.test(e.message) && e.details?.refusal === "unreadable");
+    for (const tool of [{ id: 7, version: 1, hash: "c".repeat(64) }, { id: "Not An Id", version: 1, hash: "c".repeat(64) }, { id: "odd", version: 0, hash: "c".repeat(64) }]) {
+      await assert.rejects(t.platform.stageBundle(USER, packBundle({ "capability.json": bytes(JSON.stringify(manifest)) }, { ...sidecar, tool } as any)), /doesn't say which tool and version it is/);
+    }
+    assert.ok(!existsSync(join(t.home.root, "blobs", "bundles")), "no file kept of what was refused");
+  });
+
+  test("a builder's hub or minVersion on a tool it calls is removed at promote (Hewn writes them)", async () => {
+    await installFrom(t.platform, resolve(FIX, "run-feeder"));
+    const b = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "run-feeder", request: "pin running log from the hub" }),
+      (ws) => editJson(join(ws, "capability.json"), (m) => Object.assign(m.requires.capabilities[0], { hub: "hewn/running-log", minVersion: 3 })),
+    );
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+    assert.ok(b.log.some((l) => /removed fields the platform writes/.test(l)), b.log.join("\n"));
+    assert.deepEqual(t.platform.activeManifest("run-feeder").requires!.capabilities, [{ id: "running-log", operations: ["record_run@1", "list_runs@1"] }]);
+    assert.equal(t.platform.activeManifest("run-feeder").abi, "2.0", "and the ABI isn't raised for them");
   });
 
   test("Start over: a backup is kept, the data is empty, the sample data comes back on request", async () => {
