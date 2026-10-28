@@ -101,6 +101,8 @@ export class Validation extends Domain {
     const visualState: StateRef = { capabilityId: id, scratch: `visual:${build.id}` };
     const dryRun: StateRef = { capabilityId: id, scratch: `dryrun:${build.id}` };
     const sampleState: StateRef = { capabilityId: id, scratch: `sample:${build.id}` };
+    // Sample calls run as they do after an install: nothing granted (no secrets, settings, hosts, other tools or model).
+    const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
     try {
@@ -138,7 +140,7 @@ export class Validation extends Domain {
         await this.runtime.migrate(sampleState, migrations, code);
         for (const [i, c] of sample.entries()) {
           try {
-            await this.replayCall(manifest, { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } }, c);
+            await this.replayCall(manifest, sampleTarget, c);
           } catch (e) {
             fail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
           }
@@ -146,53 +148,84 @@ export class Validation extends Domain {
         step(`sample data replays (${sample.length} calls)`);
       }
 
-      // 5b. the UI renders without errors (on fresh, empty state), with a screenshot for the owner
+      // The screenshot the build page shows, kept whether the check passed or not (a failed one shows
+      // what broke). "(screenshot attached" in the log is what tells the build page there's one.
+      const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
+        if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
+        if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+      };
+
+      // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
+      // data, again on a tool filled with it, and that's the screenshot (the tool in use, not empty)
       let shot = false;
-      if (manifest.ui?.available && this.workbench.visualCheck && build.kind !== "widgets") {
+      const visualCheck = this.workbench.visualCheck;
+      if (manifest.ui?.available && visualCheck && build.kind !== "widgets") {
         await this.runtime.dropState(visualState);
         await this.runtime.migrate(visualState, migrations, code);
         const secrets = cases.find((c) => c.secrets)?.secrets ?? Object.fromEntries((manifest.requires?.secrets ?? []).map((x) => [x.name, "visual-check"]));
         const config = cases.find((c) => c.config)?.config ?? Object.fromEntries((manifest.config ?? []).map((x) => [x.name, "visual-check"]));
-        const v = await this.workbench.visualCheck(build.id, {
-          manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
-          invoke: async (body) => {
-            const { result } = await this.d.invocation.execute(
-              manifest,
-              { capabilityId: id, code, state: visualState, secrets, config, caller: { kind: "test", id: "visual-check" } },
-              { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input },
-              async (call) => {
-                throw new PlatformError("operation_failed", `calls to ${call.capabilityId} aren't available in the visual check`);
-              },
-              manifest.requires?.model && abiAtLeast(manifest, "2.2")
-                ? async () => {
-                    throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
-                  }
-                : undefined,
-            );
-            return { result };
-          },
-        });
-        if (v.skipped) step(`visual check skipped: ${v.skipped}`);
+        const check = (state: StateRef) =>
+          visualCheck(build.id, {
+            manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
+            invoke: async (body) => {
+              const { result } = await this.d.invocation.execute(
+                manifest,
+                { capabilityId: id, code, state, secrets, config, caller: { kind: "test", id: "visual-check" } },
+                { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input },
+                async (call) => {
+                  throw new PlatformError("operation_failed", `calls to ${call.capabilityId} aren't available in the visual check`);
+                },
+                manifest.requires?.model && abiAtLeast(manifest, "2.2")
+                  ? async () => {
+                      throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
+                    }
+                  : undefined,
+              );
+              return { result };
+            },
+          });
+        const empty = await check(visualState);
+        if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
         else {
-          if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-          if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
-          if (v.errors.length) fail("UI didn't render cleanly", v.errors);
-          step("UI renders without errors (screenshot attached)");
+          if (empty.errors.length) {
+            await keep(empty);
+            if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
+            fail("UI didn't render cleanly", empty.errors);
+          }
+          const filled = sample ? await check(sampleState) : undefined;
+          const v = filled && !filled.skipped ? filled : empty;
+          await keep(v);
+          if (filled?.errors.length) {
+            if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
+            fail("UI didn't render cleanly with its sample data", filled.errors);
+          }
+          step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
       }
 
-      // 5c. changed widgets, drawn in every size they offer (the screenshot, unless the UI's was taken)
+      // 5c. changed widgets, drawn in every size they offer (the screenshot, unless the UI's was taken):
+      // with sample data, what each shows on a tool filled with it; else its test case's output
       const widgetsChanged = !!manifest.widgets?.length && (build.kind === "widgets" || JSON.stringify(manifest.widgets) !== JSON.stringify(base?.row.manifest.widgets));
-      if (widgetsChanged && !shot && this.workbench.visualCheck && abiAtLeast(manifest, "2.3")) {
-        const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: views.get(w.operation) ?? null }));
-        const v = await this.workbench.visualCheck(build.id, { manifest, widgets, invoke: async () => ({ result: null }) });
+      if (widgetsChanged && !shot && visualCheck && abiAtLeast(manifest, "2.3")) {
+        const sampled = new Map<string, unknown>();
+        if (sample)
+          for (const w of manifest.widgets!) {
+            const [operation, version] = w.operation.split("@");
+            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
+            if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
+          }
+        const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: sampled.get(w.operation) ?? views.get(w.operation) ?? null }));
+        const v = await visualCheck(build.id, { manifest, widgets, invoke: async () => ({ result: null }) });
         if (v.skipped) step(`widget check skipped: ${v.skipped}`);
         else {
-          if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-          if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
-          if (v.errors.length) fail("widgets didn't render cleanly", v.errors);
-          step(`widgets render in every size (screenshot attached)`);
+          await keep(v);
+          const filled = sampled.size ? ", with the sample data" : "";
+          if (v.errors.length) {
+            if (v.screenshot) step(`widgets rendered with errors (screenshot attached${filled})`);
+            fail("widgets didn't render cleanly", v.errors);
+          }
+          step(`widgets render in every size (screenshot attached${filled})`);
         }
       }
 

@@ -1254,7 +1254,8 @@ export class Builds extends Domain {
     };
     if (b.resultVersion) view.resultVersion = b.resultVersion;
     if (b.dependsOn) view.dependsOn = b.dependsOn;
-    if (b.log.some((l) => l.includes("(screenshot attached)"))) view.screenshot = true;
+    // Builds made on a 0.4.9 pre-release logged "(screenshot with the sample data)", and their logs keep it.
+    if (b.log.some((l) => /\(screenshot (attached|with the sample data)/.test(l))) view.screenshot = true;
     const step = this.stepState(b.id);
     if (step && (b.status === "waiting" || b.status === "open" || b.status === "building" || b.status === "validating")) view.step = step;
     const tests = testCounts(b.log);

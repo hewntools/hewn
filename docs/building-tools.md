@@ -24,7 +24,7 @@ The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCod
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen and checks it loads without errors
+3. renders its screen, empty and filled with its sample data, and checks it loads without errors
 4. makes it live if all of that passes
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
@@ -59,7 +59,7 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 ## When a build fails
 
-The build says why: a failing test, an invalid manifest, an error on its screen. Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
+The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
 
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
