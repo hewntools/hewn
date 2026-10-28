@@ -18,47 +18,71 @@ const versionSource = (id, version) => ({
 
 const kb = (n) => (n < 1024 ? `${n} B` : `${Math.round(n / 102.4) / 10} KB`);
 
+/** Lines drawn at most: a longer file (or diff) shows this many, then how many more there are. */
+const MAX_LINES = 5000;
+const more = (n) => n > 0 && h("div", { class: "code-empty" }, `${n.toLocaleString("en")} more ${n === 1 ? "line" : "lines"} not shown.`);
+
+/** A file's lines, as the diff counts them (CRLF as LF, no line after the final newline). */
+const linesOf = (text) => (text === "" ? [] : text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n"));
+
 /** One line of code: its number(s), then the text (highlighted) after its + or − mark. */
 function codeLine(cls, old, now, mark, text) {
   return h("div", { class: `code-line ${cls}` }, old !== null && h("span", { class: "no" }, old ?? ""), h("span", { class: "no" }, now ?? ""), h("span", { class: "t" }, mark && h("span", { class: "mark" }, mark), text));
 }
 
+/** A file without hunks: unchanged, changed only where lines don't show it, or empty (added or removed). */
+const NO_HUNKS = { same: "No changes in this file.", changed: "Only line endings or the final newline changed.", added: "An empty file.", removed: "An empty file." };
+
 /** Changes: each hunk's @@ header, then its lines with both line numbers. */
 function changesView(file, path) {
-  if (!file.hunks.length) return h("div", { class: "code-empty" }, file.status === "same" ? "No changes in this file." : "Nothing to show.");
+  if (!file.hunks.length) return h("div", { class: "code-empty" }, NO_HUNKS[file.status]);
   const hl = highlighter(path);
-  return file.hunks.map((hk) => {
-    hl.reset();
-    return [
+  // Each hunk starts where the file above it leaves off (it may open inside a comment or a template string).
+  const above = highlighter(path);
+  const lines = linesOf(file.text);
+  let read = 0;
+  let room = MAX_LINES;
+  const out = [];
+  for (const hk of file.hunks) {
+    if (room <= 0) break;
+    above.skip(lines.slice(read, hk.newStart - 1));
+    read = Math.max(read, hk.newStart - 1);
+    hl.state = above.state;
+    const drawn = hk.lines.slice(0, room);
+    room -= drawn.length;
+    out.push(
       h("div", { class: "code-line hunk" }, h("span", { class: "t" }, `@@ -${hk.oldStart},${hk.oldLines} +${hk.newStart},${hk.newLines} @@`)),
-      hk.lines.map((l) => codeLine(l.type === "+" ? "add" : l.type === "-" ? "del" : "", l.old, l.new, l.type === "+" ? "+ " : l.type === "-" ? "− " : "  ", hl.line(l.text))),
-    ];
-  });
+      drawn.map((l) => codeLine(l.type === "+" ? "add" : l.type === "-" ? "del" : "", l.old, l.new, l.type === "+" ? "+ " : l.type === "-" ? "− " : "  ", hl.line(l.text))),
+    );
+  }
+  const total = file.hunks.reduce((n, hk) => n + hk.lines.length, 0);
+  return [out, more(total - (MAX_LINES - room))];
 }
 
 /** Source: the file with one gutter. */
 function sourceView(file, path, text = file.text) {
   if (text === "") return h("div", { class: "code-empty" }, "An empty file.");
   const hl = highlighter(path);
-  return text.replace(/\n$/, "").split("\n").map((t, i) => codeLine("", null, i + 1, null, hl.line(t)));
+  const lines = linesOf(text);
+  return [lines.slice(0, MAX_LINES).map((t, i) => codeLine("", null, i + 1, null, hl.line(t))), more(lines.length - MAX_LINES)];
 }
 
-/** A JSON file laid out (two-space indents), when that isn't how it was written; else null. */
+/** A JSON file laid out (two-space indents), when that isn't how it was written and fits in what's drawn; else null. */
 function prettyJson(path, text) {
   if (!/\.json$/i.test(path)) return null;
   try {
     const pretty = `${JSON.stringify(JSON.parse(text), null, 2)}\n`;
-    return pretty.trimEnd() === text.trimEnd() ? null : pretty;
+    return pretty.trimEnd() === text.trimEnd() || linesOf(pretty).length > MAX_LINES ? null : pretty;
   } catch {
     return null;
   }
 }
 
 /**
- * The browser itself, for a source ({ label, list, file }). `mode`: "changes" or "source" (default:
- * changes when there's a version before with changes, else source).
+ * The browser itself, for a source ({ label, list, file }): Changes when there's a version before
+ * and something changed, else Source.
  */
-function codeBrowser(src, { mode: wanted } = {}) {
+function codeBrowser(src) {
   const side = h("nav", { class: "side-list code-files", "aria-label": "Files" }, skeleton("80%", "60%", "70%"));
   const path = h("span", { class: "mono small grow clip-1" });
   const toggle = h("span", {});
@@ -68,7 +92,7 @@ function codeBrowser(src, { mode: wanted } = {}) {
   const body = h("div", { class: "code-body" }, skeleton("60%", "80%", "40%"));
   const el = h("div", { class: "code-browser" }, side, h("div", { class: "card code-pane" }, h("div", { class: "code-head" }, path, jsonToggle, toggle), body));
   let data = null;
-  let mode = wanted;
+  let mode = "source";
   let current = null;
   const shown = () => (mode === "changes" ? data.files.filter((f) => f.status !== "same") : data.files.filter((f) => f.status !== "removed").sort((a, b) => a.path.localeCompare(b.path)));
   const drawSide = () =>
@@ -103,6 +127,7 @@ function codeBrowser(src, { mode: wanted } = {}) {
       put(body, f.binary ? h("div", { class: "code-empty" }, `Not text (${kb(meta?.size ?? 0)}), so not shown.`) : mode === "changes" ? changesView(f, p) : sourceView(f, p, laidOut && pretty ? laidOut : f.text));
       body.scrollTop = 0;
     } catch (e) {
+      if (current !== p) return;
       put(body, h("div", { class: "code-empty" }, e.message || String(e)));
     }
     if (current === p) body.removeAttribute("aria-busy");
@@ -118,10 +143,10 @@ function codeBrowser(src, { mode: wanted } = {}) {
   (async () => {
     try {
       data = await src.list();
-      const changed = data.files.some((f) => f.status !== "same");
-      if (!data.base || !changed) mode = "source";
-      mode ??= "changes";
-      if (data.base && changed) put(toggle, segmented([["changes", "Changes"], ["source", "Source"]], mode, setMode, { label: "Show" }));
+      if (data.base && data.files.some((f) => f.status !== "same")) {
+        mode = "changes";
+        put(toggle, segmented([["changes", "Changes"], ["source", "Source"]], mode, setMode, { label: "Show" }));
+      }
       const first = shown().find((f) => /^src\/index\.[jt]s$/.test(f.path)) ?? shown()[0];
       if (first) await open(first.path);
       else put(side, h("div", { class: "eyebrow" }, "No files"));

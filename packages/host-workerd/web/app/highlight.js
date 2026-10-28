@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Syntax highlighting for the code browser: a small tokenizer per language a tool is made of
 // (TypeScript and JavaScript, JSON, SQL, CSS, HTML, Markdown), line by line, carrying what spans
-// lines (a block comment, a template string) to the next. Text only: no HTML is parsed.
+// lines (a block comment, a template string) to the next; a / is a regex or a division by what
+// comes before it. Text only: no HTML is parsed.
 import { h } from "../kit.js";
 
 export { highlighter };
@@ -22,6 +23,21 @@ const langOf = (path) => {
 
 const NUMBER = /^(0x[\da-f_]+n?|\d[\d_]*(\.\d+)?(e[+-]?\d+)?n?|\.\d+)/i;
 const WORD = /^[A-Za-z_$][\w$]*/;
+/** After these (or at a line's start) an expression may start, so a / opens a regex, not a division. */
+const BEFORE_REGEX = new Set([..."(,=:[!&|?{};+-*%~^", "=>", ..."return typeof case do else in instanceof new delete void throw yield await of".split(" ")]);
+
+/** A regex literal from the / at `i`: up to its closing / (not one escaped or in a [class]), then its flags; else 0. */
+function regexEnd(line, i) {
+  let inClass = false;
+  for (let j = i + 1; j < line.length; j++) {
+    const c = line[j];
+    if (c === "\\") j++;
+    else if (c === "[") inClass = true;
+    else if (c === "]") inClass = false;
+    else if (c === "/" && !inClass) return j + 1 + /^[a-z]*/.exec(line.slice(j + 1))[0].length;
+  }
+  return 0;
+}
 
 /** Up to the closing `quote` (or the end of the line); escapes skipped. */
 function quoted(line, i, quote) {
@@ -38,6 +54,8 @@ function tokenize(line, lang, state) {
   const out = [];
   const push = (cls, text) => text && (out.length && out.at(-1)[0] === cls ? (out.at(-1)[1] += text) : out.push([cls, text]));
   let i = 0;
+  // JavaScript: the last token that wasn't space or a comment (null at the line's start), for what a / is.
+  let prev = null;
   const closeOf = lang === "html" ? "-->" : "*/";
   if (state === "comment") {
     const end = line.indexOf(closeOf);
@@ -52,6 +70,7 @@ function tokenize(line, lang, state) {
     push("str", line.slice(0, j + 1));
     i = j + 1;
     state = null;
+    prev = "`";
   }
   if (lang === "md") {
     if (/^\s{0,3}#{1,6}\s/.test(line)) return { tokens: [["kw", line]], state: null };
@@ -118,17 +137,24 @@ function tokenize(line, lang, state) {
       push("com", rest);
       break;
     }
+    // A regex literal where an expression may start (s.replace(/\/*$/, "") opens no comment); else a division.
+    const regex = lang === "js" && c === "/" && (prev === null || BEFORE_REGEX.has(prev)) && regexEnd(line, i);
+    if (regex) {
+      push("str", (prev = line.slice(i, regex)));
+      i = regex;
+      continue;
+    }
     if (lang === "js" && c === "`") {
       let j = i + 1;
       while (j < line.length && line[j] !== "`") j += line[j] === "\\" ? 2 : 1;
       if (j >= line.length) return push("str", rest), { tokens: out, state: "template" };
-      push("str", line.slice(i, j + 1));
+      push("str", (prev = line.slice(i, j + 1)));
       i = j + 1;
       continue;
     }
     if (c === '"' || c === "'") {
       const end = quoted(line, i, c);
-      const text = line.slice(i, end);
+      const text = (prev = line.slice(i, end));
       // A JSON key (a string before its colon) reads as a name, not a value.
       push(lang === "json" && /^\s*:/.test(line.slice(end)) ? "prop" : "str", text);
       i = end;
@@ -149,7 +175,7 @@ function tokenize(line, lang, state) {
     const num = /[\d.]/.test(c) && !/[\w$]/.test(line[i - 1] ?? "") && NUMBER.exec(rest);
     if (num) {
       const unit = lang === "css" ? (/^[a-z%]+/i.exec(rest.slice(num[0].length))?.[0] ?? "") : "";
-      push("num", num[0] + unit);
+      push("num", (prev = num[0] + unit));
       i += num[0].length + unit.length;
       continue;
     }
@@ -157,8 +183,11 @@ function tokenize(line, lang, state) {
     if (word) {
       const w = word[0];
       const after = line.slice(i + w.length);
+      // After a dot it's a member (map.get, x.type), never a keyword; after ... (spread) it may be one.
+      const member = line[i - 1] === "." && line[i - 2] !== ".";
+      prev = member ? `.${w}` : w;
       let cls = null;
-      if (lang === "js") cls = JS_KEYWORDS.has(w) ? "kw" : LITERALS.has(w) ? "lit" : /^\s*\(/.test(after) ? "fn" : /^[A-Z]/.test(w) ? "type" : null;
+      if (lang === "js") cls = !member && JS_KEYWORDS.has(w) ? "kw" : !member && LITERALS.has(w) ? "lit" : /^\s*\(/.test(after) ? "fn" : /^[A-Z]/.test(w) ? "type" : null;
       else if (lang === "json") cls = LITERALS.has(w) ? "lit" : null;
       else if (lang === "sql") cls = SQL_KEYWORDS.has(w.toLowerCase()) ? "kw" : LITERALS.has(w.toLowerCase()) ? "lit" : null;
       else if (lang === "css") cls = /^\s*:(?!:)/.test(after) && !/^\s*:[\w-]+\s*[,{]/.test(after) ? "prop" : null;
@@ -166,6 +195,7 @@ function tokenize(line, lang, state) {
       i += w.length;
       continue;
     }
+    if (c.trim()) prev = c === ">" && line[i - 1] === "=" ? "=>" : c;
     push(null, c);
     i++;
   }
@@ -174,7 +204,9 @@ function tokenize(line, lang, state) {
 
 /**
  * A highlighter for one file (or one run of lines, as a diff's hunk): `line(text)` returns the
- * line's nodes, carrying state to the next call. Plain text for a language it doesn't know.
+ * line's nodes, carrying state to the next call; `skip(lines)` carries it over lines not drawn.
+ * `state` is where it stands (inside a block comment, a template string), so a diff's hunk can
+ * start where the file above it leaves off. Plain text for a language it doesn't know.
  */
 function highlighter(path) {
   const lang = langOf(path);
@@ -186,8 +218,14 @@ function highlighter(path) {
       state = r.state;
       return r.tokens.map(([cls, t]) => (cls ? h("span", { class: `tk-${cls}` }, t) : t));
     },
-    reset() {
-      state = null;
+    skip(lines) {
+      if (lang) for (const t of lines) state = tokenize(t, lang, state).state;
+    },
+    get state() {
+      return state;
+    },
+    set state(s) {
+      state = s;
     },
   };
 }
