@@ -160,7 +160,8 @@ export class Schedules extends Domain {
   /**
    * Run one schedule now (owner only): Try again after a failure, or check a fix. It runs as the
    * schedule does and its last run is this one; a success clears its failures, a failure doesn't
-   * count toward pausing it (only its own runs do). Its next time stays as it was.
+   * count toward pausing it (only its own runs do). Its next time stays as it was. One paused after
+   * failing stays paused (the owner resumes it), but a success clears why: it's paused, no more.
    */
   async runScheduleNow(owner: Agent, id: string): Promise<{ ok: boolean; outcome: string }> {
     requireOwner(owner);
@@ -169,7 +170,7 @@ export class Schedules extends Domain {
     if (s.status === "proposed") throw new PlatformError("invalid_request", "enable the schedule before running it");
     const outcome = await this.runOnce(s);
     const ok = outcome === "ok";
-    this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: outcome, ...(ok ? { failures: 0 } : {}) });
+    this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: outcome, ...(ok ? { failures: 0, pausedReason: null } : {}) });
     this.logger(`schedule ${s.id} run now by ${owner.id}: ${outcome}`);
     this.onSchedulesChanged();
     return { ok, outcome };

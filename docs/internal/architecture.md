@@ -219,7 +219,7 @@ A capability is ready when every grant its manifest asks for is approved and eve
 
 ## Schedules
 
-`core/schedules.ts`. The owner adds schedules, or an agent proposes one (`schedules_propose`) for the owner to enable. They run as `schedule:<id>`, read and write operations only, on cadences like `daily 07:00` or cron in the owner's time zone, and pause after 3 failures in a row. On workerd one DO alarm fires for the next due schedule.
+`core/schedules.ts`. The owner adds schedules, or an agent proposes one (`schedules_propose`) for the owner to enable. They run as `schedule:<id>`, read and write operations only, on cadences like `daily 07:00` or cron in the owner's time zone, and pause after 3 failures in a row. The owner can run one now (Try again, `POST /api/schedules/:id/run`): it doesn't count toward pausing, and a success clears the failures and why a paused one paused (it stays paused). On workerd one DO alarm fires for the next due schedule.
 
 ## Widgets
 
