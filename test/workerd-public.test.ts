@@ -12,7 +12,7 @@ describe("workerd: the public socket", () => {
   before(async () => {
     h = await startTestHost();
   });
-  after(() => h.stop());
+  after(() => h?.stop());
   const get = (path: string, headers: Record<string, string> = {}) => fetch(`${h.sv.publicUrl}${path}`, { headers, redirect: "manual" });
   /** With a real Host header (fetch won't send one), as a tunnel forwards it. */
   const status = (path: string, host: string) =>
@@ -94,7 +94,7 @@ describe("workerd: the public socket on the network (publicListen)", { skip: lan
   before(async () => {
     h = await startTestHost({ publicListen: lan });
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("the public socket answers on the address; admin is still refused; the local listener stays on loopback", async (t) => {
     if (!(await reachable(lan!))) return t.skip(`connections to ${lan} are blocked here (a sandbox or firewall)`);

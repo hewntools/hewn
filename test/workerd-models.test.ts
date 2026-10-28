@@ -15,7 +15,7 @@ describe("model port on the workerd host", () => {
   before(async () => {
     h = await startTestHost();
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("validation's fake replies reach the isolate's ctx.model (text, JSON, images, errors)", async () => {
     const r = await h.sv.admin("install", { name: "Word Explainer", purpose: "words", dir: join(FIXTURES, "word-explainer"), wait: true });
@@ -66,7 +66,8 @@ describe("hosted: tools' model calls go to the host, through the supervisor", ()
     h = await startTestHost({ remote: { url: `http://127.0.0.1:${(service.address() as AddressInfo).port}/`, token: "host-token", label: "Test Cloud" }, hosted: {} });
   });
   after(async () => {
-    await h.stop();
+    // Also when the host didn't start: an open server would keep the test process from exiting.
+    await h?.stop();
     await new Promise((r) => service.close(r));
   });
 

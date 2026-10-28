@@ -1,0 +1,277 @@
+{
+  "id": "kid-quotes",
+  "name": "Kid Quotes",
+  "purpose": "Catch the funny and wise things the kids say before they're forgotten, each dated with the child's age at the time, and bring one back on Home, preferring 'on this day' in earlier years.",
+  "abi": "2.3",
+  "hue": 45,
+  "tags": ["family", "kids", "memories"],
+  "ui": { "available": true },
+  "operations": [
+    {
+      "name": "add_kid",
+      "version": 1,
+      "description": "Add a kid (name unique, case-insensitive) with an optional birthdate, used to give each quote the kid's age at the time.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "birthdate": { "type": ["string", "null"], "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD" }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "birthdate": { "type": ["string", "null"] }
+        },
+        "required": ["id", "name", "birthdate"]
+      }
+    },
+    {
+      "name": "list_kids",
+      "version": 1,
+      "description": "All kids by name, with birthdate, current age, how many quotes each has and when their newest quote was added.",
+      "sideEffect": "read",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "integer" },
+            "name": { "type": "string" },
+            "birthdate": { "type": ["string", "null"] },
+            "quote_count": { "type": "integer" },
+            "last_quote_at": { "type": ["string", "null"], "description": "When their newest quote was added (ISO)" },
+            "age": { "type": ["string", "null"], "description": "Age today, e.g. '4 y 7 m'" }
+          },
+          "required": ["id", "name", "birthdate", "quote_count"]
+        }
+      }
+    },
+    {
+      "name": "add_quote",
+      "version": 1,
+      "description": "Save something a kid said. kid is a name (case-insensitive) or id; an unknown kid is an error. said_on defaults to today  and can't be before the kid's birthdate. Returns the quote with age_at_time ('4 y 7 m') when the birthdate is known, else null.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "kid": { "type": ["string", "integer"], "minLength": 1, "maxLength": 100, "description": "The kid's name or id" },
+          "said_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD, default today" },
+          "context": { "type": ["string", "null"], "maxLength": 200, "description": "Where or when, e.g. 'at dinner'" }
+        },
+        "required": ["text", "kid"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "kid_id": { "type": "integer" },
+          "kid": { "type": "string", "description": "The kid's name" },
+          "text": { "type": "string" },
+          "context": { "type": ["string", "null"] },
+          "said_on": { "type": "string" },
+          "created_at": { "type": "string" },
+          "age_at_time": { "type": ["string", "null"], "description": "e.g. '4 y 7 m', '4 y', '7 m'; null without a birthdate" }
+        },
+        "required": ["id", "kid_id", "kid", "text", "context", "said_on", "created_at", "age_at_time"]
+      }
+    },
+    {
+      "name": "update_quote",
+      "version": 1,
+      "description": "Change a quote by id. Only the given fields change; context null or '' clears it.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "kid": { "type": ["string", "integer"], "minLength": 1, "maxLength": 100, "description": "The kid's name or id" },
+          "said_on": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "context": { "type": ["string", "null"], "maxLength": 200 }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "kid_id": { "type": "integer" },
+          "kid": { "type": "string" },
+          "text": { "type": "string" },
+          "context": { "type": ["string", "null"] },
+          "said_on": { "type": "string" },
+          "created_at": { "type": "string" },
+          "age_at_time": { "type": ["string", "null"] }
+        },
+        "required": ["id", "kid_id", "kid", "text", "context", "said_on", "created_at", "age_at_time"]
+      }
+    },
+    {
+      "name": "delete_quote",
+      "version": 1,
+      "description": "Permanently delete a quote by id.",
+      "sideEffect": "destructive",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "integer" } },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": { "deleted": { "const": true }, "id": { "type": "integer" } },
+        "required": ["deleted"]
+      }
+    },
+    {
+      "name": "list_quotes",
+      "version": 1,
+      "description": "Quotes, newest said_on first. Filter by kid (name or id), q (substring of the text or context, case-insensitive) and year. total is the count before paging.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kid": { "type": ["string", "integer"], "minLength": 1, "maxLength": 100 },
+          "q": { "type": "string", "maxLength": 200 },
+          "year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 50 },
+          "offset": { "type": "integer", "minimum": 0, "default": 0 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "quotes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "kid_id": { "type": "integer" },
+                "kid": { "type": "string" },
+                "text": { "type": "string" },
+                "context": { "type": ["string", "null"] },
+                "said_on": { "type": "string" },
+                "created_at": { "type": "string" },
+                "age_at_time": { "type": ["string", "null"] }
+              },
+              "required": ["id", "kid_id", "kid", "text", "context", "said_on", "created_at", "age_at_time"]
+            }
+          },
+          "total": { "type": "integer" }
+        },
+        "required": ["quotes", "total"]
+      }
+    },
+    {
+      "name": "on_this_day",
+      "version": 1,
+      "description": "Quotes said on the same month-day (±3 days, across year boundaries) in earlier years than date (default today), newest first, each with years_ago.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD, default today" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string" },
+          "count": { "type": "integer" },
+          "quotes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "kid_id": { "type": "integer" },
+                "kid": { "type": "string" },
+                "text": { "type": "string" },
+                "context": { "type": ["string", "null"] },
+                "said_on": { "type": "string" },
+                "created_at": { "type": "string" },
+                "age_at_time": { "type": ["string", "null"] },
+                "years_ago": { "type": "integer", "minimum": 1 }
+              },
+              "required": ["id", "kid_id", "kid", "text", "context", "said_on", "created_at", "age_at_time", "years_ago"]
+            }
+          }
+        },
+        "required": ["date", "count", "quotes"]
+      }
+    },
+    {
+      "name": "next_widget_quote",
+      "version": 1,
+      "description": "Pick the quote the Home widget shows next and store it: an on-this-day quote not yet shown today, otherwise a random quote other than the current one. Only quotes whose widget line (text plus attribution) fits in 280 characters count. quote is null when there are none; pool is how many it chose from. date (default today) is for replays and tests.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Act as if today were this date" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "quote": {
+            "type": ["object", "null"],
+            "properties": {
+              "id": { "type": "integer" },
+              "kid_id": { "type": "integer" },
+              "kid": { "type": "string" },
+              "text": { "type": "string" },
+              "context": { "type": ["string", "null"] },
+              "said_on": { "type": "string" },
+              "created_at": { "type": "string" },
+              "age_at_time": { "type": ["string", "null"] }
+            },
+            "required": ["id", "kid_id", "kid", "text", "context", "said_on", "created_at", "age_at_time"]
+          },
+          "on_this_day": { "type": "boolean" },
+          "repeated": { "type": "boolean", "description": "True only when the current quote is the only one that fits" },
+          "pool": { "type": "integer" }
+        },
+        "required": ["quote", "on_this_day", "repeated", "pool"]
+      }
+    },
+    {
+      "name": "widget_kid_quote",
+      "version": 1,
+      "description": "Widget: the quote next_widget_quote picked, or the newest quote that fits if none was picked, as '\"…\" — Name, 4 y 7 m, March 2025'. An 'Another' button picks the next one. Empty state: 'Add the first quote'.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date for the on-this-day caption; default today" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object" }
+    }
+  ],
+  "widgets": [
+    {
+      "name": "kid_quote",
+      "version": 1,
+      "title": "Kid quote",
+      "operation": "widget_kid_quote@1",
+      "sizes": ["medium", "large"],
+      "refresh": { "every": "6h" }
+    }
+  ]
+}

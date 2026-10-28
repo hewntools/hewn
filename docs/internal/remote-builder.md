@@ -33,6 +33,7 @@ Request:
   "capabilityId": "reading-list",
   "kind": "create",
   "attempt": 1,
+  "retryOf": "b-…",
   "feedback": "The previous candidate FAILED platform validation: …",
   "model": "fable",
   "effort": "high",
@@ -42,6 +43,7 @@ Request:
 ```
 
 - `kind`: `create`, `modify` or `widgets`. `feedback` is set from the second attempt on.
+- `retryOf` is set when this build retries a failed or cancelled one (Retry, Ask builder to fix, or Hewn's own retry after a restart): the first build of that chain, the same on every retry of it. A host can count the chain as one build. Unset: not a retry.
 - `session` is the same for every attempt of one build (the build id), so the service may resume its own model session on a later attempt instead of starting over; `prompt` and `files` are still whole each time, so a stateless service works.
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
 - `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
@@ -67,7 +69,8 @@ One request per turn of the conversation; `session` is the same for every turn o
 { "session": "6f1c…", "mode": "create", "prompt": "…", "schema": { … }, "model": "sonnet", "effort": "low", "attachments": [{ "kind": "image", "name": "screen.png", "mediaType": "image/png", "data": "<base64>" }] }
 ```
 
-- `prompt` is Hewn's intake prompt with the conversation in it; `schema` is the JSON Schema the reply must follow. The service may give the model web search and fetching (the owner reviews every draft before anything is built).
+- `prompt` is Hewn's intake prompt with the conversation in it; `schema` is the JSON Schema the reply must follow. The service may give the model web search and fetching (the owner reviews every draft before anything is built), except when reading a tool (`summarize`, below).
+- `mode` `summarize` (since 0.4.9): read a tool someone shared before the owner installs it. There is no conversation and no `session`; `prompt` carries the tool's files (up to about 200 KB), and the reply is `{ "kind": "summary", "message", "keeps", "reaches", "findings": [{ "kind": "warn" | "ok", "title", "detail", "file", "line" }] }` (the `schema` sent says so). Run it with no tools at all, no web search or fetching, and few turns: everything to read is in the prompt, and that text comes from whoever shared the tool, so it may try to steer the model. Hewn closes the request when the owner moves on (Install anyway, Cancel); stop then.
 - The reply's `kind` may be `answer` (since 0.4.8): the owner asked about Hewn itself, and `message` is the answer, with nothing to build. When the owner's message reads like a question, the prompt carries excerpts of Hewn's docs to answer from. Hewn reads the reply as it reads any other; the service passes it through.
 - `attachments` (only when there are any): the images the owner attached in the conversation so far (at most 10, each at most 2 MB; `image/png`, `image/jpeg`, `image/webp` or `image/gif`), for the model to look at next to the prompt, which names each under the message it came with (`[attached: screen.png (image 1200×800)]`). Attached text files are already in the prompt, each cut at 100,000 characters.
 

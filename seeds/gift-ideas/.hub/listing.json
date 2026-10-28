@@ -1,0 +1,32 @@
+{
+  "line": "Ideas per person, by occasion",
+  "tags": [
+    "Family"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "Jot down gift ideas for family and friends as they come up, see whose birthday is next and what's lined up for them, and remember what was given before so nothing repeats. It can suggest ideas with the model.",
+    "keeps": "People with relation, birthday and notes; gift ideas, what was bought and given; dated wishes; occasions.",
+    "reaches": "The model, when it suggests gifts: the person's notes, their wishes and past gifts.",
+    "findings": [
+      {
+        "kind": "warn",
+        "title": "Sends a person's notes and gift history to the model for suggestions",
+        "detail": "When you ask for suggestions, and when it prepares them for an occasion coming up.",
+        "file": "src/index.ts",
+        "line": 598
+      },
+      {
+        "kind": "ok",
+        "title": "Nothing leaves it unless you ask for suggestions"
+      }
+    ]
+  }
+}

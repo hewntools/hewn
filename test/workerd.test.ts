@@ -3,7 +3,6 @@
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -14,16 +13,9 @@ import { DOC_PAGES } from "@hewntools/core/docs.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor, type Supervisor } from "@hewntools/cli/supervisor/index.ts";
 import { editJson, editText, type Script, SEED } from "./helpers.ts";
-import { oauthToken } from "./workerd-helpers.ts";
+import { oauthToken, onFreePorts } from "./workerd-helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
-const freePort = () =>
-  new Promise<number>((r) => {
-    const s = createServer().listen(0, "127.0.0.1", () => {
-      const port = (s.address() as { port: number }).port;
-      s.close(() => r(port));
-    });
-  });
 const parse = (r: any) => JSON.parse(r.content[0].text);
 
 describe("workerd host (integration)", () => {
@@ -50,8 +42,7 @@ describe("workerd host (integration)", () => {
         await s(job.workspace, job as any);
       },
     };
-    port = await freePort();
-    sv = await startSupervisor({ home, port, publicPort: await freePort(), builders: { claude: scripted }, log: () => {}, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" });
+    ({ sv, port } = await onFreePorts((ports, log) => startSupervisor({ home, ...ports, builders: { claude: scripted }, log, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" })));
     token = await oauthToken(sv.url, sv.admin, "claude-code", ["discover", "invoke", "create", "modify"]);
     await sv.admin("settings", { maxBuildAttempts: 1 });
   });

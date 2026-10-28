@@ -5,7 +5,7 @@ import { AgentStore, type AgentDetails, type PendingRequest } from "./agents.ts"
 import type { Agent, Scope } from "./auth.ts";
 import type { Cells } from "./glyph.ts";
 import type { Deadline } from "./deadline.ts";
-import type { CapabilityManifest, ModelRequirement, WidgetManifest } from "./manifest.ts";
+import type { CapabilityManifest, ModelRequirement, ToolSource, WidgetManifest } from "./manifest.ts";
 import type { HostModels, ModelSettings } from "./models.ts";
 import type { Blobs, CapabilityRuntime, Files, SecretStore, Sql, Workbench } from "./ports.ts";
 import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry } from "./registry.ts";
@@ -13,7 +13,7 @@ import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { type Schedule, ScheduleStore } from "./schedules.ts";
 import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
 import { Presentation } from "./platform/presentation.ts";
-import { Data } from "./platform/data.ts";
+import { Data, type DataSummary } from "./platform/data.ts";
 import { Sessions } from "./platform/sessions.ts";
 import { Attachments, type AttachmentWithData } from "./platform/attachments.ts";
 import { Instructions, type Instruction } from "./platform/instructions.ts";
@@ -22,6 +22,8 @@ import { Connections, type ConnectionHealth } from "./platform/connections.ts";
 import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
+import type { BundleSummary, ShelfTool } from "./bundle.ts";
+import { type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport } from "./platform/builds.ts";
 import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
@@ -30,6 +32,7 @@ import { Events, type Shared, type Domains, type LoadedVersion } from "./platfor
 
 // What the domains define, importable from here as before.
 export { type CapabilitySummary } from "./platform/discovery.ts";
+export { type DataSummary } from "./platform/data.ts";
 export { MAX_SATURATION } from "./platform/presentation.ts";
 export { type Readiness, hostOf, resolveHosts } from "./platform/grants.ts";
 export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
@@ -39,10 +42,12 @@ export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH } from 
 export { WIDGET_DEADLINE_MS, type HomeEntry, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
+export { type SummaryInput } from "./platform/sharing.ts";
 export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReportRow, type BuildReport, slugify, RESERVED_IDS } from "./platform/builds.ts";
 export { matches } from "./platform/validation.ts";
 export { ATTACHMENT_LIMITS, type AttachmentWithData, attachmentRefs } from "./platform/attachments.ts";
 export { type InstructionScope, type Instruction } from "./platform/instructions.ts";
+export { type CodeFile, type CodeText, codeFiles, codeText } from "./code.ts";
 
 export interface PlatformOptions {
   /** Platform metadata (registry, agents in the workerd host). */
@@ -86,6 +91,8 @@ export interface PlatformOptions {
    * is needed, the host decides what a tier runs on, and it charges in its own unit (no USD caps).
    */
   hostModels?: HostModels;
+  /** This Hewn's version (a shared tool's file says which Hewn made it). */
+  version?: string;
 }
 
 /** Secrets kept in memory (tests, and until the host provides a store). */
@@ -121,6 +128,7 @@ export class Platform {
   modelFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Hosted: the host runs tools' model calls (PlatformOptions.hostModels). */
   hostModels?: HostModels;
+  version?: string;
   /** Heartbeat interval for builder liveness logging. */
   heartbeatMs = 10_000;
   /** How long a build waits after losing its builder connection before counting the attempt. */
@@ -151,6 +159,7 @@ export class Platform {
     this.logRetentionDays = opts.logRetentionDays ?? (() => LOG_RETENTION_DAYS);
     this.modelFetch = opts.modelFetch;
     this.hostModels = opts.hostModels;
+    this.version = opts.version;
     // The domains share the facade, the ports and the event bus, and reach each other through `d`.
     const d = (this.d = {} as Domains);
     const s: Shared = { platform: this, events: this.events, loaded: new Map(), d };
@@ -166,6 +175,7 @@ export class Platform {
     d.models = new Models(s);
     d.presentation = new Presentation(s);
     d.schedules = new Schedules(s, opts);
+    d.sharing = new Sharing(s);
     d.sessions = new Sessions(s);
     d.validation = new Validation(s);
     d.widgets = new Widgets(s);
@@ -205,9 +215,33 @@ export class Platform {
   rollback(owner: Agent, capabilityId: string, version?: number): Promise<{ from: number; to: number }> { return this.d.data.rollback(owner, capabilityId, version); }
   purge(owner: Agent, capabilityId: string, confirm: string) { return this.d.data.purge(owner, capabilityId, confirm); }
   exportData(owner: Agent, capabilityId: string): Promise<{ capability: string; version: number; exportedAt: string; source: "operation" | "state"; data: unknown }> { return this.d.data.exportData(owner, capabilityId); }
+  versionCode(owner: Agent, capabilityId: string, version: number) { return this.d.data.versionCode(owner, capabilityId, version); }
+  versionFile(owner: Agent, capabilityId: string, version: number, path: string) { return this.d.data.versionFile(owner, capabilityId, version, path); }
+  startOver(owner: Agent, capabilityId: string, req: { confirm: string; sample?: boolean }) { return this.d.data.startOver(owner, capabilityId, req); }
+  dataSummary(owner: Agent, capabilityId: string): Promise<DataSummary> { return this.d.data.dataSummary(owner, capabilityId); }
   importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> { return this.d.data.importData(owner, capabilityId, tables); }
   archived(owner: Agent): { id: string; name: string; archivedAt: string }[] { return this.d.data.archived(owner); }
   restore(owner: Agent, capabilityId: string) { return this.d.data.restore(owner, capabilityId); }
+
+  // ---------- sharing: a tool as a file, sample data (platform/sharing.ts) ----------
+
+  shareCheck(owner: Agent, capabilityId: string, version?: number): Promise<ShareCheck> { return this.d.sharing.shareCheck(owner, capabilityId, version); }
+  shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.shareBundle(owner, capabilityId, version); }
+  stageBundle(owner: Agent, zip: Uint8Array, origin?: { from: "file" | "link" | "hub"; host?: string }): Promise<BundlePreview> { return this.d.sharing.stageBundle(owner, zip, origin); }
+  stagedBundle(owner: Agent, token: string): Promise<BundlePreview> { return this.d.sharing.stagedBundle(owner, token); }
+  bundleCode(owner: Agent, token: string) { return this.d.sharing.bundleCode(owner, token); }
+  bundleFile(owner: Agent, token: string, path: string) { return this.d.sharing.bundleFile(owner, token, path); }
+  dropStaged(owner: Agent, token: string) { return this.d.sharing.dropStaged(owner, token); }
+  summaryInput(owner: Agent, token: string) { return this.d.sharing.summaryInput(owner, token); }
+  keepSummary(owner: Agent, token: string, summary: BundleSummary) { return this.d.sharing.keepSummary(owner, token, summary); }
+  installBundle(owner: Agent, token: string, req: { name: string; sample?: boolean }): Promise<BuildView> { return this.d.sharing.installBundle(owner, token, req); }
+  setSample(owner: Agent, capabilityId: string, json: string): Promise<BuildView> { return this.d.sharing.setSample(owner, capabilityId, json); }
+  hubCards(owner: Agent, shelf: ShelfTool[]): HubCard[] { return this.d.sharing.hubCards(owner, shelf); }
+  hubDetail(owner: Agent, shelf: ShelfTool[], id: string): HubDetail { return this.d.sharing.hubDetail(owner, shelf, id); }
+  hubCode(owner: Agent, shelf: ShelfTool[], id: string) { return this.d.sharing.hubCode(owner, shelf, id); }
+  hubFile(owner: Agent, shelf: ShelfTool[], id: string, path: string) { return this.d.sharing.hubFile(owner, shelf, id, path); }
+  hubImage(owner: Agent, shelf: ShelfTool[], id: string, name: string): { id: string; name: string } { return this.d.sharing.hubImage(owner, shelf, id, name); }
+  hubStage(owner: Agent, shelf: ShelfTool[], id: string): Promise<BundlePreview> { return this.d.sharing.hubStage(owner, shelf, id); }
 
   // ---------- grants, secrets, config, agents, confirmations (platform/grants.ts) ----------
 
@@ -218,6 +252,7 @@ export class Platform {
   approveGrants(owner: Agent, capabilityId: string): string[] { return this.d.grants.approveGrants(owner, capabilityId); }
   approveGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.approveGrant(owner, capabilityId, grant); }
   revokeGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.revokeGrant(owner, capabilityId, grant); }
+  declineGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.declineGrant(owner, capabilityId, grant); }
   deleteSecret(owner: Agent, capabilityId: string, name: string) { return this.d.grants.deleteSecret(owner, capabilityId, name); }
   agents(owner: Agent): AgentDetails[] { return this.d.grants.agents(owner); }
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[] } | "revoke") { return this.d.grants.updateAgent(owner, id, change); }
@@ -305,6 +340,7 @@ export class Platform {
   proposeSchedule(agent: Agent, req: { capabilityId: string; operation: string; operationVersion?: number; input?: unknown; cadence: string; note?: string }): Schedule { return this.d.schedules.proposeSchedule(agent, req); }
   updateSchedule(owner: Agent, id: string, change: { status?: "active" | "paused"; cadence?: string; input?: unknown }): Schedule { return this.d.schedules.updateSchedule(owner, id, change); }
   deleteSchedule(owner: Agent, id: string) { return this.d.schedules.deleteSchedule(owner, id); }
+  runScheduleNow(owner: Agent, id: string): Promise<{ ok: boolean; outcome: string }> { return this.d.schedules.runScheduleNow(owner, id); }
   nextScheduleAt(): number | null { return this.d.schedules.nextScheduleAt(); }
   runDueSchedules(now?: number): Promise<{ id: string; ok: boolean }[]> { return this.d.schedules.runDueSchedules(now); }
 
@@ -320,7 +356,7 @@ export class Platform {
   activeBuilds(): { buildId: string; capabilityId: string; kind: BuildKind; name: string; purpose: string; connection: boolean; state: BuildStepState }[] { return this.d.builds.activeBuilds(); }
   create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> { return this.d.builds.create(agent, req); }
   agentModelChoices(builder?: string): string[] { return this.d.builds.agentModelChoices(builder); }
-  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string }): Promise<BuildView> { return this.d.builds.install(owner, req); }
+  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean; summary?: BundleSummary }): Promise<BuildView> { return this.d.builds.install(owner, req); }
   modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.modify(agent, req); }
   addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.addWidgets(agent, req); }
   changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] { return this.d.builds.changesComing(agent, capabilityId); }

@@ -1,0 +1,426 @@
+{
+  "id": "plant-log",
+  "name": "Plant Log",
+  "purpose": "Keep track of your houseplants: when each one was last watered, fed and repotted, and which ones need water today, so nothing dries out or gets drowned.",
+  "abi": "2.3",
+  "hue": 130,
+  "tags": ["plants", "home", "care"],
+  "ui": { "available": true },
+  "requires": { "model": { "tier": "light", "input": ["image"] } },
+  "widgets": [
+    {
+      "name": "due",
+      "version": 1,
+      "title": "Needs water",
+      "operation": "widget_due@1",
+      "sizes": ["small", "medium", "large"],
+      "refresh": { "every": "30m" },
+      "open": "ui"
+    }
+  ],
+  "operations": [
+    {
+      "name": "add_plant",
+      "version": 1,
+      "description": "Add a houseplant. water_every_days defaults to 7; feed_every_days is optional (left out means feeding isn't tracked). If last_watered (YYYY-MM-DD, not in the future) is given, a 'watered' entry is recorded on that date so the schedule starts from it; otherwise the plant is due for water from the day it was added. Returns the plant with its computed status.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 80, "description": "e.g. Monstera" },
+          "location": { "type": ["string", "null"], "maxLength": 80, "description": "The window or room, e.g. 'Kitchen window'" },
+          "species": { "type": ["string", "null"], "maxLength": 120 },
+          "water_every_days": { "type": "integer", "minimum": 1, "maximum": 3650, "default": 7 },
+          "feed_every_days": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650, "description": "Leave out (or null) to not track feeding" },
+          "notes": { "type": ["string", "null"], "maxLength": 500 },
+          "last_watered": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Local date it was last watered (YYYY-MM-DD)" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["id", "name", "species", "location", "water_every_days", "feed_every_days", "notes", "created_at", "added_on", "last_watered", "watered_days_ago", "next_water", "status", "days_overdue", "days_until", "last_fed", "fed_days_ago", "next_feed", "feed_status", "feed_days_overdue", "feed_days_until", "last_repotted", "repotted_days_ago"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "species": { "type": ["string", "null"] },
+          "location": { "type": ["string", "null"] },
+          "water_every_days": { "type": "integer" },
+          "feed_every_days": { "type": ["integer", "null"] },
+          "notes": { "type": ["string", "null"] },
+          "created_at": { "type": "string" },
+          "added_on": { "type": "string" },
+          "last_watered": { "type": ["string", "null"] },
+          "watered_days_ago": { "type": ["integer", "null"] },
+          "next_water": { "type": "string" },
+          "status": { "type": "string", "enum": ["overdue", "today", "ok"] },
+          "days_overdue": { "type": "integer" },
+          "days_until": { "type": "integer" },
+          "last_fed": { "type": ["string", "null"] },
+          "fed_days_ago": { "type": ["integer", "null"] },
+          "next_feed": { "type": ["string", "null"] },
+          "feed_status": { "type": ["string", "null"], "enum": ["overdue", "today", "ok", null] },
+          "feed_days_overdue": { "type": ["integer", "null"] },
+          "feed_days_until": { "type": ["integer", "null"] },
+          "last_repotted": { "type": ["string", "null"] },
+          "repotted_days_ago": { "type": ["integer", "null"] }
+        }
+      }
+    },
+    {
+      "name": "update_plant",
+      "version": 1,
+      "description": "Change any of a plant's fields (name, location, species, water_every_days, feed_every_days, notes). null or an empty string clears an optional field; feed_every_days null stops tracking feeding. A changed watering interval applies from the last watering. Returns the plant with its computed status.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "location": { "type": ["string", "null"], "maxLength": 80 },
+          "species": { "type": ["string", "null"], "maxLength": 120 },
+          "water_every_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+          "feed_every_days": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650 },
+          "notes": { "type": ["string", "null"], "maxLength": 500 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["id", "name", "species", "location", "water_every_days", "feed_every_days", "notes", "created_at", "added_on", "last_watered", "watered_days_ago", "next_water", "status", "days_overdue", "days_until", "last_fed", "fed_days_ago", "next_feed", "feed_status", "feed_days_overdue", "feed_days_until", "last_repotted", "repotted_days_ago"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "species": { "type": ["string", "null"] },
+          "location": { "type": ["string", "null"] },
+          "water_every_days": { "type": "integer" },
+          "feed_every_days": { "type": ["integer", "null"] },
+          "notes": { "type": ["string", "null"] },
+          "created_at": { "type": "string" },
+          "added_on": { "type": "string" },
+          "last_watered": { "type": ["string", "null"] },
+          "watered_days_ago": { "type": ["integer", "null"] },
+          "next_water": { "type": "string" },
+          "status": { "type": "string", "enum": ["overdue", "today", "ok"] },
+          "days_overdue": { "type": "integer" },
+          "days_until": { "type": "integer" },
+          "last_fed": { "type": ["string", "null"] },
+          "fed_days_ago": { "type": ["integer", "null"] },
+          "next_feed": { "type": ["string", "null"] },
+          "feed_status": { "type": ["string", "null"], "enum": ["overdue", "today", "ok", null] },
+          "feed_days_overdue": { "type": ["integer", "null"] },
+          "feed_days_until": { "type": ["integer", "null"] },
+          "last_repotted": { "type": ["string", "null"] },
+          "repotted_days_ago": { "type": ["integer", "null"] }
+        }
+      }
+    },
+    {
+      "name": "delete_plant",
+      "version": 1,
+      "description": "Delete a plant and all of its history (waterings, feedings, repottings, notes).",
+      "sideEffect": "destructive",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "integer" } },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["deleted"],
+        "properties": { "deleted": { "type": "boolean" } }
+      }
+    },
+    {
+      "name": "log_event",
+      "version": 1,
+      "description": "Record a watering, feeding, repotting or a note for a plant. date (YYYY-MM-DD, owner's local date) defaults to today and can be back-dated but not set in the future. A note needs text. The same watering, feeding or repotting on the same day is only stored once. Returns the entry.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["plant_id", "type"],
+        "properties": {
+          "plant_id": { "type": "integer" },
+          "type": { "type": "string", "enum": ["watered", "fed", "repotted", "note"] },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "text": { "type": "string", "maxLength": 500 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["id", "plant_id", "type", "date", "text", "created_at"],
+        "properties": {
+          "id": { "type": "integer" },
+          "plant_id": { "type": "integer" },
+          "type": { "type": "string", "enum": ["watered", "fed", "repotted", "note"] },
+          "date": { "type": "string" },
+          "text": { "type": ["string", "null"] },
+          "created_at": { "type": "string" }
+        }
+      }
+    },
+    {
+      "name": "water",
+      "version": 1,
+      "description": "Mark several plants as watered at once (date defaults to today, owner's local date). Unknown ids fail the whole call. Returns each plant with its new next watering date.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["plant_ids"],
+        "properties": {
+          "plant_ids": { "type": "array", "minItems": 1, "maxItems": 500, "items": { "type": "integer" } },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["watered"],
+        "properties": {
+          "watered": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "next_water"],
+              "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "next_water": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "water_due",
+      "version": 1,
+      "description": "Record 'watered' today for every plant that is overdue or due today; others are left alone. Returns how many were watered and their names in due order. today (YYYY-MM-DD) is only for tests.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Which day counts as today; defaults to the owner's local date (for tests)" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["count", "names"],
+        "properties": {
+          "count": { "type": "integer" },
+          "names": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    {
+      "name": "water_next",
+      "version": 1,
+      "description": "Water only the first plant in due order (the most overdue one, else one due today). Returns it with its new next watering date, or plant null when nothing is due. today (YYYY-MM-DD) is only for tests.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Which day counts as today; defaults to the owner's local date (for tests)" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["plant"],
+        "properties": {
+          "plant": {
+            "type": ["object", "null"],
+            "required": ["id", "name", "next_water"],
+            "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "next_water": { "type": "string" } }
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_event",
+      "version": 1,
+      "description": "Delete one history entry (e.g. a wrong tap). The plant's status is recomputed from what remains.",
+      "sideEffect": "destructive",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "integer" } },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["deleted"],
+        "properties": { "deleted": { "type": "boolean" } }
+      }
+    },
+    {
+      "name": "list_plants",
+      "version": 1,
+      "description": "All plants (optionally only one location) with last watered, next watering, status (overdue/today/ok with days_overdue/days_until), feeding status when tracked and last repotted, sorted in due order: most overdue first, then due today, then soonest, ties by location and name. Also returns the distinct locations and how many need water. today (YYYY-MM-DD) defaults to the owner's local date.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "location": { "type": "string", "description": "Only plants in this window or room (case-insensitive)" },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["today", "plants", "locations", "due_count"],
+        "properties": {
+          "today": { "type": "string" },
+          "due_count": { "type": "integer" },
+          "locations": { "type": "array", "items": { "type": "string" } },
+          "plants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "location", "water_every_days", "last_watered", "next_water", "status", "days_overdue", "days_until", "last_fed", "feed_status", "last_repotted"],
+              "properties": {
+                "id": { "type": "integer" },
+                "name": { "type": "string" },
+                "species": { "type": ["string", "null"] },
+                "location": { "type": ["string", "null"] },
+                "water_every_days": { "type": "integer" },
+                "feed_every_days": { "type": ["integer", "null"] },
+                "notes": { "type": ["string", "null"] },
+                "created_at": { "type": "string" },
+                "added_on": { "type": "string" },
+                "last_watered": { "type": ["string", "null"] },
+                "watered_days_ago": { "type": ["integer", "null"] },
+                "next_water": { "type": "string" },
+                "status": { "type": "string", "enum": ["overdue", "today", "ok"] },
+                "days_overdue": { "type": "integer" },
+                "days_until": { "type": "integer" },
+                "last_fed": { "type": ["string", "null"] },
+                "fed_days_ago": { "type": ["integer", "null"] },
+                "next_feed": { "type": ["string", "null"] },
+                "feed_status": { "type": ["string", "null"], "enum": ["overdue", "today", "ok", null] },
+                "feed_days_overdue": { "type": ["integer", "null"] },
+                "feed_days_until": { "type": ["integer", "null"] },
+                "last_repotted": { "type": ["string", "null"] },
+                "repotted_days_ago": { "type": ["integer", "null"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_plant",
+      "version": 1,
+      "description": "One plant with its computed watering/feeding status and its full history (waterings, feedings, repottings, notes), newest first. today (YYYY-MM-DD) defaults to the owner's local date.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "integer" },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["id", "name", "location", "water_every_days", "feed_every_days", "last_watered", "next_water", "status", "days_overdue", "days_until", "feed_status", "last_repotted", "today", "events"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "species": { "type": ["string", "null"] },
+          "location": { "type": ["string", "null"] },
+          "water_every_days": { "type": "integer" },
+          "feed_every_days": { "type": ["integer", "null"] },
+          "notes": { "type": ["string", "null"] },
+          "created_at": { "type": "string" },
+          "added_on": { "type": "string" },
+          "last_watered": { "type": ["string", "null"] },
+          "watered_days_ago": { "type": ["integer", "null"] },
+          "next_water": { "type": "string" },
+          "status": { "type": "string", "enum": ["overdue", "today", "ok"] },
+          "days_overdue": { "type": "integer" },
+          "days_until": { "type": "integer" },
+          "last_fed": { "type": ["string", "null"] },
+          "fed_days_ago": { "type": ["integer", "null"] },
+          "next_feed": { "type": ["string", "null"] },
+          "feed_status": { "type": ["string", "null"], "enum": ["overdue", "today", "ok", null] },
+          "feed_days_overdue": { "type": ["integer", "null"] },
+          "feed_days_until": { "type": ["integer", "null"] },
+          "last_repotted": { "type": ["string", "null"] },
+          "repotted_days_ago": { "type": ["integer", "null"] },
+          "today": { "type": "string" },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "plant_id", "type", "date", "text", "created_at"],
+              "properties": {
+                "id": { "type": "integer" },
+                "plant_id": { "type": "integer" },
+                "type": { "type": "string", "enum": ["watered", "fed", "repotted", "note"] },
+                "date": { "type": "string" },
+                "text": { "type": ["string", "null"] },
+                "created_at": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "identify_plant",
+      "version": 1,
+      "description": "Identify a houseplant from a photo and suggest care defaults. Takes a base64 JPEG/PNG/WebP image (at most 5 MB, media type required). Returns up to three candidates, best first, each with a common name, botanical species, confidence from 0 to 1 and suggested watering/feeding intervals plus a short care note. not_a_plant is true when the photo shows no plant. Confidence is kept as the model reports it. This operation stores nothing.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["image", "media_type"],
+        "properties": {
+          "image": { "type": "string", "minLength": 1, "maxLength": 10000000, "description": "Base64 image data (no data: prefix). At most 5 MB once decoded." },
+          "media_type": { "type": "string", "enum": ["image/jpeg", "image/png", "image/webp"], "description": "The image's media type" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["not_a_plant", "candidates"],
+        "properties": {
+          "not_a_plant": { "type": "boolean" },
+          "candidates": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "required": ["common_name", "species", "confidence", "water_every_days", "feed_every_days", "care_note"],
+              "properties": {
+                "common_name": { "type": "string" },
+                "species": { "type": "string" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                "water_every_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+                "feed_every_days": { "type": ["integer", "null"], "minimum": 1, "maximum": 3650 },
+                "care_note": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "widget_due",
+      "version": 1,
+      "description": "Widget: which plants need water today, from stored data only. Small: how many need water. Medium/large: the first 3/5 due plants (name, window, 'today' or 'N days late') with 'Watered all' and 'Watered <first>' buttons; when nothing is due, the next plant coming up. With no plants: a prompt to add the first one.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Which day counts as today; defaults to the owner's local date (for tests)" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object" }
+    }
+  ]
+}

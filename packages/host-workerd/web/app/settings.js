@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Settings: General · AI · Remote access · Data · About.
 import { ago, api, appIcon, BRAND, capRef, CLI, commandBlock, confirmDialog, enc, fail, formSheet, h, invalidateCaps, modal, setWallpaper, sheetActions, skeleton, toast } from "../kit.js";
+import { installFromFile } from "./install.js";
 import { addPasskey, knownPasskeys, passkeyError, passkeysSupported } from "../passkey.js";
 import { deviceName } from "./add-passkey.js";
 import { addSheet, agentModelsSheet, agentTileOf, buildJobs, jobPicker, modelSheet, providerTile } from "./agents.js";
 import { applyTheme, THEME_KEY } from "./appearance.js";
-import { brandTile, browserZone, hewnMachine, hues, sandboxNotice, setSettings, settings, shortcutsDialog, topBar, view } from "./frame.js";
+import { brandTile, browserZone, hewnMachine, hues, sandboxNotice, setSettings, settings, shortcutsDialog, stillHere, topBar, view } from "./frame.js";
 import { buildsChosen, jobModelOf, modelWords } from "./home.js";
 import { plural } from "./intake.js";
 import { creditWords, modelsPage, PROVIDERS, usd } from "./models.js";
@@ -42,8 +43,11 @@ const setting = (title, sub, ...control) => h("div", { class: "setting" }, h("di
 const settingsCard = (...rows) => h("div", { class: "card settings-card" }, rows);
 
 async function settingsPage(section = "general", sub) {
+  const here = stillHere();
   settingsFrame(section, skeleton());
   setWallpaper(await hues([200, 125]));
+  // Each section, started now while this page is still the one shown, keeps its own check.
+  if (!here()) return;
   if (section === "ai" && sub === "models") return modelsPage();
   if (section === "ai") return aiSection();
   if (section === "remote") return remoteSection();
@@ -64,6 +68,7 @@ const saveSettings = async (change, message) => {
 
 /** N1 General: appearance, the owner's time zone, the sandbox. */
 async function generalSection() {
+  const here = stillHere();
   const s = setSettings(await api("/settings"));
   const sandbox = h("input", { type: "checkbox", class: "switch danger", checked: s.sandbox, "aria-label": "Sandbox" });
   sandbox.addEventListener("change", async () => {
@@ -75,6 +80,7 @@ async function generalSection() {
   const theme = localStorage.getItem(THEME_KEY) ?? "system";
   const appearance = segmented([["system", "System"], ["dark", "Dark"], ["light", "Light"]], theme, (v) => (v === "system" ? localStorage.removeItem(THEME_KEY) : localStorage.setItem(THEME_KEY, v), applyTheme(v)), { label: "Appearance" });
   const zone = s.timeZone ?? browserZone();
+  if (!here()) return;
   settingsFrame(
     "general",
     h("h1", { class: "flush" }, "General"),
@@ -109,6 +115,7 @@ function timeZoneSheet(current) {
  * tools is a metered API call with your key.
  */
 async function aiSection() {
+  const here = stillHere();
   const [{ tools, settings: s, ready }, m, machine] = await Promise.all([buildJobs(), api("/models").catch(() => null), hewnMachine()]);
   const tile = (t) => agentTileOf(t, 20);
   const builder = tools.find((x) => x.name === s.builder);
@@ -154,6 +161,7 @@ async function aiSection() {
     h("div", { class: "grow" }, h("span", { class: "strong" }, "Instructions for building"), h("span", { class: "sub clip-1" }, rules.length ? `${plural(rules.length, "rule")} · ${rules.join(" · ")}` : "None yet · tell the intake a rule, or write one here")),
     h("button", { class: "sm", onclick: () => instructionsSheet().then((saved) => saved && route()) }, "Edit…"),
   );
+  if (!here()) return;
   settingsFrame(
     "ai",
     h("div", { class: "row between" }, h("h1", { class: "flush" }, "AI"), h("button", { onclick: () => addSheet().then(() => !location.hash.startsWith("#/settings/ai/models") && route()) }, "Add…")),
@@ -189,6 +197,7 @@ async function aiSection() {
 
 /** M1 Remote access: the public address (DNS and Caddy behind Set up…), passkeys, signed-in browsers. */
 async function remoteSection() {
+  const here = stillHere();
   const [remote, sessions] = await Promise.all([api("/remote").catch(() => null), api("/sessions").catch(() => [])]);
   const removePasskey = (p) => async () => {
     if (!(await confirmDialog({ title: `Remove “${p.name}”?`, body: settings?.hosted ? "That device then signs in from your account again." : "That device then needs a sign-in link from the server again.", confirm: "Remove", danger: true }))) return;
@@ -241,6 +250,7 @@ async function remoteSection() {
         sheetActions(h("button", { class: "primary", onclick: () => close() }, "Done")),
       ],
     });
+  if (!here()) return;
   settingsFrame(
     "remote",
     h("h1", { class: "flush" }, "Remote access"),
@@ -267,6 +277,7 @@ async function remoteSection() {
 
 /** N2 Data: backups (with a warning when they share a disk with the data), call logs, deleted tools. */
 async function dataSection() {
+  const here = stillHere();
   const [s, backups, deleted] = await Promise.all([api("/settings"), api("/backups").catch(() => null), api("/capabilities?archived=1").catch(() => [])]);
   setSettings(s);
   const restore = (d) => async () => {
@@ -337,6 +348,7 @@ async function dataSection() {
   const keep = h("select", { class: "setting-select", "aria-label": "Keep call logs" }, options.map(([v, l]) => h("option", { value: v, selected: v === s.logRetentionDays }, l)));
   keep.addEventListener("change", () => saveSettings({ logRetentionDays: Number(keep.value) }, `Call logs: ${options.find(([v]) => v === Number(keep.value))[1].toLowerCase()}`));
   const last = backups?.backups?.[0];
+  if (!here()) return;
   settingsFrame(
     "data",
     h("h1", { class: "flush" }, "Data"),
@@ -346,6 +358,7 @@ async function dataSection() {
       backups && setting("Backups", last ? `Last ${ago(last.at)} · ${Math.round(last.bytes / 1024)} KB · nightly, 7 daily and 4 weekly kept` : "Nightly; 7 daily and 4 weekly kept. Never includes secrets.", backupBtn),
       !s.hosted && backups && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Folder"), h("span", { class: "sub mono" }, backups.dir)), h("button", { class: "sm", onclick: folderSheet }, "Change")),
       setting("Keep call logs", "Builds, grants and access changes are always kept", keep),
+      setting("Install from a file", "A tool someone shared with you (.hewn.zip): you read it before it's installed", h("button", { class: "sm", onclick: () => installFromFile().catch(fail) }, "Install…")),
     ),
     deleted.length > 0 &&
       h(
@@ -363,8 +376,10 @@ const DOCS_URL = "https://github.com/hewntools/hewn/tree/main/docs#readme";
 const CHANGELOG_URL = "https://github.com/hewntools/hewn/blob/main/CHANGELOG.md";
 
 async function aboutSection() {
+  const here = stillHere();
   const [status, machine] = await Promise.all([api("/status").catch(() => ({})), hewnMachine()]);
   const newer = status.latest && status.version && cmpVersion(status.latest, status.version) > 0;
+  if (!here()) return;
   settingsFrame(
     "about",
     h("h1", { class: "flush" }, "About"),

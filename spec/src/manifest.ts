@@ -29,6 +29,21 @@ export interface OperationManifest {
   deprecated?: { replacement?: string; note?: string };
 }
 
+/** Where an installed tool came from (ABI 2.5). */
+export interface ToolSource {
+  /** The tool's id where it was exported. */
+  id: string;
+  /** Its name there. */
+  name?: string;
+  /** Its version there. */
+  version: number;
+  /** That version's content hash. */
+  hash: string;
+  from: "file" | "link" | "hub";
+  /** The host a link was on. */
+  host?: string;
+}
+
 export interface CapabilityManifest {
   id: string;
   name: string;
@@ -49,6 +64,12 @@ export interface CapabilityManifest {
   /** How colourful the tile is, in percent of the design system's chroma (0–150, default 100); 0 is black or white on grey. Since ABI 2.4. */
   saturation?: number;
   /**
+   * Where an installed tool came from (ABI 2.5): the tool and version it was exported from, and how
+   * it arrived (a file, a link with its host, or the hub). The host writes it at install and keeps
+   * it on every later version; a builder's value is replaced.
+   */
+  source?: ToolSource;
+  /**
    * Non-secret settings the owner fills in (ABI 2.1), e.g. a site URL. Code reads them as
    * `ctx.config.NAME`; `requires.hosts` may name one as `config:NAME` (its host).
    */
@@ -58,8 +79,12 @@ export interface CapabilityManifest {
     secrets?: { name: string; description: string }[];
     /** Hostnames reachable over HTTPS (443) or HTTP; "*.example.com" allowed; "config:NAME" = the host in that config value. */
     hosts?: string[];
-    /** Other capabilities' operations this one calls, pinned "name@version". */
-    capabilities?: { id: string; operations: string[] }[];
+    /**
+     * Other capabilities' operations this one calls, pinned "name@version". `hub` and `minVersion`
+     * (ABI 2.5): the tool it builds on is "<publisher>/<slug>" on the hub, at least that version;
+     * the host fills them in when the tool is published.
+     */
+    capabilities?: { id: string; operations: string[]; hub?: string; minVersion?: number }[];
     /**
      * A model the platform runs for it (ABI 2.2): `ctx.model.generate`. A portable tier (the
      * owner maps tiers to models) or one pinned "<provider>/<model-id>". `input` lists what the

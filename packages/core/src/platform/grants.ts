@@ -17,6 +17,13 @@ export interface Readiness {
   /** Declared config (non-secret settings) the owner hasn't filled in. */
   missingConfig: string[];
   pendingGrants: string[];
+  /** Pending grants the owner said no to for this version (Deny): nothing asks for them again until a new version. */
+  declinedGrants?: string[];
+  /**
+   * Set when what the owner said no to is all that stands in the way (nothing else is missing):
+   * nothing asks the owner about it (Home, the Inbox), and agents' access requests are refused.
+   */
+  onlySaidNo?: boolean;
   /** Declared callee operations that don't exist (callee missing, archived, or lacks that op@version). */
   missingDependencies: string[];
   /** Set when the active version needs a newer Hewn ABI than this Hewn has (e.g. after a downgrade). */
@@ -36,6 +43,8 @@ export class Grants extends Domain {
     const granted = this.registry.grants(capabilityId);
     const wanted = wantedGrants(manifest);
     const pendingGrants = wanted.filter((g) => !granted.has(g));
+    const declined = pendingGrants.length ? this.registry.declinedGrants(capabilityId, this.registry.getCapability(capabilityId)!.activeVersion!) : new Set<string>();
+    const declinedGrants = pendingGrants.filter((g) => declined.has(g));
     const missingSecrets = (req.secrets ?? []).map((s) => s.name).filter((n) => this.secrets.get(capabilityId, n) === undefined);
     const config = this.registry.config(capabilityId);
     // A value a host is derived from must name a host (it may predate the host declaration).
@@ -45,11 +54,14 @@ export class Grants extends Domain {
     const unsupportedAbi = abiUnsupported(abiOf(manifest));
     const missingModel = req.model ? this.platform.modelProblem(req.model) : undefined;
     const ready = !pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
+    const onlySaidNo = declinedGrants.length > 0 && declinedGrants.length === pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
     return {
       ready,
       missingSecrets,
       missingConfig,
       pendingGrants,
+      ...(declinedGrants.length ? { declinedGrants } : {}),
+      ...(onlySaidNo ? { onlySaidNo } : {}),
       missingDependencies,
       ...(unsupportedAbi ? { unsupportedAbi } : {}),
       ...(missingModel ? { missingModel } : {}),
@@ -65,6 +77,8 @@ export class Grants extends Domain {
               ? `It depends on operations that no longer exist (${missingDependencies.join(", ")}); it needs a change.`
               : connectOperation(manifest) && !pendingGrants.length && !missingConfig.length
                 ? `Needs the owner to sign in to the service (never in an agent): Accounts in the Hewn web client.`
+                : onlySaidNo
+                ? `The owner said no to ${declinedGrants.join(", ")} for this version. It won't run until they allow it in the Hewn web client, or a change makes it work without it. Don't request access again.`
                 : `Needs authorization by the owner (never paste secrets into an agent): open it in the Hewn web client. You can file a request with capabilities_request_access.`,
           }),
     };
@@ -144,6 +158,9 @@ export class Grants extends Domain {
   requestAccess(agent: Agent, capabilityId: string, note: string) {
     requireScope(agent, "invoke", "create", "modify");
     this.visibleActive(agent, capabilityId);
+    // The owner already answered: what they said no to is all it lacks.
+    const status = this.readiness(capabilityId);
+    if (status.onlySaidNo) throw new PlatformError("forbidden", status.userAction!);
     this.registry.addAccessRequest(capabilityId, agent.id, note.slice(0, 500));
     this.registry.addGrantEvent(capabilityId, "request", this.readiness(capabilityId).pendingGrants.join(", "), agent.id);
     this.logger(`${agent.id} requests access for ${capabilityId}: ${note.slice(0, 120)}`);
@@ -158,6 +175,7 @@ export class Grants extends Domain {
     for (const g of pendingGrants) {
       const [kind, ...rest] = g.split(":");
       this.registry.approveGrant(capabilityId, kind as GrantKind, rest.join(":"), by);
+      this.registry.clearDecline(capabilityId, g);
       this.registry.addGrantEvent(capabilityId, "approve", g, by);
     }
     if (pendingGrants.length) this.logger(`grants approved for ${capabilityId} by ${by}: ${pendingGrants.join(", ")}`);
@@ -172,9 +190,29 @@ export class Grants extends Domain {
     if (!pendingGrants.includes(grant)) throw new PlatformError("invalid_request", `${capabilityId} doesn't request '${grant}' (or it's already approved)`);
     const [kind, ...rest] = grant.split(":");
     this.registry.approveGrant(capabilityId, kind as GrantKind, rest.join(":"), owner.id);
+    this.registry.clearDecline(capabilityId, grant);
     this.registry.addGrantEvent(capabilityId, "approve", grant, owner.id);
     this.logger(`grant ${grant} approved for ${capabilityId} by ${owner.id}`);
-    if (!this.readiness(capabilityId).pendingGrants.length) this.registry.clearAccessRequests(capabilityId);
+    const after = this.readiness(capabilityId);
+    if (!after.pendingGrants.length || after.onlySaidNo) this.registry.clearAccessRequests(capabilityId);
+  }
+
+  /**
+   * Say no to one grant the active version asks for (owner only, Deny). It stays unapproved, so the
+   * tool stays not ready, but nothing asks for it again (Home, Inbox, agents' access requests) until
+   * a new version; Authorize still allows it any time.
+   */
+  declineGrant(owner: Agent, capabilityId: string, grant: string) {
+    requireOwner(owner);
+    // A secret is set or not: there's nothing to say no to (Revoke or `hewn secrets rm` removes one).
+    if (!/^(host|capability|model):./.test(grant)) throw new PlatformError("invalid_request", `only a host, another tool's operation or a model can be declined, not '${grant}'`);
+    const { pendingGrants } = this.readiness(capabilityId);
+    if (!pendingGrants.includes(grant)) throw new PlatformError("invalid_request", `${capabilityId} doesn't request '${grant}' (or it's already approved)`);
+    this.registry.declineGrant(capabilityId, grant, this.registry.getCapability(capabilityId)!.activeVersion!, owner.id);
+    this.registry.addGrantEvent(capabilityId, "decline", grant, owner.id);
+    this.logger(`grant ${grant} declined for ${capabilityId} by ${owner.id}`);
+    // Agents' requests are answered once what the owner said no to is all it lacks.
+    if (this.readiness(capabilityId).onlySaidNo) this.registry.clearAccessRequests(capabilityId);
   }
 
   /** Revoke one approved grant ("secret:NAME" / "host:x"), owner only. The capability goes not ready. */

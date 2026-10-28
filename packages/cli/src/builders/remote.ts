@@ -8,8 +8,7 @@ import { fromBase64, isArtefact, toBase64 } from "@hewntools/core/files.ts";
 import { builderPrompt } from "./cli.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 import { readTree, writeTree } from "../workbench.ts";
-import { hewnDocs } from "../assets.ts";
-import { intakeImages, intakePrompt, parseIntake, partialReply, SCHEMA } from "../intake.ts";
+import { intakeImages, parseIntake, partialReply, promptFor, schemaFor } from "../intake.ts";
 import type { Intake } from "../intake.ts";
 import type { JobModel } from "@hewntools/host-workerd/surface/host.ts";
 import type { HostGenerateResult, HostModels } from "@hewntools/core/models.ts";
@@ -117,7 +116,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
         r,
         "v1/builds",
         // `session`: one per build, so the service may resume its own session on a later attempt (the prompt stays whole).
-        { buildId: job.buildId, session: job.buildId, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), prompt: builderPrompt(job), files },
+        { buildId: job.buildId, session: job.buildId, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), prompt: builderPrompt(job), files },
         (e) => {
           if (typeof e.activity === "string") {
             write(e.activity);
@@ -175,7 +174,7 @@ export function remoteIntake(r: RemoteJobs, run: JobModel = {}): Intake {
     await stream(
       r,
       "v1/intake",
-      { session: req.session ?? null, mode: req.mode, prompt: intakePrompt(req, { web: true, docs: await hewnDocs() }), schema: SCHEMA, ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(images.length ? { attachments: images } : {}) },
+      { session: req.session ?? null, mode: req.mode, prompt: await promptFor(req, { web: true }), schema: schemaFor(req), ...(run.model ? { model: run.model } : {}), ...(run.effort ? { effort: run.effort } : {}), ...(images.length ? { attachments: images } : {}) },
       (e) => {
         if (typeof e.text === "string") {
           text += e.text;

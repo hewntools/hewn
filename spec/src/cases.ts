@@ -21,3 +21,15 @@ export interface TestCase {
   /** The operation must throw. */
   expectError?: boolean;
 }
+
+/**
+ * sample/calls.json (ABI 2.5): sample data as operation calls, replayed in order on an empty tool
+ * when the owner installs it with sample data (and checked the same way before a version is
+ * promoted). Plain writes only: no network, other tools or model are available.
+ */
+export interface SampleCall {
+  operation: string;
+  /** The operation's version; default the latest in the manifest. */
+  version?: number;
+  input?: unknown;
+}

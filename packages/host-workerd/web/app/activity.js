@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Activity: All · Builds · Calls · Access.
 import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, clock, empty, enc, fail, h, kindTag, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
-import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures } from "./build.js";
-import { go, hues, onLeave, page, put } from "./frame.js";
+import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill } from "./build.js";
+import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
 export { activityPage, activityRow, groupItems };
@@ -83,7 +83,7 @@ function activityRow(g, all, showCap) {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
-    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
@@ -91,8 +91,8 @@ function activityRow(g, all, showCap) {
     // Schedule details read "created <id>: op@1 daily 07:00" / "paused <id> after 3 failures": drop the id.
     const sm = /^(\w+) [\w-]+:? ?(.*)$/.exec(g.detail ?? "");
     const schedule = sm ? `Schedule ${sm[1]}${sm[2] ? `: ${sm[2].replace(/@\d+/, "")}` : ""}` : "Schedule";
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule };
-    dot = g.outcome === "purge" || g.outcome === "delete" ? "warn" : "";
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}` };
+    dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
     const subject = actorLabel(g.subject, all);
@@ -120,6 +120,7 @@ function activityRow(g, all, showCap) {
     const grant = g.grant.startsWith("capability:") ? [capRef(all.get(g.grant.slice(11).split("/")[0]), g.grant.slice(11).split("/")[0])] : [g.grant.replace(/^host:/, "").replace(/^secret:/, "")];
     if (g.outcome === "approve") (dot = "ok"), (text = on(`${who} authorized`, ...grant, ref && ["for", ref]));
     else if (g.outcome === "revoke") text = on("Revoked", ...grant, ref && ["for", ref]);
+    else if (g.outcome === "decline") text = on(`${who} said no to`, ...grant, ref && ["for", ref]);
     else (dot = "warn"), (text = on("Asked for access", ref && ["for", ref]));
   }
   const href = g.kind === "build" ? `#/b/${g.buildId}` : null;
@@ -147,12 +148,15 @@ const ACTIVITY_VIEWS = [
 ];
 
 async function activityPage(q) {
+  const here = stillHere();
   page("", 760, skeleton());
   const capability = q.get("capability") ?? "";
   const agent = q.get("agent") ?? "";
   const viewKey = ACTIVITY_VIEWS.some(([k]) => k === q.get("view")) ? q.get("view") : "all";
   const [all, agents] = await Promise.all([caps(true), api("/agents").catch(() => [])]);
+  if (!here()) return;
   setWallpaper(await hues(capability && all.get(capability) ? [tintOf(all.get(capability))] : []));
+  if (!here()) return;
   const setQ = (k, v) => {
     const p = new URLSearchParams({ view: viewKey, capability, agent });
     v ? p.set(k, v) : p.delete(k);
@@ -204,6 +208,7 @@ async function activityPage(q) {
  * progress bars. Live while something builds.
  */
 async function buildsView(head, only, all0) {
+  const here = stillHere();
   const load = () => Promise.all([api("/builds?n=200&brief=1"), caps(true).catch(() => all0)]);
   const root = h("div", { class: "card timeline builds" });
   const render = (builds, all) => {
@@ -214,7 +219,7 @@ async function buildsView(head, only, all0) {
     const rest = list.filter((b) => !LIVE_BUILD.has(b.status) && b.status !== "review" && !failed.has(b.buildId));
     const nameOf = (b) => all.get(b.capabilityId)?.name ?? b.request?.name ?? b.capabilityId;
     const sub = (b) => {
-      if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Waiting for ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, b.queued ? "the change before it" : "another build") : "another build");
+      if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Starts once ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, b.queued ? "the change before it" : "the build it needs") : "the build it needs", " is done");
       if (b.status === "review") return h("span", { class: "sub" }, `${actorLabel(b.requestedBy, all)} changed it: it waits for you`);
       if (LIVE_BUILD.has(b.status)) return h("span", { class: "sub row tight" }, askedBy(b) && h("span", { class: "faint" }, `${askedBy(b)}on your ${builderLabel(b.builder)}`), milestones(b));
       const first = String(b.request?.request || b.request?.purpose || "").split("\n")[0];
@@ -224,13 +229,13 @@ async function buildsView(head, only, all0) {
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
-          ? failed.has(b.buildId)
+          ? failed.has(b.buildId) && retryable(b)
             ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
             : kindTag("failed", "danger")
           : b.status === "review"
             ? h("span", { class: "pill warn with-dot" }, "needs you")
             : b.status === "waiting"
-              ? kindTag("waiting", "warn")
+              ? waitingPill(b)
               : LIVE_BUILD.has(b.status)
                 ? h("span", { class: "mono faint small" }, b.progress ? mmss(b.progress.elapsedSeconds * 1000) : "")
                 : kindTag(b.status);
@@ -251,6 +256,7 @@ async function buildsView(head, only, all0) {
     return live.length > 0;
   };
   const [b0, a0] = await load();
+  if (!here()) return;
   page("", 760, head, root);
   let timer;
   const poll = async () => {

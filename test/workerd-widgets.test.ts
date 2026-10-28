@@ -13,7 +13,7 @@ describe("widgets on the workerd host", () => {
     const r = await h.sv.admin("install", { name: "Widget Counter", purpose: "count", dir: join(FIXTURES, "widget-counter"), wait: true });
     assert.equal(r.status, "promoted", JSON.stringify(r.log));
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("widgets_show draws from the isolate; a widget that writes is refused there, and nothing is written", async () => {
     await h.invoke("widget-counter", "increment");

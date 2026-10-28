@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
 import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
-import { backBar, go, hues, moment, onLeave, put, settings, view } from "./frame.js";
+import { brandTile, go, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
+import { installFromFile } from "./install.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
 import { cadenceText } from "./schedules.js";
 import { memoryNotice } from "./tool-actions.js";
@@ -20,10 +21,13 @@ const slug = (s) =>
 
 /** #/new: the intake as a moment screen. `?connection=<service>` asks for a connection only. */
 async function intakePage(q) {
+  const here = stillHere();
   const service = q.get("connection");
   setWallpaper(await hues(service ? [260, 200] : [125, 250]));
+  if (!here()) return;
   const intake = intakeView({ mode: "create", q, connection: service, onBuilt: (b) => go(`#/b/${enc(b.buildId)}`) });
-  view(...moment({ right: "-20px", top: "60px" }, backBar(service ? "Accounts" : "Home", service ? "#/accounts" : "#/"), h("div", { class: "moment-col" }, intake.el)));
+  // The normal top bar, its back button where the brand is.
+  view(...moment({ right: "-20px", top: "60px" }, topBar(service ? "accounts" : "", { back: service ? ["Accounts", "#/accounts"] : ["Home", "#/"] }), h("div", { class: "moment-col" }, intake.el)));
   intake.focus();
 }
 
@@ -53,6 +57,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     all = m;
     put(earlierEl, h("div", { class: "small faint earlier-label" }, `Earlier · the conversation that made v${b.resultVersion ?? "?"}`), conversationNodes(ctx.conversation ?? [], { mode: b.kind === "create" ? "create" : "modify", cap, all, version: b.resultVersion }));
     earlierEl.hidden = false;
+    // A long conversation comes back above: the box is where you go on, so that's where it lands.
+    requestAnimationFrame(() => (composer.scrollIntoView({ block: "end" }), input.focus()));
   };
   if (from) continueFrom(from).catch(fail);
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
@@ -96,7 +102,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One session id for the conversation.
   const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
-  const draftNow = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
+  const draftNow = h("button", { type: "button", class: "link sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
   // Images and files for the request: pasted, dropped or attached; uploaded as they're added, sent as refs.
   const pending = [];
   const chips = h("div", { class: "attachments", hidden: true });
@@ -121,6 +127,13 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     }
   };
   picker.addEventListener("change", () => (addFiles([...picker.files]), (picker.value = "")));
+  // "Ask builder to fix this": what failed goes in the box as text, as other pre-fills do; nothing sends until Send.
+  const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
+  if (failure) {
+    sessionStorage.removeItem(`hewn.fix.${capId}`);
+    input.value = JSON.parse(failure).text;
+    requestAnimationFrame(growWhenShown);
+  }
   input.addEventListener("paste", (e) => {
     const files = [...(e.clipboardData?.files ?? [])];
     if (files.length) (e.preventDefault(), addFiles(files));
@@ -129,12 +142,28 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
   composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
   composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
-  composer.prepend(offer);
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, composer));
-  const say = (who, text, attachments) => thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments)));
+  // Q1 New: or start from a tool someone made: one in Hub, or a file someone shared (gone once you're talking).
+  const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
+  const hubLink =
+    mode === "create" &&
+    !connection &&
+    h(
+      "div",
+      { class: "start-from" },
+      h("div", { class: "eyebrow" }, "Or start from"),
+      h(
+        "div",
+        { class: "start-options" },
+        option(brandTile(32), "A tool in Hub", "Hewn's own, ready to install", { href: "#/hub" }),
+        option(h("span", { class: "start-file", "aria-hidden": "true" }, ".zip"), "A file someone shared", "A .hewn.zip, up to 5 MB", { type: "button", onclick: () => installFromFile().catch(fail) }),
+      ),
+    );
+  // Continue the last conversation? sits above the box, not in it.
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, hubLink));
+  const say = (who, text, attachments) => (hubLink && (hubLink.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
   syncSend();
@@ -298,10 +327,12 @@ function modelChip() {
     return ctx;
   };
   const labelOf = (cat, id) => cat?.models.find((m) => m.id === (id ?? "default"))?.label ?? id ?? "Default";
+  // V2: "Claude Code · Fable · high": who builds, on what, how hard.
   const paint = () => {
     const m = jobModelOf(ctx.s, "builder");
-    name.textContent = labelOf(ctx.bCat, m.model);
-    effortEl.textContent = cap(m.effort);
+    // Hosted builds on one builder: its name goes without saying.
+    name.textContent = [ctx.s.builder !== "remote" && builderLabel(ctx.s.builder), labelOf(ctx.bCat, m.model)].filter(Boolean).join(" · ");
+    effortEl.textContent = m.effort ? `· ${m.effort}` : "";
   };
   load().then(paint).catch(() => (chip.hidden = true));
 
@@ -411,14 +442,21 @@ const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x
 /** Attachments as a message shows them: thumbnails, file names. */
 const attachmentsView = (list) => (list?.length ? h("div", { class: "attachments" }, list.map((a) => attachmentChip(a))) : null);
 
-/** One attachment: a thumbnail or the file's name, and (in the box, before sending) × to drop it. */
-const attachmentChip = (a, onRemove) =>
-  h(
-    "span",
-    { class: "attachment" },
-    a.kind === "image" ? h("img", { src: `/api/attachments/${enc(a.ref)}`, alt: a.name, title: a.name }) : h("span", { class: "file-chip", title: a.name }, a.name),
-    onRemove && h("button", { type: "button", class: "x", "aria-label": `Remove ${a.name}`, onclick: onRemove }, "×"),
-  );
+/**
+ * One attachment: a thumbnail or the file's name (opens it). In the box, before sending (V2): a
+ * 64px tile with its name on it and × to drop it.
+ */
+const attachmentChip = (a, onRemove) => {
+  const url = `/api/attachments/${enc(a.ref)}`;
+  if (onRemove)
+    return h(
+      "span",
+      { class: "attachment tile" },
+      h("a", { href: url, target: "_blank", rel: "noopener", class: "attachment-open", title: a.name }, a.kind === "image" ? h("img", { src: url, alt: a.name }) : h("span", { class: "attachment-ext" }, /\.(\w{1,4})$/.exec(a.name)?.[1].toUpperCase() ?? "TXT"), h("span", { class: "attachment-name" }, a.name)),
+      h("button", { type: "button", class: "x", "aria-label": `Remove ${a.name}`, onclick: onRemove }, "×"),
+    );
+  return h("span", { class: "attachment" }, a.kind === "image" ? h("img", { src: url, alt: a.name, title: a.name }) : h("a", { class: "file-chip", href: url, target: "_blank", rel: "noopener", title: a.name }, a.name));
+};
 
 /**
  * Upload one pasted, dropped or picked file for the request: an image is resized first (long side
@@ -459,12 +497,12 @@ async function resizeImage(file) {
 }
 
 /**
- * "Got what you asked for?", asked once as a toast when a tool is opened after a build went live
- * (its newest version's build, within a week, no answer yet): Yes, Not quite (which opens the
- * change drawer, so what's off becomes the next change), or × to skip. The answer stays in your
- * Hewn; nothing is sent anywhere.
+ * V5 "Got what you asked for?", asked once in a quiet strip at the foot of the tool when it's
+ * opened after a build went live (its newest version's build, within a week, no answer yet): Yes,
+ * Not quite (which opens the change drawer, so what's off becomes the next change), or × to skip.
+ * The answer stays in your Hewn; nothing is sent anywhere.
  */
-async function askFeedbackOnOpen(c, drawerApi) {
+async function askFeedbackOnOpen(c, drawerApi, slot) {
   const d = await api(`/capabilities/${enc(c.id)}`).catch(() => null);
   const last = d?.versions?.find((v) => v.buildId);
   if (!last || Date.now() - Date.parse(last.createdAt) > 7 * 86400_000) return;
@@ -474,25 +512,22 @@ async function askFeedbackOnOpen(c, drawerApi) {
   const askedKey = `hewn.asked.${c.id}`;
   if (localStorage.getItem(askedKey) === String(last.version)) return;
   localStorage.setItem(askedKey, String(last.version));
-  let region = document.querySelector(".toast-region");
-  if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
   // An answer that didn't reach Hewn is asked for again next time.
   const send = (score) =>
     api(`/builds/${enc(last.buildId)}/feedback`, { method: "POST", body: { score } }).catch((e) => {
       localStorage.removeItem(askedKey);
       throw e;
     });
-  const el = h("div", { class: "toast feedback-toast" });
+  const el = h("div", { class: "feedback-strip", role: "status" });
   const gone = () => el.remove();
   put(
     el,
-    h("span", { class: "dot info" }),
-    h("span", {}, `v${last.version} · got what you asked for?`),
+    h("span", { class: "grow" }, `v${last.version} · got what you asked for?`),
     h("button", { class: "link sm", onclick: () => send("yes").then(() => (gone(), toast("Noted.")), fail) }, "Yes"),
     h("button", { class: "link sm", onclick: () => send("no").then(() => (gone(), drawerApi.open?.()), fail) }, "Not quite"),
     h("button", { class: "ghost sm icon-only", "aria-label": "Skip", title: "Skip", onclick: () => send("skip").then(gone, fail) }, "×"),
   );
-  region.append(el);
+  slot.append(el);
   onLeave(gone);
 }
 /**

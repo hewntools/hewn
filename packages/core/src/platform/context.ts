@@ -21,6 +21,7 @@ import type { Connections } from "./connections.ts";
 import type { Models } from "./models.ts";
 import type { Invocation } from "./invocation.ts";
 import type { Schedules } from "./schedules.ts";
+import type { Sharing } from "./sharing.ts";
 import type { Builds } from "./builds.ts";
 import type { Validation } from "./validation.ts";
 import type { Widgets } from "./widgets.ts";
@@ -66,6 +67,7 @@ export interface Domains {
   models: Models;
   presentation: Presentation;
   schedules: Schedules;
+  sharing: Sharing;
   sessions: Sessions;
   validation: Validation;
   widgets: Widgets;
@@ -119,8 +121,11 @@ export class Domain {
     this.loaded = s.loaded;
   }
 
-  /** A stored version, its integrity checked against the hash it was promoted with. */
-  async loadVersion(capabilityId: string, version: number): Promise<LoadedVersion> {
+  /**
+   * A stored version, its integrity checked against the hash it was promoted with. Kept decoded
+   * for the next call unless `keep` is false (reading old versions' code, which never runs).
+   */
+  async loadVersion(capabilityId: string, version: number, { keep = true } = {}): Promise<LoadedVersion> {
     const row = this.registry.getVersion(capabilityId, version);
     if (!row) throw new PlatformError("not_found", `${capabilityId} has no version ${version}`);
     let v = this.loaded.get(row.contentHash);
@@ -136,7 +141,8 @@ export class Domain {
       if (contentHash(decoded.files, decoded.bundle) !== row.contentHash) {
         throw new PlatformError("operation_failed", `v${version} of ${capabilityId} failed its integrity check`);
       }
-      this.loaded.set(row.contentHash, (v = decoded));
+      v = decoded;
+      if (keep) this.loaded.set(row.contentHash, v);
     }
     return { row, files: v.files, code: { hash: row.contentHash, js: v.bundle } };
   }

@@ -6,12 +6,13 @@
 import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { ABI } from "@hewntools/core/manifest.ts";
+import { readSummary } from "@hewntools/core/bundle.ts";
+import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
-import { agentModels, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
+import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
@@ -107,7 +108,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "glyphs", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "hub", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -244,14 +245,18 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "capabilities" && id) {
     switch (`${method} ${sub ?? ""}`) {
-      case "GET ":
+      case "GET ": {
+        const m = platform.get(owner, id);
         return {
-          ...platform.get(owner, id),
+          ...m,
+          // Where it came from, when it was installed from outside, in Hewn's words (Info's pill).
+          origin: m.source ? sourceWords(m.source, true) : null,
           versions: platform.registry.versions(id),
           grants: [...platform.registry.grants(id)],
           authorization: platform.authorization(id),
           usedBy: platform.usedBy(id),
         };
+      }
       case "POST invoke": {
         const body = await readJson(req);
         return platform.invoke(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input });
@@ -325,6 +330,32 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST purge":
         await platform.purge(owner, id, String((await readJson(req)).confirm ?? ""));
         return { ok: true };
+      // The code browser: a version's files with what changed since the one before (?version=N), or one file (&path=…).
+      case "GET code": {
+        const version = Number(url.searchParams.get("version"));
+        if (!Number.isInteger(version) || version < 1) throw new PlatformError("invalid_request", "version must be a version number");
+        const path = url.searchParams.get("path");
+        return path ? platform.versionFile(owner, id, version, path) : platform.versionCode(owner, id, version);
+      }
+      // Share…: what a version would ship (?version=N), or the file itself (share/download).
+      case "GET share": {
+        const v = url.searchParams.get("version");
+        const version = v ? Number(v) : undefined;
+        if (arg !== "download") return platform.shareCheck(owner, id, version);
+        const { name, bundle } = await platform.shareBundle(owner, id, version);
+        return new Response(body(bundle), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+      }
+      // Info › Data › Start over: empty the data, keep the tool (a backup is kept).
+      case "POST start-over": {
+        const b = await readJson(req);
+        return platform.startOver(owner, id, { confirm: String(b.confirm ?? ""), sample: !!b.sample });
+      }
+      // Write it yourself: sample/calls.json as a new version.
+      case "POST sample":
+        return platform.setSample(owner, id, String((await readJson(req)).text ?? ""));
+      // Info › Data: rows per table and the last write.
+      case "GET data":
+        return platform.dataSummary(owner, id);
       case "GET export": {
         const data = await platform.exportData(owner, id);
         return new Response(JSON.stringify(data, null, 2), {
@@ -369,10 +400,53 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
           return { approved: [String(grant)] };
         }
         if (arg === "revoke") return platform.revokeGrant(owner, id, String((await readJson(req)).grant ?? ""));
+        if (arg === "decline") return (platform.declineGrant(owner, id, String((await readJson(req)).grant ?? "")), { declined: true });
     }
   }
 
   if (resource === "accounts") return platform.accounts(owner);
+
+  // The Hub (0.4.9: Hewn's own tools, Official, shipped with the release; offline): cards, a tool's page, its images and code, and staging one to install.
+  if (resource === "hub") {
+    const shelf = host.shelf ? await host.shelf.tools() : { tools: [], firstRun: [] };
+    if (!id && method === "GET") return { tools: platform.hubCards(owner, shelf.tools), firstRun: shelf.firstRun };
+    if (id && !sub && method === "GET") return platform.hubDetail(owner, shelf.tools, id);
+    if (id && sub === "image" && method === "GET") {
+      const image = platform.hubImage(owner, shelf.tools, id, arg ?? "");
+      const png = await host.shelf?.image(image.id, image.name);
+      if (!png) throw new PlatformError("not_found", "no such image");
+      // Its URL carries the release (?v=), so a day's caching never outlives an upgrade.
+      return new Response(body(png), { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" } });
+    }
+    if (id && sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.hubFile(owner, shelf.tools, id, path) : platform.hubCode(owner, shelf.tools, id);
+    }
+    if (id && sub === "stage" && method === "POST") return platform.hubStage(owner, shelf.tools, id);
+  }
+
+  // Install from a file: upload (staged, read before anything is installed), its code, install, or drop it.
+  if (resource === "bundles") {
+    if (!id && method === "POST") return platform.stageBundle(owner, fromBase64(String((await readJson(req)).data ?? "")), { from: "file" });
+    if (id && !sub && method === "GET") return platform.stagedBundle(owner, id);
+    if (id && sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.bundleFile(owner, id, path) : platform.bundleCode(owner, id);
+    }
+    if (id && sub === "install" && method === "POST") {
+      const b = await readJson(req);
+      return platform.installBundle(owner, id, { name: String(b.name ?? ""), sample: !!b.sample });
+    }
+    if (id && !sub && method === "DELETE") {
+      readings.get(id)?.abort();
+      await platform.dropStaged(owner, id);
+      return { ok: true };
+    }
+    // R2: your builder reads the code before you install it: what it does with your data, and what it found.
+    if (id && sub === "summary" && method === "POST") return readBundle(platform, host, owner, id, req);
+    // Install anyway (or the sheet closed) while it reads: stop it, and keep nothing it says after.
+    if (id && sub === "summary" && method === "DELETE") return (readings.get(id)?.abort(), { ok: true });
+  }
 
   if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");
 
@@ -435,6 +509,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (!id) return platform.listSchedules(owner);
     if (method === "PUT") return platform.updateSchedule(owner, id, pick(await readJson(req), ["status", "cadence", "input"]) as any);
     if (method === "DELETE") return platform.deleteSchedule(owner, id), { ok: true };
+    if (method === "POST" && sub === "run") return platform.runScheduleNow(owner, id);
   }
 
   if (resource === "confirmations") {
@@ -642,6 +717,69 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   throw new PlatformError("not_found", `no route ${method} ${url.pathname}`);
 }
 
+/**
+ * Readings under way, by staged file. The client stops one itself (DELETE …/summary, or dropping the
+ * file): a closed request doesn't always reach this far (workerd), and the agent should stop then.
+ */
+const readings = new Map<string, AbortController>();
+
+/** The intake's agent isn't there: none set up, none by that name, or its CLI isn't installed (the sandbox can't start it). */
+const NO_READER = /intake is not configured|no intake named|intake isn't configured|execvp.*No such file/i;
+const NO_BUILDER = "No builder is set up (Settings › AI)";
+
+/**
+ * R2: your builder reads a staged tool's code before it's installed (the intake, mode "summarize"):
+ * what it does with your data, and what it found, kept with the staged file for the install. With
+ * Accept: text/event-stream it streams as the intake does (progress, then the reading; a ping while
+ * the agent is quiet, so a proxy doesn't cut a long one). Stopping it (`readings`) or closing the
+ * request stops the agent, and a reading that ends after that isn't kept.
+ */
+async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, token: string, req: Request): Promise<unknown> {
+  const intake = host.intake;
+  if (!intake) throw new PlatformError("not_found", NO_BUILDER);
+  const bundle = await platform.summaryInput(owner, token);
+  // Who reads it: the agent the intake runs on (the builder's).
+  const by = intakeJob(await host.settings.read()).agent;
+  const read = async (closed?: AbortSignal, onProgress?: (p: IntakeProgress) => void) => {
+    readings.get(token)?.abort();
+    const stop = new AbortController();
+    readings.set(token, stop);
+    const signal = closed ? AbortSignal.any([closed, stop.signal]) : stop.signal;
+    const started = Date.now();
+    const log = (outcome: string) => host.log(`web intake summarize ${bundle.manifest.id} → ${outcome} (${Math.round((Date.now() - started) / 1000)}s)`);
+    try {
+      const reply = await intake({ mode: "summarize", messages: [], bundle }, (p) => ((p as IntakeProgress).charge !== undefined ? platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge) : onProgress?.(p as IntakeProgress)), signal);
+      const summary = reply.kind === "summary" ? readSummary(reply) : null;
+      if (!summary) throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
+      // The owner moved on (Install anyway, Cancel, closed the sheet): a reading that ends now isn't theirs to keep.
+      if (signal.aborted) throw new PlatformError("operation_failed", "stopped");
+      await platform.keepSummary(owner, token, summary);
+      log(`${summary.findings.filter((f) => f.kind === "warn").length} warning(s)`);
+      return { summary, seconds: Math.round((Date.now() - started) / 1000), by };
+    } catch (e) {
+      log(`ERROR ${(e as Error).message}`);
+      throw NO_READER.test((e as Error).message) && !signal.aborted ? new PlatformError("not_found", NO_BUILDER) : e;
+    } finally {
+      if (readings.get(token) === stop) readings.delete(token);
+    }
+  };
+  if (!/text\/event-stream/.test(req.headers.get("accept") ?? "")) return read(req.signal);
+  return sse(
+    { "content-security-policy": WEB_CSP },
+    async (event, signal) => {
+      const ping = setInterval(() => event("ping", null), 15_000);
+      try {
+        event("reply", await read(signal, (p) => event("progress", p)));
+      } catch (e) {
+        event("error", { message: signal.aborted ? "stopped" : (e as Error).message });
+      } finally {
+        clearInterval(ping);
+      }
+    },
+    req.signal,
+  );
+}
+
 /** The conversation that led to a build (and the version it made), for the intake to continue from. */
 function earlierConversation(platform: Platform, owner: Agent, buildId: unknown): NonNullable<IntakeRequest["earlier"]> {
   if (typeof buildId !== "string") throw new PlatformError("invalid_request", "earlier.buildId must be a build id");
@@ -701,7 +839,9 @@ async function capabilityList(platform: Platform, owner: Agent) {
       ui: !!m.ui?.available,
       version: row?.activeVersion ?? null,
       requests: platform.registry.accessRequests(c.id).length,
-      lastBuild: last ? { buildId: last.id, status: last.status } : null,
+      // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
+      saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
+      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder } : null,
       building: building(c.id),
     });
   }
@@ -806,9 +946,13 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     if (m.requires?.model) modelUsers = true;
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
+    // Held back only by what the owner said no to (Deny): nothing to ask.
+    if (st.onlySaidNo) continue;
     const connection = m.kind === "connection";
-    if (st.pendingGrants.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
-      const first = platform.authorization(c.id).items.find((i) => !i.approved);
+    // What the owner said no to isn't asked again; whatever else it needs is.
+    const asking = st.pendingGrants.filter((g) => !st.declinedGrants?.includes(g));
+    if (asking.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
+      const first = platform.authorization(c.id).items.find((i) => !i.approved && asking.includes(i.grant));
       const words = !first
         ? connection ? "needs setting up" : "needs your authorization"
         : first.kind === "capability"
@@ -855,7 +999,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
 
   const building = builds
     .filter((b) => LIVE.has(b.status))
-    .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null }));
+    .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null, queued: !!b.queued }));
   return { needs, building, ...(recent ? { recent: activity(platform, owner, { limit: 6 }).items } : {}) };
 }
 
@@ -896,6 +1040,8 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildId: b.buildId,
       buildKind: b.kind,
       builder: b.builder,
+      // An install from a file: "from a file", "from Hub" (Activity says "Installed from a file · v1").
+      ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
       ...(b.model ? { buildModel: b.model } : {}),
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,

@@ -1,0 +1,32 @@
+{
+  "line": "Water, feed, photos; what's due",
+  "tags": [
+    "Home"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "Keep track of your houseplants: when each was last watered, fed and repotted, and which ones need water today. It can name a plant from a photo.",
+    "keeps": "Plants with where they stand and how often they need water, and a log of watering, feeding and notes.",
+    "reaches": "The model, with a photo you choose, when you ask it to name a plant.",
+    "findings": [
+      {
+        "kind": "warn",
+        "title": "Sends a photo to the model when you ask it to name a plant",
+        "detail": "Only that photo, and only then.",
+        "file": "src/index.ts",
+        "line": 651
+      },
+      {
+        "kind": "ok",
+        "title": "Your plants and their log stay inside the tool"
+      }
+    ]
+  }
+}

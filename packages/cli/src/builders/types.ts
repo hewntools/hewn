@@ -8,6 +8,8 @@ export interface BuildJob {
   /** The only directory the builder may change. Contains BUILDER.md. */
   workspace: string;
   attempt: number;
+  /** The first build of the chain this one retries. Unset: not a retry. */
+  retryOf?: string;
   /** Validation log from the previous attempt, if it failed. */
   feedback?: string;
   /** Append-only, human-readable transcript for this build, outside the workspace. */

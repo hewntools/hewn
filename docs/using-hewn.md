@@ -2,18 +2,18 @@
 
 `hewn open` opens Hewn in your browser, signed in. Hewn's web client runs only on the machine Hewn runs on, unless you've set up [a public URL](remote-access.md).
 
-The top bar has Search, **Home · Agents · Accounts · Settings**, and the **Inbox** on the right.
+The top bar has Search, **Home · Hub · Agents · Accounts · Settings**, and the **Inbox** on the right.
 
 ## Home
 
 Home holds your tools as icons, and the widgets you've put there. Click a tool to open it: its own screen if it has one, otherwise its operations as forms. The **New** tile asks for a new tool ([Building tools](building-tools.md)).
 
-![Home with six tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
+![Home with seven tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather, Tasks Today) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
 
 Right-click a tool for its menu:
 - **Open**, **Change…** and **Info**
-- **Widgets…**, **Activity** and **Versions…**
-- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand) and **Export data**
+- **Widgets…**, **Activity** and **Versions**
+- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand), **Share…** (the tool as a file: [Sharing tools](sharing.md)) and **Export data**
 - **Delete…**
 
 Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget that takes options, such as which item to show: the same form as when you added it, with a preview), **Change…** and **Remove widget**.
@@ -24,9 +24,17 @@ Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget tha
 
 A widget shows a tool's data at a glance: today's habits, tonight's aurora forecast, a quote. It refreshes by itself. When it couldn't refresh, it keeps the last view and says how old it is.
 
+## The Hub
+
+**Hub** holds tools ready to install: today Hewn's own (**Official**), which come with Hewn, so the Hub works offline. Search, or pick a tag; each card shows what the tool is for and what it needs ("reaches api.met.no", "uses a model"; nothing when it needs nothing), and **Installed** when you have it. A tool's page has its screens (click one to see it larger), what it does and keeps (Hewn's reading of its code), its operations, what it needs, its versions and its **Source code** (a version opens it too). **Install** opens the install sheet ([Sharing tools](sharing.md#installing-a-tool-someone-shared)); a tool you have already, under any name, offers **Open** and **Install a copy**. **Install from a file…** is here too.
+
+New also offers it under the box: **Or start from** a tool in Hub, or a file someone shared ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
+
+![The Hub: search, Install from a file, the Official and tag filters, and Hewn's seven own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
+
 ## Search and commands
 
-Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now…). Enter opens it.
+Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). Enter opens it. Tools on the Hub you don't have yet come last.
 
 ![The command palette with "run" typed: Running Log, Weekend Weather, Change Running Log… and Running Log · Info](images/command-palette.png)
 
@@ -42,30 +50,32 @@ The **Inbox** button on the right of the top bar holds everything that needs you
 
 Each row has one action. **Activity** in the Inbox shows what just happened, and builds in progress pulse.
 
-![The Inbox open over Home: a failed build to show, an agent that wants to connect, and a tool that wants to reach a host, each with one button, then the recent calls](images/inbox.png)
+![The Inbox open over Home: a failed build to show, an agent that wants to connect, a tool that wants to reach a host, and a connection to sign in to again, each with one button, then the recent calls](images/inbox.png)
 
 One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it.
 
 ## A tool's page
 
-**Info** (in the tool's menu) shows what the tool is for, what it can do, and rows for:
-- **Operations:** run any operation from a form, and see its result
-- **Allowed to:** the hosts, keys, other tools and model it may use, and what's waiting for you
-- **Model:** which tier it thinks with, and its own monthly cap ([Models](models.md))
-- **Schedules:** run an operation on a timetable
-- **Widgets:** the tool's widgets, and deleting one
-- **Instructions:** standing rules for this tool's builds ([Building tools](building-tools.md#instructions))
-- **Versions:** every version, and restoring an earlier one ([Building tools](building-tools.md#versions))
+**Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
+- **Operations:** each with **Run**, which opens it as a form and shows the result; the first five, then **Show all**
+- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** a host, another tool or the model it asks for (a no is kept until its next version, and through a quick change such as another tier; it can't run without it, so Info offers **Ask builder to work without it**), **Set…** a key it asks for, **Revoke** what it has. The model's row has its tier (or **A specific model…**) in a menu, what it spent this month, and its own monthly cap ([Models](models.md))
+- **Data:** how many rows it keeps, when it last wrote, **Export**, and **Start over** (empty it, keep the tool: [Sharing tools](sharing.md#start-over))
+- **Schedules:** a switch each, **+ Add schedule**, and **Try again** on a failed run (one run now, as the schedule runs; if it works, one paused after failing stays paused until you switch it on)
+- **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**
+- **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
+- **Versions:** the last two, and **All versions**; a version's **Details** has its conversation, spec, log and code ([Building tools](building-tools.md#versions))
+
+Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)).
 
-**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed already written in: the operation, the error, its input and the last log lines. Read it, add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
+**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed in the box (the operation, the error, its input and the last log lines) and "Fix it so this works." Add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 
-![Running Log's Info page: its status and version, the Change it box, and the Operations, Allowed to, Schedules, Widgets, Instructions and Versions rows](images/tool-info.png)
+![Running Log's Info page: its status and version, Change… and Share… in the top bar, the Change it box, then Operations, Allowed to and Data (with Start over) on the left, and Schedules, Widgets, Instructions and Versions on the right](images/tool-info.png)
 
 ### Schedules
 
-A schedule runs a read or write operation hourly, daily, weekly or on a custom cadence, in your time zone (Settings › General). Info › Schedules lists them, with a switch each and when they run next. Add one at the bottom.
+A schedule runs a read or write operation hourly, daily, weekly or on a custom cadence, in your time zone (Settings › General). Info › Schedules lists them, with a switch each and when they run next. **+ Add schedule** adds one.
 
 Agents can propose a schedule, but nothing runs until you enable it from the Inbox. A schedule that fails three times in a row pauses itself and says why. Resume it when it's fixed.
 

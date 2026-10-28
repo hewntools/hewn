@@ -12,7 +12,7 @@ describe("settings with the host's builder", () => {
   before(async () => {
     h = await startTestHost({ remote: { url: "http://127.0.0.1:9/", token: "t", label: "Test Cloud" } });
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("the host's builder and intake are the default, also after saving another setting", async () => {
     assert.equal((await settings()).builder, "remote");
@@ -39,7 +39,7 @@ describe("hosted mode on the workerd host", () => {
   before(async () => {
     h = await startTestHost({ remote: { url: "http://127.0.0.1:9/", token: "t", label: "Test Cloud" }, hosted: { signInUrl: SIGN_IN } });
   });
-  after(() => h.stop());
+  after(() => h?.stop());
 
   test("signed out: the host's sign-in link; signed in: settings say hosted, no local agents to connect", async () => {
     // As the browser asks (fetch can't set Host): the web client is on hewn.localhost.

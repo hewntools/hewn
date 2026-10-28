@@ -1,0 +1,9 @@
+[
+  {"operation": "add_kid", "input": {"name": "Juno", "birthdate": "2019-04-12"}},
+  {"operation": "add_kid", "input": {"name": "Theo", "birthdate": "2021-09-03"}},
+  {"operation": "add_quote", "input": {"kid": "Juno", "text": "Snow is just cold rain that's taking its time.", "said_on": "2024-01-15", "context": "Walking to preschool"}},
+  {"operation": "add_quote", "input": {"kid": "Theo", "text": "Why is the moon following us?", "said_on": "2025-02-20", "context": "In the car"}},
+  {"operation": "add_quote", "input": {"kid": "Juno", "text": "I'm not tired, my eyes are just resting with me awake.", "said_on": "2025-06-30"}},
+  {"operation": "add_quote", "input": {"kid": "Theo", "text": "When I grow up I want to be a dinosaur doctor.", "context": "At dinner"}},
+  {"operation": "add_quote", "input": {"kid": "Juno", "text": "Grown-ups are just kids with car keys."}}
+]

@@ -1,11 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A capability's lifecycle and data, owner only: delete (archive) and restore, roll back to an earlier
-// version, purge for good, and export and import its data.
+// version, purge for good, export and import its data, and its versions' code for the code browser
+// (each file against the version it was built on; the diffing itself is in code.ts).
 import { type Agent, requireOwner } from "../auth.ts";
+import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
+import { sampleOrNull } from "../bundle.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
-import { Domain } from "./context.ts";
+import { Domain, type Domains } from "./context.ts";
+
+/** How many of a capability's latest calls Info › Data looks through for its last write. */
+const WRITE_LOOKBACK = 500;
+
+/** Info › Data: rows per table, and the last write found in the call log. */
+export interface DataSummary {
+  tables: Record<string, number>;
+  rows: number;
+  lastWriteAt: string | null;
+  /** How many calls were looked through: fewer than 500 is the whole log. */
+  callsChecked: number;
+  /** How many sample records the active version carries (null: none). */
+  sample: number | null;
+}
 
 export class Data extends Domain {
   /**
@@ -108,6 +125,30 @@ export class Data extends Domain {
   }
 
   /**
+   * Info › Data: rows per table (counted, not read) and when an operation last wrote, from the
+   * call log's last `WRITE_LOOKBACK` calls (so null once the log has been pruned past it, or when
+   * none of them wrote). `callsChecked`: how many calls that was, so "none" can say "in the last 500".
+   */
+  async dataSummary(owner: Agent, capabilityId: string): Promise<DataSummary> {
+    requireOwner(owner);
+    const cap = this.visibleActive(owner, capabilityId);
+    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
+    const tables = await this.runtime.countState({ capabilityId }, active.code);
+    const writes = new Set(active.row.manifest.operations.filter((o) => o.sideEffect !== "read").flatMap((o) => [o.name, opKey(o.name, o.version)]));
+    const headers = this.registry.capabilityLogHeaders(capabilityId, WRITE_LOOKBACK);
+    let lastWriteAt: string | null = null;
+    for (const header of headers) {
+      // The caller may hold spaces ("agent:x → tool"), so read from the end: "… <op> ok <ms>ms".
+      const m = /^(\S+) .* (\S+) ok \d+ms$/.exec(header);
+      if (m && writes.has(m[2])) {
+        lastWriteAt = m[1];
+        break;
+      }
+    }
+    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt, callsChecked: headers.length, sample: sampleOrNull(active.files)?.length ?? null };
+  }
+
+  /**
    * Load exported data into a capability's live state (owner only): the inverse of exportData's
    * state dump. Its tables must exist (migrations applied) and be empty.
    */
@@ -122,6 +163,65 @@ export class Data extends Domain {
     } catch (e) {
       throw new PlatformError("conflict", `import into ${capabilityId} failed: ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * The code browser (U4): a version's files, each with what changed since its base (added,
+   * changed, removed, and lines +n −n). Owner only.
+   */
+  async versionCode(owner: Agent, capabilityId: string, version: number): Promise<{ version: number; base: number | null; files: CodeFile[] }> {
+    const { files, base, baseFiles } = await this.codeOf(owner, capabilityId, version);
+    return { version, base, files: codeFiles(files, baseFiles) };
+  }
+
+  /** One file of a version: its text, and the hunks against its base (none for a first version). */
+  async versionFile(owner: Agent, capabilityId: string, version: number, path: string): Promise<CodeText> {
+    const { files, baseFiles } = await this.codeOf(owner, capabilityId, version);
+    return codeText(path, files, baseFiles);
+  }
+
+  /**
+   * A version's files and its base's: the version its build started from (after a Restore, the
+   * restored one), else the one before. Read without keeping them decoded: only what runs stays
+   * in memory, and the owner may look through every version a tool ever had.
+   */
+  private async codeOf(owner: Agent, capabilityId: string, version: number) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    const v = await this.loadVersion(capabilityId, version, { keep: false });
+    const n = this.registry.getBuild(v.row.buildId)?.baseVersion ?? version - 1;
+    const base = n >= 1 && n < version && this.registry.getVersion(capabilityId, n) ? n : null;
+    return { files: v.files, base, baseFiles: base ? (await this.loadVersion(capabilityId, base, { keep: false })).files : null };
+  }
+
+  /**
+   * Start over (U2): empty a tool's data and keep the tool. The live state is copied to a
+   * `backup:start-over-<time>` state first (the newest three are kept, like the ones a promote
+   * keeps), then dropped and migrated again from scratch. Owner only, confirmed with the id.
+   * `sample`: replay its sample data after.
+   */
+  async startOver(owner: Agent, capabilityId: string, req: { confirm: string; sample?: boolean }): Promise<{ backup: string | null; sample: Awaited<ReturnType<Domains["sharing"]["replaySample"]>> | null }> {
+    requireOwner(owner);
+    const cap = this.visibleActive(owner, capabilityId);
+    if (req.confirm !== capabilityId) throw new PlatformError("invalid_request", `type the id '${capabilityId}' to confirm`);
+    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
+    // Asked to replay sample data it hasn't got: refused before anything is emptied.
+    if (req.sample && !sampleOrNull(active.files)) throw new PlatformError("invalid_request", `${capabilityId} has no sample data to replay; start over without it`);
+    const live = { capabilityId };
+    let backup: string | null = null;
+    if (await this.runtime.hasState(live)) {
+      backup = `backup:start-over-${Date.now()}`;
+      await this.runtime.copyState(live, { capabilityId, scratch: backup });
+      const old = (await this.runtime.listStates(capabilityId, "backup:start-over-")).sort((a, b) => Number(b.split("-").at(-1)) - Number(a.split("-").at(-1)));
+      for (const name of old.slice(3)) await this.runtime.dropState({ capabilityId, scratch: name });
+    }
+    await this.runtime.dropState(live);
+    await this.runtime.migrate(live, migrationsOf(active.files), active.code);
+    this.registry.dropWidgetCache(capabilityId);
+    this.registry.addLifecycleEvent(capabilityId, "start-over", backup ? `data emptied; kept as ${backup}` : "data emptied", owner.id);
+    this.logger(`${capabilityId}: started over by ${owner.id}${backup ? ` (backup ${backup})` : ""}`);
+    const sample = req.sample ? await this.d.sharing.replaySample(capabilityId, owner.id) : null;
+    return { backup, sample };
   }
 
   /** Deleted (archived) capabilities, newest first: what the owner can restore. */

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kid Quotes</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+  <style>
+    .quote-text { font-size: var(--fs); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .quote-text::before { content: "\201C"; }
+    .quote-text::after { content: "\201D"; }
+    #text { font-size: var(--fs-lg); min-height: 120px; }
+    .two { display: grid; gap: var(--s3); grid-template-columns: 1fr 1fr; }
+    .two label.field { margin: 0; }
+    .kid-picker { flex-wrap: wrap; }
+    .list > li { align-items: flex-start; }
+    .list > li > button { flex: none; }
+    .edit-form { width: 100%; }
+    .filters { gap: var(--s2); }
+    .search { flex: 1; min-width: 160px; }
+    section > .eyebrow { margin-bottom: var(--s2); }
+    @media (max-width: 480px) { .two { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page stack" id="app">
+    <h1>Kid quotes</h1>
+
+    <div id="loading" class="stack" aria-hidden="true">
+      <span class="skeleton" style="height: 220px"></span>
+      <span class="skeleton" style="height: 48px"></span>
+      <span class="skeleton" style="height: 48px"></span>
+    </div>
+
+    <!-- Day one, and adding more kids later -->
+    <section id="kids-card" class="card" hidden>
+      <div id="kids-intro">
+        <strong>Who's talking?</strong>
+        <p class="muted small">Add each kid first. A birthdate is optional and gives every quote their age at the time.</p>
+      </div>
+      <form id="kid-form" novalidate>
+        <div class="two">
+          <label class="field"><span class="label">Name</span><input type="text" id="kid-name" required maxlength="100" autocomplete="off"></label>
+          <label class="field"><span class="label">Birthdate</span><input type="date" id="kid-birthdate"><span class="hint">Optional</span></label>
+        </div>
+        <div id="kid-error" class="notice danger" role="alert" hidden></div>
+        <div class="row" style="margin-top: var(--s3)">
+          <button type="submit" id="kid-save" class="primary">Add kid</button>
+          <button type="button" id="kid-done" class="ghost" hidden>Done</button>
+          <span id="kid-list" class="muted small"></span>
+        </div>
+      </form>
+    </section>
+
+    <!-- Quick add -->
+    <section id="add-card" class="card" hidden>
+      <form id="quote-form" novalidate>
+        <label class="field" style="margin-top: 0">
+          <span class="label">What did they say?</span>
+          <textarea id="text" required maxlength="500"></textarea>
+        </label>
+        <div class="field">
+          <span class="field-label" id="kid-picker-label">Who said it</span>
+          <div id="kid-picker" class="row kid-picker" role="group" aria-labelledby="kid-picker-label"></div>
+        </div>
+        <div class="two">
+          <label class="field"><span class="label">When</span><input type="date" id="said-on" required></label>
+          <label class="field"><span class="label">Where or what was happening</span><input type="text" id="context" maxlength="200" placeholder="at dinner" autocomplete="off"></label>
+        </div>
+        <div id="quote-error" class="notice danger" role="alert" hidden></div>
+        <div class="row between" style="margin-top: var(--s4)">
+          <button type="submit" id="quote-save" class="primary lg">Save</button>
+          <button type="button" id="add-kid" class="ghost">Add a kid</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="otd" hidden>
+      <div class="eyebrow">On this day</div>
+      <ul class="list card" id="otd-list"></ul>
+    </section>
+
+    <section id="all" hidden>
+      <div class="row between">
+        <div class="eyebrow" id="all-title">All quotes</div>
+      </div>
+      <div class="row filters" style="margin: var(--s2) 0 var(--s3)">
+        <div id="kid-filter" class="row filters"></div>
+        <input type="search" id="search" class="search sm" placeholder="Search" aria-label="Search quotes">
+      </div>
+      <div id="list-error" class="notice danger" role="alert" hidden></div>
+      <ul class="list" id="quote-list"></ul>
+      <div id="list-empty" hidden></div>
+      <div class="row" style="justify-content: center; margin-top: var(--s3)"><button type="button" id="more" class="ghost" hidden>Show more</button></div>
+    </section>
+  </main>
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

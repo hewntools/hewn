@@ -3,9 +3,9 @@
 // by a newer format is refused (a downgrade could silently lose data), and starting on an older
 // format upgrades it after a backup. Schema changes inside the owner's database are applied by
 // the core at start (idempotent), gated by this number.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Home } from "../home.ts";
+import { type Home, writeFileAtomic } from "../home.ts";
 import { APP_DIR } from "../app-dir.ts";
 
 /** The data format this code reads and writes. Bump when stored data changes incompatibly. */
@@ -53,5 +53,5 @@ export const STORAGE_KEYS = { owner: "hewn-owner", capability: "hewn-capability"
 
 export function writeFormat(home: Home, current = DATA_FORMAT) {
   const out = { format: current, writtenBy: VERSION, at: new Date().toISOString() };
-  writeFileSync(file(home), JSON.stringify(out, null, 2) + "\n");
+  writeFileAtomic(file(home), JSON.stringify(out, null, 2) + "\n");
 }

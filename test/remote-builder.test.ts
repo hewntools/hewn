@@ -71,7 +71,7 @@ describe("remote builder and intake", () => {
       ]);
     const dir = workspace();
     const charges: unknown[] = [];
-    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed", onCharge: (c) => charges.push(c) });
+    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed", retryOf: "b-0", onCharge: (c) => charges.push(c) });
     await remoteBuilder(remote).build(j);
     const sent = seen.at(-1)!;
     assert.equal(sent.path, "/v1/builds");
@@ -80,6 +80,7 @@ describe("remote builder and intake", () => {
     assert.equal(sent.body.effort, "high");
     assert.equal(sent.body.feedback, "1 test failed");
     assert.equal(sent.body.session, "b-1", "one session per build, for the service to resume on a later attempt");
+    assert.equal(sent.body.retryOf, "b-0", "the first build of the chain it retries");
     assert.match(sent.body.prompt, /builder for Hewn/);
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);
@@ -192,6 +193,20 @@ describe("remote builder and intake", () => {
     const sent = seen.at(-1)!.body;
     assert.ok(sent.schema.properties.kind.enum.includes("answer"));
     assert.match(sent.prompt, /Excerpts from Hewn's docs that match the owner's latest message[^]*--- docs\/connections\.md/);
+  });
+
+  test("the intake reading a shared tool: mode summarize, its schema, the files in the prompt, no docs; the reply is checked", async () => {
+    const summary = { kind: "summary", message: "Logs runs.", keeps: "Keeps runs.", reaches: "", findings: [{ kind: "ok", title: "Nothing leaves", detail: "", file: "", line: 0 }] };
+    handle = (_b, _r, res) => ndjson(res, [{ result: JSON.stringify(summary) }]);
+    const bundle = { manifest: { id: "run-log", name: "Run Log", purpose: "Runs.", abi: "2.5", operations: [] }, files: [{ path: "src/index.ts", text: "   1| export {};" }], cut: [] };
+    const got = await remoteIntake(remote)({ mode: "summarize", messages: [], bundle });
+    assert.deepEqual(got, { kind: "summary", message: "Logs runs.", keeps: "Keeps runs.", reaches: "", findings: [{ kind: "ok", title: "Nothing leaves" }] });
+    const sent = seen.at(-1)!.body;
+    assert.equal(sent.mode, "summarize");
+    assert.equal(sent.session, null);
+    assert.deepEqual(sent.schema.properties.kind.enum, ["summary"]);
+    assert.match(sent.prompt, /=== [0-9a-f]{12} src\/index\.ts\n {3}1\| export \{\};/);
+    assert.doesNotMatch(sent.prompt, /Excerpts from Hewn's docs/);
   });
 
   test("tools' model calls (hosted): the request goes as JSON; refusals, a bad token and a charged failure", async () => {

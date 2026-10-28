@@ -1,0 +1,27 @@
+{
+  "line": "Write down what they said",
+  "tags": [
+    "Kids",
+    "Family"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf",
+      "date": "2026-10-26"
+    }
+  ],
+  "summary": {
+    "message": "Catch the funny and wise things your children say, each dated with the child's age at the time, and bring one back on Home, preferring the same day in earlier years.",
+    "keeps": "Each child's name and birth date, and the quotes with date and context.",
+    "reaches": "",
+    "findings": [
+      {
+        "kind": "ok",
+        "title": "Keeps your data inside the tool",
+        "detail": "Names, birth dates and quotes never leave it."
+      }
+    ]
+  }
+}

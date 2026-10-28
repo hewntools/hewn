@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -13,11 +13,15 @@ import { platformWith, setup } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 
-/** A builder that writes the UI Counter fixture, optionally breaking its UI with a script. */
-const counter = (breakUi?: string): CapabilityBuilder => ({
+/** Sample data: `n` taps (sample/calls.json). */
+const taps = (n: number) => JSON.stringify(Array.from({ length: n }, () => ({ operation: "increment" })));
+
+/** A builder that writes the UI Counter fixture, optionally breaking its UI with a script, or with sample data. */
+const counter = (breakUi?: string, sample?: string): CapabilityBuilder => ({
   name: "counter",
   build: async (job) => {
     cpSync(join(FIX, "ui-counter"), job.workspace, { recursive: true });
+    if (sample) mkdirSync(join(job.workspace, "sample"), { recursive: true }), writeFileSync(join(job.workspace, "sample", "calls.json"), sample);
     if (breakUi) {
       const page = join(job.workspace, "ui", "index.html");
       writeFileSync(page, readFileSync(page, "utf8").replace("</body>", `<script>${breakUi}</script></body>`));
@@ -29,8 +33,8 @@ describe("visual validation", () => {
   let t: ReturnType<typeof setup>;
   let builder: CapabilityBuilder;
   const platformFor = (home: Home, visualCheck: VisualCheck) => platformWith(home, () => builder, { visualCheck, attempts: 1 });
-  const buildCounter = async (platform: Platform, breakUi?: string) => {
-    builder = counter(breakUi);
+  const buildCounter = async (platform: Platform, breakUi?: string, sample?: string) => {
+    builder = counter(breakUi, sample);
     return platform.settle((await platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" })).buildId);
   };
   const screenshot = (buildId: string) => readFileSync(join(t.home.root, "blobs", "screenshots", `${buildId}.png`));
@@ -49,6 +53,39 @@ describe("visual validation", () => {
     assert.deepEqual(seen, ['{"result":{"count":0}}'], "the UI's API runs the candidate on fresh state");
     assert.equal(done.failure?.title, "Its screen shows errors");
     assert.equal(screenshot(done.buildId).toString(), "png");
+    assert.equal(done.screenshot, true, "the build page shows what broke");
+    platform.close();
+  });
+
+  test("with sample data, the screen is checked empty and then filled with it, and the screenshot shows it in use", async () => {
+    const seen: string[] = [];
+    const fake: VisualCheck = async (req) => {
+      seen.push(JSON.stringify(await req.invoke({ operation: "get", input: {} })));
+      return { errors: [], screenshot: Buffer.from(`png ${seen.length}`) };
+    };
+    const platform = platformFor(t.home, fake);
+    const done = await buildCounter(platform, undefined, taps(3));
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.deepEqual(seen, ['{"result":{"count":0}}', '{"result":{"count":3}}']);
+    assert.equal(screenshot(done.buildId).toString(), "png 2", "the filled one");
+    assert.ok(done.log.some((l) => /empty and with its sample data/.test(l)));
+    assert.equal(done.screenshot, true, "the build page shows it");
+    assert.deepEqual((await platform.invoke(USER, { capabilityId: "ui-counter", operation: "get", input: {} })).result, { count: 0 }, "the check's state isn't the tool's");
+    platform.close();
+  });
+
+  test("a screen that breaks only with sample data fails the build, and the build page shows it filled", async () => {
+    const fake: VisualCheck = async (req) => {
+      const { result } = (await req.invoke({ operation: "get", input: {} })) as { result: { count: number } };
+      return { errors: result.count ? ["uncaught: TypeError: rows[0] is undefined"] : [], screenshot: Buffer.from(`png ${result.count}`) };
+    };
+    const platform = platformFor(t.home, fake);
+    const broken = await buildCounter(platform, undefined, taps(2));
+    assert.equal(broken.status, "failed");
+    assert.match(broken.log.join("\n"), /didn't render cleanly with its sample data/);
+    assert.equal(broken.failure?.title, "Its screen shows errors");
+    assert.equal(screenshot(broken.buildId).toString(), "png 2", "the filled screen, where it broke");
+    assert.equal(broken.screenshot, true, "the build page shows it");
     platform.close();
   });
 
@@ -124,6 +161,34 @@ describe("visual validation: widgets", () => {
     assert.deepEqual(seen, [{ name: "count", title: "Count", sizes: ["small", "medium"], view: { template: "stat", value: 1, caption: "taps", buttons: [{ label: "Add one", operation: "increment@1" }] } }]);
     assert.ok(done.log.some((l) => /widgets render in every size/.test(l)));
     assert.equal(done.screenshot, true);
+    platform.close();
+  });
+
+  test("widgets that don't render fail the build, and the build page shows them", async () => {
+    const platform = platformWith(t.home, () => widgetCounter, { attempts: 1, visualCheck: async () => ({ errors: ["count (small): the content is cut off"], screenshot: Buffer.from("png") }) });
+    const done = await build(platform);
+    assert.equal(done.status, "failed");
+    assert.match(done.log.join("\n"), /widgets didn't render cleanly/);
+    assert.equal(done.screenshot, true);
+    platform.close();
+  });
+
+  test("with sample data, changed widgets are drawn as they look filled with it", async () => {
+    let seen: any;
+    const withSample: CapabilityBuilder = {
+      name: "wc",
+      build: async (job) => {
+        cpSync(join(FIX, "widget-counter"), job.workspace, { recursive: true });
+        mkdirSync(join(job.workspace, "sample"), { recursive: true });
+        writeFileSync(join(job.workspace, "sample", "calls.json"), taps(4));
+      },
+    };
+    const platform = platformWith(t.home, () => withSample, { attempts: 1, visualCheck: async (req) => ((seen = req.widgets), { errors: [], screenshot: Buffer.from("png") }) });
+    const done = await build(platform);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.equal(seen[0].view.value, 4, "the sample's four taps, not the test case's one");
+    assert.ok(done.log.some((l) => /widgets render in every size \(screenshot attached, with the sample data\)/.test(l)));
+    assert.equal(done.screenshot, true, "the build page shows it");
     platform.close();
   });
 

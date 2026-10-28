@@ -25,6 +25,27 @@ export const freePort = () =>
 export const parse = (r: any) => JSON.parse(r.content[0].text);
 
 /**
+ * Start a supervisor on two ports that were free a moment ago. On a busy machine another process can
+ * take one before workerd binds it: workerd then exits at once, again and again, and the start fails
+ * (startSupervisor leaves nothing running). That start gets one more go, on new ports. A start that
+ * fails otherwise says why: the supervisor's log comes with the error.
+ */
+export async function onFreePorts(start: (ports: { port: number; publicPort: number }, log: (line: string) => void) => Promise<Supervisor>): Promise<{ sv: Supervisor; port: number }> {
+  for (let attempt = 1; ; attempt++) {
+    let lines: string[] | undefined = [];
+    const port = await freePort();
+    try {
+      const sv = await start({ port, publicPort: await freePort() }, (l) => void lines?.push(l));
+      lines = undefined; // only the start's log is kept
+      return { sv, port };
+    } catch (e) {
+      if (attempt === 1 && lines!.some((l) => l.includes("Address already in use"))) continue;
+      throw new Error(`${(e as Error).message}; the supervisor's log:\n${lines!.slice(-20).join("\n")}`);
+    }
+  }
+}
+
+/**
  * An agent signs in the way real ones do: dynamic registration, the authorize page, the owner's
  * approval (here over the admin channel), the page's poll, the PKCE code exchange.
  */
@@ -67,9 +88,16 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
       await s(job.workspace, job as any);
     },
   };
-  const port = await freePort();
-  const sv = await startSupervisor({ home: openHome(root), port, publicPort: await freePort(), publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, log: () => {}, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" });
-  await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1 });
+  // A host that doesn't start leaves nothing behind: the suite's after() has no host to stop.
+  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, log, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" })).catch((e) => {
+    rmSync(root, { recursive: true, force: true });
+    throw e;
+  });
+  await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1 }).catch(async (e) => {
+    await sv.stop();
+    rmSync(root, { recursive: true, force: true });
+    throw e;
+  });
   const clients: Client[] = [];
   return {
     sv,

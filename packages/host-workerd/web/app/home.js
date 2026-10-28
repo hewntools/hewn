@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Home: the first run, the grid of tools and widgets, and Edit Home; and who builds tools.
-import { api, appIcon, caps, enc, fail, h, invalidateCaps, menuFrom, openMenu, setWallpaper, skeleton, tintOf, withContextMenu } from "../kit.js";
+import { api, appIcon, caps, enc, fail, glyphCells, h, invalidateCaps, menuFrom, openMenu, setWallpaper, skeleton, tintOf, withContextMenu } from "../kit.js";
 import { agentTile, agentTileOf, buildJobs, jobPicker } from "./agents.js";
 import { connectDialog } from "./connect.js";
-import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, topBar, view } from "./frame.js";
+import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, stillHere, topBar, view } from "./frame.js";
+import { hubCard } from "./hub.js";
 import { inboxBtn } from "./inbox.js";
 import { modelChip } from "./intake.js";
 import { capabilityMenu, inlineRename, openCapability } from "./tool-actions.js";
-import { addWidgetSheet, SIZE_LETTER, widgetOptionsSheet, widgetTile } from "./widgets.js";
+import { addWidgetSheet, SIZE_LETTER, widgetOptionsSheet, widgetRenderer, widgetTile } from "./widgets.js";
 
 export { buildingLabel, buildsChosen, home, jobModelOf, modelWords, saveBuildModel, storedEntry };
 
@@ -41,14 +42,23 @@ const modelWords = (m = {}, catalog) => {
 async function home({ editing = false } = {}) {
   // Redrawn in place (a layout save, a build starting or ending): stop the last drawing's timers first.
   for (const fn of leaving.splice(0)) fn();
-  view(topBar("home"), h("main", { class: "home" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
+  const here = stillHere();
+  // A loading draw (held back while the page before stays on screen, see view()). Redrawn in place,
+  // the grid on screen stays until the new one is ready instead.
+  if (!document.querySelector("#app > main.home:not([aria-busy]) .home-grid"))
+    view(topBar("home"), h("main", { class: "home", "aria-busy": "true" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
   // Connections live under Accounts, not on Home.
   const onHome = (cs) => [...cs.values()].filter((c) => c.kind !== "connection");
   const [all0, homeData] = await Promise.all([caps(true), api("/home").catch(() => ({ layout: [], gallery: [] }))]);
+  if (!here()) return;
   const list = onHome(all0);
   setWallpaper(list.map(tintOf), { dim: !list.length });
   // The first run's moment screen, until a tool exists (even after leaving it once).
   if (!list.some((c) => c.version || c.building)) return firstRun();
+  // Home arrives in one step: the icons' glyphs and the widget renderer first (a moment at most),
+  // instead of empty tiles, then glyphs, then widgets.
+  await Promise.race([Promise.all([...list.filter((c) => c.iconKind === "glyph").map(glyphCells), widgetRenderer()]), new Promise((r) => setTimeout(r, 400))]).catch(() => {});
+  if (!here()) return;
 
   // One grid: the owner's layout of icons and widgets, then whatever it doesn't place yet (new
   // tools land last, next to "New"). Tools hidden from Home keep their place, hidden, for search.
@@ -213,7 +223,7 @@ function tile(c, { hidden = false, editHome, show } = {}) {
   const render = (cap) => {
     Object.assign(c, cap);
     const failed = c.lastBuild?.status === "failed";
-    const needsYou = !c.ready || c.requests > 0;
+    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0;
     const more = c.building ? null : h("span", { class: "more", "aria-hidden": "true", onclick: (e) => (e.stopPropagation(), menuFrom(more, items())) }, "•••");
     // Lit cells follow real progress: none while code is written (the glyph pulses), then tests passed / total.
     const b = c.building;
@@ -267,8 +277,10 @@ const STARTERS = [
  * No Skip: leaving without building shows it again until a tool exists.
  */
 async function firstRun() {
+  const here = stillHere();
   setWallpaper([125, 250], { dim: true });
   const machine = await hewnMachine();
+  if (!here()) return;
   const agentsCard = h("div", { class: "card first-card" }, skeleton("60%"));
   const jobsCard = h("div", { class: "card first-card" }, skeleton("50%"));
   const make = h("div", { class: "stack-sm first-make" });
@@ -368,8 +380,19 @@ async function firstRun() {
       h("div", { class: "eyebrow" }, hosted ? "2 · Make something" : "3 · Make something"),
       h("form", { class: "composer boxed", onsubmit: (e) => (e.preventDefault(), start()) }, ask, h("div", { class: "composer-tools" }, builderOk && modelChip(), next)),
       h("div", { class: "row tight wrap" }, starters),
+      hosted && shelf,
     );
   };
+  // Hosted, with nothing built yet: three of Hewn's own tools to start from, and the rest a tap away.
+  const shelf = h("div", { class: "stack-sm first-shelf" });
+  if (hosted)
+    api("/hub")
+      .then(({ tools, firstRun }) => {
+        const three = firstRun.map((id) => tools.find((t) => t.id === id)).filter(Boolean);
+        const draw = (list) => put(shelf, h("div", { class: "eyebrow" }, "Or start from one of Hewn's"), h("div", { class: "hub-grid" }, list.map((c) => hubCard(c))), list.length < tools.length && h("button", { class: "link sm self-start", onclick: () => draw(tools) }, `Show all ${tools.length}`));
+        if (tools.length) draw(three.length ? three : tools.slice(0, 3));
+      })
+      .catch(() => {});
   const renderAll = () => Promise.all([renderAgents(), renderJobs()]);
   view(
     moment(

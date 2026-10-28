@@ -15,6 +15,7 @@ import {
   noteSession,
   OPENCODE_BUILDER_RULES,
   OPENCODE_INTAKE_RULES,
+  OPENCODE_READER_RULES,
   opencodeArgs,
   opencodeBuildHome,
   opencodeBuilder,
@@ -84,8 +85,8 @@ describe("OpenCode's arguments", () => {
     assert.deepEqual(opencodeModelArgs({}), []);
   });
 
-  test("the rules: the builder reads and writes, nothing else; the intake reads and fetches, nothing else; both shell names", () => {
-    for (const rules of [OPENCODE_BUILDER_RULES, OPENCODE_INTAKE_RULES]) {
+  test("the rules: the builder reads and writes, nothing else; the intake reads and fetches, nothing else; a reading gets nothing; both shell names", () => {
+    for (const rules of [OPENCODE_BUILDER_RULES, OPENCODE_INTAKE_RULES, OPENCODE_READER_RULES]) {
       for (const name of ["bash", "shell", "task", "skill", "question", "websearch", "external_directory"]) assert.equal(rules.permission[name], "deny", name);
       assert.equal(rules.tools.bash, false);
       assert.equal(rules.tools.shell, false);
@@ -95,6 +96,10 @@ describe("OpenCode's arguments", () => {
     assert.equal(OPENCODE_INTAKE_RULES.permission.edit, "deny");
     assert.equal(OPENCODE_INTAKE_RULES.permission.webfetch, "allow");
     assert.equal(OPENCODE_INTAKE_RULES.tools.write, false);
+    // Reading a tool someone shared: its code is in the prompt; nothing to look up, nothing to fetch.
+    for (const name of ["read", "glob", "grep", "webfetch", "edit"]) assert.equal(OPENCODE_READER_RULES.permission[name], "deny", name);
+    assert.ok(!Object.values(OPENCODE_READER_RULES.permission).includes("allow"));
+    assert.equal(OPENCODE_READER_RULES.tools.webfetch, false);
   });
 });
 

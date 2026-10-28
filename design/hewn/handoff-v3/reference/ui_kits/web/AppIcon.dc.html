@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="../../../../../../packages/ui/src/ui.css">
+<script src="../../_ds/hewn-design-system-83a47d3e-82e4-4631-ba7b-8cb91d8eb560/_ds_bundle.js"></script>
+</helmet>
+<x-import component-from-global-scope="HewnDesignSystem_83a47d.AppIcon" dc-props="{{ p }}" style="display:inline-flex;line-height:0" hint-size="20px,20px"></x-import>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:96,&quot;height&quot;:96},&quot;glyph&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;run&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;hue&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:30,&quot;min&quot;:0,&quot;max&quot;:360,&quot;tsType&quot;:&quot;number&quot;},&quot;saturation&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:100,&quot;min&quot;:0,&quot;max&quot;:150,&quot;tsType&quot;:&quot;number&quot;},&quot;size&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:64,&quot;tsType&quot;:&quot;number&quot;},&quot;badge&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;&quot;,&quot;warn&quot;,&quot;danger&quot;],&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;progress&quot;:{&quot;editor&quot;:&quot;float&quot;,&quot;default&quot;:null,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const { glyph, rows, hue, saturation, size, progress, badge, more, logo, name, waiting } = this.props;
+    const pr = progress == null || progress === '' ? undefined : Number(progress);
+    return { p: { glyph, rows: Array.isArray(rows) ? rows : undefined, logo, name, waiting: !!waiting, more: !!more, badge: badge || undefined, hue: hue ?? 260, saturation: saturation ?? 100, size: Number(size ?? 64), progress: Number.isFinite(pr) && pr >= 0 ? pr : undefined } };
+  }
+}
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 import { empty, errorBox, h, setWallpaper } from "../kit.js";
 // No module reads another's binding as it loads, so the order below is free; the client starts at the end of this module.
 import "./appearance.js";
-import { hues, leaving, loadSettings, page } from "./frame.js";
+import { holdDraws, hues, leaving, loadSettings, page, releaseHeld } from "./frame.js";
 import { accountsPage } from "./accounts.js";
 import { activityPage } from "./activity.js";
 import { passkeyPage } from "./add-passkey.js";
@@ -15,6 +15,9 @@ import { infoPage } from "./info.js";
 import { intakePage } from "./intake.js";
 import { settingsPage } from "./settings.js";
 import { appPage, runPage } from "./tool.js";
+import { samplePage } from "./share.js";
+import { versionPage, versionsPage } from "./versions.js";
+import { hubPage, hubToolPage } from "./hub.js";
 
 export { route };
 
@@ -24,22 +27,43 @@ function parseHash() {
   const raw = location.hash.replace(/^#/, "") || "/";
   const [path, qs] = raw.split("?");
   const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
-  return { page: parts[0] ?? "", id: parts[1], sub: parts[2], q: new URLSearchParams(qs ?? "") };
+  return { page: parts[0] ?? "", id: parts[1], sub: parts[2], arg: parts[3], q: new URLSearchParams(qs ?? "") };
 }
 
 let routing = 0;
+/** The address on screen: drawing it again is a refresh. */
+let shown = null;
+/**
+ * How long a page that's loading keeps the one before it on screen: most pages are ready sooner,
+ * so they replace it in one step; a slower one shows its loading state after this. While it waits,
+ * a thin bar moves along the top, so the click is seen to have done something.
+ */
+const HOLD_MS = 600;
+const BAR_MS = 120;
 async function route() {
   for (const fn of leaving.splice(0)) fn();
   for (const d of document.querySelectorAll("dialog[open]")) d.close();
   const n = ++routing;
-  const { page: p, id, sub, q } = parseHash();
+  const { page: p, id, sub, arg, q } = parseHash();
+  const refresh = location.hash === shown;
   document.body.classList.remove("app-mode");
-  if (p !== "") setWallpaper(await hues(), { dim: true });
+  if (p !== "" && !refresh) setWallpaper(await hues(), { dim: true });
   if (n !== routing) return;
+  // Any page (a new one, or this one again) keeps the one on screen until it's ready: no skeleton
+  // flashed in between. A refresh waits for its content however long it takes. The hold is this
+  // route's: a later one takes it over, and only this one's timer or end lets it go.
+  holdDraws(n);
+  const bar = setTimeout(() => n === routing && document.body.classList.add("routing"), BAR_MS);
+  if (!refresh) setTimeout(() => releaseHeld(n), HOLD_MS);
   try {
     if (p === "") return await home();
     if (p === "app") return await appPage(id, q);
     if (p === "run") return await runPage(id, q);
+    if (p === "hub" && id) return await hubToolPage(id);
+    if (p === "hub") return await hubPage(q);
+    if (p === "c" && sub === "versions") return await versionsPage(id);
+    if (p === "c" && sub === "sample") return await samplePage(id);
+    if (p === "c" && sub === "v") return await versionPage(id, Number(arg), q);
     if (p === "c") return await infoPage(id);
     if (p === "new") return await intakePage(q);
     if (p === "b") return await buildPage(id);
@@ -51,6 +75,9 @@ async function route() {
     page("", 680, empty("Not found", "That page doesn't exist."), h("a", { class: "btn self-center", href: "#/" }, "Home"));
   } catch (e) {
     if (n === routing) page("", 680, errorBox(e), h("a", { class: "btn self-start", href: "#/" }, "‹ Home"));
+  } finally {
+    clearTimeout(bar);
+    if (n === routing) (releaseHeld(n), document.body.classList.remove("routing"), (shown = location.hash));
   }
 }
 
