@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake role's request/reply shapes (shared by the surface on every host; the CLI
 // implementation lives in src/intake.ts).
-import type { BundleSummary, SummaryFinding } from "@hewntools/core/bundle.ts";
-
-export type { SummaryFinding };
+import type { BundleSummary } from "@hewntools/core/bundle.ts";
 import type { CapabilityManifest } from "@hewntools/core/manifest.ts";
 import type { SummaryInput } from "@hewntools/core/platform.ts";
 
