@@ -187,6 +187,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         kind: job.kind,
         workspace: ws(job.buildId),
         attempt: job.attempt,
+        ...(job.retryOf ? { retryOf: job.retryOf } : {}),
         feedback: job.feedback,
         logPath: transcript(job.buildId),
         builderName: job.builder,
