@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // In-memory stand-in for the idea operations, used only when the page is opened with
 // ?preview=demo (sample ideas in every status, with and without optional fields, and max-length
-// text), ?preview=empty (no ideas) or ?preview=error (every call fails, as when Jig is unreachable). Mirrors the latest contract versions closely enough to
+// text), ?preview=empty (no ideas) or ?preview=error (every call fails, as when Hewn is unreachable). Mirrors the latest contract versions closely enough to
 // exercise every view; it never touches real data.
 import { LIVE, CLOSED, statusRank } from "./statuses.js";
 
@@ -18,7 +18,7 @@ function sampleIdeas(now) {
     { id: "d-raw", title: "Kids' weather wardrobe app", pitch: null, url: null, status: "raw", rating: null, tags: [], notes: [], age: 0.02 },
     { id: "d-long", title: longTitle, pitch: longPitch, url: "https://example.com/" + "x".repeat(480), status: "raw", rating: 2, tags: Array.from({ length: 20 }, (_, i) => `tag-${String(i + 1).padStart(2, "0")}-${"t".repeat(30)}`), notes: ["n".repeat(5000)], age: 12 },
     { id: "d-parked", title: "Newsletter about Nordic startups", pitch: "Weekly digest of funding rounds and launches.", url: null, status: "parked", rating: 2, tags: ["writing"], notes: ["On hold until autumn."], age: 40 },
-    { id: "d-shipped", title: "Word list with spaced repetition", pitch: "Learn the words I keep looking up.", url: "https://example.com/words", status: "shipped", rating: 4, tags: ["learning"], notes: ["Live and used daily."], age: 90 },
+    { id: "d-shipped", title: "Recipe scaler for home bakers", pitch: "Rescales a recipe to the tin or the number of guests you have.", url: "https://example.com/scaler", status: "shipped", rating: 4, tags: ["cooking"], notes: ["Launched; a few hundred weekly users."], age: 90 },
     { id: "d-killed", title: "Crypto tip jar", pitch: "Nobody wanted it.", url: null, status: "killed", rating: 1, tags: [], notes: [], age: 200 },
   ];
   return base.map((b) => ({
@@ -111,7 +111,7 @@ export function createFakeBackend(mode, now = Date.now()) {
 
   return async (operation, input = {}) => {
     await new Promise((r) => setTimeout(r, 150));
-    if (mode === "error") return { error: "UNAVAILABLE", message: "Couldn't reach Jig. Check the connection and try again." };
+    if (mode === "error") return { error: "UNAVAILABLE", message: "Couldn't reach Hewn. Check the connection and try again." };
     const fn = ops[operation];
     if (!fn) return { error: "UNKNOWN_OPERATION", message: `Unknown: ${operation}` };
     const out = fn(structuredClone(input));

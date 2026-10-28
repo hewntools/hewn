@@ -50,7 +50,7 @@ const MAX_TAGS = 20;
 const MAX_TAG_LEN = 40;
 const MAX_URL_LEN = 500;
 
-// The jig runtime crashes on raw U+2028/U+2029 in serialized output, and
+// The Hewn runtime crashes on raw U+2028/U+2029 in serialized output, and
 // JSON.stringify leaves them unescaped. They can only occur inside JSON string
 // literals, where the \u escape decodes to the identical character.
 const LINE_SEPARATORS = new RegExp(`[${String.fromCharCode(0x2028, 0x2029)}]`, "g");

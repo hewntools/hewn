@@ -114,7 +114,7 @@
     {
       "name": "list_people",
       "version": 1,
-      "description": "Everyone you buy for, soonest next occasion first: each with the next occasion (birthday, Christmas or a custom one), days until it, how ready it is, and counts of ideas and bought gifts.",
+      "description": "Everyone you buy for, soonest next occasion first: each with the next occasion (birthday, Christmas Eve or a custom one), days until it, how ready it is, and counts of ideas and bought gifts.",
       "sideEffect": "read",
       "inputSchema": {
         "type": "object",
@@ -179,7 +179,7 @@
     {
       "name": "add_gift",
       "version": 1,
-      "description": "Save a gift for a person. Status defaults to idea. Occasion defaults to the person's next occasion (birthday, Christmas, or other for a custom one). Year is optional: leave it out for an idea that fits any year.",
+      "description": "Save a gift for a person. Status defaults to idea. Occasion defaults to the person's next occasion (birthday, Christmas Eve, or other for a custom one). Year is optional: leave it out for an idea that fits any year.",
       "sideEffect": "write",
       "inputSchema": {
         "type": "object",
@@ -255,7 +255,7 @@
     {
       "name": "upcoming",
       "version": 1,
-      "description": "Birthdays, Christmas (Dec 24, once per person) and custom occasions within the next N days (default 60), soonest first. Each says how ready it is: bought (a gift is bought or given for it), ideas (ideas saved for the person) or none.",
+      "description": "Birthdays, Christmas Eve (Dec 24, once per person) and custom occasions within the next N days (default 60), soonest first. Each says how ready it is: bought (a gift is bought or given for it), ideas (ideas saved for the person) or none.",
       "sideEffect": "read",
       "inputSchema": {
         "type": "object",

@@ -354,7 +354,7 @@ async function renderPerson(id, keep = {}) {
   const giftRow = (g, buttons) => {
     const meta = [];
     if (g.price !== null) meta.push(numFmt.format(g.price));
-    if (g.status !== "idea" || g.occasion !== "other") meta.push(g.occasion === "birthday" ? "Birthday" : g.occasion === "christmas" ? "Christmas" : "Other");
+    if (g.status !== "idea" || g.occasion !== "other") meta.push(g.occasion === "birthday" ? "Birthday" : g.occasion === "christmas" ? "Christmas Eve" : "Other");
     if (g.year && g.status !== "given") meta.push(String(g.year));
     const link = g.link ? ` <a href="${esc(g.link)}" target="_blank" rel="noopener noreferrer">Link</a>` : "";
     return `<li>

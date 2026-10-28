@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Gift Ideas: people, gift ideas per occasion, upcoming birthdays/Christmas and model suggestions.
+// Gift Ideas: people, gift ideas per occasion, upcoming birthdays/Christmas Eve and model suggestions.
 // See BUILDER.md for the implementation contract.
 
 type Db = {
@@ -41,7 +41,7 @@ export type Upcoming = {
   bought_count: number;
 };
 
-const CHRISTMAS = { month: 12, day: 24 };
+const CHRISTMAS_EVE = { month: 12, day: 24 };
 const TIME_ZONE: string | undefined = undefined; // the runtime's own zone: tools don't get the owner's time zone yet
 
 // ---------------------------------------------------------------- dates (pure)
@@ -168,7 +168,7 @@ function compareUpcoming(a: Upcoming, b: Upcoming): number {
   );
 }
 
-/** Every person's next birthday, Christmas and custom occasions (plus general custom occasions), soonest first. */
+/** Every person's next birthday, Christmas Eve and custom occasions (plus general custom occasions), soonest first. */
 export function buildUpcoming(people: Person[], gifts: Gift[], occasions: CustomOccasion[], today: string): Upcoming[] {
   const giftsBy = new Map<number, Gift[]>();
   for (const g of gifts) {
@@ -199,7 +199,7 @@ export function buildUpcoming(people: Person[], gifts: Gift[], occasions: Custom
         // a malformed stored birthday is skipped rather than breaking the list
       }
     }
-    push("christmas", "Christmas", p, nextYearly(CHRISTMAS.month, CHRISTMAS.day, today), null, null);
+    push("christmas", "Christmas Eve", p, nextYearly(CHRISTMAS_EVE.month, CHRISTMAS_EVE.day, today), null, null);
   }
   for (const o of occasions) {
     let date: string | null = null;

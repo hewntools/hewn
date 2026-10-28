@@ -26,9 +26,9 @@ async function call(operation, input = {}) {
       headers: { "content-type": "application/json", "x-hewn-ui": "1" },
       body: JSON.stringify({ operation, input, operationVersion: VERSIONS[operation] }),
     });
-    return await r.json().catch(() => ({ error: "BAD_RESPONSE", message: "Jig sent a reply the page couldn't read. Try again." }));
+    return await r.json().catch(() => ({ error: "BAD_RESPONSE", message: "Hewn sent a reply the page couldn't read. Try again." }));
   } catch {
-    return { error: "NETWORK", message: "Couldn't reach Jig. Check the connection and try again." };
+    return { error: "NETWORK", message: "Couldn't reach Hewn. Check the connection and try again." };
   }
 }
 

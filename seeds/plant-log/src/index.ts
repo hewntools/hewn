@@ -120,7 +120,7 @@ function compareText(a: string | null, b: string | null): number {
   if (a === b) return 0;
   if (a === null) return 1; // no location sorts last
   if (b === null) return -1;
-  return a.localeCompare(b, "sv", { sensitivity: "base" }) || (a < b ? -1 : a > b ? 1 : 0);
+  return a.localeCompare(b, undefined, { sensitivity: "base" }) || (a < b ? -1 : a > b ? 1 : 0);
 }
 
 /** Due order: most overdue first, then due today, then soonest; ties by location, then name. */

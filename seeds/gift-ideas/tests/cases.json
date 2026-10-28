@@ -13,7 +13,7 @@
   { "name": "birthday rolls over the year end", "operation": "get_person", "version": 1, "input": { "id": 4, "today": "2026-12-30" }, "expect": { "next_birthday": { "date": "2027-01-05", "days_until": 6, "turning": null } } },
   { "name": "birthday today is 0 days away", "operation": "get_person", "version": 1, "input": { "id": 2, "today": "2026-10-25" }, "expect": { "next_birthday": { "date": "2026-10-25", "days_until": 0 } } },
   { "name": "Christmas Eve counts for everyone on the day", "operation": "upcoming", "version": 1, "input": { "today": "2026-12-24", "days": 0 }, "expect": { "count": 4 } },
-  { "name": "Christmas rolls over to next year after Dec 24", "operation": "upcoming", "version": 1, "input": { "today": "2026-12-25", "days": 300 }, "expect": { "count": 2, "occasions": [{ "person_name": "Otto", "date": "2027-01-05", "days_until": 11 }, { "person_name": "Maya", "date": "2027-02-28", "days_until": 65 }] } },
+  { "name": "Christmas Eve rolls over to next year after Dec 24", "operation": "upcoming", "version": 1, "input": { "today": "2026-12-25", "days": 300 }, "expect": { "count": 2, "occasions": [{ "person_name": "Otto", "date": "2027-01-05", "days_until": 11 }, { "person_name": "Maya", "date": "2027-02-28", "days_until": 65 }] } },
 
   { "name": "updates notes and relation", "operation": "update_person", "version": 1, "input": { "id": 2, "relation": "friend", "notes": "Into board games" }, "expect": { "id": 2, "name": "Ben", "relation": "friend", "notes": "Into board games", "birthday": "10-25" } },
   { "name": "update rejects unknown person", "operation": "update_person", "version": 1, "input": { "id": 99, "name": "Z" }, "expectError": true },
@@ -37,7 +37,7 @@
     { "person_name": "Ada", "kind": "birthday", "date": "2026-11-02", "days_until": 13, "turning": 36, "ready": "bought", "bought_count": 1 },
     { "person_name": null, "kind": "other", "name": "Wedding anniversary", "date": "2026-11-10", "days_until": 21, "ready": "none" }
   ] } },
-  { "name": "upcoming wider window adds Christmas per person", "operation": "upcoming", "version": 1, "input": { "today": "2026-10-20", "days": 70 }, "expect": { "count": 7 } },
+  { "name": "upcoming wider window adds Christmas Eve per person", "operation": "upcoming", "version": 1, "input": { "today": "2026-10-20", "days": 70 }, "expect": { "count": 7 } },
   { "name": "upcoming rejects too long window", "operation": "upcoming", "version": 1, "input": { "days": 1000 }, "expectError": true },
 
   { "name": "list_people sorts by next occasion", "operation": "list_people", "version": 1, "input": { "today": "2026-10-20" }, "expect": { "people": [
@@ -78,8 +78,8 @@
       { "title": "Ben · Birthday" },
       { "title": "Ada · Birthday" },
       { "title": "Wedding anniversary" },
-      { "title": "Ada · Christmas", "detail": "in 65 days", "value": "1 idea" },
-      { "title": "Ben · Christmas", "detail": "in 65 days", "value": "1 idea" }
+      { "title": "Ada · Christmas Eve", "detail": "in 65 days", "value": "1 idea" },
+      { "title": "Ben · Christmas Eve", "detail": "in 65 days", "value": "1 idea" }
     ] }
   } },
   { "name": "widget draws with defaults", "operation": "widget_upcoming", "version": 1, "input": {}, "expect": { "medium": { "template": "list" }, "large": { "template": "list" } } },
@@ -99,7 +99,7 @@
   {"name":"prepare none-ready birthday","operation":"prepare_upcoming","version":1,"input":{"today":"2099-02-10"},"model":[{"json":{"suggestions":[{"idea":"Star atlas","why":"Recent wish"},{"idea":"Red reading light","why":"For stargazing"}]}}],"expect":{"checked":1,"skipped":0,"prepared":[{"person_id":3,"name":"Birthday","date":"2099-02-28","days_until":18,"suggestions":[{"idea":"Star atlas"},{"idea":"Red reading light"}]}]}},
   {"name":"repeat preparation does not call model","operation":"prepare_upcoming","version":1,"input":{"today":"2099-02-11"},"model":[],"expect":{"checked":1,"skipped":1,"prepared":[]}},
   {"name":"get current prepared for person","operation":"get_prepared","version":1,"input":{"person_id":3},"expect":{"prepared":[{"person_id":3,"generated_at":"$any","suggestions":[{"idea":"Star atlas"},{"idea":"Red reading light"}]}]}},
-  {"name":"new widget flags stored suggestions","operation":"widget_upcoming","version":2,"input":{"today":"2099-02-10"},"expect":{"medium":{"template":"list","items":[{"title":"Maya · Birthday","detail":"in 18 days · Nothing yet · 2 ready"},{"title":"Ben · Birthday","detail":"in 257 days","value":"1 idea"},{"title":"Ben · Christmas","detail":"in 317 days","value":"1 idea"}]}}},
+  {"name":"new widget flags stored suggestions","operation":"widget_upcoming","version":2,"input":{"today":"2099-02-10"},"expect":{"medium":{"template":"list","items":[{"title":"Maya · Birthday","detail":"in 18 days · Nothing yet · 2 ready"},{"title":"Ben · Birthday","detail":"in 257 days","value":"1 idea"},{"title":"Ben · Christmas Eve","detail":"in 317 days","value":"1 idea"}]}}},
   {"name":"save stored suggestion as idea","operation":"save_suggestion","version":1,"input":{"person_id":3,"idea":"Star atlas","why":"Recent wish"},"expect":{"person_id":3,"idea":"Star atlas","status":"idea","link":null,"year":null}},
   {"name":"saved suggestion removed from batch","operation":"get_prepared","version":1,"input":{"person_id":3},"expect":{"prepared":[{"suggestions":[{"idea":"Red reading light"}]}]}},
   {"name":"cannot save same stored suggestion twice","operation":"save_suggestion","version":1,"input":{"person_id":3,"idea":"Star atlas"},"expectError":true},

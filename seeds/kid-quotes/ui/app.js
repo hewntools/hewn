@@ -8,7 +8,7 @@ const call = (operation, input = {}) =>
     body: JSON.stringify({ operation, input }),
   })
     .then((r) => r.json())
-    .catch(() => ({ error: "network", message: "Couldn't reach Jig. Check the connection and try again." }));
+    .catch(() => ({ error: "network", message: "Couldn't reach Hewn. Check the connection and try again." }));
 
 const $ = (id) => document.getElementById(id);
 const PAGE = 50;
