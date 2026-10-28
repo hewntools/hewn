@@ -6,12 +6,13 @@
 import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
+import { readSummary } from "@hewntools/core/bundle.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
-import { agentModels, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
+import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
@@ -418,22 +419,14 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       return platform.installBundle(owner, id, { name: String(b.name ?? ""), sample: !!b.sample });
     }
     if (id && !sub && method === "DELETE") {
+      readings.get(id)?.abort();
       await platform.dropStaged(owner, id);
       return { ok: true };
     }
-    // R2: your builder reads the code before you install it (decision 29): what it does with your data, and what it found.
-    if (id && sub === "summary" && method === "POST") {
-      if (!host.intake) throw new PlatformError("not_found", "No summary: no builder is set up (Settings › AI)");
-      const bundle = await platform.summaryInput(owner, id);
-      const started = Date.now();
-      const reply = await host.intake({ mode: "summarize", messages: [], bundle }, (p) => (p as IntakeProgress).charge !== undefined && platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge));
-      if (reply.kind !== "summary") throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
-      const summary = { message: reply.message, keeps: reply.keeps, reaches: reply.reaches, findings: reply.findings };
-      await platform.keepSummary(owner, id, summary);
-      const seconds = Math.round((Date.now() - started) / 1000);
-      host.log(`web intake summarize ${bundle.manifest.id} → ${summary.findings.filter((f) => f.kind === "warn").length} warning(s) (${seconds}s)`);
-      return { summary, seconds, by: (await host.settings.read()).intake ?? null };
-    }
+    // R2: your builder reads the code before you install it: what it does with your data, and what it found.
+    if (id && sub === "summary" && method === "POST") return readBundle(platform, host, owner, id, req);
+    // Install anyway (or the sheet closed) while it reads: stop it, and keep nothing it says after.
+    if (id && sub === "summary" && method === "DELETE") return (readings.get(id)?.abort(), { ok: true });
   }
 
   if (resource === "inbox" && method === "GET") return inbox(platform, host, owner, url.searchParams.get("recent") === "1");
@@ -703,6 +696,69 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   throw new PlatformError("not_found", `no route ${method} ${url.pathname}`);
+}
+
+/**
+ * Readings under way, by staged file. The client stops one itself (DELETE …/summary, or dropping the
+ * file): a closed request doesn't always reach this far (workerd), and the agent should stop then.
+ */
+const readings = new Map<string, AbortController>();
+
+/** The intake's agent isn't there: none set up, none by that name, or its CLI isn't installed (the sandbox can't start it). */
+const NO_READER = /intake is not configured|no intake named|intake isn't configured|execvp.*No such file/i;
+const NO_BUILDER = "No builder is set up (Settings › AI)";
+
+/**
+ * R2: your builder reads a staged tool's code before it's installed (the intake, mode "summarize"):
+ * what it does with your data, and what it found, kept with the staged file for the install. With
+ * Accept: text/event-stream it streams as the intake does (progress, then the reading; a ping while
+ * the agent is quiet, so a proxy doesn't cut a long one). Stopping it (`readings`) or closing the
+ * request stops the agent, and a reading that ends after that isn't kept.
+ */
+async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, token: string, req: Request): Promise<unknown> {
+  const intake = host.intake;
+  if (!intake) throw new PlatformError("not_found", NO_BUILDER);
+  const bundle = await platform.summaryInput(owner, token);
+  // Who reads it: the agent the intake runs on (the builder's).
+  const by = intakeJob(await host.settings.read()).agent;
+  const read = async (closed?: AbortSignal, onProgress?: (p: IntakeProgress) => void) => {
+    readings.get(token)?.abort();
+    const stop = new AbortController();
+    readings.set(token, stop);
+    const signal = closed ? AbortSignal.any([closed, stop.signal]) : stop.signal;
+    const started = Date.now();
+    const log = (outcome: string) => host.log(`web intake summarize ${bundle.manifest.id} → ${outcome} (${Math.round((Date.now() - started) / 1000)}s)`);
+    try {
+      const reply = await intake({ mode: "summarize", messages: [], bundle }, (p) => ((p as IntakeProgress).charge !== undefined ? platform.recordHostCharge(owner, "intake", (p as IntakeProgress).charge) : onProgress?.(p as IntakeProgress)), signal);
+      const summary = reply.kind === "summary" ? readSummary(reply) : null;
+      if (!summary) throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
+      // The owner moved on (Install anyway, Cancel, closed the sheet): a reading that ends now isn't theirs to keep.
+      if (signal.aborted) throw new PlatformError("operation_failed", "stopped");
+      await platform.keepSummary(owner, token, summary);
+      log(`${summary.findings.filter((f) => f.kind === "warn").length} warning(s)`);
+      return { summary, seconds: Math.round((Date.now() - started) / 1000), by };
+    } catch (e) {
+      log(`ERROR ${(e as Error).message}`);
+      throw NO_READER.test((e as Error).message) && !signal.aborted ? new PlatformError("not_found", NO_BUILDER) : e;
+    } finally {
+      if (readings.get(token) === stop) readings.delete(token);
+    }
+  };
+  if (!/text\/event-stream/.test(req.headers.get("accept") ?? "")) return read(req.signal);
+  return sse(
+    { "content-security-policy": WEB_CSP },
+    async (event, signal) => {
+      const ping = setInterval(() => event("ping", null), 15_000);
+      try {
+        event("reply", await read(signal, (p) => event("progress", p)));
+      } catch (e) {
+        event("error", { message: signal.aborted ? "stopped" : (e as Error).message });
+      } finally {
+        clearInterval(ping);
+      }
+    },
+    req.signal,
+  );
 }
 
 /** The conversation that led to a build (and the version it made), for the intake to continue from. */
