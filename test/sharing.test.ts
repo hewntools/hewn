@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -186,10 +186,47 @@ describe("sharing: a tool as a file", () => {
     const { files, sidecar } = unpackBundle(bundle);
     assert.deepEqual(sidecar.tool, { id: "running-log", version: 2, hash: t.platform.registry.getVersion("running-log", 2)!.contentHash });
     assert.ok(files["sample/calls.json"] && files["src/index.ts"]);
-    assert.ok(!Object.keys(files).some((p) => p === "BUILDER.md" || p.startsWith("attachments/")), "workspace-only files never travel");
     // Any version, not only the active one: v1 has no sample data.
     assert.deepEqual((await t.platform.shareCheck(USER, "running-log", 1)).blocked, { kind: "no-sample" });
     await assert.rejects(t.platform.shareCheck(t.claude, "running-log"), /cannot perform owner actions/);
+  });
+
+  test("what was only in a build's workspace never travels: the brief, AGENTS.md, attachments", async () => {
+    await withSample();
+    let had: string[] = [];
+    const b = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "running-log", request: "look at the photo" }),
+      (ws) => {
+        mkdirSync(join(ws, "attachments"), { recursive: true });
+        writeFileSync(join(ws, "attachments", "photo.png"), "a photo of the owner's street");
+        had = ["BUILDER.md", "AGENTS.md", "attachments/photo.png"].filter((p) => existsSync(join(ws, p)));
+        editJson(join(ws, "capability.json"), (m) => (m.description = "Looked at the photo"));
+      },
+    );
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+    assert.deepEqual(had, ["BUILDER.md", "AGENTS.md", "attachments/photo.png"], "the workspace had them");
+    const { files } = unpackBundle((await t.platform.shareBundle(USER, "running-log")).bundle);
+    assert.deepEqual(Object.keys(files).filter((p) => had.includes(p) || p.startsWith("attachments")), [], "and the file hasn't");
+    assert.match(text(files["capability.json"]), /Looked at the photo/, "it is that version");
+  });
+
+  test("a sample replay that fails after an install leaves the tool installed, and says which call", async () => {
+    const op = { name: "add", description: "Adds one", version: 1, sideEffect: "write", inputSchema: { type: "object" }, outputSchema: { type: "object" } };
+    const files = {
+      "capability.json": bytes(JSON.stringify({ id: "picky", name: "Picky", purpose: "Refuses people", abi: "2.0", operations: [op] })),
+      // Fine for validation's own callers; a person (the install's replay runs as the owner) is refused.
+      "src/index.ts": bytes('export const operations = { "add@1": (_: unknown, ctx: any) => { if (ctx.caller?.kind === "user") throw new Error("not for people"); ctx.db.prepare("INSERT INTO n (v) VALUES (1)").run(); return { ok: true }; } };\n'),
+      "migrations/001_init.sql": bytes("CREATE TABLE n (v INTEGER);\n"),
+      "tests/cases.json": bytes(JSON.stringify([{ name: "adds", operation: "add", input: {}, expect: { ok: true } }])),
+      "sample/calls.json": bytes(JSON.stringify([{ operation: "add", input: {} }])),
+    };
+    const zip = packBundle(files, { format: 1, hewn: "test", abi: "2.0", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "picky", version: 1, hash: "f".repeat(64) } });
+    const preview = await t.platform.stageBundle(USER, zip);
+    const done = await t.platform.settle((await t.platform.installBundle(USER, preview.token, { name: "Picky", sample: true })).buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.ok(done.log.some((l) => /sample data stopped at call 1 \(add\): .*not for people/.test(l)), done.log.join("\n"));
+    assert.equal(t.platform.registry.getCapability("picky")!.activeVersion, 1, "installed all the same");
+    assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.capabilityId === "picky" && e.action === "sample" && /0 of 1 calls; add failed: .*not for people/.test(e.detail)));
   });
 
   test("the owner's own keys block sharing, each listed and never sent back whole; a setting only warns", async () => {
