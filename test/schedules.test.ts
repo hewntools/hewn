@@ -55,6 +55,49 @@ describe("schedules", () => {
     assert.equal(t.platform.nextScheduleAt(), null);
   });
 
+  test("Try again: the owner runs a schedule now, as itself; a success clears its failures, a failure doesn't count toward pausing", async () => {
+    const s = t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 2, durationSeconds: 600 }, cadence: "hourly" });
+    t.platform.schedules.update(s.id, { failures: 2, lastOutcome: "operation_failed: boom", lastRunAt: new Date(0).toISOString() });
+    await assert.rejects(t.platform.runScheduleNow(t.claude, s.id), code("forbidden"));
+    const r = await t.platform.runScheduleNow(USER, s.id);
+    assert.deepEqual(r, { ok: true, outcome: "ok" });
+    assert.equal((await runs()).length, 1);
+    let after = t.platform.schedules.get(s.id)!;
+    assert.equal(after.failures, 0);
+    assert.equal(after.lastOutcome, "ok");
+    assert.equal(after.nextRunAt, s.nextRunAt, "its next time stays");
+    assert.match(t.platform.logLines("running-log", 10).join("\n"), new RegExp(`schedule:${s.id} record_run@1 ok`));
+    const p = t.platform.proposeSchedule(t.codex, { capabilityId: "running-log", operation: "get_summary", cadence: "daily 07:00", note: "x" });
+    await assert.rejects(t.platform.runScheduleNow(USER, p.id), /enable the schedule/);
+    await assert.rejects(t.platform.runScheduleNow(USER, "nope"), code("not_found"));
+    t.platform.schedules.update(s.id, { failures: 2 });
+    t.platform.archive(USER, "running-log");
+    const bad = await t.platform.runScheduleNow(USER, s.id);
+    assert.equal(bad.ok, false);
+    after = t.platform.schedules.get(s.id)!;
+    assert.equal(after.failures, 2, "a run by hand doesn't count toward pausing");
+    assert.equal(after.status, "active");
+    assert.equal(after.lastOutcome, bad.outcome);
+  });
+
+  test("Try again on a schedule paused after failures: it stays paused, and a success clears why", async () => {
+    const s = t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 2, durationSeconds: 600 }, cadence: "hourly" });
+    t.platform.archive(USER, "running-log");
+    for (let i = 0; i < 3; i++) await t.platform.runDueSchedules(Date.now() + (i + 1) * 2 * HOUR);
+    assert.equal((await t.platform.runScheduleNow(USER, s.id)).ok, false);
+    let after = t.platform.schedules.get(s.id)!;
+    assert.equal(after.status, "paused");
+    assert.equal(after.failures, 3, "still paused after 3 failures");
+    assert.match(after.pausedReason!, /3 failures/);
+    t.platform.restore(USER, "running-log");
+    assert.equal((await t.platform.runScheduleNow(USER, s.id)).ok, true);
+    after = t.platform.schedules.get(s.id)!;
+    assert.equal(after.status, "paused", "the owner resumes it");
+    assert.equal(after.pausedReason, null, "a plain paused schedule");
+    assert.equal(after.failures, 0);
+    assert.equal(after.nextRunAt, null);
+  });
+
   test("only read and write operations; bad cadences and inputs are refused", async () => {
     assert.throws(() => t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "record_run", input: {}, cadence: "hourly" }), code("invalid_input"));
     assert.throws(() => t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "get_summary", cadence: "* * * * *" }), /at most every 5 minutes/);

@@ -542,10 +542,11 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/settings", { method: "PUT", body: { firstRunDone: true } })).json.firstRunDone, true);
     });
 
-    test("schedules from the web: create, pause, list", async () => {
+    test("schedules from the web: create, run now, pause, list", async () => {
       const made = await api("/schedules", { method: "POST", body: { capabilityId: "ui-counter", operation: "increment", cadence: "daily 07:00" } });
       assert.equal(made.status, 200, JSON.stringify(made.json));
       assert.equal(made.json.status, "active");
+      assert.deepEqual((await api(`/schedules/${made.json.id}/run`, { method: "POST" })).json, { ok: true, outcome: "ok" });
       assert.equal((await api(`/schedules/${made.json.id}`, { method: "PUT", body: { status: "paused" } })).json.status, "paused");
       assert.ok((await api("/schedules")).json.some((x: any) => x.id === made.json.id && x.status === "paused"));
       assert.equal((await api("/schedules", { method: "POST", body: { capabilityId: "ui-counter", operation: "increment", cadence: "every second" } })).status, 400);
@@ -703,6 +704,21 @@ describe("web client (owner surface)", () => {
       assert.deepEqual((await api("/capabilities/site-connection/grants/approve", { method: "POST", body: { grant: first } })).json.approved, [first]);
       assert.deepEqual(await pending(), rest);
       assert.equal((await api("/capabilities/site-connection/grants/approve", { method: "POST", body: { grant: "host:elsewhere.example" } })).status, 400);
+    });
+
+    test("Deny from the web: the owner's no is kept, and the Inbox stops asking", async () => {
+      await installFrom(platform, resolve(FIX, "run-feeder"));
+      const asks = async () => (await api("/inbox")).json.needs.some((n: any) => n.kind === "grant" && n.capabilityId === "run-feeder");
+      assert.ok(await asks());
+      const { pendingGrants } = (await api("/capabilities/run-feeder")).json.status;
+      for (const grant of pendingGrants) assert.deepEqual((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant } })).json, { declined: true });
+      const st = (await api("/capabilities/run-feeder")).json.status;
+      assert.equal(st.ready, false);
+      assert.deepEqual(st.declinedGrants, pendingGrants);
+      assert.equal(await asks(), false);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "run-feeder").saidNo, true, "Home doesn't badge it");
+      assert.equal((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant: "host:elsewhere.example" } })).status, 400);
+      assert.equal((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant: pendingGrants[0] }, cookie: "" })).status, 401, "owner only");
     });
 
     test("the Inbox: what needs the owner in one list, what builds, and recent Activity on request", async () => {

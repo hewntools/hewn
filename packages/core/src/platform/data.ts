@@ -7,6 +7,18 @@ import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
 import { Domain } from "./context.ts";
 
+/** How many of a capability's latest calls Info › Data looks through for its last write. */
+const WRITE_LOOKBACK = 500;
+
+/** Info › Data: rows per table, and the last write found in the call log. */
+export interface DataSummary {
+  tables: Record<string, number>;
+  rows: number;
+  lastWriteAt: string | null;
+  /** How many calls were looked through: fewer than 500 is the whole log. */
+  callsChecked: number;
+}
+
 export class Data extends Domain {
   /**
    * "Delete" archives: the capability disappears for the owner and every agent, its state and
@@ -105,6 +117,30 @@ export class Data extends Domain {
     }
     const active = await this.loadVersion(capabilityId, cap.activeVersion!);
     return { ...base, source: "state", data: await this.runtime.dumpState({ capabilityId }, active.code) };
+  }
+
+  /**
+   * Info › Data: rows per table (counted, not read) and when an operation last wrote, from the
+   * call log's last `WRITE_LOOKBACK` calls (so null once the log has been pruned past it, or when
+   * none of them wrote). `callsChecked`: how many calls that was, so "none" can say "in the last 500".
+   */
+  async dataSummary(owner: Agent, capabilityId: string): Promise<DataSummary> {
+    requireOwner(owner);
+    const cap = this.visibleActive(owner, capabilityId);
+    const active = await this.loadVersion(capabilityId, cap.activeVersion!);
+    const tables = await this.runtime.countState({ capabilityId }, active.code);
+    const writes = new Set(active.row.manifest.operations.filter((o) => o.sideEffect !== "read").flatMap((o) => [o.name, opKey(o.name, o.version)]));
+    const headers = this.registry.capabilityLogHeaders(capabilityId, WRITE_LOOKBACK);
+    let lastWriteAt: string | null = null;
+    for (const header of headers) {
+      // The caller may hold spaces ("agent:x → tool"), so read from the end: "… <op> ok <ms>ms".
+      const m = /^(\S+) .* (\S+) ok \d+ms$/.exec(header);
+      if (m && writes.has(m[2])) {
+        lastWriteAt = m[1];
+        break;
+      }
+    }
+    return { tables, rows: Object.values(tables).reduce((n, x) => n + x, 0), lastWriteAt, callsChecked: headers.length };
   }
 
   /**

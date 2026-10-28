@@ -107,7 +107,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "glyphs", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "frame", "glyphs", "grants", "home", "inbox", "info", "intake", "models", "palette", "review", "router", "schedules", "settings", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -325,6 +325,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST purge":
         await platform.purge(owner, id, String((await readJson(req)).confirm ?? ""));
         return { ok: true };
+      // Info › Data: rows per table and the last write.
+      case "GET data":
+        return platform.dataSummary(owner, id);
       case "GET export": {
         const data = await platform.exportData(owner, id);
         return new Response(JSON.stringify(data, null, 2), {
@@ -369,6 +372,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
           return { approved: [String(grant)] };
         }
         if (arg === "revoke") return platform.revokeGrant(owner, id, String((await readJson(req)).grant ?? ""));
+        if (arg === "decline") return (platform.declineGrant(owner, id, String((await readJson(req)).grant ?? "")), { declined: true });
     }
   }
 
@@ -435,6 +439,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (!id) return platform.listSchedules(owner);
     if (method === "PUT") return platform.updateSchedule(owner, id, pick(await readJson(req), ["status", "cadence", "input"]) as any);
     if (method === "DELETE") return platform.deleteSchedule(owner, id), { ok: true };
+    if (method === "POST" && sub === "run") return platform.runScheduleNow(owner, id);
   }
 
   if (resource === "confirmations") {
@@ -701,6 +706,8 @@ async function capabilityList(platform: Platform, owner: Agent) {
       ui: !!m.ui?.available,
       version: row?.activeVersion ?? null,
       requests: platform.registry.accessRequests(c.id).length,
+      // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
+      saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
       lastBuild: last ? { buildId: last.id, status: last.status } : null,
       building: building(c.id),
     });
@@ -806,9 +813,13 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     if (m.requires?.model) modelUsers = true;
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
+    // Held back only by what the owner said no to (Deny): nothing to ask.
+    if (st.onlySaidNo) continue;
     const connection = m.kind === "connection";
-    if (st.pendingGrants.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
-      const first = platform.authorization(c.id).items.find((i) => !i.approved);
+    // What the owner said no to isn't asked again; whatever else it needs is.
+    const asking = st.pendingGrants.filter((g) => !st.declinedGrants?.includes(g));
+    if (asking.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
+      const first = platform.authorization(c.id).items.find((i) => !i.approved && asking.includes(i.grant));
       const words = !first
         ? connection ? "needs setting up" : "needs your authorization"
         : first.kind === "capability"
@@ -855,7 +866,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
 
   const building = builds
     .filter((b) => LIVE.has(b.status))
-    .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null }));
+    .map((b) => ({ buildId: b.buildId, capabilityId: b.capabilityId, name: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), kind: b.kind, status: b.status, step: b.step ?? null, tests: b.tests ?? b.step?.tests ?? null, dependsOn: b.dependsOn ?? null, queued: !!b.queued }));
   return { needs, building, ...(recent ? { recent: activity(platform, owner, { limit: 6 }).items } : {}) };
 }
 

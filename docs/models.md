@@ -44,11 +44,11 @@ A tool asks for a **tier**, not a model, so you can change providers without reb
 | Strong | harder reasoning |
 | Max | the most capable |
 
-Settings › AI › Models shows which model each tier uses on your provider, and its price. A tool's own **Model** row (Info) lets you move it to another tier.
+Settings › AI › Models shows which model each tier uses on your provider, and its price. On a tool's Info, **Allowed to** has its model as a tier menu, with what it spent this month; **A specific model…** at the bottom of that menu pins one model, and the **Monthly cap** row under it sets the tool's own cap.
 
 ## Spending
 
-Hewn counts what each call costs from the provider's prices, and stops at your **monthly budget** (default is $5). Calls over the budget are refused, and the tool gets an error it can show. Settings › AI › Models shows this month's spend and lets you change the budget. A tool can have its own cap too (Info › Model).
+Hewn counts what each call costs from the provider's prices, and stops at your **monthly budget** (default is $5). Calls over the budget are refused, and the tool gets an error it can show. Settings › AI › Models shows this month's spend and lets you change the budget. A tool can have its own cap too (Info › Allowed to › **Monthly cap**).
 
 ![Settings › AI › Models: $1.21 of the $5.00 monthly budget spent, Anthropic in use with its key working, and the model and price for each tier](images/models.png)
 

@@ -12,7 +12,7 @@ Home holds your tools as icons, and the widgets you've put there. Click a tool t
 
 Right-click a tool for its menu:
 - **Open**, **Change…** and **Info**
-- **Widgets…**, **Activity** and **Versions…**
+- **Widgets…**, **Activity** and **Versions**
 - **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand) and **Export data**
 - **Delete…**
 
@@ -48,24 +48,26 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 
 ## A tool's page
 
-**Info** (in the tool's menu) shows what the tool is for, what it can do, and rows for:
-- **Operations:** run any operation from a form, and see its result
-- **Allowed to:** the hosts, keys, other tools and model it may use, and what's waiting for you
-- **Model:** which tier it thinks with, and its own monthly cap ([Models](models.md))
-- **Schedules:** run an operation on a timetable
-- **Widgets:** the tool's widgets, and deleting one
-- **Instructions:** standing rules for this tool's builds ([Building tools](building-tools.md#instructions))
-- **Versions:** every version, and restoring an earlier one ([Building tools](building-tools.md#versions))
+**Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
+- **Operations:** each with **Run**, which opens it as a form and shows the result; the first five, then **Show all**
+- **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** what it asks for (a no is kept until its next version, and through a quick change such as another tier; it can't run without it, so Info offers **Ask builder to work without it**), **Revoke** what it has. The model's row has its tier (or **A specific model…**) in a menu, what it spent this month, and its own monthly cap ([Models](models.md))
+- **Data:** how many rows it keeps, when it last wrote, and **Export**
+- **Schedules:** a switch each, **+ Add schedule**, and **Try again** on a failed run (one run now, as the schedule runs; if it works, one paused after failing stays paused until you switch it on)
+- **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**
+- **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
+- **Versions:** the last two, and **All versions** ([Building tools](building-tools.md#versions))
+
+Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)).
 
-**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed already written in: the operation, the error, its input and the last log lines. Read it, add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
+**When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed in the box (the operation, the error, its input and the last log lines) and "Fix it so this works." Add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 
-![Running Log's Info page: its status and version, the Change it box, and the Operations, Allowed to, Schedules, Widgets, Instructions and Versions rows](images/tool-info.png)
+![Running Log's Info page: its status and version, the Change it box, then Operations, Allowed to and Data on the left, and Schedules, Instructions and Versions on the right](images/tool-info.png)
 
 ### Schedules
 
-A schedule runs a read or write operation hourly, daily, weekly or on a custom cadence, in your time zone (Settings › General). Info › Schedules lists them, with a switch each and when they run next. Add one at the bottom.
+A schedule runs a read or write operation hourly, daily, weekly or on a custom cadence, in your time zone (Settings › General). Info › Schedules lists them, with a switch each and when they run next. **+ Add schedule** adds one.
 
 Agents can propose a schedule, but nothing runs until you enable it from the Inbox. A schedule that fails three times in a row pauses itself and says why. Resume it when it's fixed.
 

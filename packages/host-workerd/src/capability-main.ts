@@ -7,7 +7,7 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AsyncLocalStorage } from "node:async_hooks";
 // @ts-expect-error provided at load time: the capability's own bundle
 import * as capability from "./capability.js";
-import { type AbiDb, applyMigrations, capLines, dumpTables, exportedOperations, loadTables, runOperation } from "@hewntools/core/abi.ts";
+import { type AbiDb, applyMigrations, capLines, countTables, dumpTables, exportedOperations, loadTables, runOperation } from "@hewntools/core/abi.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 
 const mod = capability as { operations?: Record<string, any> };
@@ -57,6 +57,10 @@ export class Capability extends DurableObject {
 
   dump() {
     return dumpTables(this.db());
+  }
+
+  count() {
+    return countTables(this.db());
   }
 
   load(tables: Record<string, Record<string, unknown>[]>): number {

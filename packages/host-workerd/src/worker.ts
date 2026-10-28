@@ -309,12 +309,13 @@ function workerdRuntime(env: Env): CapabilityRuntime {
     dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
     listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
     dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code),
+    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code),
     loadState: (state, tables, code) => host(state.capabilityId).load(state.scratch ?? null, tables, code),
   };
 }
 
 type CapabilityHostApi = {
-  [K in "invoke" | "describe" | "migrate" | "dump" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
+  [K in "invoke" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
 };
 
 // ---------- HewnDO: the owner's platform ----------
@@ -564,6 +565,8 @@ export class HewnDO extends DurableObject<Env> {
           return Response.json(await this.platform.rollback(USER, body.capabilityId, body.version));
         case "/_admin/export":
           return Response.json(await this.platform.exportData(USER, body.capabilityId));
+        case "/_admin/data":
+          return Response.json(await this.platform.dataSummary(USER, body.capabilityId));
         case "/_admin/purge":
           await this.platform.purge(USER, body.capabilityId, body.confirm);
           return Response.json({ ok: true });
@@ -581,7 +584,7 @@ export class HewnDO extends DurableObject<Env> {
 /** Core methods the CLI may call over the admin channel; `owner`: the first argument is the owner. */
 const ADMIN_CALLS: Record<string, { owner: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
-  setSecret: { owner: true }, deleteSecret: { owner: true }, setConfig: { owner: true }, connect: { owner: true }, accounts: { owner: true }, approveGrants: { owner: true }, approveGrant: { owner: true }, revokeGrant: { owner: true },
+  setSecret: { owner: true }, deleteSecret: { owner: true }, setConfig: { owner: true }, connect: { owner: true }, accounts: { owner: true }, approveGrants: { owner: true }, approveGrant: { owner: true }, revokeGrant: { owner: true }, declineGrant: { owner: true },
   archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
@@ -648,6 +651,10 @@ export class CapabilityHost extends DurableObject<Env> {
 
   async dump(scratch: string | null, code: CodeRef) {
     return this.facet(scratch, code, []).dump();
+  }
+
+  async count(scratch: string | null, code: CodeRef): Promise<Record<string, number>> {
+    return this.facet(scratch, code, []).count();
   }
 
   async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef): Promise<number> {

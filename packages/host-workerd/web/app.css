@@ -46,6 +46,9 @@ body > .wallpaper { position: fixed; }
 .dialog > .actions { margin-top: 0; }
 .dialog-body { font-size: var(--fs-sm); line-height: 1.6; }
 .sheet-head { gap: 14px; flex-wrap: nowrap; }
+.icon-head { align-items: center; }
+.icon-head > .icon-preview { display: flex; }
+.icon-draw { align-items: center; }
 .sheet-title { font-size: var(--fs-lg); font-weight: 650; letter-spacing: -0.01em; }
 .dialog .list .grow input { margin-top: var(--s1); }
 code.token { overflow-wrap: anywhere; }
@@ -139,15 +142,59 @@ body.app-mode #app { height: 100vh; }
 .result-head { margin-bottom: var(--s3); }
 @media (max-width: 760px) { .run { flex-direction: column; padding: var(--s4); } .side-list { width: auto; } }
 
-/* C1 Info */
-.info { gap: 28px; padding-top: var(--s5); }
+/* W1–W3 Info: everything on the page. One column in the order you use it (each section has an
+   `order`); from 1100px two columns: using it and what it may touch left, how it behaves and its history right. */
+.info { gap: 18px; padding-top: var(--s5); }
+.info-page { --w: 1100px; }
 .info-head { display: flex; align-items: center; gap: 20px; }
+@media (max-width: 760px) { .info-head { flex-wrap: wrap; } }
 .title-xl { font-size: var(--fs-2xl); letter-spacing: -0.025em; line-height: 1.1; margin: 0; }
-.info-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }
-@media (max-width: 760px) { .info-grid { grid-template-columns: 1fr; } .info-head { flex-wrap: wrap; } }
+.title-lg { font-size: var(--fs-xl); letter-spacing: -0.02em; line-height: 1.15; margin: 0; }
+.info-notice { align-items: center; }
+.info-sections { display: flex; flex-direction: column; gap: var(--s4); }
+.info-col { display: contents; }
+@media (min-width: 1100px) {
+  .info-sections { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .info-col { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+}
+.card.info-section { margin: 0; padding: 6px 20px 10px; }
+.info-section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: 40px; padding-top: 6px; }
+.info-section .list > li { min-height: 52px; }
+.info-section .list > li > .pill { flex: none; }
+.info-widgets { display: flex; flex-wrap: wrap; gap: 16px 12px; padding: 10px 0 8px; }
+.info-widget-foot { width: 100%; padding: 0 2px; }
+.info-widget-foot .segmented { flex: none; padding: 2px; }
+.info-widget-foot .segmented button { min-height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
+.list > li.list-more { min-height: 40px; }
+.model-cap-row .model-cap { width: 84px; }
+.schedule-fixes { gap: var(--s3); flex-wrap: wrap; }
+.info-widget { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.info-widget .widget-preview-stage { min-height: 0; padding: 0; background: none; }
+.info-rule { padding: 6px 0 4px; }
+.info-rule > input { flex: 1; min-width: 0; }
+.info-rule-hint { padding-bottom: 6px; }
+.info-rule-hint a { white-space: nowrap; }
+.info-used-by { padding: 6px 0 10px; }
+.info-missing:empty { display: none; }
+.info-missing button.link { padding: 0; }
+/* U3/U4 versions: under the main top bar, the left menu (as Settings), each part in a panel */
+.version-layout { width: min(960px, calc(100% - var(--s5))); padding-top: var(--s4); }
+.version-head { align-items: flex-start; }
+.version-what { margin: 0; font-size: var(--fs-lg); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; text-wrap: pretty; }
+.version-what.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.version-tile { flex: none; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--border); font: 650 18px var(--mono); letter-spacing: -0.02em; }
+.back-ref { display: inline-flex; align-items: center; gap: 6px; }
+.back-ref .cap-ref { font-weight: 600; }
+.side-list > .side-back { min-height: 48px; padding: 0 var(--s3); margin-bottom: 8px; color: var(--text); text-decoration: none; font-size: var(--fs); font-weight: 600; }
+.side-list > .side-back:hover { color: var(--accent-ink); }
+.version-actions { flex: none; }
+.card.version-panel { margin: 0; padding: 20px; }
+/* Loading the next part: its text fades only if it takes a while; the panel's ground never changes (that flashed). */
+.version-panel[aria-busy] > * { opacity: .6; transition: opacity .15s var(--ease) .2s; }
+.version-panel .thread.kept { max-height: none; overflow: visible; margin-top: 0; }
+.version-log { max-height: none; }
 .list-card { padding: var(--s2) 18px; }
 .list-card > .eyebrow { padding: 10px 0 var(--s1); }
-.connected { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 
 /* C3 Activity */
 .timeline { padding: 6px 20px 10px; }
@@ -289,9 +336,7 @@ fieldset.job legend .sub { color: var(--text-2); }
 .earlier-proposal { align-self: flex-start; padding: 0; color: var(--text-2); }
 .spec-card.superseded { opacity: .7; }
 
-/* N4 Info rows, I1 Accounts rows, L1 Agents rows, O5 choices */
-.info-row { min-height: 52px; }
-.info-key { width: 110px; flex: none; font-weight: 600; }
+/* I1 Accounts rows, L1 Agents rows, O5 choices */
 .account-row { min-height: 64px; }
 .account-row .health-detail { min-width: 0; max-width: 100%; }
 .agent-row { min-height: 72px; }
@@ -350,11 +395,9 @@ fieldset.job legend .sub { color: var(--text-2); }
   .home-grid .tile-widget.w-large { grid-row: span 2; }
   .settings-layout { width: calc(100% - var(--s5)); }
   .edit-hint { display: none; }
-  .info-key { width: 90px; }
 }
 .inbox-recent > li::after, .inbox-recent .pill { display: none; }
 .inbox-recent .row.wrap { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
-.list > li.info-row > .grow { flex-direction: row; align-items: center; gap: var(--s2); }
 .glass-bar > button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
 
 /* Design pass 2, round 2 */
@@ -448,16 +491,19 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .attachment .file-chip { font-size: var(--fs-sm); padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment > button.x { position: absolute; top: -7px; right: -7px; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; min-height: 0; border-radius: 50%; border: 0; padding: 0; background: var(--text-2); color: var(--bg); font: 700 13px/1 var(--font); cursor: pointer; }
 .attachment > button.x:hover { background: var(--text); color: var(--bg); }
+/* V2 In the box: 64px tiles, the file's name on each, × in the corner. */
+.attachment.tile { width: 64px; height: 64px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-3); }
+.attachment.tile > .attachment-open { position: relative; display: flex; align-items: flex-end; width: 100%; height: 100%; color: var(--text); text-decoration: none; }
+.attachment.tile img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; border: 0; border-radius: 0; }
+.attachment.tile .attachment-ext { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font: 600 13px/1 var(--mono); color: var(--text-2); }
+.attachment.tile .attachment-name { position: relative; max-width: calc(100% - 8px); margin: 4px; padding: 2px 5px; border-radius: 4px; background: var(--surface-overlay); font: 9px/1.3 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment.tile > button.x { top: 3px; right: 3px; border-radius: 6px; background: var(--surface-overlay); color: var(--text); font-size: 11px; }
 .composer.drop { outline: 2px dashed var(--accent); outline-offset: 2px; }
-/* A version's pane in Versions: what led to it, at the bottom. */
-.version-pane { padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.version-kept { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 /* An earlier conversation picked up in the chat, as it was; the offer to pick it up is a card in the chat. */
 .thread .earlier { margin-bottom: 8px; }
 .thread .earlier .bubble { opacity: 0.65; }
 .composer .continue-offer { margin: 8px 8px 0; align-items: center; gap: 8px; }
 /* "Got what you asked for?": a toast when a tool is opened after a build went live. */
-.feedback-toast { flex-wrap: wrap; }
 .earlier-label { align-self: center; }
 .continue-card { align-self: stretch; padding: 12px 14px; }
 .continue-title { font-weight: 600; color: var(--accent-ink); margin-bottom: 2px; }
@@ -470,8 +516,8 @@ a.inbox-row:hover, .inbox-row.link:hover, .inbox-row.link:focus-visible { backgr
 .step:has(.spec-step[open])::before { align-self: start; margin-top: 7px; }
 .spec-step > .spec-text { margin-top: 8px; padding: 12px; border-radius: 10px; background: var(--surface-2); }
 /* What the intake remembered for later builds, and the owner's instructions (one per line). */
-.memory-notice { align-items: flex-start; }
-.memory-notice .memory-text { font-size: var(--fs-sm); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-notice { align-items: center; }
+.memory-notice .memory-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 
 /* Two lines at most (the full text on hover). */
@@ -483,5 +529,12 @@ textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 .caret-btn[aria-expanded="true"]::before { transform: rotate(225deg); margin-top: 8px; }
 .caret-btn:hover, .caret-btn:focus, .caret-btn:active { background: none; transform: none; }
 .fix-slot:empty { display: none; }
+/* V5 "Got what you asked for?": a quiet strip at the foot of the tool, once per version. */
+.feedback-slot:empty { display: none; }
+.feedback-strip { display: flex; align-items: center; gap: var(--s2); padding: 8px var(--s6); border-top: 1px solid var(--border); font-size: var(--fs-sm); color: var(--text-2); background: var(--surface); }
 .fix-slot { padding: 0 var(--s6) var(--s2); } /* "Ask builder to fix this", under a tool's bar */
 .fix-bar { align-items: center; }
+
+/* A page on its way (the one before stays until it's ready): a thin bar along the top. */
+body.routing::before { content: ""; position: fixed; z-index: 1000; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat; background-size: 40% 100%; animation: route-bar 1.1s var(--ease) infinite; pointer-events: none; }
+@keyframes route-bar { from { background-position: -40% 0; } to { background-position: 140% 0; } }

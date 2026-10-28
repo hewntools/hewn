@@ -2,34 +2,31 @@
 // A tool's actions: its menu, Change…, rename, delete, icon, versions and instructions.
 import {
   actorLabel,
-  ago,
   api,
   appIcon,
   bumpIcons,
   capRef,
   caps,
-  confirmDialog,
   enc,
   fail,
   glyphCells,
   h,
   hueOf,
   invalidateCaps,
+  menuFrom,
   modal,
   pixelGlyph,
   rowCells,
   sheetActions,
   sheetHead,
-  skeleton,
   toast,
 } from "../kit.js";
 import { go, put } from "./frame.js";
 import { grantsSheet } from "./grants.js";
-import { conversationThread } from "./intake.js";
 import { route } from "./router.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
-export { askFix, askFixLatest, capabilityMenu, changeHref, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo, versionsDialog };
+export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo, toolActions };
 
 // ---------- tool actions (menu, change, rename, delete, icon, versions) ----------
 
@@ -44,28 +41,38 @@ async function openCapability(c) {
  * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once; `from`: the
  * build whose conversation the intake continues from.
  */
-function changeHref(c, { m, send, widget, from } = {}) {
-  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}) });
+function changeHref(c, { m, send, widget, from, fix } = {}) {
+  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}) });
   return `#/${c.ui ? "app" : "run"}/${enc(c.id)}?${q}`;
 }
 const openChange = (c, o) => go(changeHref(c, o));
 
 /**
- * "Ask builder to fix this": a Change to the tool, the message written for the builder from one
- * failed call (what ran it, the operation, the error, its input and last log lines). The owner
- * reads it, can edit it, and sends it.
+ * "Ask builder to fix this" (V4): a Change to the tool with the failure as text in the box (what
+ * ran it, the operation, the error, its input and last log lines), then "Fix it so this works." The
+ * owner can edit or cut it; nothing goes until Send.
  */
 const fixText = (f) => {
   const label = actorLabel(f.caller);
   const who = /^widget:/.test(f.caller ?? "") ? "A widget" : /^schedule:/.test(f.caller ?? "") ? "A schedule" : /^(user|web|ui:)/.test(f.caller ?? "user") ? "I" : label && label !== f.caller ? label : "An agent";
   const input = f.input && f.input !== "{}" ? `\n\nInput: ${f.input}` : "";
   const logs = f.logs?.length ? `\n\nLast log lines:\n${f.logs.join("\n")}` : "";
-  return `${who} ran ${f.operation} and it failed:\n${f.error}${input}${logs}\n\nFix it so this works.`;
+  return `${who} ran ${f.operation} and it failed:\n${f.error}${input}${logs}`;
 };
-const askFix = (c, f) => openChange(c, { m: fixText(f) });
+const askFix = (c, f) => {
+  // The box picks it up (once) from here: too long for the address.
+  sessionStorage.setItem(`hewn.fix.${c.id}`, JSON.stringify({ text: `${fixText(f)}\n\nFix it so this works.` }));
+  openChange(c, { fix: "1" });
+};
 /** The newest recorded failure that matches (Hewn keeps the last ten per tool), else what's known here. */
 const askFixLatest = async (c, match, fallback) => askFix(c, (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find(match) ?? fallback);
 const fixButton = (onclick, cls = "sm") => h("button", { class: cls, type: "button", onclick }, "Ask builder to fix this");
+
+/** A tool's actions in a top bar (Info, a version's page): Change… and •••, the same everywhere. */
+function toolActions(c, { rename } = {}) {
+  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename })) }, "•••");
+  return h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), more);
+}
 
 /** The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools. */
 function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
@@ -78,7 +85,7 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
     "-",
     !connection && ["Widgets…", () => toolWidgetsSheet(c).catch(fail)],
     ["Activity", () => go(`#/activity?capability=${id}`)],
-    ["Versions…", () => versionsDialog(c).catch(fail)],
+    ["Versions", () => go(`#/c/${id}/versions`)],
     "-",
     rename && ["Rename", rename],
     ["Set icon…", () => iconDialog(c).catch(fail)],
@@ -105,75 +112,6 @@ async function rollbackTo(c, version) {
   invalidateCaps();
   toast(`${c.name} is back on v${r.to}`, { undo: () => api(`/capabilities/${id}/rollback`, { method: "POST", body: { version: r.from } }).then(() => (invalidateCaps(), route())) });
   return r;
-}
-
-/** Versions and rollback: each version with what led to it (the conversation, the spec, the builder's log), and restoring an earlier one. */
-async function versionsDialog(c) {
-  const id = enc(c.id);
-  const detail = await api(`/capabilities/${id}`);
-  const active = (await caps(true)).get(c.id)?.version;
-  return modal(
-    (close) => [
-      sheetHead(appIcon(c, { size: 44 }), `Versions · ${c.name}`),
-      h("div", { class: "stack-sm version-panes" }, detail.versions.map((v) => versionPane(c, v, v.version === active, close))),
-      h("div", { class: "small faint" }, "Restoring keeps the data. It's refused if a newer version changed the data in a way older code can't read."),
-      sheetActions(h("button", { onclick: () => close() }, "Done")),
-    ],
-    { width: 640 },
-  );
-}
-
-/**
- * One version: when and who asked, Restore (or active), and at the bottom what led to it, kept
- * for the tool's life: the conversation with the intake, the spec the builder worked from, the
- * builder's log (each loaded when opened). "Continue from here" opens a change picking up that
- * conversation.
- */
-function versionPane(c, v, isActive, close) {
-  const who = actorLabel(v.requestedBy);
-  const spec = String(v.request?.requirements ?? v.request?.request ?? "").trim();
-  /** An expander whose content comes when it's first opened. */
-  const lazy = (summary, load) => {
-    const body = h("div", { class: "stack-sm" }, skeleton("60%", "40%"));
-    const d = h("details", { class: "spec-step" }, h("summary", {}, summary), body);
-    let loaded = false;
-    d.addEventListener("toggle", async () => {
-      if (!d.open || loaded) return;
-      loaded = true;
-      try {
-        put(body, await load());
-      } catch (e) {
-        put(body, h("div", { class: "small faint" }, e.message || String(e)));
-      }
-    });
-    return d;
-  };
-  const kept = v.buildId
-    ? [
-        lazy("Conversation", async () => {
-          const ctx = await api(`/builds/${enc(v.buildId)}/context`);
-          return ctx.conversation?.length ? conversationThread(ctx.conversation, { mode: v.kind === "create" ? "create" : "modify", cap: c, all: await caps(true).catch(() => new Map()), version: v.version }) : h("div", { class: "small faint" }, who && who !== "You" ? `${who} asked for it; there was no conversation.` : "No conversation was kept.");
-        }),
-        spec && h("details", { class: "spec-step" }, h("summary", {}, "Spec"), h("pre", { class: "spec-text" }, spec)),
-        lazy("Builder's log", async () => {
-          const t = await api(`/builds/${enc(v.buildId)}/transcript`);
-          return t.text ? h("pre", { class: "log tail" }, t.text.split("\n").slice(-500).join("\n")) : h("div", { class: "small faint" }, "No log was kept.");
-        }),
-        v.conversation && h("button", { class: "link sm self-start", onclick: () => (close(), go(changeHref(c, { from: v.buildId }))) }, "Continue from here ›"),
-      ]
-    : [];
-  return h(
-    "div",
-    { class: "version-pane" },
-    h(
-      "div",
-      { class: "row tight" },
-      h("span", { class: "pill" }, `v${v.version}`),
-      h("div", { class: "grow" }, h("span", {}, `${v.kind === "create" ? "Built" : "Changed"} ${ago(v.createdAt)}${who && who !== "You" ? ` · ${who} asked` : ""}`), h("span", { class: "sub clip" }, v.request?.request ?? v.request?.purpose ?? "")),
-      isActive ? h("span", { class: "pill ok with-dot" }, "active") : h("button", { class: "sm", onclick: () => rollbackTo(c, v.version).then(() => (close(), route()), fail) }, "Restore"),
-    ),
-    kept.length ? h("div", { class: "stack-sm version-kept" }, kept) : null,
-  );
 }
 
 /**
@@ -212,10 +150,10 @@ async function instructionsSheet(c) {
 /** What the intake remembered (or dropped) for later builds, shown as saved, with Undo. */
 function memoryNotice(what, { scope, text }, cap) {
   const tool = scope === "tool" ? cap : null;
-  const where = tool ? `${tool.name}'s builder instructions` : "global builder instructions";
   const path = tool ? `/capabilities/${enc(tool.id)}/instructions` : "/instructions";
-  const undo = h("button", { type: "button", class: "link sm" }, "Undo");
-  const el = h("div", { class: "notice info memory-notice" }, h("div", { class: "grow col" }, h("span", { class: "strong" }, what === "remember" ? `Saved to ${where}` : `Removed from ${where}`), h("span", { class: "memory-text" }, text)), undo);
+  const undo = h("button", { type: "button", class: "sm ghost" }, "Undo");
+  // V2: one line, "Saved as a rule: always Swedish copy", with Undo.
+  const el = h("div", { class: "notice ok memory-notice" }, h("span", { class: "grow memory-text" }, what === "remember" ? `Saved as a rule${tool ? ` for ${tool.name}` : ""}: ` : `Removed the rule${tool ? ` for ${tool.name}` : ""}: `, text), undo);
   undo.addEventListener("click", async () => {
     undo.disabled = true;
     try {
@@ -267,14 +205,29 @@ function inlineRename(c, labelEl, { onSaved } = {}) {
 async function deleteDialog(c) {
   const [detail, all] = await Promise.all([api(`/capabilities/${enc(c.id)}`).catch(() => ({ usedBy: [] })), caps()]);
   const usedBy = detail.usedBy ?? [];
-  const ok = await confirmDialog({
-    title: h("span", { class: "title-ref" }, "Delete", h("span", { class: "ref-end" }, capRef(all.get(c.id) ?? c, c.id, { size: 24 }), "?")),
-    body: usedBy.length
-      ? [usedBy.map((u, i) => [i ? ", " : "", capRef(all.get(u.id), u.id)]), usedBy.length > 1 ? " use it and will stop working. " : " uses it and will stop working. ", "Its data is kept, so you can restore it later."]
-      : "Its data is kept, so you can restore it later.",
-    confirm: "Delete",
-    danger: true,
-  });
+  // The id typed to confirm, as Start over and Delete forever ask.
+  const ok = await modal(
+    (close) => {
+      const typed = h("input", { type: "text", autocomplete: "off", placeholder: c.id, "aria-label": `Type ${c.id} to confirm` });
+      const yes = h("button", { class: "danger solid", disabled: true, onclick: () => close(true) }, "Delete");
+      typed.addEventListener("input", () => (yes.disabled = typed.value.trim() !== c.id));
+      typed.addEventListener("keydown", (e) => e.key === "Enter" && !yes.disabled && close(true));
+      setTimeout(() => typed.focus());
+      return [
+        h("h2", {}, h("span", { class: "title-ref" }, "Delete", h("span", { class: "ref-end" }, capRef(all.get(c.id) ?? c, c.id, { size: 24 }), "?"))),
+        h(
+          "div",
+          { class: "muted dialog-body" },
+          usedBy.length
+            ? [usedBy.map((u, i) => [i ? ", " : "", capRef(all.get(u.id), u.id)]), usedBy.length > 1 ? " use it and will stop working. " : " uses it and will stop working. ", "Its data is kept, so you can restore it later."]
+            : "Its data is kept, so you can restore it later.",
+        ),
+        h("label", { class: "field flush" }, h("span", { class: "label" }, "Type ", h("b", {}, c.id), " to confirm"), typed),
+        h("div", { class: "actions" }, h("button", { onclick: () => close(false) }, "Cancel"), yes),
+      ];
+    },
+    { width: 440 },
+  ).then(Boolean);
   if (!ok) return;
   try {
     await api(`/capabilities/${enc(c.id)}`, { method: "DELETE", body: { confirm: c.id } });
@@ -317,16 +270,24 @@ async function iconDialog(c) {
   const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/svg+xml" });
   file.addEventListener("change", () => touched.add("icon"));
   const status = h("p", { class: "small error" });
-  const preview = h("span", { class: "icon-preview" });
+  // V3: the icon at the sizes it's seen at (Info, a row, a cap-ref), drawn as you go.
+  const previews = [64, 28, 20].map(() => h("span", { class: "icon-preview" }));
+  const litCount = h("span", {});
+  const satLabel = h("span", {});
   const rows = () => grid.map((r) => r.map((on) => (on ? "#" : ".")).join(""));
 
-  const drawPreview = () => {
-    const tile = h("span", { class: "app-icon", style: { "--size": "48px", "--hue": hue, "--s": saturation / 100 } });
+  const tileAt = (size) => {
+    const tile = h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue, "--s": saturation / 100 } });
     // The default without a builder's glyph is the monogram.
-    if (mode === "glyph" && defaulted && !touched.has("icon") && !grid.flat().some(Boolean)) tile.append(appIcon({ name: c.name }, { size: 48 }).firstChild);
+    if (mode === "glyph" && defaulted && !touched.has("icon") && !grid.flat().some(Boolean)) tile.append(appIcon({ name: c.name }, { size }).firstChild);
     else if (mode === "glyph") tile.append(pixelGlyph(rowCells(rows())));
-    else tile.append(appIcon({ ...c, hue, saturation }, { size: 48 }).firstChild ?? "");
-    put(preview, tile);
+    else tile.append(appIcon({ ...c, hue, saturation }, { size }).firstChild ?? "");
+    return tile;
+  };
+  const drawPreview = () => {
+    [64, 28, 20].forEach((size, i) => put(previews[i], tileAt(size)));
+    litCount.textContent = `${grid.flat().filter(Boolean).length} lit`;
+    satLabel.textContent = `Saturation · ${saturation}%`;
   };
   const cellButtons = grid.map((r, y) =>
     r.map((_, x) => {
@@ -342,11 +303,11 @@ async function iconDialog(c) {
   const satInput = h("input", { type: "range", min: 0, max: 150, step: 5, value: saturation, class: "hue-range", "aria-label": "Saturation" });
   satInput.addEventListener("input", () => ((saturation = Number(satInput.value)), touched.add("saturation"), drawPreview()));
   const panes = {
-    glyph: h("div", { class: "stack-sm" }, editor, h("span", { class: "small faint" }, "7–17 lit cells, one simple idea.")),
+    glyph: h("div", { class: "stack-sm icon-draw" }, editor, h("span", { class: "small faint" }, litCount, " · 7–17 cells, one simple idea.")),
     image: h("label", { class: "field" }, h("span", { class: "label" }, "Image"), file, h("span", { class: "hint" }, "PNG, JPEG, WebP or SVG, up to 256 KB")),
   };
   const body = h("div", {});
-  const seg = h("div", { class: "segmented self-start", role: "group", "aria-label": "Icon type" });
+  const seg = h("div", { class: "segmented self-center", role: "group", "aria-label": "Icon type" });
   const show = () => {
     put(seg, ...[["glyph", "Draw"], ["image", "Image"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(k === mode), onclick: () => ((mode = k), touched.add("icon"), show()) }, l)));
     put(body, panes[mode]);
@@ -402,12 +363,13 @@ async function iconDialog(c) {
     };
     show();
     return [
-      sheetHead(preview, `Icon for ${c.name}`),
+      h("div", { class: "row sheet-head icon-head" }, previews[0], h("div", { class: "grow sheet-title" }, `Icon for ${c.name}`), previews[1], previews[2]),
       seg,
       body,
-      h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), hueInput),
+      // Both sliders the same width: the colour's sits in the same frame, without a mark.
+      h("label", { class: "field" }, h("span", { class: "label" }, "Colour"), h("span", { class: "range-mark no-mark" }, hueInput)),
       // The mark under the slider: where the default (100%) is.
-      h("label", { class: "field" }, h("span", { class: "label" }, "Saturation"), h("span", { class: "range-mark", style: { "--at": 100 / 150 }, "data-mark": "100%" }, satInput)),
+      h("label", { class: "field" }, h("span", { class: "label" }, satLabel), h("span", { class: "range-mark", style: { "--at": 100 / 150 }, "data-mark": "100%" }, satInput)),
       status,
       h(
         "div",
@@ -416,5 +378,5 @@ async function iconDialog(c) {
         h("span", { class: "row tight" }, h("button", { onclick: () => close() }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")),
       ),
     ];
-  }, { width: 440 });
+  }, { width: 480 });
 }

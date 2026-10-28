@@ -2,7 +2,7 @@
 // Settings › AI › Models: providers and keys, tiers, prices, this month's spend and its cap.
 import { ago, api, appIcon, capRef, caps, fail, formSheet, h, kindTag, modal, sheetActions, sheetHead, toast } from "../kit.js";
 import { providerTile } from "./agents.js";
-import { put } from "./frame.js";
+import { put, stillHere } from "./frame.js";
 import { pollInbox } from "./inbox.js";
 import { route } from "./router.js";
 import { settingsFrame } from "./settings.js";
@@ -172,6 +172,7 @@ const CHARGE_KINDS = { build: "builds", intake: "talking requests through", mode
  * providers, keys or USD caps: what each tier runs on, and what was used this month.
  */
 async function hostedModelsPage(m, all) {
+  const here = stillHere();
   const catalog = await api(`/tools/remote/models`).catch(() => null);
   const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
   const { totals, rows } = m.host.charges;
@@ -184,6 +185,7 @@ async function hostedModelsPage(m, all) {
       h("div", { class: "grow" }, h("span", {}, catalog?.tiers?.[tier] ?? "Picked for you"), h("span", { class: "sub" }, [TIER_TEXT[tier], users.length ? `used by ${users.map((u) => u.name).join(", ")}` : null].filter(Boolean).join(" · "))),
     );
   };
+  if (!here()) return;
   settingsFrame(
     "ai",
     h("div", { class: "row tight baseline" }, back, h("h1", { class: "flush" }, "Models")),
@@ -206,7 +208,9 @@ async function hostedModelsPage(m, all) {
 }
 
 async function modelsPage() {
+  const here = stillHere();
   const [m, all] = await Promise.all([api("/models"), caps().catch(() => new Map())]);
+  if (!here()) return;
   if (m.host) return hostedModelsPage(m, all);
   const reload = (next) => next && route();
   const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");

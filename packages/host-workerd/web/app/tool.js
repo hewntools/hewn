@@ -2,7 +2,7 @@
 // An opened tool (its own UI, or the Run view) and the change drawer beside it.
 import { api, appIcon, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
 import { buildPanel } from "./build.js";
-import { bar, glassBack, hues, onLeave, put, sandboxNotice, view } from "./frame.js";
+import { bar, glassBack, hues, onLeave, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet } from "./grants.js";
 import { askFeedbackOnOpen, intakeView } from "./intake.js";
 import { route } from "./router.js";
@@ -29,6 +29,40 @@ function appBar(c, { onChange } = {}) {
   return { el, change };
 }
 
+const DRAWER_WIDTH = "hewn.drawer.width";
+// Narrower than this and the box's tools (Attach, the model, Send) no longer fit on a line.
+const DRAWER_MIN = 420;
+const drawerWidth = (w) => Math.round(Math.max(DRAWER_MIN, Math.min(w, window.innerWidth * 0.7, 960)));
+/**
+ * Drag `grip` (or press ← →) to set `el`'s width; it's kept for next time. A narrower window
+ * narrows it, and the width comes back when there's room again.
+ */
+function resizable(el, grip) {
+  let chosen = Number(localStorage.getItem(DRAWER_WIDTH)) || null;
+  const fit = () => chosen && (el.style.width = `${drawerWidth(chosen)}px`);
+  const set = (w) => ((chosen = drawerWidth(w)), fit());
+  const keep = () => chosen && localStorage.setItem(DRAWER_WIDTH, String(chosen));
+  fit();
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+    const move = (m) => set(window.innerWidth - m.clientX);
+    // However the drag ends (let go, cancelled, the capture lost), the page is usable again
+    // (while dragging, the tool's frame doesn't take the pointer), and the width is kept once.
+    const end = () => {
+      for (const [type, fn] of listeners) grip.removeEventListener(type, fn);
+      document.body.classList.remove("resizing");
+      keep();
+    };
+    const listeners = [["pointermove", move], ["pointerup", end], ["pointercancel", end], ["lostpointercapture", end]];
+    for (const [type, fn] of listeners) grip.addEventListener(type, fn);
+  });
+  grip.addEventListener("keydown", (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && (e.preventDefault(), set(el.offsetWidth + (e.key === "ArrowLeft" ? 40 : -40)), keep()));
+  window.addEventListener("resize", fit);
+  onLeave(() => (window.removeEventListener("resize", fit), document.body.classList.remove("resizing")));
+}
+
 /**
  * The change drawer beside an opened tool (P1): the intake as a component, then the build (P3),
  * then "vN is ready" with Reload and Undo (P4). The tool stays live on the left. Closing it while
@@ -37,7 +71,10 @@ function appBar(c, { onChange } = {}) {
 function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
   const body = h("div", { class: "drawer-body" });
   const close = h("button", { class: "ghost sm icon-only", "aria-label": "Close", onclick: () => onClose() }, "×");
-  const el = h("aside", { class: "drawer", "aria-label": `Change ${c.name}` }, h("div", { class: "drawer-head" }, h("span", { class: "row tight" }, h("span", { class: "eyebrow" }, "Change"), capRef(c)), close), body);
+  // Its left edge drags to make it wider or narrower; the width is kept (in this browser).
+  const grip = h("div", { class: "drawer-grip", role: "separator", "aria-orientation": "vertical", "aria-label": "Drawer width", tabindex: 0 });
+  const el = h("aside", { class: "drawer", "aria-label": `Change ${c.name}` }, grip, h("div", { class: "drawer-head" }, h("span", { class: "row tight" }, h("span", { class: "eyebrow" }, "Change"), capRef(c)), close), body);
+  resizable(el, grip);
   let intake = null;
   const showBuild = (buildId) => {
     intake = null;
@@ -83,7 +120,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const setUrl = (open) => {
     const p = new URLSearchParams(q);
     if (open) p.set("change", "1");
-    else for (const k of ["change", "m", "send", "widget", "from"]) p.delete(k);
+    else for (const k of ["change", "m", "send", "widget", "from", "fix"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
   // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
@@ -101,7 +138,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else if (!want && shown()) {
       drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
-      for (const k of ["m", "send", "widget", "from"]) q.delete(k);
+      for (const k of ["m", "send", "widget", "from", "fix"]) q.delete(k);
       setUrl(false);
     } else drawer?.focus();
   };
@@ -112,11 +149,13 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
 }
 
 async function appPage(id, q) {
+  const here = stillHere();
   document.body.classList.add("app-mode");
   // ?at=<section>: a widget's tap opens the UI there ("open": "ui#today").
   const at = q?.get("at");
   const openUrl = async () => (await api(`/capabilities/${enc(id)}/open`, { method: "POST", ...(at ? { body: { section: at } } : {}) })).url;
   const [all, url] = await Promise.all([caps(true), openUrl()]);
+  if (!here()) return;
   const c = all.get(id) ?? { id, name: id };
   // Sandboxed without allow-same-origin (the server's CSP says the same): the app runs on an
   // opaque origin and cannot touch or navigate the web client.
@@ -135,7 +174,8 @@ async function appPage(id, q) {
   const drawerApi = {};
   const [barEl, layout] = withDrawer(c, q, frame, { reload, api: drawerApi });
   barEl.querySelector(".app-title")?.append(subtitle);
-  askFeedbackOnOpen(c, drawerApi);
+  const feedbackSlot = h("div", { class: "feedback-slot" });
+  askFeedbackOnOpen(c, drawerApi, feedbackSlot);
   const fixSlot = h("div", { class: "fix-slot" });
   const showFix = async () => {
     // This screen's own failure (its calls run as ui:<id>), not an agent's or a schedule's.
@@ -169,7 +209,7 @@ async function appPage(id, q) {
   // Older apps (or a slow first paint): don't stay invisible.
   const reveal = setInterval(() => frame.classList.remove("loading"), 1500);
   onLeave(() => clearInterval(reveal));
-  view(barEl, fixSlot, layout);
+  view(barEl, fixSlot, layout, feedbackSlot);
 }
 
 const isFlat = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.values(o).every((v) => v === null || typeof v !== "object");
@@ -295,10 +335,13 @@ const runnableOps = (cap) => latestOps(cap.operations).filter((o) => !(cap.kind 
 const sidePill = (sideEffect) => h("span", { class: `pill ${sideEffect === "read" ? "" : sideEffect === "destructive" ? "danger" : "accent"}` }, sideEffect);
 
 async function runPage(id, q) {
+  const here = stillHere();
   document.body.classList.add("app-mode");
   const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
+  if (!here()) return;
   const c = all.get(id) ?? { id, name: cap.name, kind: cap.kind };
   setWallpaper(await hues([tintOf(c)]));
+  if (!here()) return;
   const ops = runnableOps(cap);
   let selected = ops.find((o) => o.name === q.get("op")) ?? ops[0];
   const right = h("div", { class: "run-main" });
@@ -328,9 +371,10 @@ async function runPage(id, q) {
   const main = h("main", { class: "run" }, list, right);
   const drawerApi = {};
   const [barEl, layout] = withDrawer(c, q, main, { reload: () => route(), noUi: true, api: drawerApi });
-  view(barEl, sandboxNotice(), layout);
+  const feedbackSlot = h("div", { class: "feedback-slot" });
+  view(barEl, sandboxNotice(), layout, feedbackSlot);
   if (selected) select(selected);
-  askFeedbackOnOpen(c, drawerApi);
+  askFeedbackOnOpen(c, drawerApi, feedbackSlot);
 }
 
 function runForm(id, cap, op) {
@@ -375,7 +419,7 @@ function runForm(id, cap, op) {
     }
   };
   return [
-    !cap.status.ready && h("div", { class: "notice" }, h("span", { class: "grow" }, cap.status.missingModel && !cap.status.pendingGrants.length ? "Needs a model." : "Needs your authorization."), h("button", { class: "sm", onclick: () => grantsSheet(id).then((ok) => ok && route()) }, "Review")),
+    !cap.status.ready && h("div", { class: "notice" }, h("span", { class: "grow" }, cap.status.onlySaidNo ? "You said no to what it asks for, so it can't run." : cap.status.missingModel && !cap.status.pendingGrants.length ? "Needs a model." : "Needs your authorization."), h("button", { class: "sm", onclick: () => grantsSheet(id).then((ok) => ok && route()) }, "Review")),
     h("form", { class: "card run-form", onsubmit: run }, h("div", { class: "muted small" }, op.description), fields.length ? h("div", { class: "fields" }, fields.map(([, f]) => f.el)) : null, h("div", { class: "actions flush" }, runBtn)),
     result,
   ];

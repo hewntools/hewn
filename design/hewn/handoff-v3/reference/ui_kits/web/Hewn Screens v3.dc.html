@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="../../../../../../packages/ui/src/ui.css">
+<style>body{margin:0;background:#0d0e11}a{color:var(--accent-ink)}a:hover{color:var(--text)}</style>
+</helmet>
+<section style="padding:64px;display:flex;flex-direction:column;gap:72px">
+  <div style="display:flex;flex-direction:column;gap:6px;color:#e8e9ee;font-family:-apple-system,system-ui,sans-serif">
+    <div style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:#8a8d98">HEWN — HI-FI, DESIGN PASS 3 · sharing 0.4.9 → 0.5 · Info</div>
+    <div style="font-size:30px;font-weight:650;letter-spacing:-.02em">Hub, install, Share…, updates, Info</div>
+    <div style="font-size:15px;color:#8a8d98">Frame ids match UX Flows turn 3. Tweaks: theme.</div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">Q</div><div style="font-size:22px;font-weight:650">Hub</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="Q2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">Q2 · Hub tab: one shelf, Official marked on the card</div>
+        <div data-theme="{{ theme }}" data-screen-label="Q2 Hub" style="width:1280px;height:1260px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:250;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Hub" inbox="3" hint-size="100%,80px"></dc-import>
+            <div style="width:960px;margin:0 auto;padding-top:8px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:16px"><h1 style="margin:0;flex:none">Hub</h1><input type="text" placeholder="Search 38 tools" style="flex:1;min-width:0"><button>Install from a file or link…</button></div>
+              <div style="display:flex;align-items:center;gap:12px">
+                <div style="flex:1;min-width:0;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="chip plain" style="background:var(--surface-3)">All</span><span class="chip plain" style="gap:6px"><dc-import name="AppIcon" glyph="hewn" size="16" hint-size="16px,16px" style="display:flex"></dc-import>Official</span><span style="width:1px;height:20px;background:var(--border)"></span><sc-for list="{{ tags }}" as="t" hint-placeholder-count="5"><span class="chip plain">{{ t }}</span></sc-for></div>
+                <div class="segmented"><button aria-pressed="true">Hot</button><button>Most installs</button><button>Newest</button></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:1fr;gap:16px">
+                <sc-for list="{{ shelf }}" as="c" hint-placeholder-count="9">
+                  <div class="card" style="margin:0;padding:0;overflow:hidden;display:flex;flex-direction:column">
+                    <div style="height:132px;background:var(--surface-2);border-bottom:1px solid var(--border);padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+                      <div style="font-size:12px;font-weight:600;color:var(--text-2)">{{ c.shotTitle }}</div>
+                      <div style="display:flex;align-items:flex-end;gap:6px;flex:1"><sc-for list="{{ c.bars }}" as="b" hint-placeholder-count="8"><div style="flex:1;height:{{ b }};border-radius:2px 2px 1px 1px;background:var(--c1);opacity:.85"></div></sc-for></div>
+                    </div>
+                    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1">
+                      <div style="display:flex;align-items:center;gap:10px"><dc-import name="AppIcon" glyph="{{ c.glyph }}" hue="{{ c.hue }}" size="28" hint-size="28px,28px" style="display:flex"></dc-import><span style="font-weight:600;flex:1;min-width:0">{{ c.name }}</span><sc-if value="{{ c.installed }}" hint-placeholder-val="{{ false }}"><span class="pill ok">Installed</span></sc-if></div>
+                      <div class="small muted">{{ c.line }}</div>
+                      <div class="small mono" style="color:{{ c.needC }};min-height:1.5em">{{ c.need }}</div>
+                      <div style="flex:1"></div>
+                      <div style="display:flex;align-items:center;gap:6px;padding-top:8px;border-top:1px solid var(--border)">
+                        <sc-if value="{{ c.official }}" hint-placeholder-val="{{ false }}"><dc-import name="AppIcon" glyph="hewn" size="16" hint-size="16px,16px" style="display:flex"></dc-import><span class="small" style="font-weight:600;color:var(--accent-ink)">Official</span></sc-if>
+                        <sc-if value="{{ c.isOther }}" hint-placeholder-val="{{ true }}"><span style="width:16px;height:16px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;font:600 8px var(--mono);color:var(--text-2)">{{ c.initial }}</span><span class="small muted">{{ c.handle }}</span></sc-if>
+                        <span style="flex:1"></span><span class="small faint mono">{{ c.installs }} installs</span>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding-top:4px"><span class="small faint">1–9 of 38</span><div style="display:flex;gap:8px"><button class="sm" disabled="{{ true }}">‹ Previous</button><button class="sm">Next ›</button></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="Q3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">Q3 · A tool's Hub page</div>
+        <div data-theme="{{ theme }}" data-screen-label="Q3 Listing" style="width:1280px;height:1000px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:250;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="padding:20px 32px"><div class="glass-bar"><button>‹ Hub</button></div></div>
+            <div style="width:880px;margin:0 auto;display:flex;flex-direction:column;gap:22px">
+              <div style="display:grid;grid-template-columns:2fr 2fr 1fr;gap:12px">
+                <div style="height:200px;border-radius:16px;background:var(--surface-2);border:1px solid var(--border);padding:16px;display:flex;flex-direction:column;gap:10px"><div class="small" style="font-weight:600">Tonight</div><div style="font-size:40px;font-weight:650;letter-spacing:-.03em">62%</div><div class="small muted">Kp 5 · clear after 22:00</div></div>
+                <div style="height:200px;border-radius:16px;background:var(--surface-2);border:1px solid var(--border);padding:16px;display:flex;align-items:flex-end;gap:6px"><sc-for list="{{ kp }}" as="b" hint-placeholder-count="12"><div style="flex:1;height:{{ b }};border-radius:2px 2px 1px 1px;background:var(--c3)"></div></sc-for></div>
+                <div class="jw jw-small jw-marked" style="height:200px;width:auto"><div class="jw-title">Aurora</div><div class="jw-body"><div class="jw-value">62<span class="jw-unit">%</span></div><div class="jw-caption">tonight</div></div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:18px">
+                <dc-import name="AppIcon" glyph="heart" hue="250" size="64" hint-size="64px,64px" style="display:flex"></dc-import>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px"><div style="font-size:30px;font-weight:650;letter-spacing:-.025em">Aurora Watch</div><div style="display:flex;gap:6px"><span class="pill accent">Official</span><span class="pill">v3</span><span class="pill">1.2k installs</span></div></div>
+                <button class="primary lg">Install</button>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px">
+                <div style="display:flex;flex-direction:column;gap:14px">
+                  <div class="card" style="margin:0;padding:18px 20px;display:flex;flex-direction:column;gap:10px"><div class="eyebrow">What it does</div><div style="text-wrap:pretty">Checks NOAA's forecast and the local cloud cover every hour, and tells you when it's worth going out. Keeps your location and past alerts.</div><button class="link" style="align-self:flex-start;padding:0">Source code › <span class="faint">Q5</span></button></div>
+                  <div class="card" style="margin:0;padding:6px 20px"><div class="eyebrow" style="padding:12px 0 4px">Operations · 3</div><ul class="list"><li><span class="mono grow" style="flex:1">get_odds</span><span class="sub muted">tonight, for a place</span><span class="pill">read</span></li><li><span class="mono" style="flex:1">set_place</span><span class="pill accent">write</span></li><li><span class="mono" style="flex:1">list_alerts</span><span class="pill">read</span></li></ul></div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:14px">
+                  <div class="card" style="margin:0;padding:6px 20px"><div class="eyebrow" style="padding:12px 0 4px">What it needs</div><ul class="list"><li><span class="pill accent">tool</span><div class="grow"><span style="display:flex;align-items:center;gap:6px">Builds on <dc-import name="CapRef" label="Sky Log" glyph="week" hue="230" hint-size="80px,20px"></dc-import></span><span class="sub">@hewn · installed with it if you don't have it</span></div></li><li><span class="pill">host</span><div class="grow"><span>services.swpc.noaa.gov</span><span class="sub">aurora forecast</span></div></li><li><span class="pill">host</span><div class="grow"><span>api.met.no</span><span class="sub">cloud cover</span></div></li></ul></div>
+                  <div class="card" style="margin:0;padding:16px 20px;display:flex;flex-direction:column;gap:8px"><div class="eyebrow">Versions</div><div class="small" style="display:flex;justify-content:space-between"><span>v3 · Kp chart</span><span class="faint">Oct 20</span></div><div class="small" style="display:flex;justify-content:space-between"><span>v2 · cloud cover</span><span class="faint">Sep 2</span></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">R</div><div style="font-size:22px;font-weight:650">Install: one sheet for a file, a link and the Hub</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="R3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">R3 · Install sheet (from a file)</div>
+        <div data-theme="{{ theme }}" data-screen-label="R3 Install" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:140;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="cup" hue="140" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Install Plant Log</div><div class="small faint">From a file · plant-log.hewn.zip · v7</div></div></div>
+              <div style="display:flex;flex-direction:column;gap:6px"><div class="eyebrow">What it does</div><div style="text-wrap:pretty">Logs watering and feeding per plant, with photos, and tells you what's due. Keeps plants, events and photos.</div></div>
+              <div class="notice warn">Sends each photo to the model to read the plant's state.</div>
+              <button class="link" style="align-self:flex-start;padding:0">Source code ›</button>
+              <div><div class="eyebrow" style="padding-bottom:4px">It will ask for</div><ul class="list"><li><span class="pill accent">model</span><div class="grow"><span>Use a model</span><span class="sub">Light tier, with images · asked on first use</span></div></li></ul></div>
+              <label class="field" style="margin:0"><span class="label">Name</span><input type="text" value="Plant Log"></label>
+              <label class="check"><input type="checkbox" checked="{{ true }}"> Start with sample data <span class="faint">· 12 example entries</span></label>
+              <div class="actions" style="margin-top:0"><button>Cancel</button><button class="primary">Install</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="R2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">R2 · Reading the code first (files and links)</div>
+        <div data-theme="{{ theme }}" data-screen-label="R2 Reading" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:140;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="cup" hue="140" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Install Plant Log</div><div class="small faint">From anna.hewn.tools · v7</div></div></div>
+              <div class="thread"><div class="bubble them typing"><i></i><i></i><i></i></div></div>
+              <div class="small muted">Claude Code is reading the code to say what it does with your data. Usually under a minute.</div>
+              <div class="actions" style="margin-top:0;justify-content:space-between"><button class="ghost">Install anyway</button><button>Cancel</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="R2b" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">R2 → result · the sheet fills in where the dots were</div>
+        <div data-theme="{{ theme }}" data-screen-label="R2 Result" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:125;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:140;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="cup" hue="140" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Install Plant Log</div><div class="small faint">From anna.hewn.tools · v7</div></div></div>
+              <div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;align-items:baseline;justify-content:space-between"><div class="eyebrow">What it does</div><span class="small faint">Read by Claude Code · 0:38</span></div><div style="text-wrap:pretty">Logs watering and feeding per plant, with photos, and tells you what's due. Keeps plants, events and photos.</div></div>
+              <div><div class="eyebrow" style="padding-bottom:4px">What it found</div>
+                <ul class="list">
+                  <li><span class="dot warn"></span><div class="grow"><span>Sends each photo to the model</span><span class="sub">The description doesn't say so · <span class="mono">src/vision.ts:14</span></span></div><button class="ghost sm">Show</button></li>
+                  <li><span class="dot warn"></span><div class="grow"><span>Asks for api.plantnet.org but never calls it</span><span class="sub"><span class="mono">capability.json:22</span></span></div><button class="ghost sm">Show</button></li>
+                  <li><span class="dot ok"></span><div class="grow"><span>Keeps your data inside the tool</span><span class="sub">Nothing else leaves</span></div></li>
+                </ul>
+              </div>
+              <button class="link" style="align-self:flex-start;padding:0">Source code ›</button>
+              <div class="actions" style="margin-top:0"><button>Cancel</button><button class="primary">Continue</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="R8" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">R8 · Builds on a published tool (proposed, 0.5)</div>
+        <div data-theme="{{ theme }}" data-screen-label="R8 Builds on" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:250;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:230;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="heart" hue="250" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Install Aurora Watch</div><div class="small faint">From Hub · Official · v3</div></div></div>
+              <div><div class="eyebrow" style="padding-bottom:4px">Installs 2 tools, in this order</div>
+                <ul class="list">
+                  <li><span class="mono faint">1</span><dc-import name="AppIcon" glyph="week" hue="230" size="32" hint-size="32px,32px" style="display:flex"></dc-import><div class="grow"><span>Sky Log</span><span class="sub">@hewn · v2 or newer · keeps clear-sky nights</span></div><button class="link sm" style="padding:0">Hub page ›</button></li>
+                  <li><span class="mono faint">2</span><dc-import name="AppIcon" glyph="heart" hue="250" size="32" hint-size="32px,32px" style="display:flex"></dc-import><div class="grow"><span>Aurora Watch</span><span class="sub">Reads and writes <span class="mono">sky-log</span></span></div></li>
+                </ul>
+              </div>
+              <div class="small faint">Already have Sky Log from Hub: it's used, and updated first if it's older than v2. Made your own Sky Log: Use mine or Install alongside, as with connections.</div>
+              <div class="actions" style="margin-top:0"><button>Cancel</button><button class="primary">Install both</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="R6" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">R5 · R6 · With a connection (0.4.10)</div>
+        <div data-theme="{{ theme }}" data-screen-label="R6 Connection" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:200;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:260;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="week" hue="220" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Install Sleep Trends</div><div class="small faint">From anna.hewn.tools · uses <dc-import name="CapRef" label="Garmin" glyph="plug" hue="200" hint-size="80px,20px"></dc-import>, which you have</div></div></div>
+              <div class="segmented" style="align-self:flex-start"><button aria-pressed="true">Use mine</button><button>Install alongside</button></div>
+              <div class="notice info">Your Garmin doesn't have <span class="mono">list_sleep</span>. A build adds it first.</div>
+              <div class="small faint">Install alongside adds the bundled one as Garmin 2, and Sleep Trends uses that.</div>
+              <div class="actions" style="margin-top:0"><button>Cancel</button><button class="primary">Install</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">S</div><div style="font-size:22px;font-weight:650">Share…</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="S1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">S1 · Share… (all three ways, 0.5)</div>
+        <div data-theme="{{ theme }}" data-screen-label="S1 Share" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:140;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:560px;padding:26px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="cup" hue="140" size="44" hint-size="44px,44px" style="display:flex"></dc-import><div style="flex:1;font-size:18px;font-weight:650">Share Plant Log</div><select style="width:90px"><option>v7</option></select></div>
+              <div>
+                <div class="eyebrow" style="padding-bottom:4px">What's in it · 14 files</div>
+                <ul class="list">
+                  <li><span class="dot warn"></span><div class="grow"><span class="mono small">tests/cases.json:12</span><span class="sub">Looks like an email · a••••@g••••.com</span></div><button class="ghost sm">Show</button></li>
+                  <li><span class="dot warn"></span><div class="grow"><span class="mono small">src/fetch.ts:40</span><span class="sub">Long random string</span></div><button class="ghost sm">Show</button></li>
+                  <li><span class="dot ok"></span><div class="grow"><span>Sample data</span><span class="sub">sample/calls.json · 12 calls · always included</span></div></li>
+                </ul>
+                <div class="small faint" style="padding-top:6px">Never in it: your data, keys, settings, conversations, logs.</div>
+              </div>
+              <div>
+                <div class="eyebrow" style="padding-bottom:4px">Share as</div>
+                <ul class="list">
+                  <li><div class="grow"><span>Download</span><span class="sub mono">plant-log.hewn.zip</span></div><button class="sm primary">Download</button></li>
+                  <li><div class="grow"><span>Link</span><span class="sub">Anyone with it can install this version</span></div><button class="sm">Create…</button></li>
+                  <li><div class="grow"><span>Publish to <a href="https://hub.hewn.tools" target="_blank">Hub</a></span><span class="sub">Listed after review</span></div><button class="sm">Publish…</button></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="S2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">S2 · Blocked by one of your keys · and: no sample data</div>
+        <div data-theme="{{ theme }}" data-screen-label="S2 Blocked" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:140;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:10;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:560px;padding:26px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="cup" hue="140" size="44" hint-size="44px,44px" style="display:flex"></dc-import><div style="flex:1;font-size:18px;font-weight:650">Share Plant Log</div><select style="width:90px"><option>v7</option></select></div>
+              <div class="notice danger" style="align-items:center"><span style="flex:1"><span class="mono">src/config.ts:8</span> is your Todoist key. Remove it, then share again.</span><button class="sm">Change…</button></div>
+              <ul class="list"><li><span class="dot warn"></span><div class="grow"><span>No sample data</span><span class="sub">Needed to share, so it doesn't open empty</span></div><button class="sm ghost">Write it yourself</button><button class="sm">Ask builder</button></li></ul>
+              <div style="opacity:.45">
+                <div class="eyebrow" style="padding-bottom:4px">Share as</div>
+                <ul class="list"><li><div class="grow"><span>Download</span></div><button class="sm" disabled="{{ true }}">Download</button></li><li><div class="grow"><span>Link</span></div><button class="sm" disabled="{{ true }}">Create…</button></li><li><div class="grow"><span>Publish to Hub</span></div><button class="sm" disabled="{{ true }}">Publish…</button></li></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="S3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">S3 · Create a link (0.4.10)</div>
+        <div data-theme="{{ theme }}" data-screen-label="S3 Link" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:140;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:480px;padding:26px;display:flex;flex-direction:column;gap:16px">
+              <div style="font-size:18px;font-weight:650">Link to Plant Log v7</div>
+              <div class="small muted">A newer version needs a new link, so it's checked again.</div>
+              <div style="display:flex;flex-direction:column;gap:8px"><div class="eyebrow">Expires</div><div class="segmented" style="align-self:flex-start"><button>1 day</button><button>7 days</button><button>30 days</button><button aria-pressed="true">Never</button></div><div class="small" style="color:var(--danger)">Anyone with this link can install this tool until you revoke it.</div></div>
+              <div style="display:flex;gap:8px"><input type="text" class="mono" value="anna.hewn.tools/share/Xk3J9wq8Lm2Rv7Tz4Pq1Nc6Hy0Bd5WsEa" readonly="{{ true }}" style="flex:1"><button>Copy</button></div>
+              <div class="actions" style="margin-top:0"><button class="primary">Done</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="S6" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">S5 → S6 · Publish (free account, then the listing)</div>
+        <div data-theme="{{ theme }}" data-screen-label="S6 Publish" style="width:1280px;height:860px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:140;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:125;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:560px;padding:26px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:18px;font-weight:650">Plant Log on Hub</div><span class="small faint mono">@anna</span></div>
+              <label class="field" style="margin:0"><span class="label">Name</span><input type="text" value="Plant Log"></label>
+              <label class="field" style="margin:0"><span class="label">One line</span><input type="text" value="Water, feed, photos; when's next"><span class="hint">Starts as the tool's description</span></label>
+              <label class="field" style="margin:0"><span class="label">Tags</span><input type="text" value="Home, Garden"></label>
+              <div style="display:flex;flex-direction:column;gap:8px"><div class="eyebrow">Screens · with sample data</div>
+                <div style="display:grid;grid-template-columns:2fr 2fr 1fr;gap:8px"><div style="height:84px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);padding:10px;font-size:11px;font-weight:600;color:var(--text-2)">Due today · 3</div><div style="height:84px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);padding:10px;font-size:11px;font-weight:600;color:var(--text-2)">Monstera</div><div style="height:84px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);padding:10px;font-size:11px;font-weight:600;color:var(--text-2)">Widget</div></div>
+              </div>
+              <div class="actions" style="margin-top:0"><button>Back</button><button class="primary">Submit for review</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">T</div><div style="font-size:22px;font-weight:650">Updates (0.5)</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="T1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">T1 · Inbox rows</div>
+        <div data-theme="{{ theme }}" data-screen-label="T1 Inbox" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <dc-import name="TopBar" active="Home" inbox="2" inbox-open="{{ true }}" hint-size="100%,80px"></dc-import>
+            <div style="flex:1;display:flex;justify-content:center;padding-top:36px;filter:blur(2px);opacity:.7"><dc-import name="HomeBoard" badges="{{ false }}" building="{{ false }}" hint-size="744px,520px"></dc-import></div>
+          </div>
+          <div class="menu" style="position:absolute;top:72px;right:32px;width:440px;padding:10px;gap:2px;z-index:5">
+            <div class="eyebrow" style="padding:4px 10px 8px">Needs you · 2</div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px"><dc-import name="AppIcon" glyph="heart" hue="250" size="32" badge="warn" hint-size="32px,32px" style="display:flex"></dc-import><div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-weight:600">v3 of Aurora Watch is on Hub</span><span class="small muted">Official · you have v2</span></div><button class="sm">Review</button></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:10px"><dc-import name="AppIcon" glyph="heart" hue="150" size="32" hint-size="32px,32px" style="display:flex"></dc-import><div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-weight:600">Bird Count was removed from Hub</span><span class="small muted">Your copy keeps working</span></div><button class="ghost sm">OK</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="T2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">T2 · Update (unchanged since install)</div>
+        <div data-theme="{{ theme }}" data-screen-label="T2 Update" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:250;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="heart" hue="250" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">Update Aurora Watch to v3</div><div class="small faint">From Hub · Official</div></div><button class="link sm" style="padding:0">Hub page ›</button></div>
+              <div style="display:flex;flex-direction:column;gap:6px"><div class="eyebrow">What changed</div><div>Adds a Kp index chart and alerts by text.</div><button class="link" style="align-self:flex-start;padding:0">3 files changed · +120 −14 › <span class="faint">U4</span></button></div>
+              <div><div class="eyebrow" style="padding-bottom:4px">Newly asks for</div><ul class="list"><li><span class="pill warn">host</span><div class="grow"><span>api.textbelt.com</span><span class="sub">texts</span></div></li></ul></div>
+              <div class="small faint">Tested on a copy of your data first. v2 stays until it passes.</div>
+              <div class="actions" style="margin-top:0"><button>Not now</button><button class="primary">Update</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="T3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">T3 · Update (you changed it)</div>
+        <div data-theme="{{ theme }}" data-screen-label="T3 Update changed" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:250;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:520px;padding:26px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="heart" hue="250" size="48" hint-size="48px,48px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column;gap:2px"><div style="font-size:18px;font-weight:650">v3 of Aurora Watch</div><div class="small faint">You've changed it since you installed it</div></div><button class="link sm" style="padding:0">Hub page ›</button></div>
+              <ul class="list">
+                <li style="min-height:64px"><div class="grow"><span>Bring in their changes</span><span class="sub">A build applies v2 → v3 to your version · uses Credits</span></div><button class="sm primary">Start</button></li>
+                <li style="min-height:64px"><div class="grow"><span>Install v3 as a copy</span><span class="sub">Next to yours</span></div><button class="sm">Install</button></li>
+              </ul>
+              <div class="actions" style="margin-top:0"><button>Not now</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">W</div><div style="font-size:22px;font-weight:650">Info: everything on the page</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="W3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">W3 · W2 · Wide window, something needs you</div>
+        <div data-theme="{{ theme }}" data-screen-label="W3 Info wide" style="width:1440px;height:1240px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:350;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:30;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;padding:20px 32px"><div class="glass-bar"><button>‹ Home</button></div><div class="glass-bar"><button>Share…</button><button>•••</button></div></div>
+            <div style="width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;align-items:center;gap:20px"><dc-import name="AppIcon" glyph="heart" hue="350" size="72" hint-size="72px,72px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:32px;font-weight:650;letter-spacing:-.025em;line-height:1.1">Garmin Training</div><div class="muted" style="display:flex;align-items:center;gap:6px">Syncs watch runs into <dc-import name="CapRef" label="Running Log" glyph="run" hue="30" hint-size="110px,20px"></dc-import></div></div><button class="lg">Open</button></div>
+              <div style="display:flex;gap:6px"><span class="pill warn with-dot">needs you</span><span class="pill">v4</span><span class="pill">built with Claude Code</span><span class="pill">2 days ago</span><span class="pill accent">from a file · Garmin Training v3</span></div>
+              <div class="notice warn" style="align-items:center"><span style="flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap">Wants to write to <dc-import name="CapRef" label="Running Log" glyph="run" hue="30" hint-size="110px,20px"></dc-import> (<span class="mono">record_run</span>)</span><button class="sm">Deny</button><button class="sm primary">Authorize</button></div>
+              <form class="card composer-card"><span class="eyebrow accent">Change it</span><input type="text" class="bare" placeholder="What should Garmin Training also do?"><button class="primary lg" type="button">Ask</button></form>
+              <dc-import name="InfoSections" columns="2" hint-size="100%,800px"></dc-import>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="W1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">W1 · Below 1100px: one column</div>
+        <div data-theme="{{ theme }}" data-screen-label="W1 Info" style="width:860px;height:1840px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:350;--x:-8%;--y:-10%;--w:500px"></i><i style="--h:30;--x:60%;--y:60%;--w:400px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;padding:20px 32px"><div class="glass-bar"><button>‹ Home</button></div><div class="glass-bar"><button>Share…</button><button>•••</button></div></div>
+            <div style="padding:0 40px;display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;align-items:center;gap:18px"><dc-import name="AppIcon" glyph="heart" hue="350" size="64" hint-size="64px,64px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:650;letter-spacing:-.025em;line-height:1.1">Garmin Training</div><div class="muted" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Syncs watch runs into <dc-import name="CapRef" label="Running Log" glyph="run" hue="30" hint-size="110px,20px"></dc-import></div></div><button>Open</button></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill warn with-dot">needs you</span><span class="pill">v4</span><span class="pill">built with Claude Code</span><span class="pill">2 days ago</span></div>
+              <form class="card composer-card"><span class="eyebrow accent">Change it</span><input type="text" class="bare" placeholder="What should it also do?"><button class="primary" type="button">Ask</button></form>
+              <dc-import name="InfoSections" columns="1" hint-size="100%,1400px"></dc-import>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px;color:#e8e9ee"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#e8e9ee;color:#0d0e11;padding:4px 8px;border-radius:6px">U · V</div><div style="font-size:22px;font-weight:650">A version's files · fold-ins</div></div>
+    <div style="display:flex;gap:48px;align-items:flex-start">
+
+      <div id="U4" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">U4 · A version › Files: Changes (git-style)</div>
+        <div data-theme="{{ theme }}" data-screen-label="U4 Version files" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:30;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:250;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;padding:20px 32px"><div class="glass-bar"><button>‹ Running Log</button></div><div class="glass-bar"><button>Continue from here</button><button>Restore</button></div></div>
+            <div style="width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px;min-height:0;flex:1;padding-bottom:28px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="run" hue="30" size="44" hint-size="44px,44px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column"><div style="font-size:22px;font-weight:650;letter-spacing:-.02em">v7 · Pace column</div><div class="small faint">Built with Claude Code · Fable · high · 2 days ago</div></div><div class="segmented"><button>Conversation</button><button>Spec</button><button>Log</button><button aria-pressed="true">Files</button></div></div>
+              <div style="flex:1;min-height:0"><dc-import name="CodeBrowser" mode="diff" base="v6" version="v7" hint-size="100%,100%"></dc-import>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="Q5" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">Q5 · Same browser, Source: from a listing, an install sheet or Info</div>
+        <div data-theme="{{ theme }}" data-screen-label="Q5 Source" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:250;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="display:flex;justify-content:space-between;padding:20px 32px"><div class="glass-bar"><button>‹ Aurora Watch</button></div><div class="glass-bar"><button>Download</button></div></div>
+            <div style="width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:16px;flex:1;min-height:0;padding-bottom:28px">
+              <div style="display:flex;align-items:center;gap:14px"><dc-import name="AppIcon" glyph="heart" hue="250" size="44" hint-size="44px,44px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column"><div style="font-size:22px;font-weight:650;letter-spacing:-.02em">Source code · v3</div><div class="small faint">Aurora Watch · Official · read-only</div></div><select style="width:110px"><option>v3</option></select></div>
+              <div style="flex:1;min-height:0"><dc-import name="CodeBrowser" mode="source" version="v3" hint-size="100%,100%"></dc-import></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="V1" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">V1 · ⌘K: yours first, Hub last</div>
+        <div data-theme="{{ theme }}" data-screen-label="V1 Palette" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper"><i style="--h:250;--x:-6%;--y:-18%;--w:520px"></i><i style="--h:125;--x:62%;--y:-10%;--w:420px"></i><i style="--h:350;--x:70%;--y:60%;--w:480px"></i></div>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column"><dc-import name="TopBar" active="Home" inbox="2" hint-size="100%,80px"></dc-import></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:flex;justify-content:center;padding-top:120px">
+            <div class="dialog" style="width:600px;padding:10px;display:flex;flex-direction:column;gap:6px;align-self:flex-start">
+              <input type="text" class="palette-input" value="aur">
+              <div style="border-top:1px solid var(--border);display:flex;flex-direction:column;padding-top:4px">
+                <div class="eyebrow" style="padding:10px 12px 4px">Tools</div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:10px;background:var(--surface-3)"><dc-import name="AppIcon" glyph="heart" hue="250" size="28" hint-size="28px,28px" style="display:flex"></dc-import><span style="flex:1;font-weight:600">Aurora Watch</span><span class="small faint">Open · Change… · Info</span><kbd class="mono small faint">↵</kbd></div>
+                <div class="eyebrow" style="padding:12px 12px 4px">Actions</div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 12px"><dc-import name="AppIcon" glyph="new" saturation="0" size="28" hint-size="28px,28px" style="display:flex"></dc-import><span style="flex:1">New tool</span></div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 12px"><dc-import name="AppIcon" glyph="link" saturation="0" size="28" hint-size="28px,28px" style="display:flex"></dc-import><span style="flex:1">Install from a file or link…</span></div>
+                <div class="eyebrow" style="padding:12px 12px 4px">Hub</div>
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 12px"><dc-import name="AppIcon" glyph="heart" hue="270" size="28" hint-size="28px,28px" style="display:flex"></dc-import><div style="flex:1;display:flex;flex-direction:column"><span>Aurora Borealis Log</span><span class="small faint">@ana · not installed</span></div><button class="sm">Install</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="V2" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">V2 · The box: attach, model, Draft now, a saved rule</div>
+        <div data-theme="{{ theme }}" data-screen-label="V2 Intake" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:140;--x:55%;--y:-20%;--w:560px"></i><i style="--h:250;--x:-10%;--y:50%;--w:480px"></i></div>
+          <div style="position:relative;height:100%;display:flex;flex-direction:column">
+            <div style="padding:20px 32px"><div class="glass-bar"><button>‹ Home</button></div></div>
+            <div style="flex:1;width:680px;margin:0 auto;display:flex;flex-direction:column;justify-content:flex-end;gap:14px;padding-bottom:40px">
+              <div class="thread">
+                <div class="bubble me">A log for my plants</div>
+                <div class="bubble them"><p style="margin:0 0 6px"><b>One entry per watering</b>, I'd assume. Two things:</p><ul style="margin:0;padding-left:18px"><li>Photos too?</li><li>Remind you, or just show what's due?</li></ul></div>
+              </div>
+              <div class="notice ok" style="align-items:center"><span style="flex:1">Saved as a rule: always Swedish copy</span><button class="sm ghost">Undo</button></div>
+              <div class="card" style="border-radius:22px;padding:12px;display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;gap:8px"><div style="position:relative;width:64px;height:64px;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--surface-3);display:grid;place-items:end start"><div style="position:absolute;inset:0;background:var(--c3);opacity:.35"></div><div style="position:absolute;left:14px;top:10px;width:30px;height:36px;border-radius:50% 50% 8px 8px;background:var(--c4);opacity:.8"></div><span class="mono" style="position:relative;font-size:9px;padding:2px 5px;margin:4px;border-radius:4px;background:var(--surface-overlay)">plant.jpg</span><span style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:6px;display:grid;place-items:center;font-size:11px;background:var(--surface-overlay)">×</span></div></div>
+                <input type="text" class="bare" placeholder="Reply…" value="Photos yes, and just show what's due">
+                <div style="display:flex;align-items:center;gap:8px"><button class="ghost sm">Attach</button><button class="link sm" style="padding:0">Draft now</button><span style="flex:1"></span><button class="ghost sm">Claude Code · Fable · high ▾</button><button class="primary">Send</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="V3" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font:600 13px ui-monospace,Menlo,monospace;color:#8a8d98">V3 · Set icon › Saturation</div>
+        <div data-theme="{{ theme }}" data-screen-label="V3 Saturation" style="width:1280px;height:800px;border-radius:16px;overflow:hidden;position:relative">
+          <div class="wallpaper dim"><i style="--h:290;--x:-8%;--y:-25%;--w:600px"></i><i style="--h:200;--x:70%;--y:55%;--w:460px"></i></div>
+          <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+          <div style="position:relative;height:100%;display:grid;place-items:center">
+            <div class="dialog" style="width:480px;padding:26px;display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;align-items:center;gap:16px"><dc-import name="AppIcon" rows="{{ glyphRows }}" hue="{{ hue }}" saturation="{{ sat }}" size="64" hint-size="64px,64px" style="display:flex"></dc-import><div style="flex:1;font-size:20px;font-weight:650;letter-spacing:-.02em">Icon for Ghost</div><dc-import name="AppIcon" rows="{{ glyphRows }}" hue="{{ hue }}" saturation="{{ sat }}" size="28" hint-size="28px,28px" style="display:flex"></dc-import><dc-import name="AppIcon" rows="{{ glyphRows }}" hue="{{ hue }}" saturation="{{ sat }}" size="20" hint-size="20px,20px" style="display:flex"></dc-import></div>
+              <div class="segmented" style="align-self:center"><button aria-pressed="true">Draw</button><button>Image</button></div>
+              <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+                <div style="display:grid;grid-template-columns:repeat(5,40px);gap:4px"><sc-for list="{{ cells }}" as="c" hint-placeholder-count="25"><button aria-label="cell" onClick="{{ c.toggle }}" style="width:40px;height:40px;min-height:0;padding:0;border-radius:4px;border:1px solid var(--border);background:{{ c.bg }}"></button></sc-for></div>
+                <div class="small faint">{{ litCount }} lit · 7–17 cells, one simple idea.</div>
+              </div>
+              <label class="field" style="margin:0"><span class="label">Colour</span><span class="range-mark" style="--at:0;padding-bottom:0"><input type="range" min="0" max="360" value="{{ hue }}" onInput="{{ onHue }}" style="width:100%"></span></label>
+              <label class="field" style="margin:0"><span class="label">Saturation · {{ sat }}%</span><span class="range-mark" data-mark="100%" style="--at:.667"><input type="range" min="0" max="150" value="{{ sat }}" onInput="{{ onSat }}" style="width:100%"></span></label>
+              <div class="actions" style="margin-top:0;justify-content:space-between"><button class="ghost">Use default</button><div style="display:flex;gap:8px"><button>Cancel</button><button class="primary">Save</button></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark'|'light'&quot;}}">
+class Component extends DCLogic {
+  state = { sat: 100, hue: 290, grid: ['.###.', '#####', '#.#.#', '#####', '#.#.#'].join('').split('').map(c => c === '#') };
+  renderVals() {
+    const g = this.state.grid;
+    const glyphRows = [0, 1, 2, 3, 4].map(r => g.slice(r * 5, r * 5 + 5).map(b => (b ? '#' : '.')).join(''));
+    const cells = g.map((on, i) => ({ bg: on ? 'var(--text)' : 'var(--surface-2)', toggle: () => this.setState(s => ({ grid: s.grid.map((v, j) => (j === i ? !v : v)) })) }));
+    const extra = { glyphRows, cells, litCount: g.filter(Boolean).length, hue: this.state.hue, onHue: e => this.setState({ hue: Number(e.target.value) }) };
+    const bars = seed => Array.from({ length: 8 }, (_, i) => (20 + ((seed * 37 + i * 53) % 60)) + 'px');
+    const C = (name, glyph, hue, line, need, o = {}) => ({ name, glyph, hue, line, need, shotTitle: o.shot || name, bars: bars(hue + name.length), installed: !!o.installed, needC: o.warn ? 'var(--warn)' : 'var(--text-2)', by: o.by || '' });
+    return {
+      ...extra, sat: this.state.sat, onSat: e => this.setState({ sat: Number(e.target.value) }),
+      theme: this.props.theme ?? 'dark',
+      tags: ['Home', 'Health', 'Kids', 'Weather', 'Writing'],
+      official: [
+        C('Habits', 'check', 160, 'Check in daily, see streaks', '', { installed: 1, shot: 'This week', by: '3.4k' }),
+        C('Aurora Watch', 'heart', 250, 'Tonight\'s aurora odds where you are', 'reaches NOAA, met.no', { shot: 'Tonight · 62%', by: '1.2k' }),
+        C('Plant Log', 'cup', 140, 'Water, feed, photos; when\'s next', 'uses a model · set up after install', { warn: 1, shot: 'Due today · 3', by: '860' }),
+        C('Kid Quotes', 'words', 350, 'Write down what they said', '', { shot: 'October', by: '540' }),
+        C('Naming Generator', 'one', 55, 'Names, with domains checked', 'reaches 5 RDAP hosts', { shot: 'Shortlist', by: '410' }),
+        C('Gift Ideas', 'lock', 30, 'Ideas per person, by occasion', 'uses a model · set up after install', { warn: 1, shot: 'Upcoming', by: '690' }),
+      ],
+      others: [
+        C('Bike Service', 'run', 200, 'Parts and km since', '', { by: '@lars · 84', shot: 'Chain · 1 840 km' }),
+        C('Sourdough', 'cup', 45, 'Feeds, bakes, hydration', '', { by: '@mira · 212', shot: 'Last bake' }),
+        C('Bird Count', 'heart', 150, 'Garden birds by month', 'reaches ebird.org', { by: '@ana · 37', shot: 'October · 14 species' }),
+      ],
+      get shelf() {
+        const off = this.official.map(c => ({ ...c, official: true, isOther: false, installs: c.by }));
+        const oth = this.others.map(c => { const [handle, n] = c.by.split(' · '); return { ...c, official: false, isOther: true, handle, initial: handle[1].toUpperCase(), installs: n }; });
+        return [off[1], oth[1], off[0], off[2], oth[0], off[3], off[4], oth[2], off[5]];
+      },
+      kp: [30, 42, 38, 60, 85, 120, 140, 110, 90, 70, 50, 40].map(v => v + 'px'),
+    };
+  }
+}
+</script>
+</body>
+</html>

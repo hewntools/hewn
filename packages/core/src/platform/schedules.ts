@@ -122,17 +122,9 @@ export class Schedules extends Domain {
     const ran: { id: string; ok: boolean }[] = [];
     for (const s of this.schedules.due(now)) {
       const cron = parseCron(toCron(s.cadence));
-      const principal: Agent = { id: `schedule:${s.id}`, kind: "schedule", scopes: new Set(["invoke"]), capabilities: new Set([s.capabilityId]) };
       // Claim the slot first, so a slow run can't be started twice.
       this.schedules.update(s.id, { nextRunAt: nextRun(cron, s.timezone, Math.max(now, Date.now())) });
-      let outcome = "ok";
-      try {
-        this.scheduledOperation(s.capabilityId, s.operation, s.operationVersion);
-        await this.platform.invoke(principal, { capabilityId: s.capabilityId, operation: s.operation, operationVersion: s.operationVersion, input: s.input });
-      } catch (e) {
-        const err = e as PlatformError;
-        outcome = `${err.code ?? "error"}: ${err.message}`.slice(0, 300);
-      }
+      const outcome = await this.runOnce(s);
       const ok = outcome === "ok";
       const failures = ok ? 0 : s.failures + 1;
       const pause = failures >= MAX_FAILURES;
@@ -150,6 +142,38 @@ export class Schedules extends Domain {
     }
     if (ran.length) this.onSchedulesChanged();
     return ran;
+  }
+
+  /** One run of a schedule, as itself (`schedule:<id>`: the one operation, on the one capability): "ok" or what went wrong. */
+  private async runOnce(s: Schedule): Promise<string> {
+    const principal: Agent = { id: `schedule:${s.id}`, kind: "schedule", scopes: new Set(["invoke"]), capabilities: new Set([s.capabilityId]) };
+    try {
+      this.scheduledOperation(s.capabilityId, s.operation, s.operationVersion);
+      await this.platform.invoke(principal, { capabilityId: s.capabilityId, operation: s.operation, operationVersion: s.operationVersion, input: s.input });
+      return "ok";
+    } catch (e) {
+      const err = e as PlatformError;
+      return `${err.code ?? "error"}: ${err.message}`.slice(0, 300);
+    }
+  }
+
+  /**
+   * Run one schedule now (owner only): Try again after a failure, or check a fix. It runs as the
+   * schedule does and its last run is this one; a success clears its failures, a failure doesn't
+   * count toward pausing it (only its own runs do). Its next time stays as it was. One paused after
+   * failing stays paused (the owner resumes it), but a success clears why: it's paused, no more.
+   */
+  async runScheduleNow(owner: Agent, id: string): Promise<{ ok: boolean; outcome: string }> {
+    requireOwner(owner);
+    const s = this.schedules.get(id);
+    if (!s) throw new PlatformError("not_found", `no schedule '${id}'`);
+    if (s.status === "proposed") throw new PlatformError("invalid_request", "enable the schedule before running it");
+    const outcome = await this.runOnce(s);
+    const ok = outcome === "ok";
+    this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: outcome, ...(ok ? { failures: 0, pausedReason: null } : {}) });
+    this.logger(`schedule ${s.id} run now by ${owner.id}: ${outcome}`);
+    this.onSchedulesChanged();
+    return { ok, outcome };
   }
 
   /**

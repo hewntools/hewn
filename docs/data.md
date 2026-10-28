@@ -24,7 +24,7 @@ Restoring replaces the data and keeps Hewn running: it stops and starts its runt
 
 ## Export
 
-**Export data** in a tool's menu downloads all its data as JSON. Or `hewn export <id> --out file.json`.
+**Export data** in a tool's menu, or **Export** in Info › Data, downloads all its data as JSON. Or `hewn export <id> --out file.json`. Info › Data also shows how many rows the tool keeps, in how many tables, and when it last wrote.
 
 ## Versions and rollback
 

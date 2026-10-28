@@ -34,6 +34,7 @@ export interface VersionRow {
 /** "widgets": a follow-up build that adds or changes widgets only (the core stays as it is). */
 export type BuildKind = "create" | "modify" | "widgets";
 export type GrantKind = "secret" | "host" | "capability" | "model";
+export type GrantAction = "approve" | "revoke" | "decline" | "request";
 /** "waiting": a dependent build that starts once the build it depends on promotes. */
 export type BuildStatus = "waiting" | "open" | "building" | "validating" | "review" | "failed" | "promoted" | "cancelled";
 
@@ -214,6 +215,15 @@ CREATE TABLE IF NOT EXISTS grant_events (
   grant_ref     TEXT NOT NULL,
   actor         TEXT NOT NULL,
   at            TEXT NOT NULL
+);
+-- The owner said no to a grant a version asks for (Deny): it stays unapproved, and nothing asks again for that version.
+CREATE TABLE IF NOT EXISTS grant_declines (
+  capability_id TEXT NOT NULL,
+  grant_ref     TEXT NOT NULL,
+  version       INTEGER NOT NULL,
+  declined_by   TEXT NOT NULL,
+  declined_at   TEXT NOT NULL,
+  PRIMARY KEY (capability_id, grant_ref)
 );
 CREATE TABLE IF NOT EXISTS lifecycle_events (
   capability_id TEXT NOT NULL,
@@ -594,6 +604,14 @@ export class Registry {
     this.db.prepare("INSERT INTO capability_logs (capability_id, at, entry) VALUES (?, ?, ?)").run(capabilityId, at, [header, ...lines.map((l) => `  ${l}`)].join("\n"));
   }
 
+  /** The header lines of a capability's last `n` calls, newest first ("<at> <caller> <op> <outcome> <ms>ms"); the rest of each entry stays in the database. */
+  capabilityLogHeaders(capabilityId: string, n: number): string[] {
+    return this.db
+      .prepare("SELECT CASE WHEN instr(entry, char(10)) > 0 THEN substr(entry, 1, instr(entry, char(10)) - 1) ELSE entry END AS header FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?")
+      .all(capabilityId, n)
+      .map((r) => String(r.header));
+  }
+
   /** The last `n` log lines of a capability, oldest first. */
   capabilityLogLines(capabilityId: string, n: number): string[] {
     const rows = this.db.prepare("SELECT entry FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?").all(capabilityId, n);
@@ -903,6 +921,26 @@ export class Registry {
     this.db.prepare("DELETE FROM grants WHERE capability_id = ? AND kind = ? AND name = ?").run(capabilityId, kind, name);
   }
 
+  /** Grants the owner said no to for `version` ("host:x", "capability:id/op@1" …). */
+  declinedGrants(capabilityId: string, version: number): Set<string> {
+    return new Set(this.db.prepare("SELECT grant_ref FROM grant_declines WHERE capability_id = ? AND version = ?").all(capabilityId, version).map((r) => (r as Row).grant_ref as string));
+  }
+
+  declineGrant(capabilityId: string, grant: string, version: number, by: string) {
+    this.db.prepare("INSERT OR REPLACE INTO grant_declines (capability_id, grant_ref, version, declined_by, declined_at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, grant, version, by, now());
+  }
+
+  clearDecline(capabilityId: string, grant: string) {
+    this.db.prepare("DELETE FROM grant_declines WHERE capability_id = ? AND grant_ref = ?").run(capabilityId, grant);
+  }
+
+  /** The owner's no to `grants` for version `from`, kept for version `to` (a quick change isn't a new ask). */
+  carryDeclines(capabilityId: string, from: number, to: number, grants: Set<string>) {
+    for (const g of this.declinedGrants(capabilityId, from)) {
+      if (grants.has(g)) this.db.prepare("UPDATE grant_declines SET version = ? WHERE capability_id = ? AND grant_ref = ?").run(to, capabilityId, g);
+    }
+  }
+
   /** The owner's values for a capability's declared config (non-secret settings). */
   config(capabilityId: string): Record<string, string> {
     return Object.fromEntries(this.db.prepare("SELECT name, value FROM config_values WHERE capability_id = ?").all(capabilityId).map((r) => [r.name as string, r.value as string]));
@@ -1004,8 +1042,8 @@ export class Registry {
       });
   }
 
-  /** Authority history for the activity timeline: approve / revoke / request (an agent asking). */
-  addGrantEvent(capabilityId: string, action: "approve" | "revoke" | "request", grant: string, actor: string) {
+  /** Authority history for the activity timeline: approve / revoke / decline (the owner said no) / request (an agent asking). */
+  addGrantEvent(capabilityId: string, action: GrantAction, grant: string, actor: string) {
     this.db.prepare("INSERT INTO grant_events (capability_id, action, grant_ref, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, grant, actor, now());
   }
 
@@ -1015,7 +1053,7 @@ export class Registry {
       .all(limit)
       .map((r) => {
         const x = r as Row;
-        return { capabilityId: x.capability_id as string, action: x.action as "approve" | "revoke" | "request", grant: x.grant_ref as string, actor: x.actor as string, at: x.at as string };
+        return { capabilityId: x.capability_id as string, action: x.action as GrantAction, grant: x.grant_ref as string, actor: x.actor as string, at: x.at as string };
       });
   }
 
@@ -1113,7 +1151,7 @@ export class Registry {
     this.transaction(() => {
       // Attachments go first (`releaseAttachments`): shared ones move to a sibling build, the rest with their blobs.
       for (const table of ["build_context", "build_feedback"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
-      for (const table of ["grants", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
+      for (const table of ["grants", "grant_declines", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);

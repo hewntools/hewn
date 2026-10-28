@@ -269,6 +269,27 @@ describe("model port: the platform", () => {
     await assert.rejects(t.platform.setCapabilityModel(t.claude, "word-explainer", { tier: "light" }), /owner/);
   });
 
+  test("a quick change keeps the owner's no: after a tier change, a declined host is still declined", async () => {
+    net = fakeNet();
+    t = setup({ modelFetch: (url, init) => net.fetch(url, init) });
+    const f = fixtureCopy("word-explainer", (m) => (m.requires.hosts = ["api.example.com"]));
+    try {
+      await installFrom(t.platform, f.dir);
+      await t.platform.refreshModelCatalog();
+      await t.platform.setModelKey(USER, "anthropic", "sk-ant-test-key");
+      t.platform.approveGrant(USER, "word-explainer", "model:light");
+      t.platform.declineGrant(USER, "word-explainer", "host:api.example.com");
+      assert.equal(ready().onlySaidNo, true);
+      const b = await t.platform.setCapabilityModel(USER, "word-explainer", { tier: "standard" });
+      const done = await t.platform.settle(b.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.deepEqual(ready().declinedGrants, ["host:api.example.com"], "still said no to");
+      assert.deepEqual(ready().pendingGrants, ["host:api.example.com"], "and the new model grant came with the change");
+    } finally {
+      f.remove();
+    }
+  });
+
   test("Activity: each model call is recorded with who started the chain", async () => {
     await setUp();
     await configure();

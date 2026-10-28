@@ -13,7 +13,7 @@ import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { type Schedule, ScheduleStore } from "./schedules.ts";
 import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
 import { Presentation } from "./platform/presentation.ts";
-import { Data } from "./platform/data.ts";
+import { Data, type DataSummary } from "./platform/data.ts";
 import { Sessions } from "./platform/sessions.ts";
 import { Attachments, type AttachmentWithData } from "./platform/attachments.ts";
 import { Instructions, type Instruction } from "./platform/instructions.ts";
@@ -30,6 +30,7 @@ import { Events, type Shared, type Domains, type LoadedVersion } from "./platfor
 
 // What the domains define, importable from here as before.
 export { type CapabilitySummary } from "./platform/discovery.ts";
+export { type DataSummary } from "./platform/data.ts";
 export { MAX_SATURATION } from "./platform/presentation.ts";
 export { type Readiness, hostOf, resolveHosts } from "./platform/grants.ts";
 export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
@@ -205,6 +206,7 @@ export class Platform {
   rollback(owner: Agent, capabilityId: string, version?: number): Promise<{ from: number; to: number }> { return this.d.data.rollback(owner, capabilityId, version); }
   purge(owner: Agent, capabilityId: string, confirm: string) { return this.d.data.purge(owner, capabilityId, confirm); }
   exportData(owner: Agent, capabilityId: string): Promise<{ capability: string; version: number; exportedAt: string; source: "operation" | "state"; data: unknown }> { return this.d.data.exportData(owner, capabilityId); }
+  dataSummary(owner: Agent, capabilityId: string): Promise<DataSummary> { return this.d.data.dataSummary(owner, capabilityId); }
   importData(owner: Agent, capabilityId: string, tables: Record<string, Record<string, unknown>[]>): Promise<{ rows: number }> { return this.d.data.importData(owner, capabilityId, tables); }
   archived(owner: Agent): { id: string; name: string; archivedAt: string }[] { return this.d.data.archived(owner); }
   restore(owner: Agent, capabilityId: string) { return this.d.data.restore(owner, capabilityId); }
@@ -218,6 +220,7 @@ export class Platform {
   approveGrants(owner: Agent, capabilityId: string): string[] { return this.d.grants.approveGrants(owner, capabilityId); }
   approveGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.approveGrant(owner, capabilityId, grant); }
   revokeGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.revokeGrant(owner, capabilityId, grant); }
+  declineGrant(owner: Agent, capabilityId: string, grant: string) { return this.d.grants.declineGrant(owner, capabilityId, grant); }
   deleteSecret(owner: Agent, capabilityId: string, name: string) { return this.d.grants.deleteSecret(owner, capabilityId, name); }
   agents(owner: Agent): AgentDetails[] { return this.d.grants.agents(owner); }
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[] } | "revoke") { return this.d.grants.updateAgent(owner, id, change); }
@@ -305,6 +308,7 @@ export class Platform {
   proposeSchedule(agent: Agent, req: { capabilityId: string; operation: string; operationVersion?: number; input?: unknown; cadence: string; note?: string }): Schedule { return this.d.schedules.proposeSchedule(agent, req); }
   updateSchedule(owner: Agent, id: string, change: { status?: "active" | "paused"; cadence?: string; input?: unknown }): Schedule { return this.d.schedules.updateSchedule(owner, id, change); }
   deleteSchedule(owner: Agent, id: string) { return this.d.schedules.deleteSchedule(owner, id); }
+  runScheduleNow(owner: Agent, id: string): Promise<{ ok: boolean; outcome: string }> { return this.d.schedules.runScheduleNow(owner, id); }
   nextScheduleAt(): number | null { return this.d.schedules.nextScheduleAt(); }
   runDueSchedules(now?: number): Promise<{ id: string; ok: boolean }[]> { return this.d.schedules.runDueSchedules(now); }
 

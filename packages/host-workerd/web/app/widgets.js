@@ -7,7 +7,7 @@ import { route } from "./router.js";
 import { askFixLatest, openCapability, openChange } from "./tool-actions.js";
 import { field } from "./tool.js";
 
-export { addWidgetSheet, segmented, SIZE_LABEL, SIZE_LETTER, TEMPLATE_LABEL, toolWidgetsSheet, widgetOptionsSheet, widgetPreview, widgetTile };
+export { addWidgetSheet, renderer as widgetRenderer, segmented, SIZE_LABEL, SIZE_LETTER, TEMPLATE_LABEL, toolWidgetsSheet, widgetOptionsSheet, widgetPreview, widgetTile };
 
 // ---------- widgets on Home ----------
 

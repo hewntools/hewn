@@ -140,11 +140,15 @@ try {
   await settle(b1.buildId);
   const b2 = await post("/capabilities/running-log/modify", { request: "add delete_run" });
   await settle(b2.buildId);
+  // Something in each section: a run, a weekly schedule, a rule.
+  await post("/capabilities/running-log/invoke", { operation: "record_run", operationVersion: 1, input: { distanceKm: 8.2, durationSeconds: 2700 } });
+  await post("/schedules", { capabilityId: "running-log", operation: "get_summary", cadence: "weekly sun 18:00" });
+  await page.evaluate(() => fetch("/api/capabilities/running-log/instructions", { method: "PUT", headers: { "x-hewn-ui": "1", "content-type": "application/json" }, body: JSON.stringify({ text: "Distances in km, never miles" }) }));
   await page.goto(`${web}/#/c/running-log`);
-  await page.locator(".info-row", { hasText: "Versions" }).waitFor();
+  await page.locator(".info-section", { hasText: "Versions" }).waitFor();
   await page.waitForTimeout(300);
   const infoH = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
-  await shot("tool-info", { width: 1280, height: 700 });
+  await shot("tool-info", { width: 1280, height: Math.min(infoH, 1000) });
 
   // 4. The spec proposal: Bike Care, in the create chat.
   await page.setViewportSize({ width: 1280, height: 1000 });

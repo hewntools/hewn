@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;gap:16px;height:100%;min-height:0">
+  <div class="side-list" style="width:240px">
+    <sc-if value="{{ isDiff }}" hint-placeholder-val="{{ true }}"><div class="eyebrow">Changed since {{ base }}</div></sc-if>
+    <sc-if value="{{ isSource }}" hint-placeholder-val="{{ false }}"><div class="eyebrow">{{ version }} · 6 files</div></sc-if>
+    <sc-for list="{{ files }}" as="f" hint-placeholder-count="5"><button aria-pressed="{{ f.on }}" class="mono" style="font-size:13px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">{{ f.path }}</span><span class="small" style="color:var(--ok);display:{{ f.statD }}">{{ f.add }}</span><span class="small" style="color:var(--danger);display:{{ f.statD }}">{{ f.del }}</span></button></sc-for>
+  </div>
+  <div class="card" style="flex:1;min-width:0;padding:0;overflow:hidden;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">
+      <span class="mono small" style="flex:1">src/index.ts</span>
+      <div class="segmented"><button aria-pressed="{{ diffOn }}">Changes</button><button aria-pressed="{{ srcOn }}">Source</button></div>
+    </div>
+    <div class="mono" style="flex:1;overflow:hidden;font-size:12.5px;line-height:1.75;background:var(--log-bg);color:var(--log-text)">
+      <sc-for list="{{ lines }}" as="l" hint-placeholder-count="14">
+        <div style="display:grid;grid-template-columns:{{ gutter }};background:{{ l.bg }}">
+          <span style="text-align:right;padding-right:10px;color:var(--text-3);user-select:none;visibility:{{ l.oldD }}">{{ l.o }}</span>
+          <span style="text-align:right;padding-right:10px;color:var(--text-3);user-select:none">{{ l.n }}</span>
+          <span style="padding:0 12px 0 4px;white-space:pre-wrap;color:{{ l.fg }}">{{ l.mark }}{{ l.t }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1100,&quot;height&quot;:560},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;diff&quot;,&quot;source&quot;],&quot;default&quot;:&quot;diff&quot;,&quot;tsType&quot;:&quot;'diff'|'source'&quot;},&quot;base&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;v6&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;version&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;v7&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const diff = (this.props.mode ?? 'diff') === 'diff';
+    const src = [
+      'import { tool } from "@hewn/sdk";', '', 'export default tool({', '  list_runs({ limit = 50 }) {', '    const runs = db.runs.recent(limit);',
+      '    return runs.map((run) => {', '      const secs = run.time;', '      const pace = secs / run.km;', '      return { ...run, pace };', '    });', '  },',
+      '  record_run(input) {', '    return db.runs.insert(input);', '  },', '});',
+    ];
+    let lines;
+    if (diff) {
+      const H = t => ({ o: '', n: '', t, mark: '', bg: 'var(--info-soft)', fg: 'var(--info)' });
+      const C = (o, n, t) => ({ o, n, t, mark: '  ', bg: 'transparent', fg: 'var(--log-text)' });
+      const A = (n, t) => ({ o: '', n, t, mark: '+ ', bg: 'var(--ok-soft)', fg: 'var(--text)' });
+      const D = (o, t) => ({ o, n: '', t, mark: '− ', bg: 'var(--danger-soft)', fg: 'var(--text)' });
+      lines = [H('@@ -4,7 +4,8 @@ list_runs'), C(4, 4, '  list_runs({ limit = 50 }) {'), C(5, 5, '    const runs = db.runs.recent(limit);'), D(6, '    return runs;'), A(6, '    return runs.map((run) => {'), A(7, '      const secs = run.time;'), A(8, '      const pace = secs / run.km;'), A(9, '      return { ...run, pace };'), A(10, '    });'), C(7, 11, '  },'), C(8, 12, '  record_run(input) {'),
+        H('@@ -40,3 +41,3 @@ ui/index.html'), D(40, '    rows.sort(byDate);'), A(41, '    rows.sort(byPace); // fastest first'), C(41, 42, '    render(rows);')];
+    } else {
+      lines = src.map((t, i) => ({ o: '', n: i + 1, t, mark: '', bg: 'transparent', fg: 'var(--log-text)' }));
+    }
+    lines = lines.map(l => ({ ...l, oldD: diff ? 'visible' : 'hidden' }));
+    const F = (path, add, del, on) => ({ path, add: add ? '+' + add : '', del: del ? '−' + del : '', statD: diff ? 'inline' : 'none', on: on ? 'true' : 'false' });
+    const files = diff ? [F('src/index.ts', 5, 1, 1), F('ui/index.html', 2, 1), F('tests/cases.json', 12, 0)]
+      : [F('capability.json'), F('src/index.ts', 0, 0, 1), F('ui/index.html'), F('tests/cases.json'), F('sample/calls.json'), F('README.md')];
+    return { isDiff: diff, isSource: !diff, diffOn: diff ? 'true' : 'false', srcOn: diff ? 'false' : 'true', lines, files, gutter: diff ? '44px 44px minmax(0,1fr)' : '0 48px minmax(0,1fr)', base: this.props.base ?? 'v6', version: this.props.version ?? 'v7' };
+  }
+}
+</script>
+</body>
+</html>

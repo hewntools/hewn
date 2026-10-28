@@ -143,7 +143,7 @@ The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the re
 5. `tests/cases.json` on fresh state through the real runtime; every widget has a case; the UI renders headlessly without errors, in light and dark, and changed widgets render in every size
 6. migrations dry-run on a copy of live state
 7. freeze the version; an agent's change to a connection, or one that adds operations, stops here as `review` until the owner approves it
-8. back up live state, migrate it, promote, and drop grants the new version no longer asks for
+8. back up live state, migrate it, promote, and drop grants the new version no longer asks for; a quick change (manifest only, builder `keep`) keeps the owner's declines for what it still asks for
 
 A failed build leaves the active version serving. A build whose base is no longer the active version fails with `conflict`. Builds interrupted by a restart are retried once at start. The compatibility rules are in [Writing a tool](../../spec/tools.md#changing-a-published-operation).
 
@@ -215,11 +215,11 @@ Each promoted version is one ESM bundle run in a V8 isolate against the ABI ([Ca
 - **Isolation:** no filesystem, processes or environment; workerd itself runs in the OS sandbox.
 - **Versions** are content-addressed blobs (`versions/<sha256>.json`: files and bundle), verified by hash when loaded.
 
-A capability is ready when every grant its manifest asks for is approved and every secret and config value is set. Until then calls fail with `not_ready`. Only a [connection](../../spec/capability-model.md#connection) may hold secrets; other capabilities reach a service through its operations.
+A capability is ready when every grant its manifest asks for is approved and every secret and config value is set. Until then calls fail with `not_ready`. The owner may say no to a host, capability or model grant (Deny, `grant_declines`, per version): it stays unapproved and nothing asks for it again until a new version. When that's all a capability lacks, `Readiness.onlySaidNo` is set: Home and the Inbox leave it alone, and agents' access requests are refused. Only a [connection](../../spec/capability-model.md#connection) may hold secrets; other capabilities reach a service through its operations.
 
 ## Schedules
 
-`core/schedules.ts`. The owner adds schedules, or an agent proposes one (`schedules_propose`) for the owner to enable. They run as `schedule:<id>`, read and write operations only, on cadences like `daily 07:00` or cron in the owner's time zone, and pause after 3 failures in a row. On workerd one DO alarm fires for the next due schedule.
+`core/schedules.ts`. The owner adds schedules, or an agent proposes one (`schedules_propose`) for the owner to enable. They run as `schedule:<id>`, read and write operations only, on cadences like `daily 07:00` or cron in the owner's time zone, and pause after 3 failures in a row. The owner can run one now (Try again, `POST /api/schedules/:id/run`): it doesn't count toward pausing, and a success clears the failures and why a paused one paused (it stays paused). On workerd one DO alarm fires for the next due schedule.
 
 ## Widgets
 
@@ -256,7 +256,7 @@ The owner's database:
 - **Capabilities:** `capabilities`, `capability_versions`, `config_values`, `capability_logs`, `widget_cache`, `platform_kv` (the Home layout, model settings, the public URL, the owner's instructions under `instructions:global` and `instructions:<id>`, failed calls under `failures:<id>`), `settings` (the owner's settings from the web client).
 - **Builds:** `builds` (kind `create`, `modify` or `widgets`; status `waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted` or `cancelled`), `build_models`, `build_charges`, `build_context` (the conversation, instructions and brief hash a build ran with).
 - **Agents and sessions:** `agents`, `oauth_clients`, `oauth_requests`, `oauth_tokens`, `web_sessions`, `ui_sessions`, `passkeys`.
-- **Authority:** `grants` (kinds `secret`, `host`, `capability`, `model`), `access_requests`, `confirmations`, `secrets_enc`.
+- **Authority:** `grants` (kinds `secret`, `host`, `capability`, `model`), `grant_declines` (what the owner said no to, and for which version), `access_requests`, `confirmations`, `secrets_enc`.
 - **Trail:** `grant_events`, `lifecycle_events`, `authority_events`, `model_calls`. Activity merges them with builds and calls.
 - **Schedules:** `schedules`.
 

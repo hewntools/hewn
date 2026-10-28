@@ -61,6 +61,33 @@ describe("trust: rollback, export, purge", () => {
     assert.ok(Object.values(tables).flat().some((r) => r.notes === "hi"));
   });
 
+  test("data summary: rows per table, counted, and the last write from the call log", async () => {
+    const empty = await t.platform.dataSummary(USER, "running-log");
+    assert.equal(empty.rows, 0);
+    assert.equal(empty.lastWriteAt, null);
+    assert.ok(!("_hewn_migrations" in empty.tables));
+    await t.platform.invoke(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 7, durationSeconds: 2100 } });
+    await t.platform.invoke(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 3, durationSeconds: 900 } });
+    await t.platform.invoke(t.claude, { capabilityId: "running-log", operation: "list_runs", input: {} });
+    const after = await t.platform.dataSummary(USER, "running-log");
+    assert.equal(after.tables.runs, 2);
+    assert.equal(after.rows, Object.values(after.tables).reduce((n, x) => n + x, 0));
+    assert.ok(after.lastWriteAt && Date.now() - Date.parse(after.lastWriteAt) < 60_000, "a write, not the later read");
+    const reads = (await t.platform.dataSummary(USER, "running-log")).lastWriteAt;
+    assert.equal(reads, after.lastWriteAt, "reads don't move it");
+    assert.equal(after.callsChecked, 3);
+    // Only the latest 500 calls are looked through: none of them wrote, and it says how many.
+    const later = Date.now() + 1000;
+    for (let i = 0; i < 500; i++) {
+      const at = new Date(later + i).toISOString();
+      t.platform.registry.addCapabilityLog("running-log", at, `${at} agent:claude-code list_runs@1 ok 2ms`, ["read the runs", "x".repeat(2000)]);
+    }
+    const busy = await t.platform.dataSummary(USER, "running-log");
+    assert.equal(busy.lastWriteAt, null);
+    assert.equal(busy.callsChecked, 500);
+    await assert.rejects(t.platform.dataSummary(t.claude, "running-log"), /cannot perform owner actions/);
+  });
+
   test("purge: only deleted capabilities, with the id typed; everything goes and the id is free", async () => {
     await assert.rejects(t.platform.purge(USER, "running-log", "running-log"), /isn't deleted/);
     t.platform.archive(USER, "running-log");

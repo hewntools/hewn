@@ -13,7 +13,7 @@ import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from 
 import { openCapability } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
-export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures };
+export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures, waitingPill };
 
 // ---------- B3 / B4 / H2–H6: a build (its page, or in the change drawer) ----------
 
@@ -36,9 +36,12 @@ const kindWord = (b) => (b.builder === "keep" || b.request?.manifestOnly ? "quic
 const unresolvedFailures = (builds) =>
   builds.filter((b) => b.status === "failed" && !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) && !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt));
 
+/** V6 A build that waits its turn says for what, the same in the drawer, the Inbox and Activity. */
+const waitingPill = (b) => kindTag(b.queued ? "waiting for the change before it" : "waiting", "warn");
+
 /** Real milestones only (no progress bars): spec ✓ code ✓ tests 4/6 you, or waiting. */
 function milestones(b) {
-  if (b.status === "waiting") return h("span", { class: "milestones" }, kindTag("waiting", "warn"));
+  if (b.status === "waiting") return h("span", { class: "milestones" }, waitingPill(b));
   const at = STEPS.findIndex(([k]) => k === (b.step?.step ?? "code"));
   const tests = b.tests ?? b.step?.tests;
   return h(
@@ -159,7 +162,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         const dep = b.dependsOn;
         put(
           card,
-          head(appIcon(cap(), { size: compact ? 36 : 56 }), cap().name, null, kindTag("waiting", "warn")),
+          head(appIcon(cap(), { size: compact ? 36 : 56 }), cap().name, null, waitingPill(b)),
           h("div", { class: "small muted row tight wrap" }, "Starts once ", dep ? h("a", { href: `#/b/${enc(dep)}` }, b.queued ? "the change before it" : "the build it needs") : "the build it needs", " is done · you can leave"),
           logBlock(false),
         );
