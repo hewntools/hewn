@@ -430,7 +430,11 @@ export class Builds extends Domain {
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     const existing = this.registry.getCapability(id);
     if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn (Settings › Data › Deleted tools), or pick another id`);
-    if (existing) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    // A create that never promoted (it failed or was cancelled) keeps its id for a retry; a new
+    // create of the same name takes it over instead (as an install does), unless one is being built.
+    const building = existing && this.registry.unfinishedBuild(id);
+    if (building) throw new PlatformError("conflict", `'${id}' is already being built (build ${building.id}); wait for it, or cancel it`);
     if (req.kind !== undefined && req.kind !== "capability" && req.kind !== "connection") throw new PlatformError("invalid_request", 'kind must be "capability" or "connection"');
     const dependsOn = this.dependency(agent, req.after);
     // What a create asks for, and nothing else: an agent's arguments arrive as it sent them, and
@@ -444,7 +448,7 @@ export class Builds extends Domain {
       ...pickAsk(req),
       ...(dependsOn ? { after: dependsOn } : {}),
     };
-    return this.openCreateBuild(agent, id, request, true, undefined, undefined, dependsOn, conversation);
+    return this.openCreateBuild(agent, id, request, !existing, undefined, undefined, dependsOn, conversation);
   }
 
   /** The build a new one should wait for (`after`, following retries), or undefined to start now. */
@@ -771,6 +775,9 @@ export class Builds extends Domain {
       if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
       if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
+      // A new create of the same name took the id over (createBuild) and is still being built.
+      const building = this.registry.unfinishedBuild(old.capabilityId);
+      if (building) throw new PlatformError("conflict", `'${old.capabilityId}' is being built again (build ${building.id}); wait for it`);
       // An install retries with the same copy builder.
       const builder = old.builder?.startsWith("copy:") ? old.builder : undefined;
       const dependsOn = this.dependency(agent, req.after);

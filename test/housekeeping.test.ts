@@ -14,7 +14,7 @@ describe("housekeeping", () => {
 
   test("abandoned builds: workspaces go after a day, transcripts after 30, unused ids after 7", async () => {
     await installSeed(t.platform);
-    // A create that never succeeds: its id stays reserved, its workspace stays for a look.
+    // A create that never succeeds: its id stays reserved (for a retry, or the next create of that name), its workspace stays for a look.
     const failed = await t.build(
       () => t.platform.create(t.claude, { name: "Half Baked", purpose: "x", requirements: "x" }),
       () => {
@@ -24,7 +24,6 @@ describe("housekeeping", () => {
     assert.equal(failed.status, "failed");
     const ws = join(t.home.builds, failed.buildId);
     assert.ok(existsSync(ws));
-    await assert.rejects(t.platform.create(t.claude, { name: "Half Baked", purpose: "x", requirements: "x" }), /already exists/);
 
     assert.deepEqual(await t.platform.cleanup(Date.now()), { workspaces: 0, transcripts: 0, releasedIds: [], logs: 0 }, "nothing is old yet");
     const later = await t.platform.cleanup(Date.now() + 2 * DAY);

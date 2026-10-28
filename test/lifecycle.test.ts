@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
 import { USER } from "@hewntools/core/auth.ts";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { editJson, editText, installSeed, setup } from "./helpers.ts";
+import { editJson, editText, installSeed, SEED, setup } from "./helpers.ts";
 
 const write = (path: string, content: string) => (mkdirSync(dirname(path), { recursive: true }), writeFileSync(path, content));
 const backups = (t: ReturnType<typeof setup>, id: string) => (existsSync(join(t.home.capabilities, id, "backups")) ? readdirSync(join(t.home.capabilities, id, "backups")) : []);
@@ -269,6 +269,26 @@ describe("creation lifecycle", () => {
   test("duplicate id is a conflict", async () => {
     t.queue(() => new Promise(() => {}));
     await t.platform.create(t.claude, { name: "Reading List", purpose: "x", requirements: "x" });
-    await assert.rejects(t.platform.create(t.claude, { name: "reading list!", purpose: "x", requirements: "x" }), /already exists/);
+    await assert.rejects(t.platform.create(t.claude, { name: "reading list!", purpose: "x", requirements: "x" }), /'reading-list' is already being built/);
+  });
+
+  test("a create that never promoted gives its name to the next one; one being built doesn't; the old one can't be retried over it", async () => {
+    const ask = { name: "Running Log", purpose: "runs", requirements: "record runs" };
+    t.queue(() => new Promise(() => {}));
+    const first = await t.platform.create(USER, ask);
+    await assert.rejects(t.platform.create(USER, ask), /'running-log' is already being built/);
+    t.platform.cancelBuild(USER, first.buildId);
+
+    // Cancelled: the same name builds again, under the same id.
+    t.queue(() => new Promise(() => {}));
+    const second = await t.platform.create(USER, ask);
+    assert.equal(second.capabilityId, "running-log");
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), /'running-log' is being built again/);
+    t.platform.cancelBuild(USER, second.buildId);
+
+    const third = await t.build(() => t.platform.create(USER, ask), (ws) => cpSync(SEED, ws, { recursive: true }));
+    assert.equal(third.status, "promoted", third.log.join("\n"));
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), /has been created since/);
+    await assert.rejects(t.platform.create(USER, ask), /capability 'running-log' already exists/);
   });
 });
