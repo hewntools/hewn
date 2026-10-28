@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gift ideas</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+  <style>
+    .birthday { display: grid; grid-template-columns: 1.4fr 0.8fr 1fr; gap: var(--s2); }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+    .two > label.field { margin: 0; }
+    .form-actions { display: flex; gap: var(--s2); align-items: center; margin-top: var(--s3); }
+    .days { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
+    .list > li .actions-inline { display: flex; gap: var(--s1); flex: none; }
+    .when { min-width: 72px; text-align: right; }
+    dialog { width: min(560px, 94vw); max-height: 90vh; overflow: auto; }
+    dialog section + section { margin-top: var(--s5); }
+    .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); }
+    .dialog-head h2 { margin: 0; }
+    .year-head { margin-top: var(--s3); }
+    .suggestion .sub { white-space: normal; }
+    .hidden { display: none !important; }
+    @media (max-width: 480px) {
+      .two { grid-template-columns: 1fr; }
+      .birthday { grid-template-columns: 1fr 0.8fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page stack">
+    <h1>Gift ideas</h1>
+
+    <div id="load-error" class="notice danger hidden"></div>
+
+    <div id="loading" class="stack">
+      <span class="skeleton" style="height: 120px"></span>
+      <span class="skeleton" style="height: 220px"></span>
+    </div>
+
+    <!-- Day one -->
+    <section id="first-run" class="hidden">
+      <div class="empty">
+        <strong>Add the people you buy for</strong>
+        <span>Name and birthday is enough to start. Ideas come later.</span>
+        <form id="first-form" class="stack" style="width: min(420px, 100%); text-align: left" novalidate>
+          <label class="field"><span class="label">Name</span><input type="text" name="name" required maxlength="100" autocomplete="off"></label>
+          <div class="field-label">Birthday</div>
+          <div class="birthday" data-birthday></div>
+          <span class="field-hint">Year is optional.</span>
+          <div class="notice danger hidden" data-error></div>
+          <div class="form-actions"><button type="submit" class="primary">Add person</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="main" class="hidden stack">
+      <div class="card">
+        <div class="row between"><span class="eyebrow">Coming up</span><span class="faint small" id="window-note"></span></div>
+        <ul class="list" id="upcoming"></ul>
+      </div>
+
+      <form id="idea-form" class="card" novalidate>
+        <h2 style="margin-top: 0">Add idea</h2>
+        <div class="two">
+          <label class="field"><span class="label">For</span><select name="person_id" required></select></label>
+          <label class="field"><span class="label">Idea</span><input type="text" name="idea" required maxlength="500" autocomplete="off" placeholder="e.g. Linen apron"></label>
+        </div>
+        <div class="two" style="margin-top: var(--s3)">
+          <label class="field"><span class="label">Link</span><input type="url" name="link" maxlength="2000" placeholder="Optional"></label>
+          <label class="field"><span class="label">Price</span><input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="Optional"></label>
+        </div>
+        <div class="notice danger hidden" data-error style="margin-top: var(--s3)"></div>
+        <div class="form-actions"><button type="submit" class="primary">Add idea</button></div>
+      </form>
+
+      <div class="card">
+        <div class="row between">
+          <span class="eyebrow">People</span>
+          <button type="button" class="ghost sm" id="show-add-person">Add person</button>
+        </div>
+        <form id="person-form" class="hidden" novalidate>
+          <div class="two">
+            <label class="field"><span class="label">Name</span><input type="text" name="name" required maxlength="100" autocomplete="off"></label>
+            <label class="field"><span class="label">Relation</span><input type="text" name="relation" maxlength="100" placeholder="Optional, e.g. sister"></label>
+          </div>
+          <div class="field-label" style="margin-top: var(--s3)">Birthday</div>
+          <div class="birthday" data-birthday></div>
+          <span class="field-hint">Year is optional.</span>
+          <div class="notice danger hidden" data-error style="margin-top: var(--s3)"></div>
+          <div class="form-actions">
+            <button type="submit" class="primary">Add person</button>
+            <button type="button" class="ghost" data-cancel>Cancel</button>
+          </div>
+        </form>
+        <ul class="list" id="people"></ul>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="person-dialog" aria-labelledby="pd-name">
+    <div id="pd-body"></div>
+  </dialog>
+
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

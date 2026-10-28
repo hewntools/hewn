@@ -11,6 +11,8 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import type { IntakeRequest } from "@hewntools/cli/intake.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { WEB_CODE } from "@hewntools/host-workerd/surface/web.ts";
+import { packBundle } from "@hewntools/core/bundle.ts";
+import { readTree } from "@hewntools/cli/workbench.ts";
 import { installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
@@ -32,6 +34,9 @@ describe("web client (owner surface)", () => {
   let cookie: string;
   const intakeCalls: IntakeRequest[] = [];
   const setupRan: string[] = [];
+  /** How the next reading of a shared tool goes: done, ending only after the owner moved on, or with no agent to run it. */
+  let reading: "done" | "late" | "missing" = "done";
+  let lateEnded: () => void = () => {};
 
   const http = (path: string, o: { method?: string; host?: string; cookie?: string; headers?: Record<string, string>; body?: unknown } = {}) =>
     new Promise<Res>((res, rej) => {
@@ -79,9 +84,17 @@ describe("web client (owner surface)", () => {
     };
     platform = platformWith(t.home, () => builder);
     server = await serve(platform, t.home, {
-      intake: async (req, onProgress) => {
+      intake: async (req, onProgress, signal) => {
         intakeCalls.push(req);
         onProgress?.({ activity: "Thinking" });
+        // Reading a tool someone shared, before it's installed.
+        if (req.mode === "summarize") {
+          if (reading === "missing") throw new Error("intake claude exited 71: sandbox-exec: execvp() of 'claude' failed: No such file or directory");
+          // An agent that finishes anyway, after the request closed.
+          if (reading === "late") await new Promise((r) => signal?.addEventListener("abort", r, { once: true }));
+          setImmediate(() => lateEnded());
+          return { kind: "summary", message: "Logs your runs and sums them up.", keeps: "Keeps runs: date, distance, time, notes.", reaches: "", findings: [{ kind: "ok", title: "Keeps your data inside the tool" }, { kind: "warn", title: "Agents can delete runs", file: "src/index.ts", line: 3 }] };
+        }
         // A rule stated in passing is remembered (global, or for the tool when modifying); "forget" drops one.
         const last = req.messages.at(-1)?.content ?? "";
         const memory = /always Swedish/.test(last) ? { remember: [{ scope: "global" as const, text: "Swedish copy in every screen" }, { scope: "tool" as const, text: "One screen only" }] } : /drop the Swedish rule/.test(last) ? { forget: [{ scope: "global" as const, text: "Swedish copy in every screen" }] } : {};
@@ -258,6 +271,22 @@ describe("web client (owner surface)", () => {
       assert.ok(logs.json.lines.some((l: string) => / web record_run ok /.test(l)), "calls attributed to the web owner");
     });
 
+    test("code browser: a version's files, or one of them (&path=); owner only", async () => {
+      const code = (q: string, o: Parameters<typeof api>[1] = {}) => api(`/capabilities/running-log/code?${q}`, o);
+      assert.equal((await code("version=1", { cookie: "" })).status, 401, "owner only");
+      for (const q of ["", "version=", "version=abc", "version=0", "version=1.5"]) assert.equal((await code(q)).status, 400, q);
+      const list = await code("version=1");
+      assert.equal(list.status, 200, JSON.stringify(list.json));
+      assert.deepEqual([list.json.version, list.json.base], [1, null]);
+      assert.ok(list.json.files.some((f: any) => f.path === "src/index.ts" && f.status === "same" && !f.binary));
+      const file = await code("version=1&path=src%2Findex.ts");
+      assert.equal(file.status, 200);
+      assert.deepEqual([file.json.path, file.json.status, file.json.hunks], ["src/index.ts", "same", []]);
+      assert.match(file.json.text, /export const operations/);
+      for (const path of ["nope.ts", "toString"]) assert.equal((await code(`version=1&path=${path}`)).status, 404, path);
+      assert.equal((await code("version=99")).status, 404);
+    });
+
     test("secrets and grants from the web: set, approve, revoke", async () => {
       assert.equal((await api("/capabilities/secret-echo/secrets/API_TOKEN", { method: "PUT", body: { value: "s3cret" } })).status, 200);
       const page = await api("/capabilities/secret-echo");
@@ -385,6 +414,145 @@ describe("web client (owner surface)", () => {
       assert.deepEqual(c.json, { kind: "answer", message: "Through a connection: it holds the sign-in." });
       const m = await api("/intake", { method: "POST", body: { mode: "modify", capabilityId: "running-log", messages: [{ role: "user", content: "How do I see its old versions?" }] } });
       assert.equal(m.json.kind, "answer");
+    });
+
+    test("install from a file: staged, read by your builder first (kept with the install), then installed with its sample data", async () => {
+      const sample = JSON.stringify([{ operation: "record_run", input: { distanceKm: 6, durationSeconds: 2000, date: "2026-10-02" } }]);
+      assert.equal((await platform.settle((await platform.setSample(USER, "running-log", sample)).buildId)).status, "promoted");
+      const { bundle } = await platform.shareBundle(USER, "running-log");
+      const staged = await api("/bundles", { method: "POST", body: { data: Buffer.from(bundle).toString("base64") } });
+      assert.equal(staged.status, 200, JSON.stringify(staged.json));
+      assert.equal(staged.json.summary, null);
+      assert.equal(staged.json.suggestedName, "Running Log 2");
+      assert.equal(staged.json.sample, 1);
+      const code = await api(`/bundles/${staged.json.token}/code?path=src/index.ts`);
+      assert.ok(code.json.text.length > 0);
+      const read = await api(`/bundles/${staged.json.token}/summary`, { method: "POST" });
+      assert.equal(read.status, 200, JSON.stringify(read.json));
+      assert.equal(read.json.summary.message, "Logs your runs and sums them up.");
+      assert.deepEqual(read.json.summary.findings.map((f: any) => f.kind), ["warn", "ok"], "checked again here: warnings first");
+      const asked = intakeCalls.at(-1)!;
+      assert.equal(asked.mode, "summarize");
+      assert.equal(asked.bundle!.files[0].path, "capability.json", "the manifest first");
+      assert.match(asked.bundle!.files.find((f) => f.path === "src/index.ts")!.text, /^ {3}1\| /, "lines numbered");
+      assert.equal((await api(`/bundles/${staged.json.token}`)).json.summaryBy, "yours");
+      const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Read Log", sample: true } });
+      const done = await platform.settle(started.json.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.equal((done.request as any).summary.message, "Logs your runs and sums them up.", "the reading is kept with the install");
+      assert.equal((await api("/capabilities/read-log")).json.source.from, "file");
+      assert.equal((await api(`/bundles/${staged.json.token}`)).status, 404, "installed: gone");
+      const refused = await api("/bundles", { method: "POST", body: { data: Buffer.from("not a zip").toString("base64") } });
+      assert.equal(refused.status, 400);
+      assert.match(refused.json.message, /isn't a zip file/);
+    });
+
+    test("the reading streams like the intake (progress, then it, read by the builder's agent); one that ends after the owner moved on isn't kept; no agent: no builder", async () => {
+      const sample = JSON.stringify([{ operation: "record_run", input: { distanceKm: 6, durationSeconds: 2000, date: "2026-10-02" } }]);
+      assert.equal((await platform.settle((await platform.setSample(USER, "running-log", sample)).buildId)).status, "promoted");
+      const data = Buffer.from((await platform.shareBundle(USER, "running-log")).bundle).toString("base64");
+      const stage = async () => (await api("/bundles", { method: "POST", body: { data } })).json.token as string;
+      // The intake runs on the builder's agent, whatever an older intake setting says.
+      await api("/settings", { method: "PUT", body: { builder: "codex", intake: "claude" } });
+      try {
+        const token = await stage();
+        const r = await http(`/api/bundles/${token}/summary`, { method: "POST", headers: { "x-hewn-ui": "1", accept: "text/event-stream" } });
+        assert.equal(r.headers["content-type"], "text/event-stream");
+        assert.match(r.body, /event: progress\ndata: \{"activity":"Thinking"\}/);
+        const done = JSON.parse(/event: reply\ndata: (.*)/.exec(r.body)![1]);
+        assert.equal(done.summary.keeps, "Keeps runs: date, distance, time, notes.");
+        assert.equal(done.by, "codex");
+        assert.equal((await api(`/bundles/${token}`)).json.summaryBy, "yours");
+      } finally {
+        await api("/settings", { method: "PUT", body: { builder: "claude", intake: "claude" } });
+      }
+      // Install anyway (or Cancel) closes the request: the agent is stopped, and what it says after isn't kept.
+      reading = "late";
+      try {
+        const token = await stage();
+        const calls = intakeCalls.length;
+        const ended = new Promise<void>((r) => (lateEnded = r));
+        const req = request({ host: "127.0.0.1", port, path: `/api/bundles/${token}/summary`, method: "POST", headers: { host: `hewn.localhost:${port}`, cookie, "x-hewn-ui": "1", accept: "text/event-stream" } });
+        req.on("error", () => {});
+        req.end();
+        while (intakeCalls.length === calls) await new Promise((r) => setTimeout(r, 10));
+        req.destroy();
+        await ended;
+        await new Promise((r) => setTimeout(r, 50));
+        const after = (await api(`/bundles/${token}`)).json;
+        assert.deepEqual([after.summary, after.summaryBy], [null, null]);
+        // The client also says so (a closed request doesn't always reach this far): the reading stops, the stream says so.
+        const again = await stage();
+        const ended2 = new Promise<void>((r) => (lateEnded = r));
+        const before = intakeCalls.length;
+        const streamed = http(`/api/bundles/${again}/summary`, { method: "POST", headers: { "x-hewn-ui": "1", accept: "text/event-stream" } });
+        while (intakeCalls.length === before) await new Promise((r) => setTimeout(r, 10));
+        assert.equal((await api(`/bundles/${again}/summary`, { method: "DELETE" })).status, 200);
+        await ended2;
+        assert.match((await streamed).body, /event: error\ndata: \{"message":"stopped"\}/);
+        assert.equal((await api(`/bundles/${again}`)).json.summaryBy, null, "not kept");
+      } finally {
+        reading = "done";
+      }
+      // No agent to read it (its CLI isn't installed): said as such, not as the sandbox's error.
+      reading = "missing";
+      try {
+        const r = await api(`/bundles/${await stage()}/summary`, { method: "POST" });
+        assert.equal(r.status, 404);
+        assert.match(r.json.message, /^No builder is set up/);
+      } finally {
+        reading = "done";
+      }
+    });
+
+    test("the Hub: Hewn's own tools from the release, a tool's page, its image and code; installed from Hub with its sample data", async () => {
+      const hub = await api("/hub");
+      assert.equal(hub.status, 200, JSON.stringify(hub.json));
+      const ids = hub.json.tools.map((t: any) => t.id);
+      assert.ok(ids.includes("plant-log") && ids.includes("habits"), ids.join());
+      assert.deepEqual(hub.json.firstRun.length, 3);
+      const plant = hub.json.tools.find((t: any) => t.id === "plant-log");
+      assert.equal(plant.official, true);
+      assert.equal(plant.needs.model, "light");
+      assert.equal(plant.installed, false);
+      assert.ok(plant.images.includes("screen"));
+      // Its images' URLs carry the release (cached for a day; an upgrade's new screens show at once).
+      assert.equal(plant.release, platform.version ?? "dev");
+      const detail = await api("/hub/plant-log");
+      assert.ok(detail.json.summary.findings.some((f: any) => f.kind === "warn"), "Hewn's reading ships with it");
+      assert.ok(detail.json.operations.some((o: any) => o.name === "add_plant"));
+      assert.equal(detail.json.installedAs, null);
+      const img = await http(`/api/hub/plant-log/image/screen?v=${plant.release}`, { headers: { "x-hewn-ui": "1" } });
+      assert.equal(img.status, 200);
+      assert.equal(img.headers["content-type"], "image/png");
+      assert.equal((await http("/api/hub/plant-log/image/nope", { headers: { "x-hewn-ui": "1" } })).status, 404);
+      // Only the images the tool has: a path in the name reaches nothing.
+      for (const name of ["..%2F..", "..%2Fcapability.json", "..%2F..%2Fshelf.json"]) assert.equal((await http(`/api/hub/plant-log/image/${name}`, { headers: { "x-hewn-ui": "1" } })).status, 404, name);
+      // No Download: an Official tool leaves the Hub only through the install sheet.
+      assert.equal((await api("/hub/plant-log/download")).status, 404);
+      const code = await api("/hub/plant-log/code");
+      assert.ok(code.json.files.some((f: any) => f.path === "sample/calls.json"));
+      assert.ok(!code.json.files.some((f: any) => f.path.startsWith(".hub/")), "the listing never travels with the tool");
+      assert.match((await api("/hub/plant-log/code?path=capability.json")).json.text, /"id": "plant-log"/);
+      assert.equal((await api("/hub/nope/code")).status, 404);
+      // Idea Tracker has three versions of most operations: its page lists the newest of each, once.
+      const ideas = await api("/hub/idea-tracker");
+      const names = ideas.json.operations.map((o: any) => o.name);
+      assert.deepEqual(names, [...new Set(names)]);
+      assert.ok(names.includes("add_idea") && names.includes("list_tags"), names.join());
+      // Installed from Hub under another name: still the Hub's Idea Tracker (Installed, and Open opens yours).
+      const preview = await api("/hub/idea-tracker/stage", { method: "POST" });
+      assert.equal(preview.json.summaryBy, "hewn");
+      assert.equal(preview.json.from, "hub");
+      assert.deepEqual(preview.json.operations.map((o: any) => o.name), names);
+      const done = await platform.settle((await api(`/bundles/${preview.json.token}/install`, { method: "POST", body: { name: "My Ideas", sample: true } })).json.buildId);
+      assert.equal(done.status, "promoted", done.log.join("\n"));
+      assert.equal((await api("/capabilities/my-ideas")).json.source.from, "hub");
+      assert.equal((await api("/hub")).json.tools.find((t: any) => t.id === "idea-tracker").installed, true);
+      assert.equal((await api("/hub/idea-tracker")).json.installedAs, "my-ideas");
+      // One of the same id counts too (the owner's own Running Log).
+      assert.equal((await api("/hub/running-log")).json.installedAs, "running-log");
+      assert.equal((await api("/hub/nope")).status, 404);
     });
 
     test("intake streams with Accept: text/event-stream: progress, then the reply", async () => {
@@ -542,10 +710,11 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/settings", { method: "PUT", body: { firstRunDone: true } })).json.firstRunDone, true);
     });
 
-    test("schedules from the web: create, pause, list", async () => {
+    test("schedules from the web: create, run now, pause, list", async () => {
       const made = await api("/schedules", { method: "POST", body: { capabilityId: "ui-counter", operation: "increment", cadence: "daily 07:00" } });
       assert.equal(made.status, 200, JSON.stringify(made.json));
       assert.equal(made.json.status, "active");
+      assert.deepEqual((await api(`/schedules/${made.json.id}/run`, { method: "POST" })).json, { ok: true, outcome: "ok" });
       assert.equal((await api(`/schedules/${made.json.id}`, { method: "PUT", body: { status: "paused" } })).json.status, "paused");
       assert.ok((await api("/schedules")).json.some((x: any) => x.id === made.json.id && x.status === "paused"));
       assert.equal((await api("/schedules", { method: "POST", body: { capabilityId: "ui-counter", operation: "increment", cadence: "every second" } })).status, 400);
@@ -705,6 +874,21 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/capabilities/site-connection/grants/approve", { method: "POST", body: { grant: "host:elsewhere.example" } })).status, 400);
     });
 
+    test("Deny from the web: the owner's no is kept, and the Inbox stops asking", async () => {
+      await installFrom(platform, resolve(FIX, "run-feeder"));
+      const asks = async () => (await api("/inbox")).json.needs.some((n: any) => n.kind === "grant" && n.capabilityId === "run-feeder");
+      assert.ok(await asks());
+      const { pendingGrants } = (await api("/capabilities/run-feeder")).json.status;
+      for (const grant of pendingGrants) assert.deepEqual((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant } })).json, { declined: true });
+      const st = (await api("/capabilities/run-feeder")).json.status;
+      assert.equal(st.ready, false);
+      assert.deepEqual(st.declinedGrants, pendingGrants);
+      assert.equal(await asks(), false);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "run-feeder").saidNo, true, "Home doesn't badge it");
+      assert.equal((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant: "host:elsewhere.example" } })).status, 400);
+      assert.equal((await api("/capabilities/run-feeder/grants/decline", { method: "POST", body: { grant: pendingGrants[0] }, cookie: "" })).status, 401, "owner only");
+    });
+
     test("the Inbox: what needs the owner in one list, what builds, and recent Activity on request", async () => {
       const r = (await api("/inbox")).json;
       assert.ok(Array.isArray(r.needs) && Array.isArray(r.building));
@@ -745,6 +929,19 @@ describe("web client (owner surface)", () => {
       await api("/home/layout", { method: "PUT", body: { entries: [] } });
       const builds = (await api("/activity?kinds=build&limit=50")).json.items;
       assert.ok(builds.length > 0 && builds.every((i: any) => i.kind === "build"));
+    });
+
+    test("Install from a file: staged, installed; Activity says \"Installed from a file\" and Info where it came from", async () => {
+      const files = { ...readTree(SEED), "sample/calls.json": Buffer.from(JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }])) };
+      const zip = packBundle(files, { format: 1, hewn: "test", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 4, hash: "d".repeat(64) } });
+      const preview = (await api("/bundles", { method: "POST", body: { data: Buffer.from(zip).toString("base64") } })).json;
+      assert.equal(preview.suggestedName, "Running Log 2");
+      const started = (await api(`/bundles/${preview.token}/install`, { method: "POST", body: { name: "Shared Log", sample: true } })).json;
+      assert.equal((await platform.settle(started.buildId)).status, "promoted");
+      const row = (await api("/activity?kinds=build&limit=50")).json.items.find((i: any) => i.buildId === started.buildId);
+      assert.equal(row.installed, "from a file");
+      assert.equal((await api("/capabilities/shared-log")).json.origin, "from a file · Running Log v4");
+      assert.equal((await api("/capabilities/running-log")).json.origin, null, "a tool made here came from nowhere else");
     });
   });
 });

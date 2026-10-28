@@ -1,0 +1,338 @@
+{
+  "id": "gift-ideas",
+  "name": "Gift Ideas",
+  "purpose": "Jot down gift ideas for family and friends whenever they come up during the year, see whose birthday is next and what's already lined up for them, and remember what was given before so nothing repeats.",
+  "abi": "2.3",
+  "hue": 340,
+  "tags": ["gifts", "birthdays", "family", "christmas"],
+  "ui": { "available": true },
+  "requires": { "model": { "tier": "standard" } },
+  "widgets": [
+    {
+      "name": "upcoming",
+      "version": 2,
+      "title": "Gifts coming up",
+      "operation": "widget_upcoming@2",
+      "sizes": ["medium", "large"],
+      "refresh": { "every": "6h" },
+      "open": "ui"
+    }
+  ],
+  "operations": [
+    {"name":"prepare_upcoming","version":1,"description":"Prepare and store suggestions for nothing-ready occasions; reuse person/date batches, prune past dates, and skip model failures for a later retry.","sideEffect":"write","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90,"default":21},"count":{"type":"integer","minimum":1,"maximum":10,"default":3},"today":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"}},"additionalProperties":false},"outputSchema":{"type":"object","required":["today","checked","prepared","skipped"],"properties":{"today":{"type":"string"},"checked":{"type":"integer"},"prepared":{"type":"array","items":{"type":"object","required":["person_id","person_name","name","date","days_until","suggestions"]}},"skipped":{"type":"integer"}}}},
+    {"name":"get_prepared","version":1,"description":"Stored suggestion batches whose occasion date has not passed, optionally for one person.","sideEffect":"read","inputSchema":{"type":"object","properties":{"person_id":{"type":"integer"}},"additionalProperties":false},"outputSchema":{"type":"object","required":["prepared"],"properties":{"prepared":{"type":"array","items":{"type":"object","required":["person_id","person_name","name","date","days_until","generated_at","suggestions"]}}}}},
+    {"name":"save_suggestion","version":1,"description":"Save a current stored suggestion through add_gift as an idea, and remove it from stored batches.","sideEffect":"write","inputSchema":{"type":"object","required":["person_id","idea"],"properties":{"person_id":{"type":"integer"},"idea":{"type":"string","minLength":1,"maxLength":500},"why":{"type":"string","maxLength":1000}},"additionalProperties":false},"outputSchema":{"type":"object","required":["id","person_id","idea","status"],"properties":{"id":{"type":"integer"},"person_id":{"type":"integer"},"idea":{"type":"string"},"status":{"const":"idea"}}}},
+    {"name":"add_note","version":1,"description":"Record a dated wish or something the person said; date defaults to today.","sideEffect":"write","inputSchema":{"type":"object","required":["person_id","text"],"properties":{"person_id":{"type":"integer"},"text":{"type":"string","minLength":1,"maxLength":1000},"date":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"}},"additionalProperties":false},"outputSchema":{"type":"object","required":["id","date","text"],"properties":{"id":{"type":"integer"},"date":{"type":"string"},"text":{"type":"string"}}}},
+    {"name":"delete_note","version":1,"description":"Permanently delete a dated wish note.","sideEffect":"destructive","inputSchema":{"type":"object","required":["id"],"properties":{"id":{"type":"integer"}},"additionalProperties":false},"outputSchema":{"type":"object","required":["deleted","id"],"properties":{"deleted":{"const":true},"id":{"type":"integer"}}}},
+    {
+      "name": "get_person",
+      "version": 2,
+      "description": "Person detail as in version 1, plus dated notes_log, newest date then newest id first.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "integer" },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["person", "today", "next_birthday", "next_occasion", "ideas", "bought", "given_by_year", "occasions", "notes_log"],
+        "properties": {
+          "person": { "type": "object" },
+          "today": { "type": "string" },
+          "next_birthday": { "type": ["object", "null"] },
+          "next_occasion": { "type": ["object", "null"] },
+          "ideas": { "type": "array" },
+          "bought": { "type": "array" },
+          "given_by_year": { "type": "array" },
+          "occasions": { "type": "array" },
+          "notes_log": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "date", "text"],
+              "properties": {
+                "id": { "type": "integer" },
+                "date": { "type": "string" },
+                "text": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {"name":"widget_upcoming","version":2,"description":"Upcoming occasions, flagging nothing-ready dates within 21 days and stored suggestion counts. Read-only.","sideEffect":"read","inputSchema":{"type":"object","properties":{"today":{"type":"string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"}},"additionalProperties":false},"outputSchema":{"type":"object"}},
+    {
+      "name": "add_person",
+      "version": 1,
+      "description": "Add someone you buy gifts for. Birthday is MM-DD, or YYYY-MM-DD when the birth year is known (then upcoming shows the age they turn). Notes hold interests, sizes and wishes.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "relation": { "type": "string", "maxLength": 100, "description": "e.g. sister, colleague" },
+          "birthday": { "type": "string", "pattern": "^((\\d{4}-)?\\d{2}-\\d{2})?$", "description": "MM-DD or YYYY-MM-DD" },
+          "notes": { "type": "string", "maxLength": 5000, "description": "Interests, sizes, wishes" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "required": ["id", "name", "relation", "birthday", "notes", "created_at"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "relation": { "type": ["string", "null"] }, "birthday": { "type": ["string", "null"] }, "notes": { "type": "string" }, "created_at": { "type": "string" } } }
+    },
+    {
+      "name": "update_person",
+      "version": 1,
+      "description": "Change a person's name, relation, birthday or notes. Only given fields change; null or an empty string clears relation and birthday.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "relation": { "type": ["string", "null"], "maxLength": 100 },
+          "birthday": { "type": ["string", "null"], "pattern": "^((\\d{4}-)?\\d{2}-\\d{2})?$", "description": "MM-DD or YYYY-MM-DD" },
+          "notes": { "type": ["string", "null"], "maxLength": 5000 }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "required": ["id", "name", "relation", "birthday", "notes", "created_at"], "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "relation": { "type": ["string", "null"] }, "birthday": { "type": ["string", "null"] }, "notes": { "type": "string" }, "created_at": { "type": "string" } } }
+    },
+    {
+      "name": "delete_person",
+      "version": 1,
+      "description": "Delete a person together with all their gifts (ideas, bought and given history) and their custom occasions.",
+      "sideEffect": "destructive",
+      "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } }, "additionalProperties": false },
+      "outputSchema": { "type": "object", "required": ["deleted", "id", "gifts_deleted"], "properties": { "deleted": { "const": true }, "id": { "type": "integer" }, "gifts_deleted": { "type": "integer" }, "occasions_deleted": { "type": "integer" } } }
+    },
+    {
+      "name": "list_people",
+      "version": 1,
+      "description": "Everyone you buy for, soonest next occasion first: each with the next occasion (birthday, Christmas Eve or a custom one), days until it, how ready it is, and counts of ideas and bought gifts.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date to count from (defaults to today); for tests" } },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["today", "people"],
+        "properties": {
+          "today": { "type": "string" },
+          "people": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "name", "relation", "birthday", "notes", "next_occasion", "idea_count", "bought_count"],
+              "properties": {
+                "id": { "type": "integer" }, "name": { "type": "string" }, "relation": { "type": ["string", "null"] },
+                "birthday": { "type": ["string", "null"] }, "notes": { "type": "string" }, "created_at": { "type": "string" },
+                "next_occasion": {
+                  "type": ["object", "null"],
+                  "required": ["kind", "name", "date", "days_until", "ready"],
+                  "properties": { "kind": { "enum": ["birthday", "christmas", "other"] }, "name": { "type": "string" }, "date": { "type": "string" }, "days_until": { "type": "integer" }, "ready": { "enum": ["none", "ideas", "bought"] } }
+                },
+                "idea_count": { "type": "integer" },
+                "bought_count": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_person",
+      "version": 1,
+      "description": "One person with their notes, next birthday and occasion, current ideas, bought gifts, given history by year (newest first) and custom occasions.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "integer" },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date to count from (defaults to today); for tests" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["person", "today", "next_birthday", "next_occasion", "ideas", "bought", "given_by_year", "occasions"],
+        "properties": {
+          "person": { "type": "object", "required": ["id", "name", "relation", "birthday", "notes"] },
+          "today": { "type": "string" },
+          "next_birthday": { "type": ["object", "null"], "required": ["date", "days_until", "turning"], "properties": { "date": { "type": "string" }, "days_until": { "type": "integer" }, "turning": { "type": ["integer", "null"] } } },
+          "next_occasion": { "type": ["object", "null"] },
+          "ideas": { "type": "array", "items": { "type": "object", "required": ["id", "idea", "status"] } },
+          "bought": { "type": "array", "items": { "type": "object", "required": ["id", "idea", "status"] } },
+          "given_by_year": { "type": "array", "items": { "type": "object", "required": ["year", "gifts"], "properties": { "year": { "type": ["integer", "null"] }, "gifts": { "type": "array", "items": { "type": "object" } } } } },
+          "occasions": { "type": "array", "items": { "type": "object", "required": ["id", "name", "date"] } }
+        }
+      }
+    },
+    {
+      "name": "add_gift",
+      "version": 1,
+      "description": "Save a gift for a person. Status defaults to idea. Occasion defaults to the person's next occasion (birthday, Christmas Eve, or other for a custom one). Year is optional: leave it out for an idea that fits any year.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["person_id", "idea"],
+        "properties": {
+          "person_id": { "type": "integer" },
+          "idea": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "link": { "type": "string", "maxLength": 2000 },
+          "price": { "type": "number", "minimum": 0 },
+          "occasion": { "enum": ["birthday", "christmas", "other"] },
+          "year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+          "status": { "enum": ["idea", "bought", "given"], "default": "idea" },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date used to pick the default occasion; for tests" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "required": ["id", "person_id", "idea", "link", "price", "occasion", "year", "status", "created_at", "given_at"], "properties": { "id": { "type": "integer" }, "person_id": { "type": "integer" }, "idea": { "type": "string" }, "link": { "type": ["string", "null"] }, "price": { "type": ["number", "null"] }, "occasion": { "enum": ["birthday", "christmas", "other"] }, "year": { "type": ["integer", "null"] }, "status": { "enum": ["idea", "bought", "given"] }, "created_at": { "type": "string" }, "given_at": { "type": ["string", "null"] } } }
+    },
+    {
+      "name": "update_gift",
+      "version": 1,
+      "description": "Change a gift. Moving it to given stamps given_at (and sets the year to that year if none was set); moving it away from given clears given_at. Null clears link, price and year.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "integer" },
+          "idea": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "link": { "type": ["string", "null"], "maxLength": 2000 },
+          "price": { "type": ["number", "null"], "minimum": 0 },
+          "occasion": { "enum": ["birthday", "christmas", "other"] },
+          "year": { "type": ["integer", "null"], "minimum": 1900, "maximum": 2200 },
+          "status": { "enum": ["idea", "bought", "given"] }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "required": ["id", "person_id", "idea", "link", "price", "occasion", "year", "status", "created_at", "given_at"], "properties": { "id": { "type": "integer" }, "person_id": { "type": "integer" }, "idea": { "type": "string" }, "link": { "type": ["string", "null"] }, "price": { "type": ["number", "null"] }, "occasion": { "enum": ["birthday", "christmas", "other"] }, "year": { "type": ["integer", "null"] }, "status": { "enum": ["idea", "bought", "given"] }, "created_at": { "type": "string" }, "given_at": { "type": ["string", "null"] } } }
+    },
+    {
+      "name": "delete_gift",
+      "version": 1,
+      "description": "Delete one gift (an idea, a bought gift or a given one from the history).",
+      "sideEffect": "destructive",
+      "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } }, "additionalProperties": false },
+      "outputSchema": { "type": "object", "required": ["deleted", "id"], "properties": { "deleted": { "const": true }, "id": { "type": "integer" } } }
+    },
+    {
+      "name": "add_occasion",
+      "version": 1,
+      "description": "Add a custom occasion (name day, anniversary, graduation). Date MM-DD repeats every year; YYYY-MM-DD happens once. Leave out person_id for an occasion not tied to one person.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["name", "date"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "date": { "type": "string", "pattern": "^(\\d{4}-)?\\d{2}-\\d{2}$" },
+          "person_id": { "type": "integer" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object", "required": ["id", "person_id", "name", "date"], "properties": { "id": { "type": "integer" }, "person_id": { "type": ["integer", "null"] }, "name": { "type": "string" }, "date": { "type": "string" } } }
+    },
+    {
+      "name": "delete_occasion",
+      "version": 1,
+      "description": "Delete a custom occasion. Gifts are kept.",
+      "sideEffect": "destructive",
+      "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } }, "additionalProperties": false },
+      "outputSchema": { "type": "object", "required": ["deleted", "id"], "properties": { "deleted": { "const": true }, "id": { "type": "integer" } } }
+    },
+    {
+      "name": "upcoming",
+      "version": 1,
+      "description": "Birthdays, Christmas Eve (Dec 24, once per person) and custom occasions within the next N days (default 60), soonest first. Each says how ready it is: bought (a gift is bought or given for it), ideas (ideas saved for the person) or none.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": { "type": "integer", "minimum": 0, "maximum": 366, "default": 60 },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date to count from (defaults to today); for tests" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["today", "days", "count", "occasions"],
+        "properties": {
+          "today": { "type": "string" },
+          "days": { "type": "integer" },
+          "count": { "type": "integer" },
+          "occasions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "name", "person_id", "person_name", "date", "days_until", "ready", "idea_count", "bought_count"],
+              "properties": {
+                "kind": { "enum": ["birthday", "christmas", "other"] },
+                "name": { "type": "string" },
+                "person_id": { "type": ["integer", "null"] },
+                "person_name": { "type": ["string", "null"] },
+                "occasion_id": { "type": ["integer", "null"] },
+                "date": { "type": "string" },
+                "days_until": { "type": "integer" },
+                "turning": { "type": ["integer", "null"] },
+                "ready": { "enum": ["none", "ideas", "bought"] },
+                "idea_count": { "type": "integer" },
+                "bought_count": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "suggest_gifts",
+      "version": 1,
+      "description": "Ask the model for gift ideas for a person, based on their notes, avoiding their saved ideas, bought gifts and earlier gifts. Suggestions are only returned, not saved: add the ones you like with add_gift.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "required": ["person_id"],
+        "properties": {
+          "person_id": { "type": "integer" },
+          "budget": { "type": "number", "minimum": 0, "description": "Rough maximum price per gift" },
+          "count": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 },
+          "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date used to name the next occasion; for tests" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["person_id", "count", "excluded", "suggestions"],
+        "properties": {
+          "person_id": { "type": "integer" },
+          "count": { "type": "integer" },
+          "excluded": { "type": "integer", "description": "Suggestions dropped because they repeat a saved, bought or given gift" },
+          "suggestions": { "type": "array", "items": { "type": "object", "required": ["idea", "why"], "properties": { "idea": { "type": "string" }, "why": { "type": "string" } } } }
+        }
+      }
+    },
+    {
+      "name": "widget_upcoming",
+      "version": 1,
+      "description": "Widget: the next occasions with days left and whether something is bought. Medium shows 3, large 5.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "today": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "Date to count from; for tests" } },
+        "additionalProperties": false
+      },
+      "outputSchema": { "type": "object" }
+    }
+  ]
+}

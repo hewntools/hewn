@@ -13,7 +13,7 @@ import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from 
 import { openCapability } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
-export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, unresolvedFailures };
+export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, installedFrom, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
 
 // ---------- B3 / B4 / H2–H6: a build (its page, or in the change drawer) ----------
 
@@ -23,6 +23,23 @@ const STEPS = [
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
+/** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hub", "from <host>" or "from a file". */
+const installedFrom = (b) => {
+  const s = b.request?.source;
+  return s?.from === "hub" ? "from Hub" : s?.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+};
+/** A tool installed from a file or from Hub has no builder: its milestones are the file's (R4). */
+const installSteps = (b) => [
+  ["spec", b.request?.source?.from === "hub" ? "From Hub" : "From the file"],
+  ["code", "Unpacked"],
+  ["tests", "Running tests"],
+  ["auth", "Your authorization"],
+];
+/** No builder runs: an install from a file, Hub or a directory, or a change that needs none. */
+const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
+/** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
+const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
+const stepsOf = (b) => (b.builder === "bundle" ? installSteps(b) : STEPS);
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
 const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
@@ -36,9 +53,12 @@ const kindWord = (b) => (b.builder === "keep" || b.request?.manifestOnly ? "quic
 const unresolvedFailures = (builds) =>
   builds.filter((b) => b.status === "failed" && !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) && !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt));
 
+/** V6 A build that waits its turn says for what, the same in the drawer, the Inbox and Activity. */
+const waitingPill = (b) => kindTag(b.queued ? "waiting for the change before it" : "waiting", "warn");
+
 /** Real milestones only (no progress bars): spec ✓ code ✓ tests 4/6 you, or waiting. */
 function milestones(b) {
-  if (b.status === "waiting") return h("span", { class: "milestones" }, kindTag("waiting", "warn"));
+  if (b.status === "waiting") return h("span", { class: "milestones" }, waitingPill(b));
   const at = STEPS.findIndex(([k]) => k === (b.step?.step ?? "code"));
   const tests = b.tests ?? b.step?.tests;
   return h(
@@ -98,8 +118,8 @@ const askedBy = (b) => {
 /** "Built with Claude Code · claude-fable-5-5 · high effort", and why it wasn't the model asked for. */
 const builtWith = (b) =>
   b.builder &&
-  !["keep", "agent"].includes(b.builder) &&
-  !b.builder.startsWith("copy:") &&
+  b.builder !== "agent" &&
+  !noBuilder(b) &&
   h("div", { class: "small faint" }, `Built with ${builderLabel(b.builder)}${buildModelWords(b) ? ` · ${buildModelWords(b)}` : ""}${b.charge ? ` · ${chargeWords(b.charge)}` : ""}`);
 
 function buildPanel(id, { compact = false, onPromoted } = {}) {
@@ -159,7 +179,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         const dep = b.dependsOn;
         put(
           card,
-          head(appIcon(cap(), { size: compact ? 36 : 56 }), cap().name, null, kindTag("waiting", "warn")),
+          head(appIcon(cap(), { size: compact ? 36 : 56 }), cap().name, null, waitingPill(b)),
           h("div", { class: "small muted row tight wrap" }, "Starts once ", dep ? h("a", { href: `#/b/${enc(dep)}` }, b.queued ? "the change before it" : "the build it needs") : "the build it needs", " is done · you can leave"),
           logBlock(false),
         );
@@ -173,9 +193,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : null,
           clockEl,
         ),
-        !waitingAgent && buildMeta(b),
+        !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? `Installed ${installedFrom(b)}: no builder runs. Its own tests run as for any build.` : "No builder runs.") : buildMeta(b)),
         convoView,
-        h("ol", { class: "steps" }, STEPS.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        h("ol", { class: "steps" }, stepsOf(b).map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
@@ -252,8 +272,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
       // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
       const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
-      const fix = !refused && h("button", { class: "primary" }, "Ask builder to fix");
-      const retry = h("button", { class: refused ? "primary" : "" }, "Retry");
+      const fix = !refused && !noBuilder(b) && h("button", { class: "primary" }, "Ask builder to fix");
+      const retry = retryable(b) && h("button", { class: refused || !fix ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {
         btn.disabled = true;
         try {
@@ -265,7 +285,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         }
       };
       if (fix) fix.addEventListener("click", again("fix", fix));
-      retry.addEventListener("click", again("retry", retry));
+      if (retry) retry.addEventListener("click", again("retry", retry));
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
@@ -275,15 +295,15 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         convoView,
         specView,
-        h("div", { class: "row tight" }, fix, retry),
+        retry ? h("div", { class: "row tight" }, fix, retry) : h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : "No builder ran: make the change again to try once more."),
         logBlock(true),
       );
       requestAnimationFrame(keepScroll);
     };
 
     const cancelled = () => {
-      const retry = h("button", { class: "primary" }, "Start again");
-      retry.addEventListener("click", async () => {
+      const retry = retryable(b) && h("button", { class: "primary" }, "Start again");
+      if (retry) retry.addEventListener("click", async () => {
         retry.disabled = true;
         try {
           go(`#/b/${(await api(`/builds/${enc(id)}/retry`, { method: "POST" })).buildId}`);

@@ -9,7 +9,7 @@ You normally don't write tools by hand. You describe what you want (**New** on H
 ```
 capability.json      the manifest: id, name, purpose, hue, operations, requires, ui
 src/index.ts         the implementation (bundled with its npm dependencies)
-package.json         optional: npm dependencies (must run in a Workers-like isolate)
+package.json         optional: npm dependencies (registry versions only; must run in a Workers-like isolate)
 migrations/NNN_*.sql the database schema (SQLite), append-only
 tests/cases.json     test cases Hewn runs before promoting a version
 ui/icon.svg          a 5×5 pixel glyph for Home
@@ -58,6 +58,8 @@ Three small tools in the repo's [`seeds/`](../seeds) are meant to be read and co
 - [Habits](../seeds/habits): a widget with a button that runs a write operation
 
 From a checkout of the repo: `hewn install seeds/habits`.
+
+**Sample data** (`sample/calls.json`) is the tool in use: calls to its operations that fill an empty tool with made-up entries. Hewn replays it when someone installs the tool with sample data, and before every version goes live, and needs it to share the tool. See [the tool spec](../spec/tools.md#sample-data-since-25).
 
 ## Reference
 

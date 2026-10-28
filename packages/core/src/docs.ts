@@ -15,6 +15,7 @@ export const DOC_PAGES = [
   "docs/connections.md",
   "docs/models.md",
   "docs/data.md",
+  "docs/sharing.md",
   "docs/remote-access.md",
   "docs/capabilities.md",
   "docs/threat-model.md",

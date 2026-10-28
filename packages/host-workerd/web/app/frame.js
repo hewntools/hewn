@@ -15,6 +15,7 @@ export {
   glassBack,
   go,
   hewnMachine,
+  holdDraws,
   hues,
   keyHandlers,
   leaving,
@@ -24,10 +25,12 @@ export {
   onLeave,
   page,
   put,
+  releaseHeld,
   sandboxNotice,
   setSettings,
   settings,
   shortcutsDialog,
+  stillHere,
   topBar,
   view,
 };
@@ -78,10 +81,41 @@ function shortcutsDialog() {
 /** Cleanups for the current screen (streams, timers, animations), run on navigation. */
 let leaving = [];
 const onLeave = (fn) => leaving.push(fn);
+/**
+ * For a page that waits before it draws: call it as the page starts, then after each wait ask the
+ * function it returns whether to go on. It says no once the page has been left (the router went on
+ * to another page, or this one is drawn again), so a slow page can't draw over the one after it.
+ */
+const stillHere = () => {
+  let here = true;
+  onLeave(() => (here = false));
+  return () => here;
+};
 
 /** replaceChildren, skipping the false/null/"" that conditional children produce. */
 const put = (el, ...nodes) => el.replaceChildren(...nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false && n !== ""));
-const view = (...nodes) => put(app, ...nodes);
+/**
+ * The page on screen stays until the next one is ready. While the router holds it for a route
+ * (`holdDraws(n)`), a loading draw (aria-busy) is held back, and the latest one is drawn only if
+ * the router stops waiting first (`releaseHeld(n)`: it gave up, or the route is done); a real draw
+ * goes on screen at once and the hold stays the route's, so no other draw can end it early.
+ * Otherwise every page change flashed a skeleton and built the page again downwards.
+ */
+let holding = null;
+let held = null;
+const isBusy = (n) => n instanceof Element && (n.matches('[aria-busy="true"]') || !!n.querySelector('[aria-busy="true"]'));
+const view = (...nodes) => {
+  if (holding !== null && nodes.flat(Infinity).some(isBusy)) return void (held = nodes);
+  held = null;
+  put(app, ...nodes);
+};
+const holdDraws = (route) => ((holding = route), (held = null));
+const releaseHeld = (route) => {
+  if (holding !== route) return;
+  holding = null;
+  if (held) put(app, ...held);
+  held = null;
+};
 
 /** Platform settings: the persistent "sandbox off" notice, the owner's time zone and jobs. */
 let settings = null;
@@ -104,11 +138,12 @@ const sandboxNotice = () =>
 
 const GLYPH = ["##..#", ".#..#", ".####", ".#..#", ".#..#"];
 const brandGlyph = () => pixelGlyph(rowCells(GLYPH));
-const brandTile = (size = 28) => h("span", { class: "app-icon brand", style: { "--size": `${size}px` } }, brandGlyph());
+const brandTile = (size = 28) => h("span", { class: `app-icon brand${size < 24 ? " mini" : ""}`, style: { "--size": `${size}px` } }, brandGlyph());
 const brand = () => h("a", { class: "brand-link", href: "#/" }, brandTile(), h("span", { class: "brand-name" }, BRAND));
 
 const NAV = [
   ["Home", "#/", "home"],
+  ["Hub", "#/hub", "hub"],
   ["Agents", "#/agents", "agents"],
   ["Accounts", "#/accounts", "accounts"],
   ["Settings", "#/settings", "settings"],
@@ -122,14 +157,15 @@ const bar = ({ left, center, right } = {}) =>
 const glassBack = (label, href) => h("div", { class: "glass-bar" }, h("a", { href }, `‹ ${label}`));
 
 /**
- * Main pages: brand left; the four tabs and the Inbox right. On a phone the tabs fold into a ☰
- * menu while the Inbox stays visible.
+ * Main pages: brand left; the tabs and the Inbox right. On a phone the tabs fold into a ☰ menu
+ * while the Inbox stays visible. `back` ([label, href]): a page one step in (a Hub tool, New) has
+ * its back button where the brand is.
  */
-const topBar = (active) => {
+const topBar = (active, { back } = {}) => {
   const menuBtn = h("button", { "aria-label": "Menu" }, "☰");
   menuBtn.addEventListener("click", () => menuFrom(menuBtn, NAV.map(([label, href]) => [label, () => go(href)])));
   return bar({
-    left: brand(),
+    left: back ? glassBack(...back) : brand(),
     right: [
       h("button", { class: "palette-btn", "aria-label": "Search and commands", title: "Search and commands (⌘K)", onclick: () => commandPalette() }, h("span", {}, "Search"), h("kbd", {}, /Mac/i.test(navigator.platform) ? "⌘K" : "Ctrl K")),
       h("nav", { class: "glass-bar main-nav", "aria-label": "Main" }, NAV.map(([label, href, key]) => h("a", { href, "aria-current": key === active ? "page" : undefined }, label))),

@@ -30,6 +30,7 @@ import { cliCatalogs } from "../builders/cli-agents.ts";
 import { modelCatalogs } from "../builders/models.ts";
 import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
+import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { workerdBinary } from "../app-dir.ts";
 
@@ -170,6 +171,7 @@ const hewn :Workerd.Worker = (
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
     (name = "PORT", text = "${o.port}"),
+    (name = "VERSION", text = "${VERSION}"),
   ],
   durableObjectNamespaces = [
     (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),
@@ -264,6 +266,15 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       }
       res.end();
       return STREAMED;
+    },
+    // The Official shelf (seeds/, shipped with this release): every tool's listing and files, and a card image.
+    "/shelf/tools": async () => {
+      const s = readShelf();
+      return { firstRun: s.firstRun, tools: s.tools.map((t) => ({ ...t, files: Object.fromEntries(Object.entries(t.files).map(([p, b]) => [p, toBase64(b)])) })) };
+    },
+    "/shelf/image": async (b) => {
+      const png = shelfImage(String(b.id), String(b.name));
+      return { data: png ? toBase64(png) : null };
     },
     "/backups/list": async () => ({ dir: backupDir(), backups: listBackups(backupDir()), sameDisk: sameDisk(o.home.root, backupDir()) }),
     "/backups/now": async () => backupNow(o.home, backupDir()),
@@ -398,6 +409,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   let stopping = false;
   let restarts = 0;
   let quickExits = 0;
+  let restartTimer: ReturnType<typeof setTimeout> | undefined;
   // A workerd left behind by a supervisor that died (macOS has no die-with-parent) would hold the port.
   const pidFile = join(data, "workerd.pid");
   if (existsSync(pidFile)) {
@@ -430,7 +442,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       const delay = quickExits > 3 ? Math.min(30_000, 1000 * 2 ** (quickExits - 3)) : 200;
       log(`workerd exited (${signal ?? code}); restarting${delay > 200 ? ` in ${Math.round(delay / 1000)}s` : ""}`);
       restarts++;
-      setTimeout(start, delay);
+      restartTimer = setTimeout(start, delay);
     });
   };
   const healthy = async (timeoutMs: number) => {
@@ -457,8 +469,26 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       });
       child.kill("SIGTERM");
     });
+  // This process exiting (a crash, a forced exit) takes workerd with it; after a kill -9, the pid file above.
+  const killOnExit = () => child?.kill("SIGKILL");
+  /** Stop workerd for good (and a restart it had coming) and close the supervisor's channel. */
+  const shutdown = async () => {
+    stopping = true;
+    clearTimeout(restartTimer);
+    process.off("exit", killOnExit);
+    tunnel.halt();
+    child?.kill("SIGTERM");
+    await new Promise((r) => supervisorServer.close(r));
+  };
+  process.on("exit", killOnExit);
   start();
-  await waitHealthy();
+  try {
+    await waitHealthy();
+  } catch (e) {
+    // Leave nothing running: workerd restarting forever would keep this process (hewn serve, a test) alive.
+    await shutdown();
+    throw e;
+  }
   tunnel.resume();
 
   // Nightly backup: one per day, checked hourly (and a minute after start, for machines that sleep at night).
@@ -527,12 +557,9 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       }
     },
     async stop() {
-      stopping = true;
       if (timer) clearInterval(timer);
       for (const t of backupTimers) clearTimeout(t as ReturnType<typeof setTimeout>);
-      tunnel.halt();
-      child?.kill("SIGTERM");
-      await new Promise((r) => supervisorServer.close(r));
+      await shutdown();
     },
   };
 }

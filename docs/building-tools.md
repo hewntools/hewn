@@ -24,14 +24,14 @@ The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCod
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen and checks it loads without errors
+3. renders its screen, empty and filled with its sample data, and checks it loads without errors
 4. makes it live if all of that passes
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
 
 Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes.
 
-When you next open the tool, a note at the bottom asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
+When you next open the tool, a quiet strip at its foot asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
 
 The build page keeps what led to the build: **Spec agreed** opens the spec the builder works from, and **Conversation** what you and the intake said. Both stay with the version it made, along with the builder's log, for the tool's life.
 
@@ -41,7 +41,7 @@ When it's live, the tool may still need you: **Allowed to** on its Info lists th
 
 ## Changing a tool
 
-**Change…** (in the tool's bar, its menu, or Info's **Change it** box) opens a panel next to the tool, so you can describe the change while you look at it. The tool keeps running its current version while the change builds. When the new version is live, **Reload** shows it, and **Undo** goes back to the one before.
+**Change…** (in the tool's bar, its menu, or Info's **Change it** box) opens a panel next to the tool, so you can describe the change while you look at it; drag its left edge to make it wider. The tool keeps running its current version while the change builds. When the new version is live, **Reload** shows it, and **Undo** goes back to the one before.
 
 Changes to one tool take turns: ask for another while one builds (or an agent does) and it waits, then starts from the version the first one leaves, whether that one goes live or fails. An agent's change waiting for your approval doesn't hold the next one up. The box and your agents see the changes on their way, so the next one builds on them instead of asking for the same thing again.
 
@@ -53,13 +53,13 @@ Some changes need no builder: picking another model tier, for example, is a new 
 
 ## Instructions
 
-Standing rules for how your tools are built, which the builder reads on every build: for every tool ("Swedish copy in every screen", "never a delete button without Undo") or for one tool ("keep it to a single screen"). Tell the intake a rule while you talk a request through and it remembers it: the chat shows **Saved to global builder instructions** (or to the tool's) with the rule as it was written down, and **Undo** if that's not what you meant. Withdraw a rule the same way.
+Standing rules for how your tools are built, which the builder reads on every build: for every tool ("Swedish copy in every screen", "never a delete button without Undo") or for one tool ("keep it to a single screen"). Tell the intake a rule while you talk a request through and it remembers it: the chat shows **Saved as a rule:** (or **Saved as a rule for** the tool) with the rule as it was written down, and **Undo** if that's not what you meant. Withdraw a rule the same way.
 
-They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool. Each build records the instructions it ran with, next to its conversation and spec.
+They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool, where **Remove** takes one out and the line under them adds one. Each build records the instructions it ran with, next to its conversation and spec.
 
 ## When a build fails
 
-The build says why: a failing test, an invalid manifest, an error on its screen. Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
+The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
 
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
@@ -69,15 +69,17 @@ If the builder itself can't work (signed out, out of usage), Hewn stops instead 
 
 ## Versions
 
-Every change is a new version. Your data stays and moves forward with each one. **Versions** (Info, or the tool's menu) lists them; **Restore** makes an earlier one active again, with the data kept. Restoring is refused if a newer version changed the data in a way the older code can't read.
+Every change is a new version. Your data stays and moves forward with each one. Info shows the last two; **All versions** (or **Versions** in the tool's menu) lists every one. **Details** opens a version; **Restore…** there makes it active again (it asks first), with the data kept. Restoring is refused if a newer version changed the data in a way the older code can't read.
 
-Under each version is what led to it: the conversation with the intake, the spec and the builder's log. **Continue from here** opens a change with that conversation on top, so you pick up where you left off instead of explaining the tool again; opening **Change…** on a tool offers the same ("Continue from the last conversation?").
+A version's page shows what led to it: the conversation with the intake, the spec and the builder's log, each in the menu on the left, under the tool (back to its Info). **Files** shows its code: **Changes** lists what changed since the version it was built on (the one before, or the one restored before the change), each file as a diff (added lines green, removed lines red, with both line numbers), and **Source** shows every file as it is, in syntax colours (JSON written compactly is laid out, or **As written**). A long file shows its first 5,000 lines. **Continue from here** opens a change with that conversation on top, so you pick up where you left off instead of explaining the tool again; opening **Change…** on a tool offers the same ("Continue from the last conversation?").
+
+![A version's Files: what changed since the version before, as a diff with both line numbers](images/version-files.png)
 
 Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@2` next to the old one, so agents and other tools that use `@1` keep working.
 
 ## Deleting a tool
 
-**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data. Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back.
+**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back.
 
 ## From the terminal
 
@@ -89,7 +91,9 @@ hewn review                    agents' changes waiting for you
 hewn rollback <id> [version]   an earlier version, active again
 hewn restore <id>              bring back a deleted tool
 hewn purge <id>                delete a deleted tool forever
-hewn install <dir>             install a tool from a folder
+hewn install <dir | file>      install a tool from a folder, or a file someone shared
+hewn share <id>                a tool as a file to give someone (see Sharing tools)
+hewn data reset <id>           Start over: empty a tool's data, keep the tool
 ```
 
 To read or write a tool's code yourself, see [Writing tools](capabilities.md).

@@ -13,7 +13,7 @@ import { startMetrics } from "./supervisor/metrics.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
 import { initConfig, readConfig, writeConfig } from "./config.ts";
 import { formatChecks, runDoctor } from "./doctor.ts";
-import { openHome } from "./home.ts";
+import { openHome, writeFileAtomic } from "./home.ts";
 import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
@@ -54,7 +54,11 @@ Use it (as the owner; talks to the running Hewn)
   feedback [--days N] [--json]
                       how recent builds worked out: your answers to "Got what you asked for?", attempts,
                       what they ran on, and the signs in the record (a fix, a change soon after, a restore, a delete)
-  install <dir>       install a tool from a source dir
+  install <dir | file.hewn.zip> [--name <name>] [--no-sample]
+                      install a tool from a source dir, or from a file someone shared (with its sample data)
+  share <id> [--version N] [--out file.hewn.zip]
+                      a tool as a file to give someone: what's in it (personal data, keys, your settings) first;
+                      refused if it holds one of your own keys or has no sample data
   connect <id>        give a tool what it needs: config, secrets (hidden prompt or --from <path>) + approval;
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
   accounts            connections to external services: health and what uses them
@@ -66,7 +70,7 @@ Use it (as the owner; talks to the running Hewn)
   config <id> [NAME value]
                       show a tool's config (non-secret settings like a site URL), or set one
   secrets list|set|import|rm <id> [NAME] [--from <path>]
-  grants [id]         show requested / approved authority; grants approve <id> [grant]
+  grants [id]         show requested / approved authority; grants approve <id> [grant]; grants deny <id> <grant>
   schedules [id]      list schedules; schedules add <id> <op> "<cadence>" [json input] | pause|resume|rm <schedule>
   logs <id> [-f] [-n N]
                       a tool's call log
@@ -76,6 +80,9 @@ Use it (as the owner; talks to the running Hewn)
   restore <id>        bring back a deleted tool, with its data
   rollback <id> [version]
   export <id> [--out file.json]
+  data reset <id> [--sample]
+                      Start over: empty a tool's data and keep the tool (a backup is kept; asks you to
+                      type the id); --sample replays its sample data after
   purge <id>          permanently delete a deleted tool (asks you to type the id)
   backup now|list|restore <date|file>|dir <path>
                       zipped snapshots (never secrets in plain text, never agent tokens)
@@ -158,7 +165,7 @@ async function main() {
         log,
       });
       writeFormat(home);
-      writeFileSync(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", { mode: 0o600 });
+      writeFileAtomic(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", 0o600);
       // Off unless set: a host that scrapes Hewn turns it on.
       const metricsPort = Number(process.env.HEWN_METRICS_PORT ?? 0);
       if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log });
@@ -350,10 +357,13 @@ async function main() {
 
     case "install": {
       const dir = resolve(positional()[0] ?? "");
-      const manifest = JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
       const info = supervisorInfo(home);
       if (!info) throw new Error("Hewn isn't running: start it with hewn serve (or hewn service install)");
-      const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify({ name: manifest.name, purpose: manifest.purpose, dir, wait: true }) });
+      // A shared tool's file (a zip): installed under its name (or --name), with its sample data unless --no-sample.
+      const zip = statSync(dir, { throwIfNoEntry: false })?.isFile();
+      const manifest = zip ? null : JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
+      const body = zip ? { bundle: readFileSync(dir).toString("base64"), ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
+      const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
@@ -437,6 +447,46 @@ async function main() {
         else console.log(data);
       });
       return;
+
+    case "share": {
+      const id = positional()[0] ?? "";
+      const info = supervisorInfo(home);
+      if (!info) throw new Error("Hewn isn't running: start it with hewn serve (or hewn service install)");
+      const version = option("version");
+      const res = await fetch(`${info.url}/_admin/share`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify({ capabilityId: id, ...(version ? { version: Number(version.replace(/^v/, "")) } : {}) }) });
+      const out = (await res.json()) as any;
+      if (!res.ok) throw new Error(out.message ?? out.error);
+      const { check } = out;
+      console.log(`${check.name} v${check.version}: ${check.files} files${check.sample ? `, sample data (${check.sample.calls} calls)` : ""}`);
+      for (const f of check.findings) console.log(`  ${f.kind === "secret" ? "✖" : "!"} ${f.file}:${f.line}  ${f.label}: ${f.masked}`);
+      if (!check.findings.length) console.log("  nothing personal or key-shaped found");
+      console.log("  never in it: your data, keys, settings, conversations, logs");
+      if (check.blocked?.kind === "secret") {
+        process.exitCode = 1;
+        return void console.error(`✖ your own keys are in it (✖ above: ${check.findings.filter((f: any) => f.kind === "secret").map((f: any) => `${f.file}:${f.line}`).join(", ")}). Remove them, then share again.`);
+      }
+      if (check.blocked?.kind === "no-sample") {
+        process.exitCode = 1;
+        return void console.error(`✖ ${id} has no sample data (sample/calls.json), and a tool needs it to be shared. Open Share… on it in Hewn: Ask builder adds some, or write it yourself.`);
+      }
+      const file = resolve(option("out") ?? out.name);
+      writeFileSync(file, Buffer.from(out.bundle, "base64"));
+      console.log(`✔ wrote ${file}`);
+      return;
+    }
+
+    case "data": {
+      const [sub, id] = positional();
+      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample]");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const typed = (await rl.question(`Start ${id} over: its data is emptied (a backup is kept), the tool stays.\nType ${id} to confirm: `)).trim();
+      rl.close();
+      await owner(async (c) => {
+        const r = await c.call("startOver", id, { confirm: typed, sample: args.includes("--sample") });
+        console.log(`✔ ${id} started over${r.backup ? ` (backup kept: ${r.backup})` : ""}${r.sample ? (r.sample.failed ? `; sample data stopped at call ${r.sample.failed.index + 1} (${r.sample.failed.operation}): ${r.sample.failed.error}` : `; sample data: ${r.sample.calls} calls`) : ""}`);
+      });
+      return;
+    }
 
     case "purge": {
       const id = positional()[0] ?? "";
@@ -865,7 +915,7 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     for (const i of items) {
       const secret = i.kind === "secret" ? i.grant.slice(7) : null;
       const value = secret ? (st.missingSecrets.includes(secret) ? " (value missing)" : " (value set)") : "";
-      console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : "  [not authorized]"}`);
+      console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : st.declinedGrants?.includes(i.grant) ? "  [you said no]" : "  [not authorized]"}`);
     }
     for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? "(not set)"}  ${x.description}`);
     for (const d of st.missingDependencies) console.log(`  ✖ depends on ${d}, which no longer exists`);
@@ -893,6 +943,13 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
 
   if (command === "grants") {
     if (pos[0] === "approve") return approve(pos[1] ?? "", pos[2]);
+    if (pos[0] === "deny") {
+      if (!pos[2]) throw new Error("usage: hewn grants deny <id> <grant>   (the grant as hewn grants <id> shows it, e.g. host:api.example.com)");
+      // A secret is set or not: there's nothing to say no to.
+      if (pos[2].startsWith("secret:")) throw new Error(`a secret can't be denied: leave it unset, or remove it (hewn secrets rm ${pos[1]} ${pos[2].slice(7)})`);
+      await c.call("declineGrant", pos[1], pos[2]);
+      return console.log(`✔ said no to ${pos[2]}: nothing asks for it again until a new version (hewn grants approve ${pos[1]} ${pos[2]} allows it)`);
+    }
     for (const x of pos[0] ? [{ id: pos[0] }] : caps) await show(x.id);
     return;
   }

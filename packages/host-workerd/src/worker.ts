@@ -13,6 +13,7 @@ import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { DOC_NAME } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
+import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
@@ -54,6 +55,8 @@ interface Env {
   REMOTE_JOBS?: string;
   /** "1" when a host runs this Hewn for its owner (HEWN_HOSTED): no terminal, no local agents. */
   HOSTED?: string;
+  /** This Hewn's version. */
+  VERSION?: string;
   /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
   HOST_SIGNIN_URL?: string;
 }
@@ -178,6 +181,9 @@ class EncryptedSecretStore implements SecretStore {
 }
 
 const aad = (capabilityId: string, name: string) => new TextEncoder().encode(`${capabilityId}/${name}`);
+
+/** The shelf, read once (it changes only with the release). */
+let shelfCache: Promise<{ tools: ShelfTool[]; firstRun: string[] }> | undefined;
 
 /** Calls to the supervisor (token-authenticated, loopback only). */
 function supervisor(env: Env) {
@@ -309,12 +315,13 @@ function workerdRuntime(env: Env): CapabilityRuntime {
     dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
     listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
     dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code),
+    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code),
     loadState: (state, tables, code) => host(state.capabilityId).load(state.scratch ?? null, tables, code),
   };
 }
 
 type CapabilityHostApi = {
-  [K in "invoke" | "describe" | "migrate" | "dump" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
+  [K in "invoke" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
 };
 
 // ---------- HewnDO: the owner's platform ----------
@@ -342,6 +349,7 @@ export class HewnDO extends DurableObject<Env> {
         workbench: remoteWorkbench(env, this.visualInvokers),
         secrets: this.secrets,
         brief: BRIEF,
+        version: env.VERSION,
         designSystem: async () => {
           const res = await env.ASSETS_UI.fetch("http://assets/ui.css");
           return res.ok ? res.text() : undefined;
@@ -470,6 +478,17 @@ export class HewnDO extends DurableObject<Env> {
             },
             tunnel: () => sv.json("/tunnel/status", {}),
           }),
+      // The release's Official shelf: the supervisor reads seeds/ (kept a while: it changes only with the release).
+      shelf: {
+        tools: async () => {
+          shelfCache ??= sv.json<{ tools: (Omit<ShelfTool, "files"> & { files: Record<string, string> })[]; firstRun: string[] }>("/shelf/tools", {}).then((r) => ({ firstRun: r.firstRun, tools: r.tools.map((t) => ({ ...t, files: Object.fromEntries(Object.entries(t.files).map(([p, b]) => [p, fromBase64(b)])) })) }));
+          return shelfCache.catch((e) => ((shelfCache = undefined), Promise.reject(e)));
+        },
+        image: async (id, name) => {
+          const r = await sv.json<{ data: string | null }>("/shelf/image", { id, name });
+          return r.data ? fromBase64(r.data) : undefined;
+        },
+      },
       backups: {
         location: async () => (await sv.json<{ dir: string }>("/backups/list", {})).dir,
         list: async () => (await sv.json<{ backups: unknown[] }>("/backups/list", {})).backups,
@@ -517,6 +536,12 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/web-ticket":
           return Response.json({ ticket: this.platform.createWebTicket(USER) });
         case "/_admin/install": {
+          // A shared tool's file (hewn install <file.hewn.zip>): staged, then installed under its name (or the given one), with its sample data unless told not to.
+          if (body.bundle) {
+            const preview = await this.platform.stageBundle(USER, fromBase64(body.bundle), { from: "file" });
+            const started = await this.platform.installBundle(USER, preview.token, { name: body.name ?? preview.suggestedName, sample: body.sample !== false });
+            return Response.json(body.wait ? await this.platform.settle(started.buildId) : started);
+          }
           const seed = body.files ? decodeFiles(body.files) : undefined;
           const builder = body.builder ?? (seed ? "keep" : `copy:${body.dir}`);
           const started = await this.platform.install(USER, { name: body.name, purpose: body.purpose, builder, id: body.id, seed, requirements: body.requirements });
@@ -564,6 +589,18 @@ export class HewnDO extends DurableObject<Env> {
           return Response.json(await this.platform.rollback(USER, body.capabilityId, body.version));
         case "/_admin/export":
           return Response.json(await this.platform.exportData(USER, body.capabilityId));
+        case "/_admin/data":
+          return Response.json(await this.platform.dataSummary(USER, body.capabilityId));
+        // hewn share: the check (with findings), and the file unless it's blocked.
+        case "/_admin/share": {
+          const check = await this.platform.shareCheck(USER, body.capabilityId, body.version);
+          if (check.blocked || body.check) return Response.json({ check });
+          const { name, bundle } = await this.platform.shareBundle(USER, body.capabilityId, body.version);
+          return Response.json({ check, name, bundle: toBase64(bundle) });
+        }
+        // hewn data reset: Start over.
+        case "/_admin/start-over":
+          return Response.json(await this.platform.startOver(USER, body.capabilityId, { confirm: body.confirm, sample: !!body.sample }));
         case "/_admin/purge":
           await this.platform.purge(USER, body.capabilityId, body.confirm);
           return Response.json({ ok: true });
@@ -581,8 +618,8 @@ export class HewnDO extends DurableObject<Env> {
 /** Core methods the CLI may call over the admin channel; `owner`: the first argument is the owner. */
 const ADMIN_CALLS: Record<string, { owner: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
-  setSecret: { owner: true }, deleteSecret: { owner: true }, setConfig: { owner: true }, connect: { owner: true }, accounts: { owner: true }, approveGrants: { owner: true }, approveGrant: { owner: true }, revokeGrant: { owner: true },
-  archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true },
+  setSecret: { owner: true }, deleteSecret: { owner: true }, setConfig: { owner: true }, connect: { owner: true }, accounts: { owner: true }, approveGrants: { owner: true }, approveGrant: { owner: true }, revokeGrant: { owner: true }, declineGrant: { owner: true },
+  archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true }, startOver: { owner: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
   buildReport: { owner: true },
@@ -648,6 +685,10 @@ export class CapabilityHost extends DurableObject<Env> {
 
   async dump(scratch: string | null, code: CodeRef) {
     return this.facet(scratch, code, []).dump();
+  }
+
+  async count(scratch: string | null, code: CodeRef): Promise<Record<string, number>> {
+    return this.facet(scratch, code, []).count();
   }
 
   async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef): Promise<number> {

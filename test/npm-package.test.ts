@@ -21,7 +21,7 @@ describe("the npm packages", () => {
     assert.equal(r.status, 0, r.stderr);
   });
 
-  test("@hewntools/cli ships the bundle, the prebuilt host, the web client, the UI kit, the docs pages and the licences; nothing else", () => {
+  test("@hewntools/cli ships the bundle, the prebuilt host, the web client, the UI kit, the docs pages, the Official tools and the licences; nothing else", () => {
     const pkg = JSON.parse(readFileSync(join(CLI, "package.json"), "utf8"));
     assert.equal(pkg.name, "@hewntools/cli");
     assert.equal(pkg.version, JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version);
@@ -29,9 +29,11 @@ describe("the npm packages", () => {
     assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["esbuild", "workerd"]);
     assert.equal(pkg.private, undefined);
     const list = packed(CLI);
-    for (const f of list) assert.match(f, /^(dist\/(cli\.js|host\/(worker\.js|capability-runtime\.js|builder-brief\.md)|web\/.+|platform-ui\/.+|docs\/(spec\/)?([\w-]+\.md|LICENSE))|README\.md|LICENSE|LICENSING\.md|CHANGELOG\.md|package\.json)$/, f);
-    for (const f of ["dist/cli.js", "dist/host/worker.js", "dist/web/index.html", "dist/platform-ui/session.js", "dist/platform-ui/LICENSE", "dist/docs/spec/LICENSE", "LICENSE"]) assert.ok(list.includes(f), f);
+    for (const f of list) assert.match(f, /^(dist\/(cli\.js|host\/(worker\.js|capability-runtime\.js|builder-brief\.md)|web\/.+|platform-ui\/.+|seeds\/.+|docs\/(spec\/)?([\w-]+\.md|LICENSE))|README\.md|LICENSE|LICENSING\.md|CHANGELOG\.md|package\.json)$/, f);
+    for (const f of ["dist/cli.js", "dist/host/worker.js", "dist/web/index.html", "dist/platform-ui/session.js", "dist/platform-ui/LICENSE", "dist/docs/spec/LICENSE", "dist/seeds/shelf.json", "dist/seeds/habits/capability.json", "dist/seeds/LICENSE", "LICENSE"]) assert.ok(list.includes(f), f);
     for (const f of files(join(ROOT, "packages", "host-workerd", "web"))) assert.ok(list.includes(`dist/web/${f}`), `the web client's ${f}`);
+    // Every tool on the shelf with its listing (the Hub leaves out a tool without one, silently).
+    for (const id of JSON.parse(readFileSync(join(ROOT, "seeds", "shelf.json"), "utf8")).tools) assert.ok(list.includes(`dist/seeds/${id}/.hub/listing.json`), `${id}'s listing`);
     // The docs hewn_docs and the intake read, where assetDirs() looks for them: docs/x.md in dist/docs/, spec/x.md in dist/docs/spec/.
     for (const page of DOC_PAGES) {
       const f = `dist/docs/${page.replace(/^docs\//, "")}`;

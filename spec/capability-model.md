@@ -4,7 +4,7 @@ This document defines Hewn's domain concepts and the invariants between them. It
 
 A **Capability** is what the rest of the spec, and Hewn's interface, call a **tool**. This document keeps the formal name. For the practical side, see [Writing a tool](tools.md) and [Connecting an agent](agents.md).
 
-[ABI](README.md#versions) 2.4 is current. Anything added after 2.0 is marked with the minor version that introduced it ("since 2.1"); see [Capability ABI](#capability-abi).
+[ABI](README.md#versions) 2.5 is current. Anything added after 2.0 is marked with the minor version that introduced it ("since 2.1"); see [Capability ABI](#capability-abi).
 
 ## Capability
 
@@ -261,7 +261,7 @@ The authorization representation may later use a relationship-based engine, but 
 
 ## Capability Manifest
 
-The Capability Manifest (`capability.json`) is the public machine-readable description of a Capability. A host validates it before any version is installed or promoted. The types are [`src/manifest.ts`](src/manifest.ts) and the JSON Schema is [`schemas/capability.schema.json`](schemas/capability.schema.json); this section summarises them for ABI 2.4, and [Writing a tool](tools.md#the-manifest) explains each field.
+The Capability Manifest (`capability.json`) is the public machine-readable description of a Capability. A host validates it before any version is installed or promoted. The types are [`src/manifest.ts`](src/manifest.ts) and the JSON Schema is [`schemas/capability.schema.json`](schemas/capability.schema.json); this section summarises them for ABI 2.5, and [Writing a tool](tools.md#the-manifest) explains each field.
 
 ```ts
 interface CapabilityManifest {
@@ -281,6 +281,8 @@ interface CapabilityManifest {
   hue?: number;
   /** Since 2.4. How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. */
   saturation?: number;
+  /** Since 2.5. Where an installed tool came from; written by the host, a builder's value is replaced. */
+  source?: { id: string; name?: string; version: number; hash: string; from: "file" | "link" | "hub"; host?: string };
   tags?: string[];
 
   /** Since 2.1. Non-secret settings the owner fills in; code reads ctx.config.NAME. */
@@ -290,7 +292,7 @@ interface CapabilityManifest {
   requires?: {
     secrets?: { name: string; description: string }[];  // connections only
     hosts?: string[];
-    capabilities?: { id: string; operations: string[] }[];
+    capabilities?: { id: string; operations: string[]; hub?: string; minVersion?: number }[];  // hub, minVersion since 2.5
     model?: ModelRequirement;                            // since 2.2
   };
 
@@ -367,7 +369,7 @@ The widget's operation must be a `read` operation. It returns a view model for o
 
 ## Capability ABI
 
-The Capability ABI is what a capability's code and the platform agree on: the module the code exports, the `ctx` each handler receives, the environment it runs in, and the manifest format above. It is the same on every runtime and every host. The types are [`src/ctx.ts`](src/ctx.ts) (module and `ctx`), [`src/model.ts`](src/model.ts) (`ctx.model`) and [`src/abi.ts`](src/abi.ts) (the version and its history); this section summarises them for ABI 2.4. [Writing a tool](tools.md) has the same contract with examples, and [`builder-brief.md`](builder-brief.md) is the version handed to builders.
+The Capability ABI is what a capability's code and the platform agree on: the module the code exports, the `ctx` each handler receives, the environment it runs in, and the manifest format above. It is the same on every runtime and every host. The types are [`src/ctx.ts`](src/ctx.ts) (module and `ctx`), [`src/model.ts`](src/model.ts) (`ctx.model`) and [`src/abi.ts`](src/abi.ts) (the version and its history); this section summarises them for ABI 2.5. [Writing a tool](tools.md) has the same contract with examples, and [`builder-brief.md`](builder-brief.md) is the version handed to builders.
 
 ### Versions
 
@@ -380,6 +382,7 @@ A manifest's `abi` declares the lowest version the capability needs. Minor versi
 | 2.2 | `requires.model` and `ctx.model.generate` |
 | 2.3 | `widgets` (and read-only runs) |
 | 2.4 | `saturation` |
+| 2.5 | `source`, `requires.capabilities[]` `hub` and `minVersion`, `sample/calls.json` |
 
 A manifest without `abi` is 2.0.
 

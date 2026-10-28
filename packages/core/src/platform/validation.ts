@@ -3,14 +3,15 @@
 // tests, the UI and widgets, an upgrade dry run), frozen, and promoted, or held for the owner's review.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { contentHash, encodeVersion, text, versionFiles } from "../files.ts";
-import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, validateManifest } from "../manifest.ts";
+import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
+import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
+import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CodeRef, ExecutionTarget, Files, StateRef } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
-import type { TestCase } from "@hewntools/spec/cases.ts";
+import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
 import { Domain } from "./context.ts";
 
@@ -30,12 +31,24 @@ export class Validation extends Domain {
     } catch (e) {
       return fail(`capability.json is not valid JSON: ${(e as Error).message}`);
     }
+    // The platform's own fields come from its record (or, installing from a file, the install's), never the builder.
+    const source = this.registry.getCapability(id)?.source ?? installedFrom(build) ?? null;
+    const stamped = stampSource(manifest, source);
+    if (JSON.stringify(stamped) !== JSON.stringify(manifest)) {
+      manifest = stamped;
+      workspace["capability.json"] = bytes(JSON.stringify(manifest, null, 2) + "\n");
+      step(source ? `source kept: ${source.id} v${source.version}, ${sourceWords(source)}` : "removed fields the platform writes (source, hub, minVersion)");
+    }
     const manifestErrors = validateManifest(manifest, id);
     if (manifest?.ui?.available && !workspace["ui/index.html"]) manifestErrors.push("ui.available but ui/index.html is missing");
     if (manifestErrors.length) fail("manifest invalid", manifestErrors);
     step("manifest valid");
 
-    // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares
+    // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares.
+    // npm runs on the machine, outside the builder's sandbox: registry versions only, and no npm settings
+    // (read from the whole workspace: an .npmrc never becomes part of a version, but npm would read it).
+    const npmProblems = dependencyProblems(workspace);
+    if (npmProblems.length) fail("npm won't install this tool's dependencies", npmProblems);
     const files = versionFiles(workspace);
     let bundled: { js: string; log: string[] };
     try {
@@ -87,6 +100,9 @@ export class Validation extends Domain {
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };
     const visualState: StateRef = { capabilityId: id, scratch: `visual:${build.id}` };
     const dryRun: StateRef = { capabilityId: id, scratch: `dryrun:${build.id}` };
+    const sampleState: StateRef = { capabilityId: id, scratch: `sample:${build.id}` };
+    // Sample calls run as they do after an install: nothing granted (no secrets, settings, hosts, other tools or model).
+    const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
     try {
@@ -112,53 +128,104 @@ export class Validation extends Domain {
       if (failed.length) fail(`${failed.length} of ${cases.length} test cases failed`, failed);
       step(`${cases.length} test cases passed`);
 
-      // 5b. the UI renders without errors (on fresh, empty state), with a screenshot for the owner
+      // 5a. sample data replays on a fresh state, as installing (or starting over) with it does
+      let sample;
+      try {
+        sample = readSample(files);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+      if (sample) {
+        await this.runtime.dropState(sampleState);
+        await this.runtime.migrate(sampleState, migrations, code);
+        for (const [i, c] of sample.entries()) {
+          try {
+            await this.replayCall(manifest, sampleTarget, c);
+          } catch (e) {
+            fail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
+          }
+        }
+        step(`sample data replays (${sample.length} calls)`);
+      }
+
+      // The screenshot the build page shows, kept whether the check passed or not (a failed one shows
+      // what broke). "(screenshot attached" in the log is what tells the build page there's one.
+      const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
+        if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
+        if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+      };
+
+      // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
+      // data, again on a tool filled with it, and that's the screenshot (the tool in use, not empty)
       let shot = false;
-      if (manifest.ui?.available && this.workbench.visualCheck && build.kind !== "widgets") {
+      const visualCheck = this.workbench.visualCheck;
+      if (manifest.ui?.available && visualCheck && build.kind !== "widgets") {
         await this.runtime.dropState(visualState);
         await this.runtime.migrate(visualState, migrations, code);
         const secrets = cases.find((c) => c.secrets)?.secrets ?? Object.fromEntries((manifest.requires?.secrets ?? []).map((x) => [x.name, "visual-check"]));
         const config = cases.find((c) => c.config)?.config ?? Object.fromEntries((manifest.config ?? []).map((x) => [x.name, "visual-check"]));
-        const v = await this.workbench.visualCheck(build.id, {
-          manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
-          invoke: async (body) => {
-            const { result } = await this.d.invocation.execute(
-              manifest,
-              { capabilityId: id, code, state: visualState, secrets, config, caller: { kind: "test", id: "visual-check" } },
-              { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input },
-              async (call) => {
-                throw new PlatformError("operation_failed", `calls to ${call.capabilityId} aren't available in the visual check`);
-              },
-              manifest.requires?.model && abiAtLeast(manifest, "2.2")
-                ? async () => {
-                    throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
-                  }
-                : undefined,
-            );
-            return { result };
-          },
-        });
-        if (v.skipped) step(`visual check skipped: ${v.skipped}`);
+        const check = (state: StateRef) =>
+          visualCheck(build.id, {
+            manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
+            invoke: async (body) => {
+              const { result } = await this.d.invocation.execute(
+                manifest,
+                { capabilityId: id, code, state, secrets, config, caller: { kind: "test", id: "visual-check" } },
+                { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input },
+                async (call) => {
+                  throw new PlatformError("operation_failed", `calls to ${call.capabilityId} aren't available in the visual check`);
+                },
+                manifest.requires?.model && abiAtLeast(manifest, "2.2")
+                  ? async () => {
+                      throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
+                    }
+                  : undefined,
+              );
+              return { result };
+            },
+          });
+        const empty = await check(visualState);
+        if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
         else {
-          if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-          if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
-          if (v.errors.length) fail("UI didn't render cleanly", v.errors);
-          step("UI renders without errors (screenshot attached)");
+          if (empty.errors.length) {
+            await keep(empty);
+            if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
+            fail("UI didn't render cleanly", empty.errors);
+          }
+          const filled = sample ? await check(sampleState) : undefined;
+          const v = filled && !filled.skipped ? filled : empty;
+          await keep(v);
+          if (filled?.errors.length) {
+            if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
+            fail("UI didn't render cleanly with its sample data", filled.errors);
+          }
+          step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
       }
 
-      // 5c. changed widgets, drawn in every size they offer (the screenshot, unless the UI's was taken)
+      // 5c. changed widgets, drawn in every size they offer (the screenshot, unless the UI's was taken):
+      // with sample data, what each shows on a tool filled with it; else its test case's output
       const widgetsChanged = !!manifest.widgets?.length && (build.kind === "widgets" || JSON.stringify(manifest.widgets) !== JSON.stringify(base?.row.manifest.widgets));
-      if (widgetsChanged && !shot && this.workbench.visualCheck && abiAtLeast(manifest, "2.3")) {
-        const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: views.get(w.operation) ?? null }));
-        const v = await this.workbench.visualCheck(build.id, { manifest, widgets, invoke: async () => ({ result: null }) });
+      if (widgetsChanged && !shot && visualCheck && abiAtLeast(manifest, "2.3")) {
+        const sampled = new Map<string, unknown>();
+        if (sample)
+          for (const w of manifest.widgets!) {
+            const [operation, version] = w.operation.split("@");
+            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
+            if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
+          }
+        const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: sampled.get(w.operation) ?? views.get(w.operation) ?? null }));
+        const v = await visualCheck(build.id, { manifest, widgets, invoke: async () => ({ result: null }) });
         if (v.skipped) step(`widget check skipped: ${v.skipped}`);
         else {
-          if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-          if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
-          if (v.errors.length) fail("widgets didn't render cleanly", v.errors);
-          step(`widgets render in every size (screenshot attached)`);
+          await keep(v);
+          const filled = sampled.size ? ", with the sample data" : "";
+          if (v.errors.length) {
+            if (v.screenshot) step(`widgets rendered with errors (screenshot attached${filled})`);
+            fail("widgets didn't render cleanly", v.errors);
+          }
+          step(`widgets render in every size (screenshot attached${filled})`);
         }
       }
 
@@ -169,7 +236,7 @@ export class Validation extends Domain {
         step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
       }
     } finally {
-      for (const s of [testState, visualState, dryRun]) await this.runtime.dropState(s).catch(() => {});
+      for (const s of [testState, visualState, dryRun, sampleState]) await this.runtime.dropState(s).catch(() => {});
     }
 
     // 7. freeze; an agent's change that adds operations or changes a connection waits for the owner
@@ -202,9 +269,13 @@ export class Validation extends Domain {
     const applied = await this.runtime.migrate(live, migrations, code);
     if (applied.length) step(`migrations applied: ${applied.join(", ")}`);
 
+    const before = this.registry.getCapability(id)?.activeVersion ?? null;
+    const installed = installedFrom(build);
     this.registry.transaction(() => {
       this.registry.insertVersion({ capabilityId: id, version: next, manifest, contentHash: code.hash, buildId: build.id });
       this.registry.promote({ id, name: manifest.name, purpose: manifest.purpose, version: next });
+      // Installed from a file: where it came from becomes the record every later version is stamped from.
+      if (installed && !this.registry.getCapability(id)?.source) this.registry.setSource(id, installed);
     });
     // Grants this version no longer asks for go: asking again later means asking the owner again.
     const wanted = new Set(wantedGrants(manifest));
@@ -215,8 +286,32 @@ export class Validation extends Domain {
       this.registry.addGrantEvent(id, "revoke", g, "platform");
       step(`grant ${g} dropped: v${next} doesn't ask for it`);
     }
+    // A quick change (the manifest only, no builder: another tier, a widget removed) isn't a new
+    // ask: what the owner said no to stays said no to, for what this version still asks for.
+    if (build.kind === "modify" && build.request.manifestOnly && before) this.registry.carryDeclines(id, before, next, wanted);
     await this.workbench.remove(build.id).catch(() => {});
     return next;
+  }
+
+  /**
+   * One sample call (sample/calls.json), through the contract, with nothing granted: the target
+   * has no hosts (no network), and other tools and the model refuse. Validation and installs both
+   * replay sample data this way.
+   */
+  async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall) {
+    return this.d.invocation.execute(
+      manifest,
+      target,
+      { capabilityId: manifest.id, operation: c.operation, operationVersion: c.version, input: c.input ?? {} },
+      async (call) => {
+        throw new PlatformError("forbidden", `sample data can't call other tools (${call.capabilityId})`);
+      },
+      manifest.requires?.model && abiAtLeast(manifest, "2.2")
+        ? async () => {
+            throw new PlatformError("forbidden", "sample data can't use the model");
+          }
+        : undefined,
+    );
   }
 
   private async runCase(manifest: CapabilityManifest, target: ExecutionTarget, c: TestCase) {
@@ -342,4 +437,12 @@ function shortJson(v: unknown, max = 1200): string {
   };
   const out = JSON.stringify(trim(v, 0), null, 2) ?? "null";
   return out.length > max ? `${out.slice(0, max)}\n…` : out;
+}
+
+/**
+ * Where a build's tool came from: only an install from a file (builder "bundle", which only the
+ * owner's install makes) says, never what an agent put in its request.
+ */
+function installedFrom(build: BuildRow): ToolSource | undefined {
+  return build.builder === "bundle" ? (build.request as { source?: ToolSource }).source : undefined;
 }

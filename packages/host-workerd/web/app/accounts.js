@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Accounts: the connections, and adding one.
 import { api, appIcon, capRef, caps, enc, formSheet, h, setWallpaper, sheetActions, skeleton } from "../kit.js";
-import { go, hues, onLeave, page } from "./frame.js";
+import { go, hues, onLeave, page, stillHere } from "./frame.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { buildingLabel } from "./home.js";
 import { route } from "./router.js";
@@ -19,9 +19,12 @@ const HEALTH = {
 
 /** I1 Accounts: one row per connection; a button only when it needs you. */
 async function accountsPage() {
+  const here = stillHere();
   page("accounts", 720, h("h1", { class: "flush" }, "Accounts"), skeleton("60%", "90%", "70%"));
   const [{ connections }, all] = await Promise.all([api("/accounts"), caps(true)]);
+  if (!here()) return;
   setWallpaper(await hues([260, 200]));
+  if (!here()) return;
   const building = [...all.values()].filter((c) => c.kind === "connection" && c.building);
   const row = (x) => {
     const c = all.get(x.id) ?? { id: x.id, name: x.name };

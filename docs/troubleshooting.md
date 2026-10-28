@@ -51,7 +51,7 @@ The passkey must have been added on the current public URL (`hewn url`): passkey
 - systemd is enabled, but WSLg mounted its own `/run/user/<uid>` over systemd's, hiding the bus (`ls /run/user/$(id -u)/bus` finds nothing). Hewn keeps running, but nothing can control it. `sudo systemctl restart user@$(id -u).service` fixes it until the next start.
 
 **Port 7717 is in use**
-Another Hewn is probably running. Choose another port: `HEWN_PORT=7727 hewn service install`. The tunnel listener uses the next port (7728).
+Another Hewn is probably running. Choose another port: `HEWN_PORT=7727 hewn service install`. The tunnel listener uses the next port (7728). If something else holds the tunnel port, `hewn serve` stops with "workerd did not start" instead of staying up without it: free the port or choose another.
 
 **Hewn keeps restarting: "can't store the secrets key with secret-tool: … Could not connect"** (WSL, a server)
 `secret-tool` (from `libsecret-tools`) is installed, but there's no keyring for it to talk to. Hewn 0.4.0 tried to use it anyway; later versions don't. Remove it, or tell Hewn to use its key file, then restart:
@@ -143,7 +143,7 @@ Hewn lists what `opencode models` lists: the providers you're signed in to (`ope
 
 **Deleted a tool by mistake:** Settings › Data › Deleted tools → Restore (data included), or `hewn restore <id>`.
 
-**A new version broke something:** **Versions** in the tool's menu → Restore on the one before, or `hewn rollback <id>`.
+**A new version broke something:** **Versions** in the tool's menu → **Details** on the one before → **Restore**, or `hewn rollback <id>`.
 
 ## Reporting
 

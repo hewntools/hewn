@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>body{margin:0;background:#efeff2;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#1c1c1e}a{color:#3f6212}a:hover{color:#1c1c1e}@keyframes hw{from{transform:rotate(-1.6deg)}to{transform:rotate(1.6deg)}}</style>
+</helmet>
+<section id="turn-3" style="padding:64px;display:flex;flex-direction:column;gap:56px;width:2600px;border-bottom:2px dashed #c9cad0">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:980px">
+    <div style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:#6b6b72">HEWN — UX FLOWS, TURN 3 (LOW-FI) · sharing, 0.4.9 → 0.5</div>
+    <div style="font-size:30px;font-weight:650;letter-spacing:-.02em">Sharing: the Hub, Share…, install and updates</div>
+    <div style="font-size:15px;color:#55555c;text-wrap:pretty">For 0.4.9, 0.4.10 and 0.5. Each frame names the release it arrives in. One new nav tab, Hub; everything else reuses pass 2 patterns (Request, Picker, Form, Confirm; the Inbox; the drawer). All open questions are settled.</div>
+  </div>
+  <div style="display:flex;gap:24px;align-items:stretch">
+    <div style="flex:1;display:flex;flex-direction:column;gap:12px;padding:22px 24px;border-radius:14px;background:#fff;border:1.5px solid #c9cad0">
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">N0</span><span style="font-size:18px;font-weight:650">Where sharing lives</span></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div style="display:flex;flex-direction:column;gap:5px;padding:12px;border-radius:10px;background:#f6f6f8;border:1px solid #e3e4e8"><div style="font-size:14px;font-weight:650">Getting tools</div><div style="font-size:11.5px;color:#3a3a40">Hub tab · link under New · ⌘K · hosted first run</div></div>
+        <div style="display:flex;flex-direction:column;gap:5px;padding:12px;border-radius:10px;background:#f6f6f8;border:1px solid #e3e4e8"><div style="font-size:14px;font-weight:650">Giving tools</div><div style="font-size:11.5px;color:#3a3a40">Tool menu › Share… (next to Export data)</div></div>
+        <div style="display:flex;flex-direction:column;gap:5px;padding:12px;border-radius:10px;background:#f6f6f8;border:1px solid #e3e4e8"><div style="font-size:14px;font-weight:650">Knowing where it came from</div><div style="font-size:11.5px;color:#3a3a40">Info pill · Versions › Files</div></div>
+        <div style="display:flex;flex-direction:column;gap:5px;padding:12px;border-radius:10px;background:#f6f6f8;border:1px solid #e3e4e8"><div style="font-size:14px;font-weight:650">Updates and notes</div><div style="font-size:11.5px;color:#3a3a40">Inbox › Needs you</div></div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:12px;padding:22px 24px;border-radius:14px;background:#1c1c1e;color:#f0f0f2">
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px ui-monospace,Menlo,monospace;background:#c6ef5a;color:#1f2a0f;padding:4px 8px;border-radius:6px">Z</span><span style="font-size:18px;font-weight:650">Three rules</span></div>
+      <div style="font-size:12.5px;color:#b4b6be;line-height:1.5"><b style="color:#fff">One install sheet</b> for a file, a link and the Hub: what it does, flags, what it'll ask for, Files, name, sample data. Only the "From …" line changes.</div>
+      <div style="font-size:12.5px;color:#b4b6be;line-height:1.5"><b style="color:#fff">One Share… sheet that grows</b>: what's in it on top, ways to share as rows below. 0.4.10 and 0.5 add rows, not screens.</div>
+      <div style="font-size:12.5px;color:#b4b6be;line-height:1.5"><b style="color:#fff">Read before it runs</b>: the summary comes first, and Source code is one tap away everywhere code enters (install, update, a version).</div>
+    </div>
+  </div>
+  <sc-for list="{{ f3.sections }}" as="sec" hint-placeholder-count="9">
+    <div id="{{ sec.key }}" style="display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">{{ sec.key }}</div><div style="font-size:20px;font-weight:650">{{ sec.title }}</div><div style="font-size:13px;color:#6b6b72">{{ sec.sub }}</div></div>
+      <sc-for list="{{ sec.lanes }}" as="lane" hint-placeholder-count="1">
+        <div style="display:flex;align-items:flex-start">
+          <sc-for list="{{ lane }}" as="f" hint-placeholder-count="4">
+            <div style="display:flex;align-items:flex-start">
+              <div id="{{ f.id }}" style="display:flex;flex-direction:column;gap:8px;width:{{ f.w }}">
+                <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">{{ f.id }} · {{ f.name }}</div>
+                <div style="border:1.5px solid {{ f.frameBorder }};border-radius:{{ f.radius }};background:{{ f.outerBg }};padding:{{ f.outerPad }};min-height:{{ f.minH }};display:flex;flex-direction:column;justify-content:{{ f.justify }};align-items:center">
+                  <div style="box-sizing:border-box;width:{{ f.innerW }};background:#fff;border-radius:{{ f.innerRadius }};box-shadow:{{ f.innerShadow }};padding:12px;display:flex;flex-direction:column;gap:8px;align-self:{{ f.innerAlign }}">
+                    <sc-for list="{{ f.rows }}" as="r" hint-placeholder-count="4">
+                      <sc-if value="{{ r.isTop }}" hint-placeholder-val="{{ false }}"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div style="display:flex;gap:5px;align-items:center"><span style="width:13px;height:13px;border-radius:4px;background:#c6ef5a"></span><span style="font-size:10.5px;font-weight:650">Hewn</span></div><div style="display:flex;gap:4px;align-items:center"><span style="font-size:8.5px;padding:2px 8px;border-radius:8px;border:1px solid #d4d5da;color:#8a8d98;white-space:nowrap;flex:none;display:{{ r.searchD }}">⌘K</span><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="5"><span style="font-size:8.5px;padding:2px 5px;border-radius:8px;background:{{ x.bg }};color:{{ x.fg }}">{{ x.t }}</span></sc-for><sc-if value="{{ r.chip }}" hint-placeholder-val="{{ false }}"><span style="font-size:8.5px;padding:2px 6px;border-radius:8px;background:#fdecc8;color:#8a4b06;font-weight:600">{{ r.chip }}</span></sc-if></div></div></sc-if>
+                      <sc-if value="{{ r.isH }}" hint-placeholder-val="{{ false }}"><div style="font-size:{{ r.size }};font-weight:650;letter-spacing:-.01em;line-height:1.25">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isP }}" hint-placeholder-val="{{ false }}"><div style="font-size:10px;color:#6b6b72;line-height:1.4">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isEyebrow }}" hint-placeholder-val="{{ false }}"><div style="font:600 8.5px ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#8a8d98;text-transform:uppercase">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isPills }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><span style="font:9px ui-monospace,Menlo,monospace;padding:2px 5px;border-radius:4px;background:{{ x.bg }};color:{{ x.fg }}">{{ x.t }}</span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isRows }}" hint-placeholder-val="{{ false }}"><div style="display:flex;flex-direction:column"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:{{ x.bt }};font-size:10px"><span style="width:7px;height:7px;border-radius:1.5px;flex:none;background:{{ x.dot }};display:{{ x.dotD }}"></span><span style="width:16px;height:16px;border-radius:5px;flex:none;background:{{ x.ic }};display:{{ x.icD }}"></span><span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-weight:{{ x.fw }}">{{ x.a }}</span><span style="font-size:8.5px;color:#8a8d98;display:{{ x.bD }}">{{ x.b }}</span></span><span style="font-size:9px;color:{{ x.rc }};padding:{{ x.rp }};border-radius:5px;background:{{ x.rbg }};border:{{ x.rbd }};font-weight:{{ x.rfw }};white-space:nowrap">{{ x.r }}</span></div></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isBtns }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:5px;justify-content:{{ r.justify }};flex-wrap:wrap"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="2"><span style="font-size:9.5px;padding:4px 9px;border-radius:5px;background:{{ x.bg }};border:{{ x.bd }};color:{{ x.fg }};font-weight:{{ x.fw }}">{{ x.t }}</span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isTiles }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:repeat({{ r.cols }},1fr);gap:7px;grid-auto-rows:{{ r.rowH }}"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="6"><div style="position:relative;animation:{{ x.anim }};grid-column:span {{ x.span }};grid-row:span {{ x.rspan }};border-radius:{{ x.rad }};background:{{ x.bg }};border:{{ x.bd }};display:flex;flex-direction:column;justify-content:flex-end;padding:{{ x.pad }};font-size:8px;color:#55555c;overflow:hidden"><span style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:2px;background:{{ x.badge }};border:1.5px solid #fff;display:{{ x.badgeD }}"></span><span style="position:absolute;top:3px;left:3px;font:600 7px ui-monospace,Menlo,monospace;padding:1px 3px;border-radius:3px;background:#1c1c1e;color:#fff;display:{{ x.tagD }}">{{ x.tag }}</span>{{ x.t }}</div></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isBox }}" hint-placeholder-val="{{ false }}"><div style="border:1.5px dashed #c9cad0;border-radius:6px;padding:10px;min-height:{{ r.h }};display:grid;place-items:center;text-align:center;font:9.5px ui-monospace,Menlo,monospace;color:#8a8d98">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isField }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:5px;align-items:center"><span style="font-size:9px;color:#55555c;display:{{ r.labelD }};width:{{ r.labelW }}">{{ r.label }}</span><div style="flex:1;height:20px;border:1px solid #c9cad0;border-radius:5px;padding:0 7px;display:flex;align-items:center;font-size:9.5px;color:#8a8d98">{{ r.text }}</div></div></sc-if>
+                      <sc-if value="{{ r.isBar }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:repeat(24,1fr);gap:1.5px"><sc-for list="{{ r.items }}" as="b" hint-placeholder-count="24"><span style="aspect-ratio:1;border-radius:1px;background:{{ b }}"></span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isBanner }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:{{ r.bg }};font-size:9.5px"><span style="width:7px;height:7px;border-radius:1.5px;background:{{ r.dot }}"></span><span style="flex:1">{{ r.text }}</span><span style="font-weight:600;display:{{ r.actD }}">{{ r.act }}</span></div></sc-if>
+                      <sc-if value="{{ r.isSeg }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:2px;padding:2px;border-radius:6px;background:#f0f0f3;align-self:flex-start"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><span style="font-size:9px;padding:3px 8px;border-radius:4px;background:{{ x.bg }};box-shadow:{{ x.sh }}">{{ x.t }}</span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isCols }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start"><sc-for list="{{ r.cols }}" as="c" hint-placeholder-count="2"><div style="display:flex;flex-direction:column;gap:10px;min-width:0"><sc-for list="{{ c }}" as="sec" hint-placeholder-count="3"><div style="display:flex;flex-direction:column;gap:2px;padding:7px 9px;border:1px solid #e3e4e8;border-radius:8px"><div style="font:600 7.5px ui-monospace,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;color:#8a8d98;padding-bottom:2px">{{ sec.eb }}</div><sc-for list="{{ sec.items }}" as="it" hint-placeholder-count="2"><div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-top:1px solid #f0f0f2"><span style="width:6px;height:6px;border-radius:1px;background:{{ it.dot }};flex:none;display:{{ it.dotD }}"></span><div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-size:9.5px">{{ it.a }}</span><span style="font-size:8px;color:#6b6b72;display:{{ it.bD }}">{{ it.b }}</span></div><span style="font-size:8px;padding:1px 6px;border-radius:5px;white-space:nowrap;background:{{ it.rbg }};border:{{ it.rbd }};color:#1c1c1e;display:{{ it.rD }}">{{ it.r }}</span></div></sc-for></div></sc-for></div></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isCards }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:repeat({{ r.cols }},1fr);gap:7px"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><div style="border:1px solid #e3e4e8;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-width:0"><div style="height:{{ r.shotH }};background:{{ x.shot }};display:grid;place-items:center;font:8px ui-monospace,Menlo,monospace;color:#a0a2aa">screen</div><div style="padding:5px 6px;display:flex;flex-direction:column;gap:3px"><div style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:4px;background:{{ x.ic }};flex:none"></span><span style="font-size:9.5px;font-weight:600;flex:1;min-width:0">{{ x.name }}</span><span style="font:7.5px ui-monospace,Menlo,monospace;padding:1px 4px;border-radius:3px;background:#e2f3e6;color:#2e7d4f;display:{{ x.instD }}">Installed</span></div><div style="font-size:8.5px;color:#6b6b72;line-height:1.3">{{ x.line }}</div><div style="font:8px ui-monospace,Menlo,monospace;color:{{ x.needC }}">{{ x.need }}</div></div></div></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isSide }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:10px"><div style="width:74px;display:flex;flex-direction:column;gap:2px;flex:none"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="5"><span style="font-size:9px;padding:4px 6px;border-radius:4px;background:{{ x.bg }};font-weight:{{ x.fw }}">{{ x.t }}</span></sc-for></div><div style="flex:1;border-left:1px solid #ececf0;padding-left:10px;display:flex;flex-direction:column;gap:5px"><sc-for list="{{ r.body }}" as="x" hint-placeholder-count="3"><div style="display:flex;justify-content:space-between;gap:6px;font-size:9.5px;padding:3px 0;border-top:1px solid #f0f0f3"><span style="display:flex;flex-direction:column"><span>{{ x.a }}</span><span style="font-size:8px;color:#8a8d98">{{ x.b }}</span></span><span style="font-size:9px;color:#55555c;white-space:nowrap">{{ x.r }}</span></div></sc-for></div></div></sc-if>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:#6b6b72;line-height:1.45;text-wrap:pretty">{{ f.note }}</div>
+                <sc-if value="{{ f.decide }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;line-height:1.45;padding:8px 10px;border-radius:8px;background:#fff7e0;border:1px solid #f3dd9b;color:#5c4206"><b style="font:700 10px ui-monospace,Menlo,monospace;letter-spacing:.06em">DECIDE</b> {{ f.decide }}</div></sc-if>
+              </div>
+              <sc-if value="{{ f.next }}" hint-placeholder-val="{{ false }}">
+                <div style="width:74px;padding-top:120px;display:flex;flex-direction:column;align-items:center;gap:4px;flex:none"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98;text-align:center">{{ f.next }}</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+              </sc-if>
+              <sc-if value="{{ f.gap }}" hint-placeholder-val="{{ false }}"><div style="width:40px;flex:none"></div></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </sc-for>
+</section>
+
+<section id="turn-2" style="padding:64px;display:flex;flex-direction:column;gap:56px;width:2600px;border-bottom:2px dashed #c9cad0">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:980px">
+    <div style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:#6b6b72">HEWN — UX FLOWS, TURN 2 (LOW-FI) · after v0.3.3</div>
+    <div style="font-size:30px;font-weight:650;letter-spacing:-.02em">Everything added since pass 1, reworked</div>
+    <div style="font-size:15px;color:#55555c;text-wrap:pretty">Frame ids continue the A–E rows from pass 1 and refer back to the <a href="Current State Map.dc.html">Current State Map</a> ids (H3, M3, T2…). Lime marks the primary action; amber or red squares mean it needs you. The notes under each frame say what changes and why. Questions for you are marked <b>DECIDE</b>.</div>
+  </div>
+
+  <div style="display:flex;gap:24px;align-items:stretch">
+    <div style="flex:1;display:flex;flex-direction:column;gap:14px;padding:22px 24px;border-radius:14px;background:#fff;border:1.5px solid #c9cad0">
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">N0</span><span style="font-size:18px;font-weight:650">Proposed navigation</span></div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+        <sc-for list="{{ f2.nav }}" as="n" hint-placeholder-count="5">
+          <div style="display:flex;flex-direction:column;gap:5px;padding:12px;border-radius:10px;background:#f6f6f8;border:1px solid #e3e4e8">
+            <div style="font-size:14px;font-weight:650">{{ n.name }}</div>
+            <sc-for list="{{ n.kids }}" as="k" hint-placeholder-count="3"><div style="font-size:11.5px;color:#3a3a40;display:flex;gap:5px"><span style="color:#a0a2aa">·</span><span>{{ k }}</span></div></sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#55555c;line-height:1.5">
+        <div><b>Needs you and Activity merge into one Inbox</b>: a pixel-bell button at the right of the nav, with a count. Its panel has two tabs (Needs you · Activity) and an "All activity ›" link to the full page, where Builds is a filter. The nav keeps four tabs: Home · Agents · Accounts · Settings.</div>
+        <div><b>Settings gets sections</b> with a left sub-nav: General · AI · Remote access · Data · About. <b>AI</b> holds the three jobs Hewn runs AI for: asking the questions, building, and the models inside tools (<a href="#O1">O1</a>). That leaves Agents only for agents that connect to Hewn.</div>
+        <div><b>Accounts stays top level</b>, as you decided.</div>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:12px;padding:22px 24px;border-radius:14px;background:#1c1c1e;color:#f0f0f2">
+      <div style="display:flex;align-items:baseline;gap:10px"><span style="font:600 13px ui-monospace,Menlo,monospace;background:#c6ef5a;color:#1f2a0f;padding:4px 8px;border-radius:6px">Z</span><span style="font-size:18px;font-weight:650">Two system rules this turn introduces</span></div>
+      <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:14px;font-weight:600">One attention model: "Needs you"</span><span style="font-size:12.5px;color:#b4b6be;line-height:1.5;text-wrap:pretty">The builds chip becomes one top-bar chip: "3 need you" (amber), with "2 building" next to it in quieter text. It opens a Needs you sheet listing every pending grant, failed build, new agent, schedule proposal, retired model and budget warning. Each row opens its own sheet. Tile badges stay. The notices above the Home grid, the dot on the Agents tab and the 15-second schedule toast all go. <b style="color:#fff">The one exception:</b> an agent's destructive call blocks that agent, so it also shows as a banner on whatever page you're on (L3).</span></div>
+      <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:14px;font-weight:600">Four dialog patterns instead of ~20 one-offs</span><span style="font-size:12.5px;color:#b4b6be;line-height:1.5;text-wrap:pretty"><b style="color:#fff">Request</b> (something wants something: grants, new agent, schedule proposal, confirmation) · <b style="color:#fff">Picker</b> (choose one: tier, model, builder, icon) · <b style="color:#fff">Form</b> (edit values: cap, schedule, connection settings, sign-in steps) · <b style="color:#fff">Confirm</b> (title, one line, two buttons). Same header, widths of 440 or 520, and the primary button always bottom-right.</span></div>
+    </div>
+  </div>
+
+  <sc-for list="{{ f2.sections }}" as="sec" hint-placeholder-count="9">
+    <div id="{{ sec.key }}" style="display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">{{ sec.key }}</div><div style="font-size:20px;font-weight:650">{{ sec.title }}</div><div style="font-size:13px;color:#6b6b72">{{ sec.sub }}</div></div>
+      <sc-for list="{{ sec.lanes }}" as="lane" hint-placeholder-count="1">
+        <div style="display:flex;align-items:flex-start">
+          <sc-for list="{{ lane }}" as="f" hint-placeholder-count="4">
+            <div style="display:flex;align-items:flex-start">
+              <div id="{{ f.id }}" style="display:flex;flex-direction:column;gap:8px;width:{{ f.w }}">
+                <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">{{ f.id }} · {{ f.name }}</div>
+                <div style="border:1.5px solid {{ f.frameBorder }};border-radius:{{ f.radius }};background:{{ f.outerBg }};padding:{{ f.outerPad }};min-height:{{ f.minH }};display:flex;flex-direction:column;justify-content:{{ f.justify }};align-items:center">
+                  <div style="box-sizing:border-box;width:{{ f.innerW }};background:#fff;border-radius:{{ f.innerRadius }};box-shadow:{{ f.innerShadow }};padding:12px;display:flex;flex-direction:column;gap:8px;align-self:{{ f.innerAlign }}">
+                    <sc-for list="{{ f.rows }}" as="r" hint-placeholder-count="4">
+                      <sc-if value="{{ r.isTop }}" hint-placeholder-val="{{ false }}"><div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><div style="display:flex;gap:5px;align-items:center"><span style="width:13px;height:13px;border-radius:4px;background:#c6ef5a"></span><span style="font-size:10.5px;font-weight:650">Hewn</span></div><div style="display:flex;gap:4px;align-items:center"><sc-if value="{{ r.chip }}" hint-placeholder-val="{{ false }}"><span style="font-size:8.5px;padding:2px 6px;border-radius:8px;background:#fdecc8;color:#8a4b06;font-weight:600">{{ r.chip }}</span></sc-if><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="5"><span style="font-size:8.5px;padding:2px 5px;border-radius:8px;background:{{ x.bg }};color:{{ x.fg }}">{{ x.t }}</span></sc-for></div></div></sc-if>
+                      <sc-if value="{{ r.isH }}" hint-placeholder-val="{{ false }}"><div style="font-size:{{ r.size }};font-weight:650;letter-spacing:-.01em;line-height:1.25">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isP }}" hint-placeholder-val="{{ false }}"><div style="font-size:10px;color:#6b6b72;line-height:1.4">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isEyebrow }}" hint-placeholder-val="{{ false }}"><div style="font:600 8.5px ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#8a8d98;text-transform:uppercase">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isPills }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><span style="font:9px ui-monospace,Menlo,monospace;padding:2px 5px;border-radius:4px;background:{{ x.bg }};color:{{ x.fg }}">{{ x.t }}</span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isRows }}" hint-placeholder-val="{{ false }}"><div style="display:flex;flex-direction:column"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-top:{{ x.bt }};font-size:10px"><span style="width:7px;height:7px;border-radius:1.5px;flex:none;background:{{ x.dot }};display:{{ x.dotD }}"></span><span style="width:16px;height:16px;border-radius:5px;flex:none;background:{{ x.ic }};display:{{ x.icD }}"></span><span style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px"><span style="font-weight:{{ x.fw }}">{{ x.a }}</span><span style="font-size:8.5px;color:#8a8d98;display:{{ x.bD }}">{{ x.b }}</span></span><span style="font-size:9px;color:{{ x.rc }};padding:{{ x.rp }};border-radius:5px;background:{{ x.rbg }};border:{{ x.rbd }};font-weight:{{ x.rfw }};white-space:nowrap">{{ x.r }}</span></div></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isBtns }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:5px;justify-content:{{ r.justify }};flex-wrap:wrap"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="2"><span style="font-size:9.5px;padding:4px 9px;border-radius:5px;background:{{ x.bg }};border:{{ x.bd }};color:{{ x.fg }};font-weight:{{ x.fw }}">{{ x.t }}</span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isTiles }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:repeat({{ r.cols }},1fr);gap:7px;grid-auto-rows:{{ r.rowH }}"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="6"><div style="position:relative;animation:{{ x.anim }};grid-column:span {{ x.span }};grid-row:span {{ x.rspan }};border-radius:{{ x.rad }};background:{{ x.bg }};border:{{ x.bd }};display:flex;flex-direction:column;justify-content:flex-end;padding:{{ x.pad }};font-size:8px;color:#55555c;overflow:hidden"><span style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:2px;background:{{ x.badge }};border:1.5px solid #fff;display:{{ x.badgeD }}"></span><span style="position:absolute;top:3px;left:3px;font:600 7px ui-monospace,Menlo,monospace;padding:1px 3px;border-radius:3px;background:#1c1c1e;color:#fff;display:{{ x.tagD }}">{{ x.tag }}</span>{{ x.t }}</div></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isBox }}" hint-placeholder-val="{{ false }}"><div style="border:1.5px dashed #c9cad0;border-radius:6px;padding:10px;min-height:{{ r.h }};display:grid;place-items:center;text-align:center;font:9.5px ui-monospace,Menlo,monospace;color:#8a8d98">{{ r.text }}</div></sc-if>
+                      <sc-if value="{{ r.isField }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:5px;align-items:center"><span style="font-size:9px;color:#55555c;display:{{ r.labelD }};width:{{ r.labelW }}">{{ r.label }}</span><div style="flex:1;height:20px;border:1px solid #c9cad0;border-radius:5px;padding:0 7px;display:flex;align-items:center;font-size:9.5px;color:#8a8d98">{{ r.text }}</div></div></sc-if>
+                      <sc-if value="{{ r.isBar }}" hint-placeholder-val="{{ false }}"><div style="display:grid;grid-template-columns:repeat(24,1fr);gap:1.5px"><sc-for list="{{ r.items }}" as="b" hint-placeholder-count="24"><span style="aspect-ratio:1;border-radius:1px;background:{{ b }}"></span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isBanner }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:{{ r.bg }};font-size:9.5px"><span style="width:7px;height:7px;border-radius:1.5px;background:{{ r.dot }}"></span><span style="flex:1">{{ r.text }}</span><span style="font-weight:600;display:{{ r.actD }}">{{ r.act }}</span></div></sc-if>
+                      <sc-if value="{{ r.isSeg }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:2px;padding:2px;border-radius:6px;background:#f0f0f3;align-self:flex-start"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="3"><span style="font-size:9px;padding:3px 8px;border-radius:4px;background:{{ x.bg }};box-shadow:{{ x.sh }}">{{ x.t }}</span></sc-for></div></sc-if>
+                      <sc-if value="{{ r.isSide }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:10px"><div style="width:74px;display:flex;flex-direction:column;gap:2px;flex:none"><sc-for list="{{ r.items }}" as="x" hint-placeholder-count="5"><span style="font-size:9px;padding:4px 6px;border-radius:4px;background:{{ x.bg }};font-weight:{{ x.fw }}">{{ x.t }}</span></sc-for></div><div style="flex:1;border-left:1px solid #ececf0;padding-left:10px;display:flex;flex-direction:column;gap:5px"><sc-for list="{{ r.body }}" as="x" hint-placeholder-count="3"><div style="display:flex;justify-content:space-between;gap:6px;font-size:9.5px;padding:3px 0;border-top:1px solid #f0f0f3"><span style="display:flex;flex-direction:column"><span>{{ x.a }}</span><span style="font-size:8px;color:#8a8d98">{{ x.b }}</span></span><span style="font-size:9px;color:#55555c;white-space:nowrap">{{ x.r }}</span></div></sc-for></div></div></sc-if>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:#6b6b72;line-height:1.45;text-wrap:pretty">{{ f.note }}</div>
+                <sc-if value="{{ f.decide }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;line-height:1.45;padding:8px 10px;border-radius:8px;background:#fff7e0;border:1px solid #f3dd9b;color:#5c4206"><b style="font:700 10px ui-monospace,Menlo,monospace;letter-spacing:.06em">DECIDE</b> {{ f.decide }}</div></sc-if>
+              </div>
+              <sc-if value="{{ f.next }}" hint-placeholder-val="{{ false }}">
+                <div style="width:74px;padding-top:120px;display:flex;flex-direction:column;align-items:center;gap:4px;flex:none"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98;text-align:center">{{ f.next }}</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+              </sc-if>
+              <sc-if value="{{ f.gap }}" hint-placeholder-val="{{ false }}"><div style="width:40px;flex:none"></div></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </sc-for>
+</section>
+<section style="padding:64px;display:flex;flex-direction:column;gap:56px;width:2400px">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <div style="font:500 12px ui-monospace,'SF Mono',Menlo,monospace;letter-spacing:.06em;color:#6b6b72">JIG — UX FLOWS (LOW-FI)</div>
+    <div style="font-size:30px;font-weight:650;letter-spacing:-.02em">Every screen and state, after the UX pass</div>
+    <div style="font-size:15px;color:#55555c;text-wrap:pretty">Read left to right. A lime fill means the primary action, and an amber or red square on an icon means it needs you. The grey notes say what changed from today's app.</div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">A</div><div style="font-size:20px;font-weight:650">Home &amp; opening things</div></div>
+    <div style="display:flex;align-items:flex-start;gap:0">
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">A1 · First run (empty)</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;position:relative;overflow:hidden">
+          <div style="position:absolute;right:10px;top:8px;font:9px/9px ui-monospace,Menlo,monospace;color:#c9cad0;white-space:pre">  .:==:.
+ :#@@@#:
+    =@=
+ #. =@=
+ :#@@=</div>
+          <div style="width:30px;height:30px;border-radius:8px;background:#c6ef5a"></div>
+          <div style="font-size:17px;font-weight:650">Nothing here yet</div>
+          <div style="display:flex;gap:6px"><div style="font-size:11px;padding:6px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Make something</div><div style="font-size:11px;padding:6px 10px;border-radius:6px;border:1px solid #c9cad0">Connect an agent</div></div>
+          <div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">or run: jig setup</div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Two ways in: describe a capability, or connect Claude Code / Codex. ASCII J in the background (a moment screen).</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">first build</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">A2 · Home</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:12px;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;gap:6px;align-items:center"><div style="width:14px;height:14px;border-radius:4px;background:#c6ef5a"></div><div style="font-size:11px;font-weight:650">Jig</div></div><div style="display:flex;gap:4px;font-size:9px;color:#6b6b72"><span style="padding:3px 6px;border-radius:9px;background:#e3e4e8;color:#1c1c1e">Home</span><span style="padding:3px 6px">Activity</span><span style="padding:3px 6px">Agents</span></div></div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);row-gap:12px;justify-items:center">
+            <sc-for list="{{ homeApps }}" as="a" hint-placeholder-count="8">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+                <div style="position:relative;width:38px;height:38px;border-radius:11px;background:{{ a.bg }};border:{{ a.border }}">
+                  <div style="position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:3px;background:{{ a.badge }};border:2px solid #fff;display:{{ a.badgeDisplay }}"></div>
+                </div>
+                <div style="font-size:8.5px;color:#55555c">{{ a.name }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">No strip and no hint text. Badges: <b>amber</b> needs access · <b>red</b> build failed · <b>building</b>: the tile dims and its glyph fills pixel by pixel; tapping it opens B3. Tapping a badge opens the grants sheet (D1) or the failed build (B4).</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">hover</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">A3 · Hover ••• / right-click menu</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:24px;display:flex;gap:18px;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+            <div style="position:relative;width:64px;height:64px;border-radius:18px;background:#dfe8f7"><div style="position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:7px;background:#fff;border:1px solid #c9cad0;font-size:10px;display:grid;place-items:center;line-height:1">•••</div></div>
+            <div style="font-size:10px">Reading List</div>
+          </div>
+          <div style="flex:1;border:1px solid #c9cad0;border-radius:8px;padding:4px;display:flex;flex-direction:column;font-size:11px;box-shadow:0 6px 16px rgba(0,0,0,.08)">
+            <div style="padding:5px 8px;border-radius:5px;background:#f0f0f3">Open</div>
+            <div style="padding:5px 8px">Info</div>
+            <div style="padding:5px 8px">Change…</div>
+            <div style="padding:5px 8px">Activity</div>
+            <div style="padding:5px 8px">Rename</div>
+            <div style="height:1px;background:#e3e4e8;margin:3px 6px"></div>
+            <div style="padding:5px 8px;color:#c0392b">Delete…</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">The actions are now discoverable. Rename edits the label in place, with no prompt(). Activity opens C3, filtered to this capability.</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">tap</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+          <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">A4 · Opened: has its own UI</div>
+          <div style="height:180px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;display:flex;flex-direction:column;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #e3e4e8;font-size:10px"><span style="color:#6b6b72">‹ Home</span><span style="width:14px;height:14px;border-radius:4px;background:#dfe8f7"></span><b>Reading List</b><span style="flex:1"></span><span style="padding:2px 6px;border:1px solid #c9cad0;border-radius:5px">•••</span></div>
+            <div style="flex:1;margin:10px;border:1.5px dashed #c9cad0;border-radius:6px;display:grid;place-items:center;font:10px ui-monospace,Menlo,monospace;color:#8a8d98">capability UI (sandboxed frame)</div>
+          </div>
+          <div style="font-size:12px;color:#6b6b72;line-height:1.45">The thin bar keeps the same ••• menu. The ⓘ and ↗ buttons go into it.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+          <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">A5 · Opened: no UI → Run view</div>
+          <div style="height:180px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;display:flex;flex-direction:column;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #e3e4e8;font-size:10px"><span style="color:#6b6b72">‹ Home</span><b>Secret Echo</b><span style="flex:1"></span><span style="padding:2px 6px;border:1px solid #c9cad0;border-radius:5px">•••</span></div>
+            <div style="flex:1;display:flex">
+              <div style="width:110px;border-right:1px solid #e3e4e8;padding:8px;display:flex;flex-direction:column;gap:4px;font:9.5px ui-monospace,Menlo,monospace"><div style="padding:4px 6px;border-radius:4px;background:#f0f0f3">echo</div><div style="padding:4px 6px">status</div></div>
+              <div style="flex:1;padding:10px;display:flex;flex-direction:column;gap:6px"><div style="height:16px;border:1px solid #c9cad0;border-radius:4px"></div><div style="height:16px;border:1px solid #c9cad0;border-radius:4px"></div><div style="align-self:flex-start;font-size:10px;padding:4px 10px;border-radius:5px;background:#c6ef5a;font-weight:600">Run</div><div style="flex:1;border-radius:4px;background:#f3f3f5;font:9px ui-monospace,Menlo,monospace;color:#8a8d98;padding:4px">result → table / key-value</div></div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:#6b6b72;line-height:1.45">New screen. The operation forms move out of Info into here. Operations are listed on the left, with a form and result on the right.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">B</div><div style="font-size:20px;font-weight:650">Making a capability</div></div>
+    <div style="display:flex;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">B1 · Intake</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;justify-content:flex-end;gap:8px">
+          <div style="font-size:15px;font-weight:650">What should it do?</div>
+          <div style="align-self:flex-end;font-size:10px;padding:5px 8px;border-radius:9px;background:#c6ef5a;max-width:70%">Track books and how far in I am</div>
+          <div style="font-size:10px;padding:5px 8px;border-radius:9px;border:1px solid #c9cad0;max-width:75%">Covers from the web, or local?</div>
+          <div style="display:flex;gap:6px"><div style="flex:1;height:22px;border:1px solid #c9cad0;border-radius:6px"></div><div style="font-size:10px;padding:5px 10px;border-radius:6px;background:#e3e4e8">Send</div></div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Intake asks at most ~3 questions. ASCII J in the background.</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">ready</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">B2 · Spec card</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:9px;font-family:ui-monospace,Menlo,monospace;color:#8a8d98;letter-spacing:.06em">WILL BUILD</div>
+          <div style="display:flex;gap:8px;align-items:center"><div style="width:26px;height:26px;border-radius:8px;background:#dfe8f7"></div><b style="font-size:13px">Reading List</b></div>
+          <div style="font:9.5px/1.7 ui-monospace,Menlo,monospace;color:#55555c">add_book · log_progress · list_books</div>
+          <div style="font-size:10px;color:#55555c">Needs: nothing outside itself</div>
+          <div style="flex:1"></div>
+          <div style="display:flex;gap:6px;justify-content:flex-end"><div style="font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #c9cad0">Keep talking</div><div style="font-size:10px;padding:5px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Build it</div></div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Replaces the editable draft fields. It's a short summary you approve; to change it, you keep chatting. Permissions are shown up front, so the grants sheet is no surprise.</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">build</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">B3 · Building</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between"><b style="font-size:13px">Reading List</b><span style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">62%</span></div>
+          <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:1.5px"><sc-for list="{{ blocks }}" as="b" hint-placeholder-count="48"><div style="aspect-ratio:1;border-radius:1px;background:{{ b }}"></div></sc-for></div>
+          <div style="display:flex;flex-direction:column;gap:5px;font-size:10px"><div>■ Spec agreed</div><div>■ Writing code</div><div style="color:#4d7c0f">▣ Running tests</div><div style="color:#8a8d98">□ Your authorization</div></div>
+          <div style="flex:1;border-radius:5px;background:#26272b;font:9px ui-monospace,Menlo,monospace;color:#9fb79a;padding:6px">› running 6 tests… <span style="color:#6b6b72">(collapsed by default)</span></div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">You can leave and come back: a lime pulse on Home shows it's still building. The log is collapsed by default.</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:30px">
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">pass</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:center"><div style="font:10px ui-monospace,Menlo,monospace;color:#c0392b">fail</div><div style="width:50px;height:1.5px;background:#c0392b;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #c0392b;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+          <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">B4a · Done → grants sheet if needed → Open</div>
+          <div style="height:120px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;align-items:center;gap:12px">
+            <div style="width:44px;height:44px;border-radius:13px;background:#dfe8f7"></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:3px"><b style="font-size:13px">Reading List is ready</b><span style="font-size:10px;color:#6b6b72">Added to Home</span></div>
+            <div style="font-size:10px;padding:6px 12px;border-radius:6px;background:#c6ef5a;font-weight:600">Open</div>
+          </div>
+          <div style="font-size:12px;color:#6b6b72;line-height:1.45">If it needs access, D1 opens on top first, and Authorize leads straight to Open.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+          <div style="font:600 12px ui-monospace,Menlo,monospace;color:#c0392b">B4b · Failed</div>
+          <div style="height:150px;border:1.5px solid #e9b8b1;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:8px">
+            <div style="display:grid;grid-template-columns:repeat(24,1fr);gap:1.5px"><sc-for list="{{ blocksFail }}" as="b" hint-placeholder-count="48"><div style="aspect-ratio:1;border-radius:1px;background:{{ b }}"></div></sc-for></div>
+            <b style="font-size:13px">2 of 6 tests didn't pass</b>
+            <div style="font-size:10px;color:#55555c">log_progress accepted pages beyond the book's length.</div>
+            <div style="display:flex;gap:6px;align-items:center"><div style="font-size:10px;padding:5px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Ask builder to fix</div><div style="font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #c9cad0">Retry</div><span style="flex:1"></span><span style="font-size:10px;color:#3f6212">Show log</span></div>
+          </div>
+          <div style="font-size:12px;color:#6b6b72;line-height:1.45">Says why in plain language (written by the builder). "Ask builder to fix" re-runs the build with the failure as context.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">C</div><div style="font-size:20px;font-weight:650">Managing a capability</div></div>
+    <div style="display:flex;align-items:flex-start;gap:70px">
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">C1 · Info (from •••)</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:10px;align-items:center"><div style="width:36px;height:36px;border-radius:10px;background:#f6dde3"></div><div style="flex:1"><b style="font-size:13px">Garmin Training</b><div style="font-size:10px;color:#6b6b72">Syncs watch runs into Running Log.</div></div><div style="font-size:10px;padding:5px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Open</div></div>
+          <div style="display:flex;gap:4px;font:8.5px ui-monospace,Menlo,monospace"><span style="padding:2px 5px;border-radius:4px;background:#e2f3e6">ready</span><span style="padding:2px 5px;border-radius:4px;background:#f0f0f3">v3</span><span style="padding:2px 5px;border-radius:4px;background:#f0f0f3">Codex</span></div>
+          <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:8px;flex:1">
+            <div style="border:1px solid #e3e4e8;border-radius:6px;padding:6px;font:9px/1.9 ui-monospace,Menlo,monospace">OPERATIONS<br>sync_runs ›<br>get_status ›<br>list_devices ›</div>
+            <div style="display:flex;flex-direction:column;gap:6px"><div style="border:1px solid #e3e4e8;border-radius:6px;padding:6px;font-size:9px;line-height:1.7"><span style="font-family:ui-monospace,Menlo,monospace">ALLOWED TO</span><br>Write to Running Log<br>Reach garmin.com</div><div style="border:1px solid #e3e4e8;border-radius:6px;padding:6px;font-size:9px"><span style="font-family:ui-monospace,Menlo,monospace">CONNECTED</span></div></div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">As in hi-fi 05. An operation › opens A5 with it selected. "Allowed to" › opens D1 in its approved state.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">C2 · Change… (intake with context)</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;justify-content:flex-end;gap:8px">
+          <div style="display:flex;gap:6px;align-items:center;font-size:10px;padding:5px 8px;border-radius:7px;background:#f3f3f5;align-self:flex-start"><span style="width:12px;height:12px;border-radius:3px;background:#f6dde3"></span>Changing Garmin Training · v3</div>
+          <div style="font-size:15px;font-weight:650">What should change?</div>
+          <div style="align-self:flex-end;font-size:10px;padding:5px 8px;border-radius:9px;background:#c6ef5a">Also pull heart rate</div>
+          <div style="display:flex;gap:6px"><div style="flex:1;height:22px;border:1px solid #c9cad0;border-radius:6px"></div><div style="font-size:10px;padding:5px 10px;border-radius:6px;background:#e3e4e8">Send</div></div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Same flow as B1 → B4. The new version only replaces the old one once it passes; existing data is kept.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">C3 · Activity (one timeline)</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;gap:5px;font-size:9.5px"><span style="padding:3px 8px;border-radius:9px;background:#1c1c1e;color:#fff">Garmin Training ×</span><span style="padding:3px 8px;border-radius:9px;border:1px solid #c9cad0">All agents ▾</span></div>
+          <div style="font:8.5px ui-monospace,Menlo,monospace;color:#8a8d98;letter-spacing:.06em;margin-top:2px">TODAY</div>
+          <sc-for list="{{ activity }}" as="e" hint-placeholder-count="5">
+            <div style="display:flex;gap:8px;align-items:center;font-size:10px"><span style="width:7px;height:7px;border-radius:1.5px;background:{{ e.dot }}"></span><span style="flex:1">{{ e.text }}</span><span style="font:9px ui-monospace,Menlo,monospace;color:#8a8d98">{{ e.t }}</span></div>
+          </sc-for>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Builds, calls and grant changes in one list. Filter chips are in the URL. Calls from the same agent are grouped ("Codex · 14 calls"). This replaces History and Logs on Info.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">C4 · Delete…</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#f3f3f5;display:grid;place-items:center">
+          <div style="width:250px;background:#fff;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.12)">
+            <b style="font-size:13px">Delete Garmin Training?</b>
+            <div style="font-size:10px;color:#55555c;line-height:1.5">Weekly Review uses it and will stop working. Data is kept; you can restore it later.</div>
+            <div style="display:flex;gap:6px;justify-content:flex-end"><div style="font-size:10px;padding:5px 10px;border-radius:6px;border:1px solid #c9cad0">Cancel</div><div style="font-size:10px;padding:5px 10px;border-radius:6px;background:#c0392b;color:#fff;font-weight:600">Delete</div></div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">A real dialog instead of "type the id". Data is kept anyway, so the friction only grows when something depends on it.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">D</div><div style="font-size:20px;font-weight:650">Trust: grants &amp; agents</div></div>
+    <div style="display:flex;align-items:flex-start;gap:70px">
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">D1 · Grants sheet: pending</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#f3f3f5;display:grid;place-items:center">
+          <div style="width:270px;background:#fff;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:7px;box-shadow:0 10px 30px rgba(0,0,0,.12)">
+            <b style="font-size:12px">Garmin Training wants to</b>
+            <div style="font-size:9.5px;display:flex;gap:6px"><span style="font-family:ui-monospace,Menlo,monospace;background:#eaf7c8;padding:1px 4px;border-radius:3px">write</span>Add runs to Running Log</div>
+            <div style="font-size:9.5px;display:flex;gap:6px"><span style="font-family:ui-monospace,Menlo,monospace;background:#f0f0f3;padding:1px 4px;border-radius:3px">host</span>Reach connect.garmin.com</div>
+            <div style="font-size:9.5px;display:flex;gap:6px;align-items:center"><span style="font-family:ui-monospace,Menlo,monospace;background:#f0f0f3;padding:1px 4px;border-radius:3px">secret</span>GARMIN_TOKEN <span style="flex:1;height:14px;border:1px solid #c9cad0;border-radius:4px"></span></div>
+            <div style="display:flex;gap:6px;justify-content:flex-end"><div style="font-size:10px;padding:4px 10px;border-radius:6px;border:1px solid #c9cad0">Not now</div><div style="font-size:10px;padding:4px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Authorize</div></div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">There is now one component, opened from the Home badge, the end of a build (B4a) or Info. Authorize stays disabled until the required secrets are filled in.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">D2 · Grants sheet: approved</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#f3f3f5;display:grid;place-items:center">
+          <div style="width:270px;background:#fff;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:7px;box-shadow:0 10px 30px rgba(0,0,0,.12)">
+            <b style="font-size:12px">Garmin Training is allowed to</b>
+            <div style="font-size:9.5px;display:flex;gap:6px"><span style="flex:1">Add runs to Running Log</span><span style="color:#3f6212">Revoke</span></div>
+            <div style="font-size:9.5px;display:flex;gap:6px"><span style="flex:1">Reach connect.garmin.com</span><span style="color:#3f6212">Revoke</span></div>
+            <div style="font-size:9.5px;display:flex;gap:6px"><span style="flex:1">Use GARMIN_TOKEN</span><span style="color:#3f6212">Replace</span></div>
+            <div style="display:flex;justify-content:flex-end"><div style="font-size:10px;padding:4px 10px;border-radius:6px;border:1px solid #c9cad0">Done</div></div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Revoke takes effect immediately, with a toast and Undo. No confirm() popups.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">D3 · Agents</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:8px;position:relative">
+          <div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:13px">Claude Code</b><span style="font-size:9.5px;color:#c0392b">Disconnect</span></div>
+          <sc-for list="{{ scopes }}" as="s" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:8px;font-size:10.5px"><span style="flex:1">{{ s.label }}</span><span style="width:24px;height:14px;border-radius:7px;background:{{ s.track }};position:relative"><span style="position:absolute;top:2px;left:{{ s.knob }};width:10px;height:10px;border-radius:5px;background:#fff"></span></span></div>
+          </sc-for>
+          <div style="height:1px;background:#e3e4e8"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:#6b6b72"><span>Codex</span><span>›</span></div>
+          <div style="position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:10px;padding:5px 10px;border-radius:7px;background:#1c1c1e;color:#fff;white-space:nowrap">Saved · <span style="color:#c6ef5a">Undo</span></div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Scopes in plain words (discover / invoke / create / modify). Changes save on toggle. To connect a new agent you copy a command; no prose explanation.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">D4 · Agent asks for access</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;gap:8px;align-items:center"><div style="position:relative;width:38px;height:38px;border-radius:11px;background:#f6dde3"><div style="position:absolute;top:-4px;right:-4px;width:12px;height:12px;border-radius:3px;background:#e0a526;border:2px solid #fff"></div></div><div style="font-size:10px;color:#55555c">Badge on Home → tap</div></div>
+          <div style="font-size:10px;padding:8px;border-radius:7px;background:#f3f3f5;line-height:1.5">"Codex asked for this: sync my watch runs into my log"</div>
+          <div style="font-size:10px;color:#55555c">→ D1, with the request note shown under the title.</div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Today's notice strip is gone. The badge plus the sheet carry it.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><div style="font:600 13px ui-monospace,Menlo,monospace;background:#1c1c1e;color:#fff;padding:4px 8px;border-radius:6px">E</div><div style="font-size:20px;font-weight:650">Connect &amp; settings</div><div style="font-size:13px;color:#b45309">Needs backend: no web API exists yet for either</div></div>
+    <div style="display:flex;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">E1 · Connect an agent</div>
+        <div style="height:230px;border:1.5px solid #c9cad0;border-radius:10px;background:#f3f3f5;display:grid;place-items:center">
+          <div style="width:280px;background:#fff;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px;box-shadow:0 10px 30px rgba(0,0,0,.12)">
+            <b style="font-size:13px">Connect an agent</b>
+            <div style="display:flex;align-items:center;gap:8px;font-size:10.5px"><span style="width:20px;height:20px;border-radius:6px;background:#f0f0f3"></span><span style="flex:1">Claude Code <span style="color:#2e7d4f;font-size:9px">· found</span></span><span style="font-size:10px;padding:4px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Connect</span></div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:10.5px"><span style="width:20px;height:20px;border-radius:6px;background:#f0f0f3"></span><span style="flex:1">Codex <span style="color:#2e7d4f;font-size:9px">· found</span></span><span style="font-size:10px;padding:4px 10px;border-radius:6px;background:#c6ef5a;font-weight:600">Connect</span></div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:10.5px;color:#8a8d98"><span style="width:20px;height:20px;border-radius:6px;border:1px dashed #c9cad0"></span><span style="flex:1">Something else</span><span style="font-size:10px;color:#3f6212">Manual setup</span></div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Opened from Agents, or from first run (A1). Lists agents detected on this Mac. <b>Backend:</b> endpoints to detect agents and run the setup steps (reusing the setup wizard), each step reporting its progress.</div>
+      </div>
+
+      <div style="width:70px;height:230px;margin-top:20px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px"><div style="font:10px ui-monospace,Menlo,monospace;color:#8a8d98">connect</div><div style="width:50px;height:1.5px;background:#8a8d98;position:relative"><div style="position:absolute;right:-1px;top:-4px;width:0;height:0;border-left:7px solid #8a8d98;border-top:5px solid transparent;border-bottom:5px solid transparent"></div></div></div>
+
+      <div style="display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+          <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">E2 · Connecting → done</div>
+          <div style="height:150px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:7px">
+            <b style="font-size:13px">Codex</b>
+            <div style="font-size:10.5px">■ Saved token to ~/.zshrc</div>
+            <div style="font-size:10.5px">■ Added Jig to Codex</div>
+            <div style="font-size:10.5px;color:#4d7c0f">▣ Telling Codex where to look</div>
+            <div style="font-size:10.5px;color:#8a8d98">□ Test call</div>
+          </div>
+          <div style="font-size:12px;color:#6b6b72;line-height:1.45">Same step style as a build. It ends with a real test call (the existing agent verify check). Then it shows the plain-language toggles (D3) with defaults per agent.</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;width:340px">
+          <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">E2b · Manual setup</div>
+          <div style="height:90px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:12px;display:flex;flex-direction:column;gap:6px">
+            <div style="font:9.5px ui-monospace,Menlo,monospace;background:#26272b;color:#d6d7dc;border-radius:5px;padding:6px 8px;display:flex;justify-content:space-between"><span>MCP URL · http://127.0.0.1:…/mcp</span><span style="color:#c6ef5a">Copy</span></div>
+            <div style="font:9.5px ui-monospace,Menlo,monospace;background:#26272b;color:#d6d7dc;border-radius:5px;padding:6px 8px;display:flex;justify-content:space-between"><span>Bearer token · ••••••••</span><span style="color:#c6ef5a">Copy</span></div>
+          </div>
+          <div style="font-size:12px;color:#6b6b72;line-height:1.45">For any other MCP client: the same information as the existing terminal command that prints manual instructions, with copy buttons.</div>
+        </div>
+      </div>
+
+      <div style="width:70px"></div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;width:400px">
+        <div style="font:600 12px ui-monospace,Menlo,monospace;color:#55555c">E3 · Settings</div>
+        <div style="height:300px;border:1.5px solid #c9cad0;border-radius:10px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:12px">
+          <b style="font-size:13px">Settings</b>
+          <sc-for list="{{ settings }}" as="s" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="flex:1;display:flex;flex-direction:column;gap:1px"><span style="font-size:11px">{{ s.label }}</span><span style="font-size:9.5px;color:#8a8d98">{{ s.sub }}</span></div>
+              <span style="font-size:10px;padding:4px 8px;border-radius:6px;border:1px solid #c9cad0;background:#f8f8fa;white-space:nowrap">{{ s.value }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:12px;color:#6b6b72;line-height:1.45">Covers everything in platform.json, in plain words. Turning off the sandbox needs a confirmation and shows a red notice until it's back on. <b>Backend:</b> a settings read/write endpoint, owner-only; agents still can't change settings. Theme (system/dark/light) is the only setting that lives in the browser.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:12px;max-width:900px;padding:20px 24px;border-radius:12px;background:#fff;border:1.5px solid #c9cad0">
+    <div style="font-size:16px;font-weight:650">Removed or moved</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 32px;font-size:13px;color:#55555c">
+      <div>Home notice strip → badges</div>
+      <div>"Long-press or right-click" hint → visible •••</div>
+      <div>Info: operation forms → Run view (A5)</div>
+      <div>Info: History, Logs → Activity filtered (C3)</div>
+      <div>Info: description paragraph → one-line purpose</div>
+      <div>prompt()/confirm() → in-place rename, dialogs, toasts with Undo</div>
+      <div>Draft field editing → spec card + keep chatting</div>
+      <div>Agents checkboxes + Save → instant toggles</div>
+    </div>
+    <div style="font-size:13px;color:#8a8d98">Later: ⌘K command bar.</div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  flows2() {
+    const LIME = '#c6ef5a', AMB = '#e0a526', RED = '#c0392b', INK = '#1c1c1e', GREY = '#e3e4e8';
+    const HUE = { run: '#fbe2d4', read: '#dfe8f7', garmin: '#f6dde3', week: '#dff2e4', lock: '#ece0f6', coffee: '#f5e6d3', words: '#e2ecf6', todo: '#f3e9d2', conn: '#e6e7eb' };
+    const R = (t, o) => Object.assign({ isTop: false, isH: false, isP: false, isEyebrow: false, isPills: false, isRows: false, isBtns: false, isTiles: false, isBox: false, isField: false, isBar: false, isBanner: false, isSeg: false, isSide: false, isCards: false }, { [t]: true }, o);
+    const top = (active, chip) => R('isTop', { chip: chip || false, items: ['Home', 'Activity', 'Agents', 'Accounts', 'Settings'].map(t => ({ t, bg: t === active ? GREY : 'transparent', fg: t === active ? INK : '#8a8d98' })) });
+    const hd = (text, size = '12.5px') => R('isH', { text, size });
+    const p = text => R('isP', { text });
+    const eb = text => R('isEyebrow', { text });
+    const pills = (...a) => R('isPills', { items: a.map(x => { const [t, k] = Array.isArray(x) ? x : [x]; return { t, bg: k === 'a' ? '#eaf7c8' : k === 'w' ? '#fdecc8' : k === 'r' ? '#fbdcd8' : k === 'ok' ? '#e2f3e6' : '#f0f0f3', fg: k === 'w' ? '#8a4b06' : k === 'r' ? '#9b2318' : '#3a3a40' }; }) });
+    const rows = (...a) => R('isRows', { items: a.map((x, i) => {
+      const [aa, b, r, opt = {}] = x;
+      const btn = opt.btn, prim = opt.btn === 'p';
+      return { a: aa, b: b || '', bD: b ? 'block' : 'none', r: r || '', fw: opt.bold ? 600 : 400, bt: i ? '1px solid #f0f0f3' : '0',
+        dot: opt.dot || 'transparent', dotD: opt.dot ? 'block' : 'none', ic: opt.ic || 'transparent', icD: opt.ic ? 'block' : 'none',
+        rc: opt.rc || (prim ? INK : btn ? INK : '#8a8d98'), rp: btn ? '3px 8px' : '0', rbg: prim ? LIME : 'transparent', rbd: btn && !prim ? '1px solid #c9cad0' : '0', rfw: prim ? 600 : 400 };
+    }) });
+    const btns = (...a) => R('isBtns', { justify: 'flex-end', items: a.map(x => { const [t, k] = Array.isArray(x) ? x : [x]; return { t, bg: k === 'p' ? LIME : k === 'd' ? RED : 'transparent', bd: k === 'p' || k === 'd' ? '1px solid transparent' : k === 'g' ? '1px solid transparent' : '1px solid #c9cad0', fg: k === 'd' ? '#fff' : k === 'l' ? '#3f6212' : INK, fw: k === 'p' || k === 'd' ? 600 : 400 }; }) });
+    const btnsL = (...a) => Object.assign(btns(...a), { justify: 'flex-start' });
+    const tile = (t, bg, o = {}) => ({ anim: 'none', t, bg, span: o.span || 1, rspan: o.rspan || 1, rad: o.w ? '8px' : '9px', bd: o.dashed ? '1.5px dashed #c9cad0' : o.edit ? '1.5px dashed #8a8d98' : '1px solid #e3e4e8', pad: o.w ? '6px' : '3px', badge: o.badge || 'transparent', badgeD: o.badge ? 'block' : 'none', tag: o.tag || '', tagD: o.tag ? 'block' : 'none' });
+    const tiles = (cols, rowH, ...items) => R('isTiles', { cols, rowH, items });
+    const box = (text, h = '40px') => R('isBox', { text, h });
+    const field = (text, label) => R('isField', { text, label: label || '', labelD: label ? 'block' : 'none', labelW: label ? '64px' : '0' });
+    const bar = (on, live = 0, fail = false) => R('isBar', { items: Array.from({ length: 24 }, (_, i) => i < on ? (fail ? RED : INK) : i < on + live ? '#a3d62f' : GREY) });
+    const banner = (text, tone = 'w', act) => R('isBanner', { text, bg: tone === 'r' ? '#fbdcd8' : tone === 'i' ? '#e4ecfa' : tone === 'ok' ? '#e2f3e6' : '#fdecc8', dot: tone === 'r' ? RED : tone === 'i' ? '#4a78c2' : tone === 'ok' ? '#2e7d4f' : AMB, act: act || '', actD: act ? 'block' : 'none' });
+    const seg = (active, ...a) => R('isSeg', { items: a.map(t => ({ t, bg: t === active ? '#fff' : 'transparent', sh: t === active ? '0 1px 2px rgba(0,0,0,.12)' : 'none' })) });
+    const side = (active, items, body) => R('isSide', { items: items.map(t => ({ t, bg: t === active ? GREY : 'transparent', fw: t === active ? 600 : 400 })), body: body.map(([a, b, r]) => ({ a, b: b || '', r: r || '' })) });
+
+    const F = (id, name, chrome, rws, note, o = {}) => {
+      const sheet = chrome === 'sheet', phone = chrome === 'phone', wide = chrome === 'wide';
+      return { id, name, rows: rws, note, next: o.next || false, gap: !o.next && !o.last, decide: o.decide || false,
+        w: phone ? '230px' : wide ? '440px' : '330px',
+        frameBorder: '#c9cad0', radius: phone ? '26px' : '10px',
+        outerBg: sheet ? '#e9e9ee' : '#fff', outerPad: sheet ? '18px' : phone ? '10px 8px' : '0',
+        minH: phone ? '420px' : '250px', justify: sheet ? 'center' : 'flex-start',
+        innerW: sheet ? (o.sw || '86%') : '100%', innerRadius: sheet ? '12px' : '10px', innerShadow: sheet ? '0 10px 30px rgba(0,0,0,.12)' : 'none', innerAlign: sheet ? 'center' : 'stretch' };
+    };
+
+    const nav = [
+      { name: 'Home', kids: ['Tools + widgets', 'Edit Home (F4)', 'New → intake'] },
+      { name: 'Inbox (pixel bell)', kids: ['Needs you · Activity tabs', 'All activity › full page', 'Builds as a filter'] },
+      { name: 'Agents', kids: ['Waiting for you', 'Connected agents', 'Connect an agent'] },
+      { name: 'Accounts', kids: ['Connections', 'Add a connection', 'Connection page'] },
+      { name: 'Settings', kids: ['General · AI (jobs + models)', 'Remote access · Data · About'] },
+    ];
+
+    const wig = (on, r) => (on && r.items.forEach((t, i) => (t.anim = `hw .22s ${(-((i * 0.07) % 0.22)).toFixed(2)}s ease-in-out infinite alternate`)), r);
+    const homeTiles = (o = {}) => wig(o.edit, tiles(6, '34px',
+      tile('', HUE.run), tile('', HUE.read, { badge: o.badges ? AMB : 0 }), tile('Steps today 8 214', '#f3f4f6', { span: 2, w: 1, tag: o.edit ? 'M' : '' }), tile('', HUE.garmin, { badge: o.badges ? RED : 0 }), tile('', HUE.week),
+      tile('Next word: lucid · Again · Good', '#f3f4f6', { span: 2, rspan: 2, w: 1, tag: o.edit ? 'L' : '' }), tile('', HUE.lock), tile('', HUE.coffee), tile('Brews 4', '#f3f4f6', { w: 1, tag: o.edit ? 'S' : '' }), tile('+', 'transparent', { dashed: 1 }),
+      tile('', HUE.words), tile('', HUE.todo, { edit: o.edit })));
+
+    const sections = [
+      { key: 'F', title: 'Home, widgets and attention', sub: 'replaces H1–H6 · current: notices above the grid, New as a menu, a widgets dialog with three jobs', lanes: [[
+        F('F1', 'First run, merged', 'page', [hd('Make your own tools.', '15px'), p('Every agent you connect can use them.'), eb('1 · Agents on this Mac'), rows(['Claude Code', 'found', 'Connect', { ic: '#f0f0f3', btn: 'p' }], ['Codex', 'found', 'Connected', { ic: '#f0f0f3', rc: '#2e7d4f' }]), eb('2 · Who builds, who asks the questions'), rows(['Builds tools', 'not chosen', 'Choose', { btn: 1 }], ['Asks the questions', 'not chosen', 'Choose', { btn: 1 }]), p('One agent can do both.'), eb('3 · Make something'), field('Describe it, or pick one'), pills('Reading list', 'Habit tracker', 'Running log')], 'One moment screen instead of Welcome plus empty Home. Choosing who builds stays an explicit step (decided), using the O2 picker. Step 3 stays disabled until a builder is chosen. Starters are chips, without emoji.', { next: 'first build' }),
+        F('F2', 'Home', 'page', [top('Home', '3 need you · 2 building'), homeTiles({ badges: 1 })], 'Nothing sits above the grid any more. Widgets and tools share the grid. Search stays on "/" and is always visible once there are more than 12 tools. "New" (+) goes straight to the intake, which also handles widget and schedule requests.', { next: 'chip' }),
+        F('F3', 'Needs you sheet', 'sheet', [hd('Needs you'), rows(['Garmin Training', 'wants to write to Running Log', 'Review', { ic: HUE.garmin, dot: AMB, btn: 1 }], ['Weekly Review', 'build failed: 2 of 6 tests', 'Show', { ic: HUE.week, dot: RED, btn: 1 }], ['Codex on MacBook', 'wants to connect', 'Review', { ic: '#f0f0f3', dot: AMB, btn: 1 }], ['Daily 07:00 sync_runs', 'proposed by Claude Code', 'Review', { ic: HUE.garmin, dot: AMB, btn: 1 }], ['Models', '80% of this month\'s $5', 'Open', { ic: '#f0f0f3', dot: AMB, btn: 1 }]), eb('Building'), rows(['Reading List', 'Testing 4/6', '', { ic: HUE.read, dot: '#a3d62f' }])], 'A popover from the chip. Everything that waits for you, newest first, with one row per item; each row opens its Request sheet. When the list is empty, the chip disappears.', { next: 'edit', sw: '92%' }),
+        F('F4', 'Edit Home', 'page', [banner('Editing Home', 'i', 'Done'), homeTiles({ edit: 1 }), btnsL(['+ Add widget', 'p'])], 'Opened by right-clicking empty space or pressing "e". Tiles and widgets wiggle, as on iOS, while you edit. You drag to reorder, the S/M/L tag on a widget cycles its size, and × removes it. This makes resizing visible instead of hidden in a menu. Tile menus lose their size items.', { next: 'add' }),
+        F('F5', 'Add widget', 'sheet', [hd('Add a widget'), seg('All', 'All', 'Word List', 'Running Log'), box('live preview · Next word', '70px'), seg('Medium', 'Small', 'Medium', 'Large'), btns(['Cancel'], ['Add to Home', 'p']), p('Want a different one? Describe it ›')], 'This sheet only adds widgets to Home. Making a new widget goes to the intake (via the link). Deleting a widget from a tool moves to that tool\'s Info page (U3 → C5).', { last: 1, sw: '92%' }),
+      ], [
+        F('F6', 'Widget anatomy', 'page', [tiles(2, '74px', tile('Word List · Next word  lucid  [Again] [Good]', '#f3f4f6', { span: 2, w: 1 }), tile('Steps 8 214', '#f3f4f6', { w: 1 }), tile('Couldn\'t refresh · showing 2h ago', '#fdf3df', { w: 1 })), p('Title + tool icon top-left · content · up to 3 buttons · stale: amber pixel + "2h ago" in place of the "!"')], 'The first proper design for widgets: header, content area, button row, and stale and missing states. A press shows a pending state on the button, and the widget redraws once the press is done.', { next: 'menu' }),
+        F('F7', 'Tile menu, grouped', 'sheet', [rows(['Open', '', ''], ['Change…', '', ''], ['Info', '', '']), rows(['Widgets…', '', ''], ['Activity', 'includes builds', ''], ['Versions…', '', '']), rows(['Rename', '', ''], ['Set icon…', '', ''], ['Export data', '', '']), rows(['Delete…', '', '', { rc: RED }])], 'The 11 items go into four groups: use, look closer, personalise, delete. "Builds" and "Failed build…" go away; Activity filtered to the tool covers both, and a failed build shows in Needs you.', { last: 1, sw: '70%' }),
+      ]] },
+
+      { key: 'G', title: 'Asking for tools, several at once', sub: 'replaces M1–M4 · current: five different reply cards', lanes: [[
+        F('G1', 'One proposal card', 'wide', [eb('Proposal · 3 tools'), rows(['Coffee Log', 'brews, beans, grind', '☑', { ic: HUE.coffee, bold: 1 }], ['Brew Stats', 'builds on Coffee Log', '☑', { ic: '#efe3d6', bold: 1 }], ['Bean Shop', 'needs a new connection: Tradera', '☐', { ic: HUE.conn, bold: 1 }]), pills('3 + 2 ops', ['1 schedule', 'a'], ['standard model', ''], ['1 connection', 'w']), btns(['Keep talking'], ['Build 2 tools', 'p'])], 'Every reply that proposes something uses this one card: a new tool, a change, several ideas, widgets, or a schedule. A single draft has no tick box. Each row is one line; the detail opens in G2.', { next: '▸ row' }),
+        F('G2', 'Row expanded', 'wide', [rows(['Brew Stats', 'Shows trends from your brews', '☑', { ic: '#efe3d6', bold: 1 }]), pills(['add_brew', 'a'], 'list_brews', 'stats'), rows(['Uses', 'Coffee Log (built first)', '', { dot: AMB }], ['Schedule', 'weekly summary · Sun 18:00', '☑', {}], ['Widgets', 'Brews this week (S, M)', '☑', {}], ['Model', 'standard tier', '', {}]), btnsL(['Show spec', 'l'])], 'The details move into the expanded row: operations, needs (with cap-refs), schedule ticks, widget previews and the model tier. The raw spec stays behind "Show spec".', { next: 'keep talking' }),
+        F('G3', 'Revised proposal', 'wide', [rows(['Earlier proposal · 3 tools', 'replaced', '▸', { dot: '#c9cad0' }]), box('you: drop Bean Shop, add a grinder setting', '22px'), eb('Proposal · 2 tools · revised'), rows(['Coffee Log', '+ grinder setting', '☑', { ic: HUE.coffee, bold: 1 }], ['Brew Stats', 'unchanged', '☑', { ic: '#efe3d6', bold: 1 }]), btns(['Keep talking'], ['Build 2 tools', 'p'])], 'Today the old draft stays, faded, at full length. Instead it collapses to a single line that can be opened again. The new proposal marks what changed in each row.', { next: 'build' }),
+        F('G4', 'Building several', 'page', [top('Home', '2 building'), tiles(6, '34px', tile('', HUE.run), tile('', HUE.read), tile('Coffee Log 2/5', '#eef0e8'), tile('Brew Stats waiting', '#f4f4f6'), tile('', HUE.week), tile('+', 'transparent', { dashed: 1 }))], 'Kept as it is today: you land on Home and the new tiles fill in as they build. A tile that waits for another build shows "Waiting" and a dimmed glyph. One build (rather than several) opens its build page instead, as today.', { last: 1 }),
+      ]] },
+
+      { key: 'H', title: 'Builds', sub: 'replaces M5–M6 · current: Builds page reached through Settings, variants never designed', lanes: [[
+        F('H1', 'Activity › Builds', 'page', [top('Activity'), seg('Builds', 'All', 'Builds', 'Calls', 'Access'), eb('In progress'), rows(['Coffee Log · new', 'Running tests 2/5', '1:12', { ic: HUE.coffee }]), pills(['spec ✓', 'ok'], ['code ✓', 'ok'], ['tests 2/5', 'a'], 'you'), eb('Failed'), rows(['Weekly Review · change', '2 of 6 tests didn\'t pass', 'Retry', { ic: HUE.week, btn: 1 }]), eb('Earlier'), rows(['Reading List · new', 'v1 · yesterday', 'done', { ic: HUE.read }])], 'Builds become a view of Activity, with in-progress builds pinned at the top. No progress bars: a build shows only the milestones Hewn really knows (spec, code, tests n/total, waiting for you). The builds chip goes away (Needs you and "2 building" cover it). The "b" shortcut opens this view.', { next: 'row' }),
+        F('H2', 'Build: waiting', 'page', [hd('Brew Stats'), pills(['waiting', 'w']), p('Starts after Coffee Log is built'), rows(['Coffee Log', 'Running tests 2/5', 'Show', { ic: HUE.coffee, btn: 1 }])], 'The page says what it is waiting for, linking to that build.', { gap: 1 }),
+        F('H3', 'Build: widgets only', 'page', [hd('New widgets · Word List'), pills(['done', 'ok']), tiles(3, '44px', tile('S', '#f3f4f6', { w: 1 }), tile('M', '#f3f4f6', { span: 2, w: 1 })), p('Only adds widgets. The tool itself is unchanged.'), btns(['Add to Home', 'p'])], 'It ends with each widget shown in every size it offers, plus an "Add to Home" button.'),
+        F('H4', 'Quick change', 'page', [hd('Garmin Training · v4'), pills(['quick change', 'ok']), p('Model changed to the strong tier. No builder needed.'), btns(['Done', 'p'])], 'For changes that touch only the manifest (a model, deleting a widget): no steps and no log, and it finishes almost at once. It shows as "Quick change" in Activity.'),
+        F('H5', 'Connection build ends', 'page', [hd('Tradera is ready'), banner('Sign in to finish setting it up', 'w'), btns(['Later'], ['Sign in', 'p'])], 'A new connection ends with its sign-in or credentials step (the I4 sheet), not with "Open".', {}),
+        F('H6', 'Finished builds keep their log', 'page', [hd('Reading List is ready'), pills(['6 of 6 tests passed', 'ok']), btns(['Open', 'p']), eb('Log · 1:48'), box('› wrote src/books.ts · › 6 tests passed · › promoted v1', '54px'), p('A failed build opens with its log expanded under the reason.')], 'Dogfood fix: the log stays after a build finishes (today it disappears). It is collapsed under "Show log" when the build succeeds and expanded when it fails, so a first failed build always shows why.', { last: 1 }),
+      ]] },
+
+      { key: 'I', title: 'Connections & Accounts', sub: 'replaces C1–C3 · current: state-dependent buttons, a Save per setting, no way to add one', lanes: [[
+        F('I1', 'Accounts', 'page', [top('Accounts'), rows(['Garmin', 'connected · used by Garmin Training, Weekly Review', '', { ic: HUE.conn, dot: '#2e7d4f' }], ['Todoist', 'key expired', 'Sign in', { ic: HUE.conn, dot: RED, btn: 'p' }], ['Tradera', 'building… 2/4', '', { ic: HUE.conn, dot: '#a3d62f' }]), btnsL(['+ Add a connection'])], 'Compact rows: health in a word, "used by" as cap-refs, and a button only when it needs you. Clicking a row opens its page. The explanatory sentence goes.', { next: 'row' }),
+        F('I2', 'Connection page', 'page', [hd('Garmin'), pills(['connected', 'ok'], 'v2', 'checked 5 min ago'), eb('Used by'), pills('Garmin Training', 'Weekly Review'), eb('Settings'), field('https://connect.garmin.com', 'Site'), btnsL(['Save']), eb('Sign-in'), rows(['Signed in as you@…', '12 days ago', 'Sign in again', { btn: 1 }]), btnsL(['Operations ›', 'g'], ['Change…', 'g'])], 'The Info page for a connection: health, what uses it, one settings form with a single Save, and sign-in. Its operations and Change… are secondary.', { next: 'add' }),
+        F('I3', 'Add a connection', 'sheet', [hd('Add a connection'), field('Which service?'), pills('Todoist', 'Notion', 'Ghost', 'Strava'), p('It\'s built like a tool. You approve what it needs.'), btns(['Cancel'], ['Next', 'p'])], 'The way in that\'s missing today. It opens the intake in connection mode with the service name filled in.', { next: 'sign in', sw: '86%' }),
+        F('I4', 'Sign-in sheet (stepped)', 'sheet', [hd('Sign in to Garmin'), pills(['1 Account', 'a'], '2 Code'), field('you@example.com', 'Email'), field('••••••••', 'Password'), btns(['Cancel'], ['Continue', 'p'])], 'A Form sheet with numbered steps; a step that needs a code waits on its own screen. The sheet ends on a check mark and the connection\'s health.', { last: 1, sw: '86%' }),
+      ]] },
+
+      { key: 'J', title: 'Models & budget', sub: 'replaces Mo1–Mo3 · current: four cards of different weight, six dialogs, a separate setup dialog after authorizing', lanes: [[
+        F('J1', 'Settings › AI › Models', 'page', [top('Settings'), side('AI', ['General', 'AI', 'Remote access', 'Data', 'About'], [['This month', '$1.84 of $5 · 37%', 'Change cap'], ['Anthropic', 'key works', 'Switch…'], ['Light · Haiku', 'used by 2', '›'], ['Standard · Sonnet', 'used by 4', '›'], ['Strong · Opus', 'used by 1', '›']])], 'One list that puts spend first (you check it monthly), then the provider, then the tiers. Caps per tool move to each tool\'s model sheet (J3). Pinned models only appear when a tool has one.', { next: 'authorize' }),
+        F('J2', 'Model in the grants sheet', 'sheet', [hd('Word List wants to'), rows(['use a model', 'standard tier · Sonnet · ~$0.002 a call', '', { dot: AMB }], ['reach api.dictionary.dev', '', '', {}]), banner('No provider yet', 'w'), field('Paste an Anthropic key'), btns(['Not now'], ['Authorize', 'p'])], 'The model becomes a grant row like any other. With no provider set up, the key field appears right in the sheet, so the separate "model setup" dialog goes away.', { next: 'Info ▸ model', sw: '90%' }),
+        F('J3', 'A tool\'s model', 'sheet', [hd('Word List · model'), rows(['Light tier', 'Haiku', '○'], ['Standard tier', 'Sonnet', '●'], ['A specific model', 'pin one', '○']), eb('This month'), rows(['$0.42 · 210 calls', 'cap $1', 'Change']), btns(['Cancel'], ['Use it', 'p'])], 'A Picker sheet that combines today\'s "model choice" and "cap" dialogs. Changing the model makes a quick-change build (H4).', { next: 'warnings', sw: '86%' }),
+        F('J4', 'Budget & retired models', 'sheet', [hd('Needs you'), rows(['Models', '80% of $5 used · 9 days left', 'Open', { dot: AMB, btn: 1 }], ['Word List', 'its pinned model was retired', 'Replace…', { dot: RED, btn: 1 }], ['Brew Stats', 'call refused: over its cap', 'Raise cap…', { dot: RED, btn: 1 }])], 'Warnings and refused calls go to Needs you, and still show on Activity. Replace… opens J3 with the suggested model already selected.', { last: 1, sw: '92%' }),
+      ]] },
+
+      { key: 'K', title: 'Schedules', sub: 'replaces T3 · current: never designed, proposals announced only by a toast', lanes: [[
+        F('K1', 'Schedules on Info', 'page', [eb('Schedules'), rows(['sync_runs', 'Daily 07:00 · next in 3 h', 'on', { dot: '#2e7d4f' }], ['weekly_digest', 'Paused after 3 failures', 'Resume', { dot: RED, btn: 1 }]), btnsL(['+ Add schedule'])], 'Each schedule is a row with its next run and an on/off switch. A schedule that paused itself says why and offers Resume.', { next: 'add / edit' }),
+        F('K2', 'Schedule sheet', 'sheet', [hd('Run on a timetable'), field('sync_runs', 'Operation'), seg('Daily', 'Hourly', 'Daily', 'Weekly', 'Custom'), field('07:00', 'At'), p('Europe/Stockholm · your time zone'), btns(['Cancel'], ['Save', 'p'])], 'A Form sheet with preset cadences and an owner time zone (post-launch: taken from the browser and set in General). An operation that takes input shows its fields here.', { next: 'agent proposes', sw: '86%' }),
+        F('K3', 'Proposal (Request)', 'sheet', [hd('Claude Code wants to run sync_runs daily at 07:00'), box('"keep my runs up to date every morning"', '22px'), rows(['Garmin Training', 'write · runs as you', '', { ic: HUE.garmin }]), btns(['Decline'], ['Enable', 'p'])], 'Opened from Needs you, using the same layout as the other Request sheets. Today it\'s only a 15-second toast.', { last: 1, sw: '90%' }),
+      ]] },
+
+      { key: 'L', title: 'Agents', sub: 'replaces T4–T5 · current: approval cards and "who builds" on the same page, Edit expands inline, Connect is mostly instructions', lanes: [[
+        F('L1', 'Agents', 'page', [top('Agents'), rows(['Claude Code', 'on this Mac · see, use, make · 2 min ago', '›', { ic: '#f0f0f3', dot: '#a3d62f' }], ['claude.ai', 'through hewn.example.com · see, use · yesterday', '›', { ic: '#e2f1ea' }], ['Codex 2', 'MacBook · see, use · 3 days ago', '›', { ic: '#f0f0f3' }]), btnsL(['Connect an agent', 'p'])], 'Compact rows; the scope summary is in words. Clicking a row opens L2. New agents waiting for approval go to Needs you, not this page. "Who builds" moves to Settings › AI (O1).', { next: 'row' }),
+        F('L2', 'Agent sheet', 'sheet', [hd('Claude Code'), p('On this Mac · connected 12 days ago'), rows(['See your tools', '', 'on'], ['Use them', '', 'on'], ['Make new ones', '', 'on'], ['Change existing ones', '', 'off']), field('All tools', 'Tools'), btns(['Disconnect', 'g'], ['Done', 'p'])], 'Replaces the inline Edit. Toggles save immediately with Undo (as in D3). "Only some tools" is a tool picker that shows cap-refs.', { next: 'new agent', sw: '86%' }),
+        F('L3', 'Agent approval / confirmation', 'sheet', [banner('Codex is waiting: delete 3 runs from Running Log', 'r', 'Review'), hd('Codex wants to delete 3 runs'), rows(['Running Log', 'delete_runs · ids 41, 42, 43', '', { ic: HUE.run }]), btns(['Stop'], ['Allow once', 'd'])], 'A destructive call blocks the agent, so it\'s the one thing that also shows as a banner on any page. A new agent (whose name you can edit, and whose scopes start at their defaults) uses the same Request sheet, opened from Needs you.', { next: 'connect', sw: '92%' }),
+        F('L4', 'Connect an agent', 'sheet', [hd('Connect an agent'), rows(['Claude Code', 'found on this Mac', 'Connect', { ic: '#f0f0f3', btn: 'p' }], ['Codex', 'connected', '', { ic: '#f0f0f3' }], ['claude.ai, ChatGPT', 'through your public address', 'How', { ic: '#e2f1ea', btn: 1 }], ['Anything else', 'MCP address + sign-in', 'How', { ic: '#f0f0f3', btn: 1 }])], 'Same list as today. Each "How" branch becomes one screen: a copyable address, at most 3 short steps, and a copyable block of text to paste. Terminal commands only for things that only a terminal can do.', { last: 1, sw: '90%' }),
+      ]] },
+
+      { key: 'M', title: 'Remote access & passkeys (desktop + phone)', sub: 'replaces Se2–Se4 · current: DNS records next to passkeys, no phone layouts, public sign-in page never designed', lanes: [[
+        F('M1', 'Settings › Remote access', 'page', [top('Settings'), side('Remote access', ['General', 'AI', 'Remote access', 'Data', 'About'], [['Public address', 'hewn.example.com · reachable', 'Set up…'], ['Passkeys', 'iPhone · MacBook', '›'], ['Signed-in browsers', '3', '›']])], 'Splits the server side (public address, with DNS and Caddy instructions behind "Set up…") from your devices (passkeys and signed-in browsers).', { next: 'on a phone' }),
+        F('M2', 'Public sign-in', 'phone', [box('ASCII H', '90px'), hd('Hewn', '15px'), btns(['Sign in with a passkey', 'p']), p('New device? On the server, run  hewn open --print  and scan the code.')], 'The first screen anyone sees on the public address. A moment screen, with passkeys only.', { next: 'one-time link' }),
+        F('M3', 'Add a passkey', 'phone', [hd('Add this iPhone', '14px'), p('Next time it signs in with Face ID.'), field('iPhone', 'Name'), btns(['Add passkey', 'p']), btnsL(['Not now', 'l'])], 'Opened from the one-time link. One field and one primary button; afterwards it goes to Home.', { next: 'Home' }),
+        F('M4', 'Home on a phone', 'phone', [R('isTop', { chip: '3', items: [{ t: '☰', bg: 'transparent', fg: INK }] }), tiles(4, '30px', tile('', HUE.run), tile('', HUE.read, { badge: AMB }), tile('', HUE.garmin), tile('', HUE.week), tile('Next word: lucid', '#f3f4f6', { span: 4, rspan: 2, w: 1 }), tile('', HUE.lock), tile('', HUE.coffee), tile('', HUE.words), tile('+', 'transparent', { dashed: 1 }))], 'A 4-column grid with widgets spanning the full width; the nav collapses into a menu while the Needs you chip stays visible. Tool UIs open full screen. Building and settings work on a phone but aren\'t designed for it (decided: Home + Needs you is enough).', { last: 1 }),
+      ]] },
+
+      { key: 'N', title: 'Settings and owner chores', sub: 'replaces Se1, H7, H8, U4 · current: one long Settings page, emoji icons, Versions only in a menu', lanes: [[
+        F('N1', 'Settings › General', 'page', [top('Settings'), side('General', ['General', 'AI', 'Remote access', 'Data', 'About'], [['Appearance', '', 'System'], ['Time zone', 'Europe/Stockholm · from this browser', 'Change'], ['Sandbox', 'Confines tool code and network', 'on']])], 'Five sections in place of eleven stacked cards. AI holds the three jobs Hewn runs AI for (O1). About holds the version and the upgrade command.', { next: 'Data' }),
+        F('N2', 'Settings › Data', 'page', [side('Data', ['General', 'AI', 'Remote access', 'Data', 'About'], [['Backups', 'last 3 h ago · 412 KB', 'Back up now'], ['Folder', '~/hewn/backups', 'Change'], ['Keep call logs', '', '2 weeks'], ['Deleted tools', '2', '›']]), banner('Backups are on the same disk as your data', 'w')], 'Adds the post-launch warning about backups sharing a disk with the data. Deleted tools open a list with Restore and Delete forever, which keeps the type-the-name check (decided).', { next: 'forever' }),
+        F('N3', 'Set icon', 'sheet', [hd('Icon for Word List'), seg('Draw', 'Draw', 'Image'), box('5×5 glyph editor', '60px'), field('hue', 'Colour'), btns(['Use default', 'g'], ['Save', 'p'])], 'A Picker sheet: draw the glyph, or upload an image. Emoji icons are removed entirely (decided); there are none to migrate.', { next: 'Info', sw: '80%' }),
+        F('N4', 'Info, settled', 'page', [hd('Garmin Training'), box('Change it composer', '22px'), rows(['Operations', '3', '›'], ['Allowed to', '3 · 1 pending', '›', { dot: AMB }], ['Model', 'standard · $0.42 this month', '›'], ['Schedules', '1 daily', '›'], ['Widgets', '2 · 1 on Home', '›'], ['Versions', 'v4 · 2 days ago', '›'])], 'The right-hand column of four cards becomes one list of rows; each opens its sheet (grants, J3, K1, widgets, versions). Widgets and Versions get a place on the page.', { last: 1 }),
+      ]] },
+      { key: 'O', title: 'Who does what: agents, jobs and models', sub: 'new · the same Claude Code can play four parts', lanes: [[
+        F('O1', 'Settings › AI', 'page', [top('Settings'), side('AI', ['General', 'AI', 'Remote access', 'Data', 'About'], [['Asks the questions', 'Claude Code on this Mac · your subscription', 'Change'], ['Builds tools', 'Claude Code on this Mac · your subscription', 'Change'], ['Thinks inside tools', 'Anthropic API · your key · $1.84 this month', 'Manage ›']]), p('Agents that use your tools are on Agents.')], 'The three jobs Hewn gives to AI, side by side, each showing what runs it and how it\'s paid. Subscription versus key is the real difference: a job runs an agent on this Mac with your sign-in, while a tool\'s model is a metered API call made with your key.', { next: 'Change' }),
+        F('O2', 'Job picker', 'sheet', [hd('Who builds tools?'), rows(['Claude Code', 'on this Mac · signed in · also asks the questions', '●', { ic: '#f0f0f3' }], ['Codex', 'on this Mac · signed in', '○', { ic: '#f0f0f3' }], ['Gemini CLI', 'coming soon', '', { ic: '#f0f0f3' }]), p('One agent can do every job.'), btns(['Cancel'], ['Use Claude Code', 'p'])], 'A Picker sheet, also used for step 2 of first run (F1). Only signed-in agents on this Mac can be picked; the subtitle shows any other job an agent already does.', { next: 'same agent' }),
+        F('O3', 'One identity, several roles', 'page', [top('Agents'), rows(['Claude Code', 'on this Mac · 2 min ago', '›', { ic: '#f0f0f3', dot: '#a3d62f' }]), pills(['uses your tools', 'a'], 'builds tools', 'asks the questions'), rows(['claude.ai', 'through hewn.example.com · yesterday', '›', { ic: '#e2f1ea' }]), pills(['uses your tools', 'a'])], 'Claude Code has the same tile and name everywhere, with a chip for each role it plays. The job chips link to Settings › AI. So "my local Claude Code does everything" reads as one thing playing several parts, not four separate things.', { next: 'a tool needs AI' }),
+        F('O4', 'Why a key, not an agent', 'sheet', [hd('Word List wants to'), rows(['use a model', 'standard tier · ~$0.002 a call', '', { dot: AMB }]), p('Tools call a model directly with an API key, not through an agent, so your Claude subscription can\'t pay for this.'), field('Paste an Anthropic key'), btns(['Not now'], ['Authorize', 'p'])], 'The distinction matters most the first time a tool needs a model. This is J2 with one added line saying why it needs a key and can\'t use the agent you already connected.', { last: 1 }),
+      ], [
+        F('O5', 'Add… one entry point', 'sheet', [hd('Add'), rows(['An agent that uses your tools', 'Claude Code, Codex, claude.ai, ChatGPT, any MCP client', '›', { ic: '#f0f0f3', bold: 1 }], ['An agent that works for Hewn', 'builds tools or asks the questions · runs on this Mac', '›', { ic: '#f0f0f3', bold: 1 }], ['A model provider', 'Anthropic, OpenAI, OpenRouter · for tools that think', '›', { ic: '#f0f0f3', bold: 1 }])], 'Opened from Agents (Connect an agent) and from Settings › AI (Add…). The three choices are the same as the three ways AI touches Hewn, so adding something also teaches the model. Each one goes to its own flow.', { next: 'uses your tools' }),
+        F('O6', 'Connected, then offered jobs', 'sheet', [hd('Claude Code is connected'), pills(['uses your tools', 'a']), eb('It can also work for Hewn'), rows(['Build tools', 'today: Codex', '☐'], ['Ask the questions', 'today: not chosen', '☐']), btns(['Done', 'p'])], 'The end of L4 for an agent on this Mac. Since it is the same program, Hewn offers its jobs right there; both start unticked. Agents in the cloud (claude.ai, ChatGPT) can\'t do jobs, so they skip this step.', { next: 'works for Hewn' }),
+        F('O7', 'An agent for Hewn\'s jobs', 'sheet', [hd('Agents on this Mac'), rows(['Claude Code', 'installed · signed in', 'Use', { ic: '#f0f0f3', btn: 'p' }], ['Codex', 'installed · not signed in', 'How', { ic: '#f0f0f3', btn: 1 }], ['Gemini CLI', 'coming soon', '', { ic: '#f0f0f3' }]), p('Look again after installing or signing in.'), btns(['Look again'], ['Done', 'p'])], 'Covers installing or signing in a CLI so it can build or ask the questions. "How" shows the single sign-in command. Use goes to the job picker (O2). Nothing here needs it to be connected as an agent.', { next: 'model provider' }),
+        F('O8', 'Add a model provider', 'page', [side('AI', ['General', 'AI', 'Remote access', 'Data', 'About'], [['Anthropic', 'in use · key works', '●'], ['OpenAI', 'key saved', 'Use'], ['OpenRouter', 'no key', 'Add key'], ['This month', '$1.84 of $5', '›']])], 'Under Settings › AI › Models, every provider is a row: in use, key saved (one click to switch, as today), or no key. Add key opens a small Form sheet that checks the key. Hewn connects to no MCP servers of its own, so there is nothing to add for those.', { last: 1 }),
+      ]] },
+
+      { key: 'P', title: 'Change it while you use it', sub: 'dogfood fix · today Change… leaves the tool, so you lose sight of what you wanted to change', lanes: [[
+        F('P1', 'Change… opens a drawer', 'wide', [rows(['Running Log', 'v3', 'Change…', { ic: HUE.run, btn: 'p', bold: 1 }]), tiles(3, '160px', tile('the tool, still usable', '#f6f6f8', { span: 2, w: 1 }), tile('Change Running Log · What should change? · [composer]', '#fff', { w: 1 }))], 'Every change now goes through this view (decided): Change… in the bar, Change… in the tile menu, and the Change it box on Info all open the tool with the drawer on the right. The tool stays visible and usable, so you can look at what you mean while you type. The full-page change chat (C2) goes away.', { next: 'send' }),
+        F('P2', 'Proposal in the drawer', 'wide', [tiles(3, '190px', tile('the tool', '#f6f6f8', { span: 2, w: 1 }), tile('you: show pace per km · Proposal: Change · pace column · [Keep talking] [Build change]', '#fff', { w: 1 }))], 'The same proposal card (G1), narrower. Keep talking and Build change stay inside the drawer.', { next: 'build' }),
+        F('P3', 'Building beside the tool', 'wide', [tiles(3, '190px', tile('the tool · still v3', '#f6f6f8', { span: 2, w: 1 }), tile('Building change · code ✓ · tests 3/6 · Show log', '#fff', { w: 1 }))], 'The build runs in the drawer while the tool keeps working on v3. You can close the drawer; the tile and Needs you take over from there.', { next: 'ready' }),
+        F('P4', 'Ready in place', 'wide', [tiles(3, '190px', tile('the tool · v4', '#eef6dd', { span: 2, w: 1 }), tile('v4 is ready · [Reload] · Undo', '#fff', { w: 1 }))], 'Once the new version is live, the drawer offers Reload: the tool reloads in place and keeps its section. Undo rolls back to v3, the same as Versions.', {}),
+        F('P5', 'No UI: Operations + drawer', 'wide', [rows(['Weekly Review', 'v2 · forms only', 'Change…', { ic: HUE.week, btn: 'p', bold: 1 }]), tiles(3, '160px', tile('Operations list · form · last result', '#f6f6f8', { span: 2, w: 1 }), tile('Change Weekly Review · What should change? · [composer]', '#fff', { w: 1 }))], 'A tool without its own UI opens the Run view with the same drawer, so you can run an operation and look at the result while you describe the change. Connections work the same way (their Operations plus the drawer).', { last: 1 }),
+      ]] },
+    ];
+
+    const top3 = (active, inbox) => R('isTop', { searchD: 'inline', chip: inbox ? '◩ ' + inbox : false, items: ['Home', 'Hub', 'Agents', 'Accounts', 'Settings'].map(t => ({ t, bg: t === active ? GREY : 'transparent', fg: t === active ? INK : '#8a8d98' })) });
+    const card = (name, ic, line, need, o = {}) => ({ name, ic, line, need, shot: o.shot || '#f3f4f6', instD: o.installed ? 'inline' : 'none', needC: o.warn ? '#8a4b06' : '#55555c' });
+    const cards = (cols, shotH, ...items) => R('isCards', { cols, shotH, items });
+    const sec = (eb, ...items) => ({ eb, items: items.map(([a, b, r, o = {}]) => ({ a, b: b || '', bD: b ? 'block' : 'none', r: r || '', rD: r ? 'inline' : 'none', rbg: o.p ? '#c6ef5a' : 'transparent', rbd: o.p ? '1px solid transparent' : '1px solid #c9cad0', dot: o.dot || 'transparent', dotD: o.dot ? 'inline-block' : 'none' })) });
+    const cols = (l, r) => R('isCols', { cols: [l, r] });
+    const shelf = [
+      card('Habits', '#e2f3e6', 'Check in daily, see streaks', 'needs nothing', { installed: 1 }),
+      card('Aurora Watch', '#e4e6f7', 'Tonight\'s aurora odds where you are', 'reaches NOAA, met.no'),
+      card('Plant Log', '#e2f3e6', 'Water, feed, photos; when\'s next', 'uses a model', { warn: 1 }),
+      card('Kid Quotes', '#f6dde3', 'Write down what they said', 'needs nothing'),
+      card('Naming Generator', '#f3e9d2', 'Names, with domains checked', 'reaches 5 RDAP hosts'),
+      card('Gift Ideas', '#f5e6d3', 'Ideas per person, by occasion', 'uses a model', { warn: 1 }),
+    ];
+    const sections3 = [
+      { key: 'Q', title: 'Hub: Official, then everyone\'s', sub: 'a nav tab · 0.4.9 Official ships in the release · 0.5 adds listings from others on the same page', lanes: [[
+        F('Q1', 'New: the box, and a link', 'page', [top3('', 3), hd('What should it do?', '14px'), field('Describe a tool…'), btnsL('Attach', ['Claude Code · Fable · high ▾', 'g'], ['Send', 'p']), btnsL(['Or start from one in Hub ›', 'l'])], 'No cards: they\'d go stale after your first couple of tools. One quiet link under the box. The hosted first run is the exception: there, with nothing built yet, it shows three Official cards.', { next: 'Hub' }),
+        F('Q2', 'Hub page', 'wide', [top3('Hub', 3), hd('Hub', '15px'), field('Search tools'), pills(['All', 'a'], 'Home', 'Health', 'Kids', 'Weather', 'Writing'), eb('Official'), cards(3, '44px', ...shelf), eb('From others · 0.5'), cards(3, '44px', card('Bike Service', '#dfe8f7', 'Parts and km since', '@lars · needs nothing'), card('Sourdough', '#f5e6d3', 'Feeds, bakes, hydration', '@mira · needs nothing'), card('Bird Count', '#dff2e4', 'Garden birds by month', '@ana · reaches ebird.org')), btnsL(['Install from a file or link…', 'l'])], 'One page, two shelves. Official works offline (it ships with Hewn); From others is fetched when the page opens, and simply isn\'t there when the hub is off. Cards are screenshot-led. Under the line: what it needs, in words ("needs nothing", "reaches NOAA", "uses a model"). A tool you have shows Installed. Install from a file or link lives here as well as in Settings › Data.', { next: 'card' }),
+        F('Q3', 'A tool\'s hub page', 'wide', [R('isBtns', { justify: 'flex-start', items: [{ t: '‹ Hub', bg: 'transparent', bd: '1px solid #c9cad0', fg: INK, fw: 400 }] }), tiles(3, '58px', tile('screen', '#f3f4f6', { w: 1 }), tile('screen', '#f3f4f6', { w: 1 }), tile('widget', '#f3f4f6', { w: 1 })), rows(['Aurora Watch', 'Tonight\'s aurora odds where you are', 'Install', { ic: '#e4e6f7', bold: 1, btn: 'p' }]), pills(['Official', 'a'], 'v3', '1.2k installs'), eb('What it does'), p('Checks NOAA\'s forecast and the local cloud cover every hour, and tells you when it\'s worth going out. Keeps your location and past alerts.'), btnsL(['Source code ›', 'l']), eb('What it needs'), rows(['Reach services.swpc.noaa.gov', 'aurora forecast', '', { dot: GREY }], ['Reach api.met.no', 'cloud cover', '', { dot: GREY }]), eb('Operations · 3'), rows(['get_odds', 'tonight, for a place', 'read'], ['set_place', '', 'write'])], 'The listing in Hewn: screens first, then the summary (shipped with the bundle, so no model turn), what it needs, operations. Install opens the install sheet (R3). Installed: Open and Install a copy replace Install. For a listing from others, the publisher line replaces the Official badge: avatar, @handle, GitHub check, joined, their other tools.', { next: 'Install' }),
+        F('Q4', 'Needs a model you haven\'t set up', 'page', [cards(2, '40px', card('Plant Log', '#e2f3e6', 'Water, feed, photos', 'uses a model · set up after install', { warn: 1 }), card('Gift Ideas', '#f5e6d3', 'Ideas per person', 'uses a model · set up after install', { warn: 1 })), p('On the tool page:'), banner('Uses a model (light tier). You haven\'t set one up: you\'ll be asked for a key on first use.', 'w')], 'Installing still works: the tool asks for a model through the model grant (J2 from pass 2) the first time it needs one. The card says it in amber words, not a badge. Hosted: no warning, the host\'s models cover it.', { last: 1 }),
+      ]] },
+      { key: 'R', title: 'Install: one sheet for a file, a link and the hub', sub: '0.4.9 file · 0.4.10 link and connections · 0.5 hub', lanes: [[
+        F('R1', 'Install from a file or link', 'sheet', [hd('Install a tool'), box('Drop a .hewn.zip here, or choose a file', '56px'), field('or paste a link', ''), btns('Cancel', ['Continue', 'p'])], 'From Hub (Q2) or Settings › Data. One field takes a file or an https link (0.4.10). A link shows its host on the next sheet ("From anna.hewn.tools").', { next: 'file' }),
+        F('R2', 'Reading the code', 'sheet', [rows(['Plant Log', 'From a file · Plant Log v7', '', { ic: '#e2f3e6', bold: 1 }]), R('isP', { text: 'Thinking…' }), p('Claude Code reads the code and says what it does with your data. Usually under a minute.'), btns(['Install anyway', 'g'], 'Cancel')], 'Files and links get read by your own builder agent before the sheet (the spec\'s summary). Hub and shelf tools skip this: their summary ships with them. With no builder set up: "No summary: no builder agent set up", with Files and Install anyway.', { next: 'done' }),
+        F('R3', 'Install sheet', 'sheet', [rows(['Install Plant Log', 'From a file · Plant Log v7', '', { ic: '#e2f3e6', bold: 1 }]), eb('What it does'), p('Logs watering and feeding per plant, with photos, and tells you what\'s due. Keeps plants, events and photos.'), banner('Sends each photo to the model to read the plant\'s state', 'w'), btnsL(['Source code ›', 'l']), eb('It will ask for'), rows(['A model', 'light tier, with images', '', { dot: GREY }]), field('Plant Log', 'Name'), rows(['Start with sample data', '12 example entries', '☑']), btns('Cancel', ['Install', 'p'])], 'The Request pattern. Flags from the summary come first, as amber notices. "It will ask for" is a preview: the asking happens after install, through the existing grants flow. Sample data is on by default; untick it to start empty. The name field is always shown, prefilled; a taken name gets a 2.', { next: 'Install' }),
+        F('R4', 'Installing → open', 'page', [top3('', 3), rows(['Plant Log', 'Installed from a file', '', { ic: '#e2f3e6', bold: 1 }]), pills(['files ✓', 'ok'], ['tests ✓', 'ok'], ['sample data 12 calls', 'a']), p('Then the tool opens, like any new tool, and asks for what it needs.')], 'The build page, with the bundle\'s milestones (no builder runs). Activity has one entry for the sample replay. A failing sample call stops the replay and says which; the tool stays.', { last: 1 }),
+      ], [
+        F('R5', 'With a connection (0.4.10)', 'sheet', [rows(['Install Sleep Trends', 'From anna.hewn.tools', '', { ic: '#dfe8f7', bold: 1 }]), eb('Installs 2 things'), rows(['1 · Garmin', 'connection · you\'ll sign in after', '', { ic: '#e6e7eb' }], ['2 · Sleep Trends', 'tool', '', { ic: '#dfe8f7' }]), btns('Cancel', ['Install both', 'p'])], 'You have no Garmin: the connection installs first and lands in Accounts; its sign-in comes after, through the I4 sign-in sheet. Credentials never travel.', { next: 'you have one' }),
+        F('R6', 'You already have it', 'sheet', [rows(['Install Sleep Trends', 'uses Garmin, which you have', '', { ic: '#dfe8f7', bold: 1 }]), seg('Use mine', 'Use mine', 'Install alongside'), banner('Your Garmin lacks list_sleep. A build adds it first · uses Credits', 'i'), btns('Cancel', ['Install', 'p'])], 'Never decided silently. Use mine: only the tool installs, and if your connection is missing operations a build adds them first; the sheet says what it costs. Install alongside: the bundled one becomes "Garmin 2" and the tool uses it.', { next: 'refused' }),
+        F('R7', 'Can\'t install', 'sheet', [hd('Plant Log needs a newer Hewn'), p('It was made with Hewn 0.6 (ABI 2.6). This Hewn is 0.4.9.'), R('isBox', { text: 'hewn upgrade            Copy', h: '24px' }), btns(['Close', 'p'])], 'The Confirm pattern, for refusals: a newer ABI or format, over 5 MB, an http link. One reason, one way forward.', { last: 1 }),
+      ]] },
+      { key: 'S', title: 'Share…: one sheet, ways to share as rows', sub: 'tool menu, next to Export data · 0.4.9 Download · 0.4.10 Link · 0.5 Publish', lanes: [[
+        F('S1', 'Share…', 'sheet', [rows(['Share Plant Log', '', 'v7 ▾', { ic: '#e2f3e6', bold: 1 }]), eb('What\'s in it · 14 files'), rows(['tests/cases.json:12', 'looks like an email · a••••@g••••.com', 'Show', { dot: AMB, btn: 1 }], ['src/fetch.ts:40', 'long random string', 'Show', { dot: AMB, btn: 1 }]), rows(['Sample data', 'sample/calls.json · 12 calls · always included', '✓']), p('Never in it: your data, keys, settings, conversations, logs.'), eb('Share as'), rows(['Download', 'plant-log.hewn.zip', 'Download', { btn: 'p' }], ['Link', 'anyone with it can install', 'Create…', { btn: 1 }], ['Publish to the hub', 'listed after review', 'Publish…', { btn: 1 }])], 'One sheet. Sample data is required: Hub cards are screenshot-led, and a screenshot of an empty tool sells nothing. Without it, every row is off and the sample line reads "No sample data · Add some… ›" (opens the drawer, prefilled). The top says what travels (the scan\'s findings by file and line, masked, each with Show); the bottom is how. Warnings don\'t block: test fixtures make false positives. Link and Publish rows appear with 0.4.10 and 0.5. Any version can be shared.', { next: 'blocked' }),
+        F('S2', 'Blocked', 'sheet', [rows(['Share Plant Log', '', 'v7 ▾', { ic: '#e2f3e6', bold: 1 }]), banner('src/config.ts:8 is your Todoist key. Remove it, then share again', 'r', 'Change…'), eb('Share as'), rows(['Download', '', 'Download', { rc: '#b4b6be' }], ['Link', '', 'Create…', { rc: '#b4b6be' }])], 'An exact match of your own stored secret or config value blocks every way to share. Change… opens the drawer with the line prefilled ("remove the hard-coded key in src/config.ts").', { next: 'Link' }),
+        F('S3', 'Create a link (0.4.10)', 'sheet', [hd('Link to Plant Log'), p('Links to v7. A newer version needs a new link, so it gets checked again.'), eb('Expires'), seg('7 days', '1 day', '7 days', '30 days', 'Never'), R('isBox', { text: 'anna.hewn.tools/share/k3J…q8   Copy', h: '24px' }), btns('Done')], 'Always one version: the S2 check runs on what you share, not on what you build later. Never turns the line under it red: "Anyone with this link can install this tool until you revoke it." Without a public address: "Links need a public address · Set up remote access ›" instead of the form.', { next: 'later' }),
+        F('S4', 'Share… with links and a listing', 'sheet', [rows(['Share Plant Log', '', 'v7 ▾', { ic: '#e2f3e6', bold: 1 }]), eb('Links'), rows(['v7 · 4 days left', '3 downloads', 'Revoke', { btn: 1 }], ['v6 · never expires', '11 downloads', 'Revoke', { btn: 1, dot: RED }]), eb('On the hub'), rows(['@anna/plant-log · v7', '142 installs', 'Publish v8', { btn: 'p' }]), btnsL(['Unlist', 'g'])], 'The same sheet, once things exist: active links (a count, never who), and the listing with Publish update when there\'s a newer version than the listed one.', { last: 1 }),
+      ], [
+        F('S5', 'Publish 1 · sign in once (0.5)', 'sheet', [hd('Publish to the hub'), p('Publishing needs a free Hewn account.'), btns(['Sign in with GitHub', 'p'], 'Sign in with email')], 'An account, not a subscription: the spec has no money in the hub. Self-hosted signs in once in the browser; the token is kept as a secret. Hosted: already signed in, this step is skipped.', { next: '' }),
+        F('S6', 'Publish 2 · the listing', 'sheet', [hd('Plant Log on the hub'), field('Plant Log', 'Name'), R('isBox', { text: 'Water, feed, photos; when\'s next · from the tool', h: '22px' }), field('Home, Garden', 'Tags'), eb('Screens · sample data'), tiles(3, '40px', tile('screen', '#f3f4f6', { w: 1 }), tile('screen', '#f3f4f6', { w: 1 }), tile('widget M', '#f3f4f6', { w: 1 })), btns('Back', ['Submit for review', 'p'])], 'The one line is the tool\'s own description, shown read-only (Change… edits it). Screens are the visual check\'s render with the sample data, never yours. Better screenshots come from better sample data.', { next: '' }),
+        F('S7', 'Publish 3 · in review', 'sheet', [hd('Submitted'), p('Hewn checks it again (secrets, personal data) and writes its own summary. You\'ll see it in the Inbox when it\'s listed.'), btns(['Done', 'p'])], 'Then an Inbox row: "Plant Log is on the hub" or "Plant Log is held: a key-shaped string in src/fetch.ts:40", with Show.', { last: 1 }),
+      ]] },
+      { key: 'T', title: 'Updates, origin and takedowns (0.5)', sub: 'never automatic · Inbox is the only signal', lanes: [[
+        F('T1', 'Inbox row', 'sheet', [hd('Needs you'), rows(['v3 of Aurora Watch is on the hub', 'Official · you have v2', 'Review', { ic: '#e4e6f7', dot: AMB, btn: 1 }], ['Bird Count was removed from the hub', 'your copy is yours', 'OK', { ic: '#dff2e4', dot: GREY, btn: 1 }])], 'Updates live in Needs you, not on the tile. A takedown is a note, not an alarm: installed copies keep working.', { next: 'Review' }),
+        F('T2', 'Update (unchanged since install)', 'sheet', [rows(['Update Aurora Watch to v3', 'from the hub · Official', '', { ic: '#e4e6f7', bold: 1 }]), eb('What changed'), p('Adds a Kp index chart and alerts by text.'), rows(['3 files changed', '+120 −14', 'Files ›']), eb('Newly asks for'), rows(['Reach api.textbelt.com', 'texts', '', { dot: AMB }]), p('Tested on a copy of your data first; v2 stays until it passes.'), btns('Not now', ['Update', 'p'])], 'The Request pattern again. "Newly asks for" is a grant diff, shown before you update. The diff opens in Files (U4).', { next: 'changed by you' }),
+        F('T3', 'Update (you changed it)', 'sheet', [rows(['v3 of Aurora Watch', 'You\'ve changed it since you installed it', '', { ic: '#e4e6f7', bold: 1 }]), rows(['Bring in their changes', 'a build applies v2→v3 to your version · uses Credits', 'Start', { btn: 'p' }], ['Install v3 as a copy', 'next to yours', 'Install', { btn: 1 }]), btns('Not now')], 'Never an overwrite. Bring in their changes is a normal change build, reviewed like any other.', { next: 'origin' }),
+        F('T4', 'Origin on Info', 'page', [rows(['Aurora Watch', 'Tonight\'s aurora odds where you are', 'Open', { ic: '#e4e6f7', bold: 1, btn: 1 }]), pills('v3', ['from the hub · Official', 'a'], '2 days ago'), R('isBox', { text: 'Change it · composer', h: '22px' }), rows(['Data', 'Export · Start over', '›'], ['Versions', 'v3 · Files', '›'])], 'Origin shows on Info only, as a pill: "from the hub · Official", "from a file · Plant Log v7", "from a link · anna.hewn.tools". Home stays clean.', { last: 1 }),
+      ]] },
+      { key: 'U', title: 'Data and versions', sub: '0.4.9 Start over, Files · fold-in: Versions › Details', lanes: [[
+        F('U1', 'Info › Data', 'sheet', [eb('Data'), rows(['Export data', 'JSON, for you', 'Export', { btn: 1 }], ['Start over', 'empty it, keep the tool', 'Start over…', { btn: 1, rc: RED }])], 'Now a section on Info (W1), not a sheet. Share… is about the tool, Export data about your data: two separate words on purpose.', { next: 'Start over' }),
+        F('U2', 'Start over', 'sheet', [hd('Start Plant Log over?'), p('Empties its data and keeps the tool. A backup is kept.'), rows(['And replay the sample data', '12 example entries', '☐']), field('plant-log', 'Type'), btns('Cancel', ['Start over', 'd'])], 'The Confirm pattern with type-the-id, as purge. Shown only for the owner; agents can\'t.', { last: 1 }),
+      ], [
+        F('U3', 'Versions', 'sheet', [hd('Versions · Running Log'), rows(['v7 · live', 'Pace column · 2 days ago · Claude Code', 'Details', { dot: '#a3d62f', btn: 1, bold: 1 }], ['v6', 'Weekly chart · Oct 12', 'Details', { btn: 1 }], ['v5', 'from a file · Oct 2', 'Details', { btn: 1 }])], 'One row per version with what it changed. Details opens the version (U4).', { next: 'Details' }),
+        F('U4', 'A version', 'wide', [rows(['Running Log · v7', 'Pace column · Built with Claude Code · Fable · high', 'Restore', { ic: '#fbe2d4', bold: 1, btn: 1 }]), seg('Files', 'Conversation', 'Spec', 'Log', 'Files'), R('isSide', { items: [{ t: 'Changes since v6', bg: GREY, fw: 600 }, { t: 'capability.json', bg: 'transparent', fw: 400 }, { t: 'src/index.ts', bg: 'transparent', fw: 400 }, { t: 'ui/index.html', bg: 'transparent', fw: 400 }, { t: 'tests/cases.json', bg: 'transparent', fw: 400 }], body: [{ a: '+ pace: secs / km', b: 'src/index.ts:42', r: 'added' }, { a: '− sort by date', b: 'ui/index.html:18', r: 'removed' }, { a: '~ fastest first', b: 'ui/index.html:20', r: 'changed' }] }), btnsL(['Continue from here', 'l'])], 'Conversation · Spec · Log · Files as tabs on one page. Files is the read-only viewer (mono, line numbers, wraps) with Changes since v(N−1) first. The install sheet and hub page open the same viewer for a bundle before it\'s installed.', { last: 1 }),
+      ]] },
+      { key: 'W', title: 'Info: everything on the page', sub: 'replaces the row-per-sheet Info · sheets only to add or to confirm', lanes: [[
+        F('W1', 'Info', 'wide', [R('isBtns', { justify: 'space-between', items: [{ t: '‹ Home', bg: 'transparent', bd: '1px solid #c9cad0', fg: INK, fw: 400 }, { t: 'Share… · •••', bg: 'transparent', bd: '1px solid #c9cad0', fg: INK, fw: 400 }] }), rows(['Garmin Training', 'Syncs watch runs into ▣ Running Log', 'Open', { ic: '#f6dde3', bold: 1, btn: 1 }]), pills(['needs you', 'w'], 'v4', 'built with Claude Code', '2 days ago', ['from a file', 'a']), R('isBox', { text: 'Change it · What should Garmin Training also do?          Ask', h: '22px' }),
+          eb('Operations · 3'), rows(['sync_runs', 'pull new runs from Garmin', 'Run', { btn: 1 }], ['get_status', 'last sync, device', 'Run', { btn: 1 }], ['list_devices', '', 'Run', { btn: 1 }]),
+          eb('Allowed to'), rows(['Write to ▣ Running Log', 'record_run · asked 2 h ago', 'Authorize', { dot: AMB, btn: 'p' }], ['Use ▣ Garmin', 'connection', 'Revoke', { btn: 1 }], ['Use a model', 'strong tier · $0.42 this month', 'Strong ▾', { btn: 1 }]),
+          eb('Schedules'), rows(['sync_runs', 'daily 07:00 · next in 3 h', '☑'], ['weekly_digest', 'paused after 3 failures', 'Resume', { dot: RED, btn: 1 }]), btnsL(['+ Add schedule', 'l']),
+          eb('Widgets'), tiles(3, '36px', tile('Last run · M · on Home', '#f3f4f6', { w: 1 }), tile('Week · S', '#f3f4f6', { w: 1 }), tile('', 'transparent', { w: 1 })),
+          eb('Instructions'), rows(['Distances in km, never miles', '', '×']), field('Add a rule for this tool…'),
+          eb('Versions'), rows(['v4 · live', 'Strong model · 2 days ago', 'Details', { btn: 1 }], ['v3', 'Sleep field · Oct 14', 'Details', { btn: 1 }]), btnsL(['All 4 versions ›', 'l']),
+          eb('Data'), rows(['412 rows · 3 tables', 'last write 5 min ago', 'Export · Start over…', { btn: 1 }])],
+          'One scrolling page, sections in the order you use them: run it, what it may touch, when it runs, where it shows, how it\'s built, its history, its data. Each section is the thing itself with its actions inline: Authorize, Revoke, a tier menu, a schedule switch, Remove a rule. Sheets stay only for adding (a schedule, a key) and confirming (Start over, Revoke). Empty sections collapse into one line at the foot: "Not set up: Schedules · Widgets · Instructions", each a link that adds one.', { next: 'needs you' }),
+      ], [
+        F('W2', 'Needs you leads', 'page', [rows(['Garmin Training', 'Syncs watch runs into ▣ Running Log', 'Open', { ic: '#f6dde3', bold: 1, btn: 1 }]), banner('Wants to write to ▣ Running Log (record_run)', 'w', 'Authorize'), R('isBox', { text: 'Change it', h: '22px' }), eb('Operations · 3'), p('…')], 'Whatever needs you sits above the composer as a notice with its one action, and also stays in its section (Allowed to, Schedules, Model). A failed build or a retired model works the same way.', { next: 'two columns' }),
+        F('W3', 'Info, wide window (≥ 1100px)', 'wide', [R('isBtns', { justify: 'space-between', items: [{ t: '‹ Home', bg: 'transparent', bd: '1px solid #c9cad0', fg: INK, fw: 400 }, { t: 'Share… · •••', bg: 'transparent', bd: '1px solid #c9cad0', fg: INK, fw: 400 }] }), rows(['Garmin Training', 'Syncs watch runs into ▣ Running Log', 'Open', { ic: '#f6dde3', bold: 1, btn: 1 }]), pills(['needs you', 'w'], 'v4', 'built with Claude Code', '2 days ago', ['from a file', 'a']), R('isBox', { text: 'Change it · What should Garmin Training also do?                                   Ask', h: '22px' }),
+  cols([
+    sec('Operations · 3', ['sync_runs', 'pull new runs from Garmin', 'Run'], ['get_status', 'last sync, device', 'Run'], ['list_devices', '', 'Run']),
+    sec('Allowed to', ['Write to ▣ Running Log', 'record_run · asked 2 h ago', 'Authorize', { p: 1, dot: AMB }], ['Use ▣ Garmin', 'connection', 'Revoke'], ['Use a model', 'strong tier · $0.42 this month', 'Strong ▾']),
+    sec('Data', ['412 rows · 3 tables', 'last write 5 min ago', 'Export'], ['Start over', 'empty it, keep the tool', 'Start over…']),
+  ], [
+    sec('Schedules', ['sync_runs', 'daily 07:00 · next in 3 h', '☑'], ['weekly_digest', 'paused after 3 failures', 'Resume', { dot: RED }], ['+ Add schedule', '', '']),
+    sec('Widgets', ['Last run · M', 'on Home', 'Remove'], ['Week · S', '', 'Add to Home']),
+    sec('Instructions', ['Distances in km, never miles', '', '×'], ['Add a rule for this tool…', '', '']),
+    sec('Versions', ['v4 · live', 'strong model · 2 days ago', 'Details', { dot: '#a3d62f' }], ['v3', 'sleep field · Oct 14', 'Details'], ['All 4 versions ›', '', '']),
+  ])],
+  'Header, pills and Change it span the page. Left is using it and what it may touch: Operations, Allowed to, Data. Right is how it behaves and its history: Schedules, Widgets, Instructions, Versions. Each column scrolls with the page; nothing is sticky. Below 1100px the right column drops under the left, in the W1 order. Connections (I2) use the same split: Operations left, Used by and Settings right.', { last: 1 }),
+      ]] },
+      { key: 'V', title: 'Fold-ins from 0.4.x', sub: 'built without a design pass', lanes: [[
+        F('V1', '⌘K palette', 'sheet', [field('aur'), eb('Tools'), rows(['Aurora Watch', 'Open · Change… · Info', '↵', { ic: '#e4e6f7' }]), eb('Actions'), rows(['New tool', '', '', { ic: GREY }], ['Install from a file or link…', '', '', { ic: GREY }]), eb('Hub'), rows(['Aurora Borealis Log', '@ana · not installed', 'Install', { ic: '#e4e6f7', btn: 1 }])], 'Yours first: tools, then actions and places on grey tiles. The Hub comes last: yes, search covers it, Official locally and listings from others fetched as you type (and simply absent offline). Install opens R3, never installs straight away.', { next: '' }),
+        F('V2', 'Intake box', 'sheet', [R('isP', { text: 'You: a log for my plants' }), p('Them: **One entry per watering**, I\'d assume; right? · Photos too?'), btnsL(['Draft now', 'l']), banner('Saved as a rule: always Swedish copy', 'ok', 'Undo'), field('Reply…'), btnsL('Attach · plant.jpg ×', ['Claude Code · Fable · high ▾', 'g'], ['Send', 'p'])], 'Attachments as chips above the field; the model menu as a ghost chip next to Send; Draft now appears once there are questions; saved rules as an ok notice with Undo. Replies render Markdown.', { next: '' }),
+        F('V3', 'Set icon › Saturation', 'sheet', [hd('Icon · Ghost'), seg('Draw', 'Draw', 'Image'), tiles(5, '14px', ...Array.from({ length: 10 }, (_, i) => tile('', i % 3 ? '#e3e4e8' : INK))), field('Colour', 'Hue'), field('0% ·······|100%······ 150%', 'Saturation'), tiles(3, '28px', tile('', '#e3e4e8'), tile('', '#e3e4e8'), tile('', '#e3e4e8')), btns(['Use default', 'g'], 'Cancel', ['Save', 'p'])], 'Saturation sits under Hue with its 100% mark; the previews at three sizes show the ink glyph below 25%. Hewn\'s own items are always 0 (colour is for tools).', { last: 1 }),
+      ], [
+        F('V4', 'Ask builder to fix', 'page', [banner('get_odds failed: NOAA is unreachable', 'r', 'Ask builder to fix'), p('opens the drawer with:'), R('isBox', { text: 'Failure · get_odds · 14:02 · input + last log lines', h: '22px' }), field('Fix this: retry when NOAA is down')], 'From a tool\'s screen, a run, a widget or a schedule. The failure goes in as an attachment chip (readable, removable), the composer gets one prefilled line. Nothing sends until you press Send.', { next: '' }),
+        F('V5', 'Got what you asked for?', 'page', [R('isBox', { text: 'the tool', h: '60px' }), banner('Got what you asked for with v4?', 'i', 'Yes · Not quite · ×')], 'A quiet strip at the foot of the tool, once per version, within a week. Not quite opens the drawer. Nothing leaves your Hewn.', { next: '' }),
+        F('V6', 'Waiting its turn', 'page', [rows(['Running Log · change', 'Waiting for the change before it', 'waiting', { ic: '#fbe2d4', rc: '#8a4b06' }])], 'A queued change shows the waiting pill and names what it waits for, in the drawer, the Inbox and Activity. No new surface.', { last: 1 }),
+      ]] },
+    ];
+    return { f2: { nav, sections }, f3: { sections: sections3 } };
+  }
+  renderVals() {
+    const homeApps = [
+      ['Running Log', '#fbe2d4'], ['Reading List', '#dfe8f7', '#c6ef5a'], ['Garmin', '#f6dde3', '#e0a526'], ['Weekly', '#dff2e4', '#c0392b'],
+      ['Secret Echo', '#ece0f6'], ['Counter', '#f6efd6'], ['Coffee', '#f5e6d3'], ['New', 'transparent'],
+    ].map(([name, bg, badge]) => ({ name, bg, border: name === 'New' ? '1.5px dashed #c9cad0' : '1px solid #e3e4e8', badge: badge || 'transparent', badgeDisplay: badge ? 'block' : 'none' }));
+    const blocks = Array.from({ length: 48 }, (_, i) => i < 29 ? '#1c1c1e' : i < 31 ? '#a3d62f' : '#e3e4e8');
+    const blocksFail = Array.from({ length: 48 }, (_, i) => i < 34 ? '#c0392b' : '#e3e4e8');
+    const activity = [
+      ['#a3d62f', 'Codex · 14 calls', '14:02'], ['#1c1c1e', 'Built v3', '11:40'], ['#e0a526', 'Asked to write to Running Log', '11:41'],
+      ['#2e7d4f', 'You authorized it', '11:45'], ['#c0392b', 'get_status timed out', '09:12'],
+    ].map(([dot, text, t]) => ({ dot, text, t }));
+    const scopes = [['See your capabilities', 1], ['Use them', 1], ['Make new ones', 1], ['Change existing ones', 0]]
+      .map(([label, on]) => ({ label, track: on ? '#a3d62f' : '#d4d5da', knob: on ? '12px' : '2px' }));
+    const settings = [
+      ['Who builds', 'Writes and tests new capabilities', 'Codex ▾'],
+      ['Who asks the questions', 'Runs the intake chat', 'Claude ▾'],
+      ['Build attempts', 'Before giving up', '− 3 +'],
+      ['Sandbox', 'Confine capability code', 'On'],
+      ['Appearance', '', 'System ▾'],
+    ].map(([label, sub, value]) => ({ label, sub, value }));
+    return { ...this.flows2(), settings, homeApps, blocks, blocksFail, activity, scopes };
+  }
+}
+</script>
+</body>
+</html>

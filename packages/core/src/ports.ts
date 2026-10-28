@@ -104,6 +104,8 @@ export interface CapabilityRuntime {
   loadState(state: StateRef, tables: Record<string, Record<string, unknown>[]>, code: CodeRef): Promise<number>;
   /** Every user table as JSON rows (platform export), read through the active version `code`. */
   dumpState(state: StateRef, code: CodeRef): Promise<Record<string, Record<string, unknown>[]>>;
+  /** Rows per user table, without reading them (Info › Data). */
+  countState(state: StateRef, code: CodeRef): Promise<Record<string, number>>;
 }
 
 // ---------- Workbench (where builders run: the Node process, or the supervisor) ----------

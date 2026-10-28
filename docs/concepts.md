@@ -52,7 +52,7 @@ Tools are isolated by default: no network, no keys, no model. A tool reaches out
 - **other tools' operations:** e.g. a Weekly Review reading `running-log/list_runs@1`
 - **a model:** at a tier you choose
 
-A tool is **not ready** until you've granted what it needs. You can revoke any grant at any time.
+A tool is **not ready** until you've granted what it needs. You can revoke any grant at any time. **Deny** says no to a host, another tool or a model: the tool stays not ready, and nothing asks for it again (Home, the Inbox, agents' requests) until its next version. A quick change that only edits its manifest (another model tier, a widget removed) keeps your no. Then it runs only if you **Authorize** it after all, or a change makes it work without it (**Ask builder to work without it**). From the terminal: `hewn grants deny <id> <grant>`.
 
 ## Connections
 
@@ -61,6 +61,12 @@ A **connection** is a tool that wraps one service you have an account with (Todo
 ## Schedules
 
 You can run an operation on a timetable, e.g. "daily 07:00", in your time zone. Agents can only **propose** a schedule; nothing runs until you enable it. Read and write operations only. A schedule pauses itself after three failures in a row.
+
+## Sharing and the Hub
+
+A tool can travel as a file (`<tool>.hewn.zip`). **Share…** makes one from any version of yours; **Install from a file** turns someone else's into a new tool of yours. The file holds the tool's code, tests, migrations, screens and **sample data** (made-up entries it can start with). Hewn never puts your data, keys or settings in it, and checks the code for them before you share: one of your own keys stops the share, and anything else that looks personal is a warning. Before you install one, your builder reads its code and says what it does with your data.
+
+The **Hub** holds tools ready to install: today Hewn's own (**Official**), which ship with Hewn and come with Hewn's reading of their code. However it arrives, a tool goes through the same checks as a build, runs in the same sandbox, and asks for its [grants](#grants) once it's installed. It's yours from then on: nothing updates it from where it came from. See [Sharing tools](sharing.md).
 
 ## The Inbox and Activity
 

@@ -338,6 +338,16 @@ The platform still owns:
 
 An authorization engine answers relationship questions; it does not replace product-level authority semantics.
 
+## Code from outside (a shared tool)
+
+A tool installed from a file or from the Hub runs through the same validation and sandbox as a builder's: its manifest, its code bundled and loaded, its tests, its migrations, its UI rendered. Nothing in a bundle can grant itself anything: what its manifest asks for (hosts, a model, other tools' operations, secrets for a connection) is asked of the owner after install, one grant at a time, as for any new tool. Hewn never puts state, secrets, config values, the build's conversation or logs in a bundle, and nothing it adds says whose Hewn it came from; what the code itself holds is what the scan below is for.
+
+- **The reading is advisory.** The intake's summary (Hewn's for an Official tool, the owner's own builder's for a file, run with no tools and no web) says what the code does with the owner's data and where it differs from what it says. It isn't a gate: the owner can skip or stop it, the code is what runs, and the owner can read all of it before installing. A file's own summary in its sidecar is ignored.
+- **npm and imports stay inside the tool.** A bundle whose npm dependencies aren't registry versions or ranges, or that carries an `.npmrc`, is refused when it's staged; code that imports a file outside the tool fails at bundling, as in any build.
+- **`source` is the platform's.** Where a tool came from is the capability's record; validation writes it into every version's manifest, replacing whatever a builder wrote, so a later change can't claim another origin.
+- **Sample data runs with nothing granted.** Replayed after install (on the owner's request) and before every promotion, each call goes through the contract with no hosts, no other tools and no model.
+- **Sharing scans first.** Before a tool is shared, its files are scanned: an exact match of one of the owner's stored keys (any tool's secrets, the model providers' keys) blocks the share; one of the owner's settings, personal data and key shapes warn. The scan finds known values and common shapes; it can't prove a file clean.
+
 ## Security invariants
 
 1. The user is the root authority.

@@ -5,8 +5,9 @@ import { HEALTH } from "./accounts.js";
 import { put } from "./frame.js";
 import { PROVIDERS, titleCase, usd } from "./models.js";
 import { changeHref } from "./tool-actions.js";
+import { quickModelChange } from "./tool-model.js";
 
-export { grantsSheet, perCall, signInDialog, tierModel, TIERS };
+export { grantsSheet, grantText, kindPill, perCall, signInDialog, tierModel, TIERS };
 
 // ---------- D1 / D2 / O4: the grants sheet (a Request; approved, the same rows with Revoke) ----------
 
@@ -112,8 +113,9 @@ async function grantsSheet(capId) {
 
   const secrets = new Map();
   const config = new Map();
-  /** Grant → its switch, for pending host and capability grants (the owner may leave some out). */
+  /** Grant → its switch, for pending host and capability grants (the owner may leave some out: that's saying no). */
   const picks = new Map();
+  const declined = new Set(cap.status.declinedGrants ?? []);
   let tier = modelReq?.tier ?? null;
   let keyOk = !needsKey;
   let check = () => {};
@@ -121,7 +123,13 @@ async function grantsSheet(capId) {
   return modal(
     (close) => {
       const authorize = h("button", { class: "primary", disabled: true }, "Authorize");
-      check = () => (authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || [...config.values()].some((input) => !input.value.trim()));
+      check = () => {
+        authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || [...config.values()].some((input) => !input.value.trim());
+        // Every switch off and nothing else to give: the button says what it does.
+        const saysNo = picks.size > 0 && ![...picks.values()].some((sw) => sw.checked) && !pending.some((i) => !picks.has(i.grant)) && !config.size;
+        authorize.textContent = saysNo ? "Deny" : "Authorize";
+        authorize.classList.toggle("primary", !saysNo);
+      };
       authorize.addEventListener("click", async () => {
         authorize.disabled = true;
         try {
@@ -134,13 +142,18 @@ async function grantsSheet(capId) {
           const modelGrant = items.find((i) => i.kind === "model")?.grant;
           if (!left.length && !otherTier) await api(`/capabilities/${id}/grants/approve`, { method: "POST" });
           else for (const i of pending) if (!i.approved && !left.includes(i.grant) && !(otherTier && i.grant === modelGrant)) await api(`/capabilities/${id}/grants/approve`, { method: "POST", body: { grant: i.grant } });
-          if (otherTier) {
-            await api(`/capabilities/${id}/model`, { method: "POST", body: { tier } });
-            toast(`${c.name} will use the ${tier} tier`);
-          }
+          if (otherTier && (await quickModelChange(c, { tier }))) toast(`${c.name} will use the ${tier} tier`);
+          // After the quick change, so each no is said to the version that's live by then.
+          for (const g of left) if (!declined.has(g)) await api(`/capabilities/${id}/grants/decline`, { method: "POST", body: { grant: g } });
           invalidateCaps();
           const now = await api(`/capabilities/${id}`);
-          if (!otherTier) toast(now.status.ready ? `${c.name} is ready` : "Authorized");
+          // What was said: a switch left off is a no, so "Authorized" only when something was.
+          const yes = pending.filter((i) => !i.approved && !left.includes(i.grant)).length;
+          if (!otherTier)
+            toast(
+              now.status.ready ? `${c.name} is ready` : !yes && left.length ? `Said no to ${left.length === 1 ? "it" : `${left.length} things`}. ${c.name} won't run until you allow ${left.length === 1 ? "it" : "them"}.` : left.length ? `Authorized. Said no to ${left.length === 1 ? "one thing" : `${left.length} things`}.` : "Authorized",
+              { dot: yes ? "ok" : "" },
+            );
           close(now.status.ready);
         } catch (e) {
           fail(e);
@@ -169,7 +182,8 @@ async function grantsSheet(capId) {
         }
         let sw = null;
         if (!secretName && !i.approved) {
-          sw = h("input", { type: "checkbox", class: "switch", checked: true, "aria-label": "Allow" });
+          sw = h("input", { type: "checkbox", class: "switch", checked: !declined.has(i.grant), "aria-label": "Allow" });
+          sw.addEventListener("change", () => check());
           picks.set(i.grant, sw);
         }
         return {

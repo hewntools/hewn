@@ -58,7 +58,7 @@ describe("workerd: the public socket with HEWN_PROXY_SECRET", () => {
   before(async () => {
     h = await startTestHost({ proxySecret: SECRET });
   });
-  after(() => h.stop());
+  after(() => h?.stop());
   /** With a real Host header (fetch won't send one). */
   const status = (path: string, headers: Record<string, string>) =>
     new Promise<number>((resolve, reject) => {

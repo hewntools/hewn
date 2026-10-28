@@ -4,6 +4,7 @@
 import { api, appIcon, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
 import { activityRow, groupItems } from "./activity.js";
 import { agentRequestSheet, agentTile, confirmationSheet } from "./agents.js";
+import { waitingPill } from "./build.js";
 import { go, put } from "./frame.js";
 import { BELL } from "./glyphs.js";
 import { grantsSheet, signInDialog } from "./grants.js";
@@ -120,7 +121,7 @@ async function renderInbox() {
       { class: "inbox-row link", href: `#/b/${enc(b.buildId)}` },
       h("span", { class: "dot live" }),
       appIcon(c, { size: 36, progress: lit, waiting: !lit }),
-      h("div", { class: "grow" }, h("span", { class: "title" }, b.name), h("span", { class: "small muted" }, b.status === "waiting" ? "Waiting" : buildingLabel({ ...(b.step ?? {}), tests: b.tests }))),
+      h("div", { class: "grow" }, h("span", { class: "title" }, b.name), b.status === "waiting" ? h("span", { class: "row tight" }, waitingPill(b)) : h("span", { class: "small muted" }, buildingLabel({ ...(b.step ?? {}), tests: b.tests }))),
       h("span", { class: "faint", "aria-hidden": "true" }, "›"),
     );
   };

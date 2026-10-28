@@ -1,0 +1,11 @@
+[
+  {"operation": "add_person", "input": {"name": "Ada", "relation": "Sister", "birthday": "11-14", "notes": "Loves astronomy and good coffee."}},
+  {"operation": "add_person", "input": {"name": "Ben", "relation": "Dad", "birthday": "12-02", "notes": "Gardening, crime novels."}},
+  {"operation": "add_person", "input": {"name": "Maya", "relation": "Friend", "birthday": "03-21"}},
+  {"operation": "add_gift", "input": {"person_id": 1, "idea": "A star atlas", "price": 35, "occasion": "birthday", "status": "idea"}},
+  {"operation": "add_gift", "input": {"person_id": 1, "idea": "Hand grinder for coffee", "price": 60, "occasion": "christmas", "status": "bought"}},
+  {"operation": "add_gift", "input": {"person_id": 2, "idea": "Kneeling pad and gloves", "price": 25, "occasion": "birthday", "status": "idea"}},
+  {"operation": "add_gift", "input": {"person_id": 3, "idea": "A cooking class for two", "price": 80, "occasion": "birthday", "status": "idea"}},
+  {"operation": "add_note", "input": {"person_id": 2, "text": "Said the old secateurs are blunt."}},
+  {"operation": "add_occasion", "input": {"name": "Wedding anniversary", "date": "06-08"}}
+]

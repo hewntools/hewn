@@ -194,6 +194,20 @@ describe("remote builder and intake", () => {
     assert.match(sent.prompt, /Excerpts from Hewn's docs that match the owner's latest message[^]*--- docs\/connections\.md/);
   });
 
+  test("the intake reading a shared tool: mode summarize, its schema, the files in the prompt, no docs; the reply is checked", async () => {
+    const summary = { kind: "summary", message: "Logs runs.", keeps: "Keeps runs.", reaches: "", findings: [{ kind: "ok", title: "Nothing leaves", detail: "", file: "", line: 0 }] };
+    handle = (_b, _r, res) => ndjson(res, [{ result: JSON.stringify(summary) }]);
+    const bundle = { manifest: { id: "run-log", name: "Run Log", purpose: "Runs.", abi: "2.5", operations: [] }, files: [{ path: "src/index.ts", text: "   1| export {};" }], cut: [] };
+    const got = await remoteIntake(remote)({ mode: "summarize", messages: [], bundle });
+    assert.deepEqual(got, { kind: "summary", message: "Logs runs.", keeps: "Keeps runs.", reaches: "", findings: [{ kind: "ok", title: "Nothing leaves" }] });
+    const sent = seen.at(-1)!.body;
+    assert.equal(sent.mode, "summarize");
+    assert.equal(sent.session, null);
+    assert.deepEqual(sent.schema.properties.kind.enum, ["summary"]);
+    assert.match(sent.prompt, /=== [0-9a-f]{12} src\/index\.ts\n {3}1\| export \{\};/);
+    assert.doesNotMatch(sent.prompt, /Excerpts from Hewn's docs/);
+  });
+
   test("tools' model calls (hosted): the request goes as JSON; refusals, a bad token and a charged failure", async () => {
     const req = { capabilityId: "word-explainer", tier: "light" as const, messages: [{ role: "user" as const, content: "gruntled" }], maxTokens: 300 };
     const signal = new AbortController().signal;

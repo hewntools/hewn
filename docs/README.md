@@ -5,16 +5,17 @@ New to Hewn? Read the [quickstart](quickstart.md), then [concepts](concepts.md).
 ## Getting started
 
 - [Quickstart](quickstart.md): install, start, upgrade, uninstall
-- [Concepts](concepts.md): tools, agents, Hewn's two jobs, grants, connections, schedules
+- [Concepts](concepts.md): tools, agents, Hewn's two jobs, grants, connections, schedules, sharing and the Hub
 
 ## Using Hewn
 
-- [The web client](using-hewn.md): Home, the Inbox, a tool's page, Activity, Settings, shortcuts
+- [The web client](using-hewn.md): Home, the Hub, the Inbox, a tool's page, Activity, Settings, shortcuts
 - [Building tools](building-tools.md): asking for a tool, changing one, failed builds, versions, deleting
 - [Connecting agents](agents.md): Claude Code, Codex, OpenCode, claude.ai and Claude Desktop, ChatGPT, and what each may do
 - [Connections](connections.md): tools that use your accounts elsewhere (Todoist, GitHub, your bank)
 - [Models](models.md): tools that think, with your own API key and a monthly budget
 - [Your data](data.md): backups, export, restore, moving to a new machine
+- [Sharing tools](sharing.md): a tool as a file, sample data, installing one someone shared, the Hub, starting over
 - [Using Hewn from anywhere](remote-access.md): a public URL, your phone, passkeys
 
 ## Reference
