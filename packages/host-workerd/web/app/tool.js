@@ -33,24 +33,34 @@ const DRAWER_WIDTH = "hewn.drawer.width";
 // Narrower than this and the box's tools (Attach, the model, Send) no longer fit on a line.
 const DRAWER_MIN = 420;
 const drawerWidth = (w) => Math.round(Math.max(DRAWER_MIN, Math.min(w, window.innerWidth * 0.7, 960)));
-/** Drag `grip` (or press ← →) to set `el`'s width; it's kept for next time. */
+/**
+ * Drag `grip` (or press ← →) to set `el`'s width; it's kept for next time. A narrower window
+ * narrows it, and the width comes back when there's room again.
+ */
 function resizable(el, grip) {
-  const saved = Number(localStorage.getItem(DRAWER_WIDTH));
-  if (saved) el.style.width = `${drawerWidth(saved)}px`;
-  const set = (w) => {
-    el.style.width = `${drawerWidth(w)}px`;
-    localStorage.setItem(DRAWER_WIDTH, String(drawerWidth(w)));
-  };
+  let chosen = Number(localStorage.getItem(DRAWER_WIDTH)) || null;
+  const fit = () => chosen && (el.style.width = `${drawerWidth(chosen)}px`);
+  const set = (w) => ((chosen = drawerWidth(w)), fit());
+  const keep = () => chosen && localStorage.setItem(DRAWER_WIDTH, String(chosen));
+  fit();
   grip.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
     document.body.classList.add("resizing");
     const move = (m) => set(window.innerWidth - m.clientX);
-    const up = () => (grip.removeEventListener("pointermove", move), grip.removeEventListener("pointerup", up), document.body.classList.remove("resizing"));
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", up);
+    // However the drag ends (let go, cancelled, the capture lost), the page is usable again
+    // (while dragging, the tool's frame doesn't take the pointer), and the width is kept once.
+    const end = () => {
+      for (const [type, fn] of listeners) grip.removeEventListener(type, fn);
+      document.body.classList.remove("resizing");
+      keep();
+    };
+    const listeners = [["pointermove", move], ["pointerup", end], ["pointercancel", end], ["lostpointercapture", end]];
+    for (const [type, fn] of listeners) grip.addEventListener(type, fn);
   });
-  grip.addEventListener("keydown", (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && (e.preventDefault(), set(el.offsetWidth + (e.key === "ArrowLeft" ? 40 : -40))));
+  grip.addEventListener("keydown", (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && (e.preventDefault(), set(el.offsetWidth + (e.key === "ArrowLeft" ? 40 : -40)), keep()));
+  window.addEventListener("resize", fit);
+  onLeave(() => (window.removeEventListener("resize", fit), document.body.classList.remove("resizing")));
 }
 
 /**
