@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
-import { dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
+import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
 import { editJson, installFrom, installSeed, setup } from "./helpers.ts";
@@ -20,6 +20,74 @@ const runs = async (t: ReturnType<typeof setup>, id = "running-log") => ((await 
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 
+/**
+ * A zip written byte by byte as other tools write them (stored): extra fields in the headers,
+ * directory entries, a data descriptor after an entry's data when asked, entries in the order
+ * given. `central` lists names and the entry each points at (default: one per entry), so several
+ * may point at one entry.
+ */
+function rawZip(entries: { path: string; data?: Uint8Array; descriptor?: boolean }[], central?: { path: string; entry: number }[]): Uint8Array {
+  const parts: Uint8Array[] = [];
+  const at: number[] = [];
+  let offset = 0;
+  const push = (b: Uint8Array) => (parts.push(b), (offset += b.length));
+  for (const e of entries) {
+    const name = bytes(e.path);
+    const data = e.data ?? new Uint8Array();
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true);
+    h.setUint16(4, 10, true);
+    h.setUint16(6, e.descriptor ? 0x0808 : 0x0800, true);
+    if (!e.descriptor) (h.setUint32(14, crc32(data), true), h.setUint32(18, data.length, true), h.setUint32(22, data.length, true));
+    h.setUint16(26, name.length, true);
+    h.setUint16(28, 28, true);
+    at.push(offset);
+    push(new Uint8Array(h.buffer));
+    push(name);
+    push(new Uint8Array(28)); // extra fields (timestamps, owner): skipped by readers
+    push(data);
+    if (e.descriptor) {
+      const d = new DataView(new ArrayBuffer(16));
+      d.setUint32(0, 0x08074b50, true);
+      d.setUint32(4, crc32(data), true);
+      d.setUint32(8, data.length, true);
+      d.setUint32(12, data.length, true);
+      push(new Uint8Array(d.buffer));
+    }
+  }
+  const cdStart = offset;
+  const list = central ?? entries.map((e, entry) => ({ path: e.path, entry }));
+  for (const c of list) {
+    const name = bytes(c.path);
+    const data = entries[c.entry].data ?? new Uint8Array();
+    const h = new DataView(new ArrayBuffer(46));
+    h.setUint32(0, 0x02014b50, true);
+    h.setUint16(4, 0x031e, true);
+    h.setUint16(6, 10, true);
+    h.setUint16(8, 0x0800, true);
+    h.setUint32(16, crc32(data), true);
+    h.setUint32(20, data.length, true);
+    h.setUint32(24, data.length, true);
+    h.setUint16(28, name.length, true);
+    h.setUint16(30, 24, true);
+    h.setUint32(42, at[c.entry], true);
+    push(new Uint8Array(h.buffer));
+    push(name);
+    push(new Uint8Array(24));
+  }
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, list.length, true);
+  end.setUint16(10, list.length, true);
+  end.setUint32(12, offset - cdStart, true);
+  end.setUint32(16, cdStart, true);
+  push(new Uint8Array(end.buffer));
+  const out = new Uint8Array(offset);
+  let p = 0;
+  for (const b of parts) (out.set(b, p), (p += b.length));
+  return out;
+}
+
 describe("bundles: the zip and the scan", () => {
   test("a store-only zip round-trips; a deflated entry (another tool's zip) is refused with the reason", () => {
     const files = { "capability.json": bytes("{}"), "src/index.ts": bytes("export const operations = {};\n") };
@@ -28,6 +96,25 @@ describe("bundles: the zip and the scan", () => {
     const deflated = createZip([{ path: "capability.json", data: Buffer.from("x".repeat(500)) }]);
     assert.throws(() => readZip(deflated), /compressed\. Hewn reads bundles that Hewn made/);
     assert.throws(() => readZip(bytes("not a zip at all")), /isn't a zip file/);
+  });
+
+  test("overlapping entries (a zip bomb) are refused, and so are more than 1,000 files", () => {
+    const big = new Uint8Array(1024 * 1024).fill(97);
+    const bomb = rawZip([{ path: "a.txt", data: big }], Array.from({ length: 300 }, (_, i) => ({ path: `f${i}.txt`, entry: 0 })));
+    assert.ok(bomb.length < 1.1 * 1024 * 1024, "1 MB that would read as 300 MB");
+    assert.throws(() => readZip(bomb), /entries overlap or are out of order/);
+    const backwards = rawZip([{ path: "a.txt", data: bytes("a") }, { path: "b.txt", data: bytes("b") }], [{ path: "b.txt", entry: 1 }, { path: "a.txt", entry: 0 }]);
+    assert.throws(() => readZip(backwards), /overlap or are out of order/);
+    const many = rawZip(Array.from({ length: 1001 }, (_, i) => ({ path: `f${i}`, data: bytes("x") })));
+    assert.throws(() => readZip(many), /holds 1001 files; a tool's file may hold at most 1,000/);
+  });
+
+  test("one file under two names (case, Unicode normalisation, or the same name twice) is refused, and so are control characters", () => {
+    const one = bytes("export const operations = {};\n");
+    assert.throws(() => readZip(writeZip({ "src/index.ts": one, "SRC/index.ts": one })), /SRC\/index\.ts and src\/index\.ts are in the zip: on many disks they're the same file/);
+    assert.throws(() => readZip(writeZip({ "src/caf\u00e9.ts": one, "src/cafe\u0301.ts": one })), /the same file/);
+    assert.throws(() => readZip(rawZip([{ path: "a.ts", data: one }, { path: "a.ts", data: one }])), /a\.ts is in the zip twice/);
+    assert.throws(() => readZip(writeZip({ "src/a\nb.ts": one })), /"src\/a\\nb\.ts" isn't a path Hewn accepts/);
   });
 
   test("a bundle needs its sidecar, a format this Hewn reads, and at most 5 MB", () => {
@@ -164,6 +251,18 @@ describe("sharing: a tool as a file", () => {
     );
     assert.equal(b.status, "promoted", b.log.join("\n"));
     assert.deepEqual(other.platform.activeManifest("running-log").source, source);
+  });
+
+  test("a zip made by another tool installs when its entries are stored (directory entries, extra fields, data descriptors)", async () => {
+    await withSample();
+    const { files, sidecar } = unpackBundle((await t.platform.shareBundle(USER, "running-log")).bundle);
+    const dirs = [...new Set(Object.keys(files).flatMap((p) => p.split("/").slice(0, -1).map((_, i, a) => `${a.slice(0, i + 1).join("/")}/`)))];
+    const entries = [...dirs.map((path) => ({ path })), ...Object.entries({ [SIDECAR]: bytes(JSON.stringify(sidecar)), ...files }).reverse().map(([path, data]) => ({ path, data, descriptor: true }))];
+    other = setup();
+    const preview = await other.platform.stageBundle(USER, rawZip(entries));
+    assert.equal(preview.sample, 3);
+    const done = await other.platform.settle((await other.platform.installBundle(USER, preview.token, { name: preview.suggestedName })).buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
   });
 
   test("install: a taken name is offered as \"<name> 2\" and refused as it is; the id comes from the name", async () => {

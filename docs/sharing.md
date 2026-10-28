@@ -42,7 +42,7 @@ Installing runs the tool's own tests, as for any build, but no builder: the code
 
 Info shows where it came from ("from a file · Plant Log v7"). Change it like any of your tools: it's yours now, and nothing pulls updates from where it came from.
 
-A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB, its dependencies aren't all from the npm registry, or the tool needs a newer Hewn (then `hewn upgrade` and try again).
+A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB or holds more than 1,000 files, it names one file twice (`src/index.ts` and `SRC/index.ts` are one file on many disks), its dependencies aren't all from the npm registry, or the tool needs a newer Hewn (then `hewn upgrade` and try again).
 
 From the terminal: `hewn install <file.hewn.zip> [--name "Plant Log 2"] [--no-sample]`.
 

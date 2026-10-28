@@ -202,7 +202,15 @@ function concat(parts: Uint8Array[]): Uint8Array {
 /** Why a file isn't a bundle Hewn can read: thrown with a message for the owner. */
 export class BundleError extends Error {}
 
-/** The files in a zip. Stored entries only: a compressed one (a zip made by another tool) is refused with the reason. */
+/** A bundle holds at most this many files. */
+export const MAX_BUNDLE_FILES = 1000;
+
+/**
+ * The files in a zip. Stored entries only: a compressed one (a zip made by another tool) is
+ * refused with the reason. Entries must follow one another without overlapping, so the files
+ * together are never bigger than the zip (no entry read twice), and no two may name the same file
+ * on a disk that ignores case or Unicode normalisation.
+ */
 export function readZip(zip: Uint8Array): Files {
   const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
   let end = -1;
@@ -214,26 +222,41 @@ export function readZip(zip: Uint8Array): Files {
   }
   if (end < 0) throw new BundleError("This isn't a zip file.");
   const count = view.getUint16(end + 10, true);
+  if (count > MAX_BUNDLE_FILES) throw new BundleError(`The zip holds ${count} files; a tool's file may hold at most ${MAX_BUNDLE_FILES.toLocaleString("en")}.`);
   let p = view.getUint32(end + 16, true);
   const out: Files = {};
+  const seen = new Map<string, string>();
+  let next = 0;
+  let total = 0;
   for (let n = 0; n < count; n++) {
     if (p + 46 > zip.length || view.getUint32(p, true) !== 0x02014b50) throw new BundleError("The zip is damaged (its file list doesn't read).");
     const method = view.getUint16(p + 10, true);
     const crc = view.getUint32(p + 16, true);
     const size = view.getUint32(p + 20, true);
+    const unpacked = view.getUint32(p + 24, true);
     const nameLen = view.getUint16(p + 28, true);
     const extraLen = view.getUint16(p + 30, true);
     const commentLen = view.getUint16(p + 32, true);
     const at = view.getUint32(p + 42, true);
     const path = dec.decode(zip.subarray(p + 46, p + 46 + nameLen));
     p += 46 + nameLen + extraLen + commentLen;
+    // Each entry starts where the one before it ended, or later: none is read twice.
+    if (at < next || at + 30 > zip.length || view.getUint32(at, true) !== 0x04034b50) throw new BundleError("The zip is damaged (its entries overlap or are out of order).");
+    const start = at + 30 + view.getUint16(at + 26, true) + view.getUint16(at + 28, true);
+    next = start + size;
     if (path.endsWith("/")) continue;
     if (method !== 0) throw new BundleError(`${path} is compressed. Hewn reads bundles that Hewn made: share the tool again from Hewn and use that file.`);
-    if (path.startsWith("/") || path.split("/").some((s) => s === ".." || s === "") || path.includes("\\")) throw new BundleError(`${path} isn't a path Hewn accepts.`);
-    if (at + 30 > zip.length) throw new BundleError("The zip is damaged.");
-    const start = at + 30 + view.getUint16(at + 26, true) + view.getUint16(at + 28, true);
-    const data = zip.slice(start, start + size);
-    if (data.length !== size || crc32(data) !== crc) throw new BundleError(`${path} is damaged (its checksum doesn't match).`);
+    if (path.startsWith("/") || path.split("/").some((s) => s === ".." || s === "") || path.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(path)) throw new BundleError(`${JSON.stringify(path)} isn't a path Hewn accepts.`);
+    // On a disk that ignores case (or Unicode normalisation), SRC/index.ts would overwrite src/index.ts.
+    const key = path.normalize("NFC").toLowerCase();
+    const twin = seen.get(key);
+    if (twin !== undefined) throw new BundleError(twin === path ? `${path} is in the zip twice.` : `${twin} and ${path} are in the zip: on many disks they're the same file.`);
+    seen.set(key, path);
+    total += unpacked;
+    if (total > MAX_BUNDLE_BYTES) throw new BundleError("Its files come to more than 5 MB; a tool's file may be at most 5 MB.");
+    if (unpacked !== size || next > zip.length) throw new BundleError(`${path} is damaged (its size doesn't match).`);
+    const data = zip.subarray(start, next);
+    if (crc32(data) !== crc) throw new BundleError(`${path} is damaged (its checksum doesn't match).`);
     out[path] = data;
   }
   return out;
