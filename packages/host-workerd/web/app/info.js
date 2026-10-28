@@ -54,15 +54,9 @@ function statusPills(c, cap, all) {
     // An install from a file says so once, in the origin pill.
     latest && !(latest.builder === "bundle" && cap.source) && h("span", { class: "pill" }, madeBy(latest, all).replace(/ You$/, " you")),
     latest && h("span", { class: "pill" }, ago(latest.createdAt)),
-    origin(cap.source),
+    // T4 Where it came from, when it was installed from outside (Hewn's words): Info only, Home stays clean.
+    cap.origin && h("span", { class: "pill accent" }, cap.origin),
   );
-}
-
-/** T4 Where it came from, when it was installed from outside: Info only, Home stays clean. */
-function origin(s) {
-  if (!s) return null;
-  const text = s.from === "hub" ? "from Hub · Official" : s.from === "link" ? `from a link · ${s.host ?? "a link"}` : `from a file · ${s.name ?? s.id} v${s.version}`;
-  return h("span", { class: "pill accent" }, text);
 }
 
 /** U2 Start over: the Confirm pattern with the id typed, as purge; replays the sample data when asked. */

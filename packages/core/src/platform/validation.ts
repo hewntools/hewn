@@ -5,7 +5,7 @@ import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
-import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
+import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
@@ -37,7 +37,7 @@ export class Validation extends Domain {
     if (JSON.stringify(stamped) !== JSON.stringify(manifest)) {
       manifest = stamped;
       workspace["capability.json"] = bytes(JSON.stringify(manifest, null, 2) + "\n");
-      step(source ? `source kept: ${source.id} v${source.version}, from ${source.from === "hub" ? "Hub" : `a ${source.from}`}` : "removed fields the platform writes (source, hub, minVersion)");
+      step(source ? `source kept: ${source.id} v${source.version}, ${sourceWords(source)}` : "removed fields the platform writes (source, hub, minVersion)");
     }
     const manifestErrors = validateManifest(manifest, id);
     if (manifest?.ui?.available && !workspace["ui/index.html"]) manifestErrors.push("ui.available but ui/index.html is missing");

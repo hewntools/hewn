@@ -11,6 +11,8 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import type { IntakeRequest } from "@hewntools/cli/intake.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { WEB_CODE } from "@hewntools/host-workerd/surface/web.ts";
+import { packBundle } from "@hewntools/core/bundle.ts";
+import { readTree } from "@hewntools/cli/workbench.ts";
 import { installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
@@ -777,6 +779,19 @@ describe("web client (owner surface)", () => {
       await api("/home/layout", { method: "PUT", body: { entries: [] } });
       const builds = (await api("/activity?kinds=build&limit=50")).json.items;
       assert.ok(builds.length > 0 && builds.every((i: any) => i.kind === "build"));
+    });
+
+    test("Install from a file: staged, installed; Activity says \"Installed from a file\" and Info where it came from", async () => {
+      const files = { ...readTree(SEED), "sample/calls.json": Buffer.from(JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }])) };
+      const zip = packBundle(files, { format: 1, hewn: "test", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 4, hash: "d".repeat(64) } });
+      const preview = (await api("/bundles", { method: "POST", body: { data: Buffer.from(zip).toString("base64") } })).json;
+      assert.equal(preview.suggestedName, "Running Log 2");
+      const started = (await api(`/bundles/${preview.token}/install`, { method: "POST", body: { name: "Shared Log", sample: true } })).json;
+      assert.equal((await platform.settle(started.buildId)).status, "promoted");
+      const row = (await api("/activity?kinds=build&limit=50")).json.items.find((i: any) => i.buildId === started.buildId);
+      assert.equal(row.installed, "from a file");
+      assert.equal((await api("/capabilities/shared-log")).json.origin, "from a file · Running Log v4");
+      assert.equal((await api("/capabilities/running-log")).json.origin, null, "a tool made here came from nowhere else");
     });
   });
 });

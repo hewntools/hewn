@@ -6,7 +6,7 @@
 import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { ABI } from "@hewntools/core/manifest.ts";
+import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
@@ -244,14 +244,18 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "capabilities" && id) {
     switch (`${method} ${sub ?? ""}`) {
-      case "GET ":
+      case "GET ": {
+        const m = platform.get(owner, id);
         return {
-          ...platform.get(owner, id),
+          ...m,
+          // Where it came from, when it was installed from outside, in Hewn's words (Info's pill).
+          origin: m.source ? sourceWords(m.source, true) : null,
           versions: platform.registry.versions(id),
           grants: [...platform.registry.grants(id)],
           authorization: platform.authorization(id),
           usedBy: platform.usedBy(id),
         };
+      }
       case "POST invoke": {
         const body = await readJson(req);
         return platform.invoke(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input });
@@ -948,6 +952,8 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildId: b.buildId,
       buildKind: b.kind,
       builder: b.builder,
+      // An install from a file: "from a file", "from Hub" (Activity says "Installed from a file · v1").
+      ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
       ...(b.model ? { buildModel: b.model } : {}),
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,

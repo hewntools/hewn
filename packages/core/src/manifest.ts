@@ -86,8 +86,15 @@ export function stampSource(m: CapabilityManifest, source: ToolSource | null): C
   return out;
 }
 
-/** Where an installed tool came from, in words: "from Hub", "from example.com" (a link), "from a file". */
-export const sourceWords = (s: Pick<ToolSource, "from" | "host">): string => (s.from === "hub" ? "from Hub" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file");
+/**
+ * Where an installed tool came from, in words, the same everywhere (a build's log, Activity, Info):
+ * "from Hub", "from example.com" (a link), "from a file". `long` adds what it was: "from a file ·
+ * Plant Log v7" (a Hub tool's is "Official").
+ */
+export function sourceWords(s: ToolSource, long = false): string {
+  const where = s.from === "hub" ? "from Hub" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+  return long ? `${where} · ${s.from === "hub" ? "Official" : `${s.name ?? s.id} v${s.version}`}` : where;
+}
 
 /** A compiled JSON Schema check. `errors` holds the last failure's messages. */
 export interface SchemaCheck {

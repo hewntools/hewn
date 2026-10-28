@@ -83,7 +83,7 @@ function activityRow(g, all, showCap) {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
-    if (g.outcome === "promoted") text = on(`${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
