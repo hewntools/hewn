@@ -42,7 +42,7 @@ Installing runs the tool's own tests, as for any build, but no builder: the code
 
 Info shows where it came from ("from a file · Plant Log v7"). Change it like any of your tools: it's yours now, and nothing pulls updates from where it came from.
 
-A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB, or the tool needs a newer Hewn (then `hewn upgrade` and try again).
+A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB, its dependencies aren't all from the npm registry, or the tool needs a newer Hewn (then `hewn upgrade` and try again).
 
 From the terminal: `hewn install <file.hewn.zip> [--name "Plant Log 2"] [--no-sample]`.
 
@@ -52,4 +52,4 @@ Info › Data › **Start over** empties a tool's data and keeps the tool: after
 
 ## Is it safe to install a tool from someone else?
 
-It runs in the same sandbox as tools your builder makes, through the same checks: its manifest, its tests, its migrations. Nothing in the file can grant itself anything: what it reaches (hosts, a model, your other tools) is asked of you after it's installed, one grant at a time, as for any tool. A shared tool never holds keys: a connection's credentials stay with you. Read **Source code** first if you're unsure what it does with your data. See the [threat model](threat-model.md).
+It runs in the same sandbox as tools your builder makes, through the same checks: its manifest, its tests, its migrations. Its code can use only its own files and npm packages from the npm registry: a file whose dependencies point anywhere else (a path on your disk, git, a URL) is refused. Nothing in the file can grant itself anything: what it reaches (hosts, a model, your other tools) is asked of you after it's installed, one grant at a time, as for any tool. A shared tool never holds keys: a connection's credentials stay with you. Read **Source code** first if you're unsure what it does with your data. See the [threat model](threat-model.md).

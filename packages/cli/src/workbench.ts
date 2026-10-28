@@ -3,9 +3,9 @@
 // (optionally OS-sandboxed), bundles are built with esbuild. Used by the Node host and by the
 // supervisor on behalf of the workerd host.
 import { spawn } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { build as esbuild } from "esbuild";
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
+import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
 import { CLI_AGENTS } from "./builders/cli-agents.ts";
 import { forgetSession } from "./builders/cli.ts";
@@ -70,6 +70,42 @@ function npmInstall(cwd: string): Promise<string[]> {
   });
 }
 
+/** Marks the resolve call `insideWorkspace` makes itself, so it doesn't check its own lookup. */
+const CHECKING = Symbol("inside-workspace");
+
+/**
+ * Keeps a bundle to the workspace's own files: an import that resolves (links followed) outside it
+ * is refused, and so is an import attribute other than `type: "json"` (`with { type: "text" }`
+ * would inline any file as a string). Without it, a tool's code (a builder's, or a shared file's)
+ * could pull the machine's files into its bundle: Hewn's own settings, a key, `~/.ssh`. Its
+ * `node_modules` is inside it, so npm dependencies bundle as before.
+ */
+function insideWorkspace(ws: string): Plugin {
+  const root = realpathSync(ws);
+  return {
+    name: "inside-workspace",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, async (args) => {
+        if (args.pluginData === CHECKING) return undefined;
+        const attrs = Object.entries(args.with ?? {});
+        if (attrs.some(([k, v]) => k !== "type" || v !== "json")) return { errors: [{ text: `import "${args.path}" with { ${attrs.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }: a tool may import JSON with { type: "json" }, nothing else` }] };
+        const r = await build.resolve(args.path, { kind: args.kind, importer: args.importer, namespace: args.namespace, resolveDir: args.resolveDir, with: args.with, pluginData: CHECKING });
+        if (r.errors.length) return { errors: r.errors };
+        if (!r.external && r.namespace === "file") {
+          let real = "";
+          try {
+            real = realpathSync(r.path);
+          } catch {
+            // Not there: refused below, as outside.
+          }
+          if (real !== root && !real.startsWith(root + sep)) return { errors: [{ text: `"${args.path}" is outside the tool's files: a tool's code may only import its own files and its npm dependencies` }] };
+        }
+        return { path: r.path, external: r.external, namespace: r.namespace, sideEffects: r.sideEffects, suffix: r.suffix, pluginData: r.pluginData };
+      });
+    },
+  };
+}
+
 /** Bundle a workspace's src/index.ts (+ npm dependencies) into one ESM module for the isolate runtime. */
 export async function bundleWorkspace(ws: string): Promise<{ js: string; log: string[] }> {
   const log: string[] = [];
@@ -92,6 +128,7 @@ export async function bundleWorkspace(ws: string): Promise<{ js: string; log: st
     external: ["node:*", "cloudflare:*"],
     logLevel: "silent",
     absWorkingDir: ws,
+    plugins: [insideWorkspace(ws)],
   }).catch((e: { errors?: { text: string; location?: { file: string; line: number } }[] }) => {
     throw new Error((e.errors ?? []).map((x) => `${x.location ? `${x.location.file}:${x.location.line}: ` : ""}${x.text}`).join("; ") || String(e));
   });

@@ -4,7 +4,7 @@
 // a create build with no builder ("bundle") through the normal validation. Sample data: replayed
 // after an install or Start over, and written by the owner as a new version. Owner only.
 import { type Agent, requireOwner } from "../auth.ts";
-import { BundleError, type Finding, packBundle, readSample, SAMPLE_FILE, type SampleCall, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
+import { BundleError, dependencyProblems, type Finding, packBundle, readSample, SAMPLE_FILE, type SampleCall, scanFiles, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, text } from "../files.ts";
@@ -335,5 +335,7 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
   const tooNew = abiUnsupported(abiOf(manifest));
   if (tooNew) throw new PlatformError("invalid_request", `${manifest.name} ${tooNew.replace(/^needs/, "needs")}. Upgrade Hewn to install it.`, { refusal: "newer", abi: abiOf(manifest) });
   if (!unpacked.sidecar.tool?.id || !Number.isInteger(unpacked.sidecar.tool?.version) || !/^[0-9a-f]{64}$/.test(unpacked.sidecar.tool?.hash ?? "")) throw new PlatformError("invalid_request", "Its hewn-bundle.json doesn't say which tool and version it is.", { refusal: "unreadable" });
+  const deps = dependencyProblems(unpacked.files);
+  if (deps.length) throw new PlatformError("invalid_request", `${manifest.name} asks npm for what isn't on the npm registry, so Hewn won't install it: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
   return { ...unpacked, manifest };
 }

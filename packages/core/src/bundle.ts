@@ -53,6 +53,68 @@ export function readSample(files: Files): SampleCall[] | null {
   return calls as SampleCall[];
 }
 
+// ---------- what npm may install for a shared tool ----------
+
+/**
+ * A version, range or tag npm resolves on the registry ("^1.2.0", "1.x", "latest"), or an alias
+ * to one ("npm:other@^1"). Never a path or a link (npm would take the machine's own files), git
+ * (cloned with the owner's keys), a URL, or GitHub shorthand.
+ */
+export function registrySpec(spec: unknown): boolean {
+  if (typeof spec !== "string") return false;
+  const alias = /^npm:(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(?:@(.*))?$/i.exec(spec);
+  const range = alias ? (alias[1] ?? "") : spec;
+  return /^[\w.^~<>=*|+ -]*$/.test(range) && !range.startsWith(".") && !/\.(tgz|tar|tar\.gz)$/i.test(range);
+}
+
+/**
+ * Why npm shouldn't install a tool's dependencies as a file someone shared has them: a spec that
+ * isn't the registry's (package.json's dependencies of any kind, and overrides), workspaces, or a
+ * lockfile entry that is a link or isn't fetched over https. A tool installed from a file is
+ * refused with these. (An `.npmrc` never gets that far: dotfiles never become part of a version.)
+ */
+export function dependencyProblems(files: Files): string[] {
+  const out: string[] = [];
+  const json = (path: string): any => {
+    try {
+      return JSON.parse(dec.decode(files[path]));
+    } catch {
+      out.push(`${path} isn't valid JSON`);
+      return null;
+    }
+  };
+  const pkg = files["package.json"] ? json("package.json") : null;
+  if (pkg) {
+    if (pkg.workspaces !== undefined) out.push("package.json has workspaces");
+    for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+      for (const [name, spec] of Object.entries(pkg[field] ?? {})) if (!registrySpec(spec)) out.push(`package.json ${field}: ${name} is ${JSON.stringify(spec)}, not a version from the npm registry`);
+    }
+    // Overrides nest ({ "a": { "b": "1.0.0" } }); "$a" points at a dependency's own spec.
+    const overrides = (o: unknown, at: string) => {
+      for (const [name, spec] of Object.entries(o ?? {})) {
+        if (spec && typeof spec === "object") overrides(spec, `${at}${name} › `);
+        else if (!(typeof spec === "string" && spec.startsWith("$")) && !registrySpec(spec)) out.push(`package.json overrides: ${at}${name} is ${JSON.stringify(spec)}, not a version from the npm registry`);
+      }
+    };
+    overrides(pkg.overrides, "");
+  }
+  for (const path of ["package-lock.json", "npm-shrinkwrap.json"]) {
+    const lock = files[path] ? json(path) : null;
+    if (!lock) continue;
+    // lockfileVersion 2 and 3 list `packages` by path; 1 nests `dependencies`.
+    const entry = (name: string, e: any) => {
+      if (!e || typeof e !== "object") return;
+      if (e.link) out.push(`${path}: ${name} is a link`);
+      else if (e.resolved !== undefined && !/^https:\/\//.test(String(e.resolved))) out.push(`${path}: ${name} comes from ${JSON.stringify(e.resolved)}, not over https`);
+      else if (e.version !== undefined && !registrySpec(e.version)) out.push(`${path}: ${name} is ${JSON.stringify(e.version)}, not a version from the npm registry`);
+      for (const [n, d] of Object.entries(e.dependencies ?? {})) if (d && typeof d === "object") entry(n, d);
+    };
+    for (const [p, e] of Object.entries(lock.packages ?? {})) if (p) entry(p, e);
+    for (const [n, e] of Object.entries(lock.dependencies ?? {})) entry(n, e);
+  }
+  return out;
+}
+
 // ---------- the zip (store only) ----------
 
 const CRC_TABLE = (() => {

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
-import { MAX_BUNDLE_BYTES, packBundle, readZip, scanFiles, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
+import { dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
 import { editJson, installFrom, installSeed, setup } from "./helpers.ts";
@@ -206,5 +208,59 @@ describe("sharing: a tool as a file", () => {
     assert.ok(done.log.some((l) => /sample\/calls\.json doesn't replay/.test(l) && /call 2 \(record_run\)/.test(l)), done.log.join("\n"));
     await assert.rejects(t.platform.setSample(USER, "running-log", "[{ nope"), /not valid JSON/);
     await assert.rejects(t.platform.setSample(USER, "running-log", "[]"), /sample\/calls\.json/);
+  });
+});
+
+describe("code from outside stays outside", () => {
+  let t: ReturnType<typeof setup>;
+  let outside: string;
+  beforeEach(async () => {
+    t = setup();
+    await installSeed(t.platform);
+    // A file of the machine's that isn't the tool's: what Hewn's settings or a key would be.
+    outside = mkdtempSync(join(tmpdir(), "hewn-outside-"));
+    writeFileSync(join(outside, "conf.json"), JSON.stringify({ adminToken: "not-for-tools" }));
+    writeFileSync(join(outside, "key.txt"), "-----BEGIN PRIVATE KEY-----");
+  });
+  afterEach(() => (t.cleanup(), rmSync(outside, { recursive: true, force: true })));
+
+  const importing = (line: string) => (ws: string) => writeFileSync(join(ws, "src/index.ts"), `${line}\nexport const operations = { leak: () => ({ x }) };\n`);
+
+  test("a tool importing a file outside its own (an absolute path, or ../ out of it) fails validation, saying so", async () => {
+    for (const line of [`import x from ${JSON.stringify(join(outside, "conf.json"))};`, `import x from "${"../".repeat(12)}${outside.slice(1)}/conf.json";`]) {
+      const b = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "read a file" }), importing(line));
+      assert.equal(b.status, "failed");
+      assert.ok(b.log.some((l) => /bundling failed: .*is outside the tool's files/.test(l)), b.log.join("\n"));
+    }
+  });
+
+  test("an import attribute other than json is refused, wherever the file is", async () => {
+    const b = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "read a key" }), importing(`import x from ${JSON.stringify(join(outside, "key.txt"))} with { type: "text" };`));
+    assert.equal(b.status, "failed");
+    assert.ok(b.log.some((l) => /bundling failed: .*with \{ type: "text" \}: a tool may import JSON/.test(l)), b.log.join("\n"));
+  });
+
+  test("dependencies: registry versions and ranges pass; paths, links, git, URLs and GitHub shorthand don't", () => {
+    for (const ok of ["1.2.3", "^1.2.0", "~1.2", ">=1 <2", "1.x", "*", "", "latest", "npm:other@^1", "npm:@scope/other@2.0.0"]) assert.ok(registrySpec(ok), ok);
+    for (const no of ["file:../x", "link:/etc", "git+ssh://git@github.com/a/b.git", "github:a/b", "a/b", "https://example.com/x.tgz", "../x", ".", "~/x", "/abs", "x.tgz", "npm:other@file:../x", "workspace:*"]) assert.ok(!registrySpec(no), no);
+    const pkg = (p: object) => ({ "package.json": bytes(JSON.stringify(p)) });
+    assert.deepEqual(dependencyProblems(pkg({ dependencies: { zod: "^3.0.0" }, devDependencies: { typescript: "5.x" } })), []);
+    assert.equal(dependencyProblems(pkg({ optionalDependencies: { x: "git+ssh://git@github.com/a/b.git" } })).length, 1);
+    assert.equal(dependencyProblems(pkg({ overrides: { a: { b: "file:../b" } } })).length, 1);
+    assert.equal(dependencyProblems(pkg({ workspaces: ["../../elsewhere"] })).length, 1);
+    const lock = { lockfileVersion: 3, packages: { "": {}, "node_modules/a": { version: "1.0.0", resolved: "git+ssh://git@github.com/a/a.git#abc" }, "node_modules/b": { link: true, resolved: "../../b" }, "node_modules/c": { version: "1.0.0", resolved: "https://registry.npmjs.org/c/-/c-1.0.0.tgz" } } };
+    assert.equal(dependencyProblems({ "package-lock.json": bytes(JSON.stringify(lock)) }).length, 2);
+  });
+
+  test("a shared tool with a file: dependency is refused, before and at install", async () => {
+    await t.platform.setSample(USER, "running-log", SAMPLE).then((b) => t.platform.settle(b.buildId));
+    const { files, sidecar } = unpackBundle((await t.platform.shareBundle(USER, "running-log")).bundle);
+    const withDep = { ...files, "package.json": bytes(JSON.stringify({ dependencies: { secrets: "file:/etc" } })) };
+    await assert.rejects(t.platform.stageBundle(USER, packBundle(withDep, sidecar)), (e: any) => /isn't on the npm registry.*secrets is "file:\/etc"/.test(e.message) && e.details?.refusal === "dependencies");
+    // Installed with no builder from given files, the same rule holds in validation.
+    const manifest = { ...JSON.parse(text(files["capability.json"])), id: "dep-tool", name: "Dep Tool" };
+    const b = await t.platform.settle((await t.platform.install(USER, { name: "Dep Tool", purpose: "x", builder: "bundle", id: "dep-tool", seed: { ...withDep, "capability.json": bytes(JSON.stringify(manifest)) } })).buildId);
+    assert.equal(b.status, "failed");
+    assert.ok(b.log.some((l) => /aren't all from the npm registry/.test(l) && /secrets is "file:\/etc"/.test(l)), b.log.join("\n"));
   });
 });

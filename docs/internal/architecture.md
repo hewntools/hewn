@@ -137,7 +137,7 @@ The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the re
 `validateAndPromote` (`platform/validation.ts`), in order:
 
 1. the manifest: schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
-2. bundle `src/index.ts` with its npm dependencies; the bundle exports every declared `name@version`
+2. bundle `src/index.ts` with its npm dependencies (imports resolve inside the workspace only, links followed, and take no import attribute but `type: "json"`; a tool installed from a file asks npm for registry versions only, `dependencyProblems`); the bundle exports every declared `name@version`
 3. contract compatibility with the active version; a widgets build changes only widgets; declared callees offer the pinned operations
 4. migrations are append-only and non-destructive
 5. `tests/cases.json` on fresh state through the real runtime; every widget has a case; the UI renders headlessly without errors, in light and dark, and changed widgets render in every size

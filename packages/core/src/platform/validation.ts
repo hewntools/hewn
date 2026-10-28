@@ -3,7 +3,7 @@
 // tests, the UI and widgets, an upgrade dry run), frozen, and promoted, or held for the owner's review.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { readSample, SAMPLE_FILE } from "../bundle.ts";
+import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -46,6 +46,11 @@ export class Validation extends Domain {
 
     // 2. bundle (src/index.ts + npm dependencies), then: it exports exactly what the manifest declares
     const files = versionFiles(workspace);
+    // Installed from a file: npm installs from the registry only (no paths, links, git or URLs).
+    if (build.builder === "bundle") {
+      const problems = dependencyProblems(files);
+      if (problems.length) fail("its dependencies aren't all from the npm registry", problems);
+    }
     let bundled: { js: string; log: string[] };
     try {
       bundled = await this.workbench.bundle(build.id);
