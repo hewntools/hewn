@@ -436,11 +436,11 @@ describe("web client (owner surface)", () => {
       assert.equal(asked.bundle!.files[0].path, "capability.json", "the manifest first");
       assert.match(asked.bundle!.files.find((f) => f.path === "src/index.ts")!.text, /^ {3}1\| /, "lines numbered");
       assert.equal((await api(`/bundles/${staged.json.token}`)).json.summaryBy, "yours");
-      const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Shared Log", sample: true } });
+      const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Read Log", sample: true } });
       const done = await platform.settle(started.json.buildId);
       assert.equal(done.status, "promoted", done.log.join("\n"));
       assert.equal((done.request as any).summary.message, "Logs your runs and sums them up.", "the reading is kept with the install");
-      assert.equal((await api("/capabilities/shared-log")).json.source.from, "file");
+      assert.equal((await api("/capabilities/read-log")).json.source.from, "file");
       assert.equal((await api(`/bundles/${staged.json.token}`)).status, 404, "installed: gone");
       const refused = await api("/bundles", { method: "POST", body: { data: Buffer.from("not a zip").toString("base64") } });
       assert.equal(refused.status, 400);
