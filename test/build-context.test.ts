@@ -111,7 +111,7 @@ describe("what a build keeps", () => {
 
   test("the owner's words: ideas come down to their names, anything else is kept as written; a long conversation keeps its first turn and the latest", () => {
     assert.equal(ownersWords(undefined), "");
-    assert.match(ownersWords([{ role: "intake", content: "IDEAS\n1. A\n…", reply: { kind: "ideas", message: "Two ways:", ideas: [{ name: "A", purpose: "a" }, { name: "B", purpose: "b" }] } }]), /INTAKE: Two ways:\n\(It offered: A: a; B: b\)$/);
+    assert.match(ownersWords([{ role: "intake", content: "IDEAS\n1. A\n…", reply: { kind: "ideas", message: "Two ways:", ideas: [{ name: "A", purpose: "a" }, { name: "B", purpose: "b" }] } }]), /INTAKE: Two ways:\n\(It offered:\n- A: a\n- B: b\)$/);
     assert.match(ownersWords([{ role: "intake", content: "SCHEDULES\n…", reply: { kind: "schedules" } }]), /INTAKE: SCHEDULES\n…$/);
     const long = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"x".repeat(1000)}` }));
     const w = ownersWords(long);

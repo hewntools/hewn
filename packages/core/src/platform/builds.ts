@@ -1335,7 +1335,7 @@ function turnText(t: BuildTurn): string {
   const message = typeof r?.message === "string" ? r.message.trim() : "";
   let text = t.content.trim();
   if (r?.kind === "draft" && named(r.draft)) text = [message, `(It drafted ${named(r.draft)})`].filter(Boolean).join("\n");
-  else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered: ${r.ideas.map(named).join("; ")})`].filter(Boolean).join("\n");
+  else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
   return text + attached;
 }
 
