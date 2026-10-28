@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Real-browser E2E on a fresh workerd host (not part of npm test): the first run, an agent's
-// approval (from the Inbox), choosing who builds, a starter build, schedules, a destructive call
-// confirmed from the banner, and the authority trail on Activity. The builder is scripted (copies the Running Log seed);
+// approval (from the Inbox), choosing who builds, a starter build, schedules, Info's own actions (Run,
+// a rule, Deny then Authorize, Restore… cancelled), a destructive call confirmed from the banner,
+// and the authority trail on Activity. The builder is scripted (copies the Running Log seed);
 // builder/intake checks are stubbed as installed and signed in, so it runs anywhere.
 //
 //   PLAYWRIGHT_NODE_MODULES=/path/to/node_modules/ node test/e2e/first-run.e2e.ts
@@ -184,6 +185,74 @@ try {
     await row.getByRole("checkbox", { name: "On" }).uncheck();
     await row.getByText(/paused/).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-schedules.png" });
+  });
+
+  await step("Info: Run on an operation opens the Run view on that operation", async () => {
+    await page.goto(`${web}/#/c/reading-list`);
+    const second = page.locator(".info-section", { hasText: "Operations" }).locator("li").nth(1);
+    const op = (await second.locator(".mono").textContent())!.trim();
+    await second.getByRole("button", { name: "Run" }).click();
+    await page.waitForURL(new RegExp(`#/run/reading-list\\?op=${op}$`));
+    await page.locator("nav.side-list button[aria-pressed='true']", { hasText: op }).waitFor();
+  });
+
+  await step("a slow page the owner has already left doesn't draw over the next one", async () => {
+    const slow = "**/api/capabilities/reading-list";
+    await page.route(slow, async (r: any) => (await new Promise((ok) => setTimeout(ok, 1500)), r.continue()));
+    await page.goto(`${web}/#/`);
+    await page.locator(".tile-label", { hasText: "Reading List" }).waitFor();
+    await page.evaluate(() => (location.hash = "#/c/reading-list"));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => (location.hash = "#/activity"));
+    await page.getByRole("heading", { name: "Activity" }).waitFor();
+    await page.waitForTimeout(2500);
+    if (await page.locator(".info-page").count()) throw new Error("Info drew over Activity");
+    await page.unroute(slow);
+  });
+
+  await step("Info: add a rule for the tool, then Remove it", async () => {
+    await page.goto(`${web}/#/c/reading-list`);
+    const section = page.locator(".info-section", { hasText: "Instructions" });
+    await section.getByLabel("New rule").fill("Titles in sentence case");
+    await section.getByRole("button", { name: "Add", exact: true }).click();
+    const rule = section.locator("li", { hasText: "Titles in sentence case" });
+    await rule.waitFor();
+    await rule.getByRole("button", { name: "Remove" }).click();
+    await rule.waitFor({ state: "detached" });
+  });
+
+  await step("Info: Deny a host a tool asks for, it says you said no, then Authorize it", async () => {
+    // A counter that asks to reach a host, installed by the owner.
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-host-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "host-counter", name: "Host Counter", requires: { hosts: ["api.example.com"] } }));
+    const installed = await sv.admin("install", { name: "Host Counter", purpose: "Counts, and may reach a host", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    await page.goto(`${web}/#/c/host-counter`);
+    await page.locator(".info-notice", { hasText: "Wants to Reach api.example.com" }).getByRole("button", { name: "Deny" }).click();
+    const saidNo = page.locator(".info-notice", { hasText: "You said no to letting it connect to api.example.com" });
+    await saidNo.waitFor();
+    await page.locator(".pill", { hasText: "you said no" }).waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-said-no.png" });
+    await saidNo.getByRole("button", { name: "Authorize" }).click();
+    await saidNo.waitFor({ state: "detached" });
+    await page.locator(".pill.ok", { hasText: /^ready$/ }).waitFor();
+  });
+
+  await step("Versions › Details › Restore… asks first, and Cancel keeps the live version", async () => {
+    const v2 = await sv.admin("modify", { capabilityId: "reading-list", request: "a second version", wait: true });
+    if (v2.status !== "promoted") throw new Error(v2.log?.join("\n"));
+    await page.goto(`${web}/#/c/reading-list`);
+    await page.locator(".info-section", { hasText: "Versions" }).locator("li").filter({ hasNotText: "live" }).getByRole("button", { name: "Details" }).click();
+    await page.waitForURL(/#\/c\/reading-list\/v\/1$/);
+    await page.getByRole("button", { name: "Restore…" }).click();
+    const confirm = page.locator("dialog[open]", { hasText: "Restore v1?" });
+    await confirm.waitFor();
+    await confirm.getByRole("button", { name: "Cancel" }).click();
+    await confirm.waitFor({ state: "detached" });
+    const status = await sv.admin("status", {});
+    if (status.capabilities.find((c: any) => c.id === "reading-list")?.version !== 2) throw new Error("Cancel restored it");
   });
 
   await step("an agent's destructive call waits for the owner, who allows it once", async () => {
