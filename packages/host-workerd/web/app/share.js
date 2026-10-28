@@ -3,7 +3,7 @@
 // masked, each with Show; the sample data), the ways to share below as rows (a file now; a link
 // in 0.4.10, Publish to Hub in 0.5). Write it yourself: a tool's sample data, edited by hand.
 import { api, appIcon, enc, fail, h, modal, setWallpaper, sheetActions, skeleton, svg, tintOf, caps } from "../kit.js";
-import { backBar, go, hues, put, view } from "./frame.js";
+import { backBar, go, hues, put, stillHere, view } from "./frame.js";
 import { plural } from "./intake.js";
 import { download, openChange } from "./tool-actions.js";
 
@@ -110,13 +110,16 @@ async function shareSheet(c, { version } = {}) {
  * Saving makes a new version with no builder; validation replays it on an empty tool first.
  */
 async function samplePage(id) {
+  const here = stillHere();
   view(backBar("Info", `#/c/${enc(id)}`), h("main", { class: "column", style: { "--w": "900px" } }, skeleton("40%", "90%", "70%")));
   const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
+  if (!here()) return;
   const c = all.get(id) ?? { id, name: cap.name };
   setWallpaper(await hues([tintOf(c)]));
   const version = c.version ?? cap.versions[0]?.version;
   const has = (await api(`/capabilities/${enc(id)}/data`).catch(() => null))?.sample;
   const current = has ? await api(`/capabilities/${enc(id)}/code?version=${version}&path=${enc("sample/calls.json")}`).catch(() => null) : null;
+  if (!here()) return;
   // A start: one call per operation that writes, with its required fields left for you to fill.
   const writes = cap.operations.filter((o) => o.sideEffect === "write" && !o.deprecated);
   const today = new Date().toISOString().slice(0, 10);

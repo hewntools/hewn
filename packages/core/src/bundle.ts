@@ -16,7 +16,7 @@ export const MAX_BUNDLE_BYTES = 5 * 1024 * 1024;
 export const SIDECAR = "hewn-bundle.json";
 export const SAMPLE_FILE = "sample/calls.json";
 
-/** What the intake model wrote about a tool's code (decision 29), shipped with a bundle Hewn publishes. */
+/** What the intake model wrote about a tool's code, shipped with a bundle Hewn publishes. */
 export interface BundleSummary {
   message: string;
   keeps?: string;
