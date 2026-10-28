@@ -4,6 +4,7 @@
 // in 0.4.10, Publish to Hub in 0.5). Write it yourself: a tool's sample data, edited by hand.
 import { api, appIcon, enc, fail, h, modal, setWallpaper, sheetActions, skeleton, svg, tintOf, caps } from "../kit.js";
 import { backBar, go, hues, put, view } from "./frame.js";
+import { plural } from "./intake.js";
 import { download, openChange } from "./tool-actions.js";
 
 export { samplePage, shareButton, shareIcon, shareSheet };
@@ -17,8 +18,8 @@ const shareIcon = () =>
     svg("path", { d: "M7.5 7.5 12 3l4.5 4.5" }),
     svg("path", { d: "M8.5 10.5H6.5a1.5 1.5 0 0 0-1.5 1.5v7.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V12a1.5 1.5 0 0 0-1.5-1.5h-2" }),
   );
-/** Share… as a top-bar button, with its mark. */
-const shareButton = (c) => h("button", { class: "with-icon", onclick: () => shareSheet(c).catch(fail) }, shareIcon(), "Share…");
+/** Share… as a top-bar button, with its mark. `version`: open on that version (a version's page) rather than the live one. */
+const shareButton = (c, { version } = {}) => h("button", { class: "with-icon", onclick: () => shareSheet(c, { version }).catch(fail) }, shareIcon(), "Share…");
 
 /** What Ask builder asks for: sample data, written the way the brief says. */
 const ASK_SAMPLE = "Add sample data: sample/calls.json with made-up entries that show what the tool does (it fills an empty tool when someone installs it, and its screenshots).";
@@ -56,7 +57,7 @@ async function shareSheet(c, { version } = {}) {
         const warnings = check.findings.filter((f) => f.kind !== "secret");
         const where = [...new Set(keys.map((f) => `${f.file}:${f.line}`))];
         const sampleRow = check.sample
-          ? h("li", {}, h("span", { class: "dot ok" }), h("div", { class: "grow" }, h("span", {}, "Sample data"), h("span", { class: "sub" }, `sample/calls.json · ${check.sample.calls} calls · always included`)))
+          ? h("li", {}, h("span", { class: "dot ok" }), h("div", { class: "grow" }, h("span", {}, "Sample data"), h("span", { class: "sub" }, `sample/calls.json · ${plural(check.sample.calls, "call")} · always included`)))
           : check.connection
             ? h("li", {}, h("span", { class: "dot ok" }), h("div", { class: "grow" }, h("span", {}, "No sample data needed"), h("span", { class: "sub" }, "A connection has none of its own to show. Whoever installs it signs in with their own account.")))
           : h(

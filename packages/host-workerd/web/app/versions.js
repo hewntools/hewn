@@ -41,8 +41,8 @@ async function load(id) {
   return { cap, all, c, active: c.version ?? cap.versions[0]?.version };
 }
 
-/** Info's top bar, the same on a tool's version pages. */
-const toolBar = (c) => backBar("Home", "#/", toolActions(c, { extra: shareButton(c) }));
+/** Info's top bar, the same on a tool's version pages (where Share… opens on the version on screen). */
+const toolBar = (c, version) => backBar("Home", "#/", toolActions(c, { extra: shareButton(c, { version }) }));
 /** Back to the tool's Info: the tool itself, at the top left of the page. */
 const backRef = (c, id, cls = "") => h("a", { class: `back-ref ${cls}`.trim(), href: `#/c/${enc(id)}` }, "‹", capRef(c, id, { size: 28 }));
 
@@ -147,7 +147,7 @@ async function versionPage(id, n, q) {
   if (long) what.addEventListener("click", () => what.classList.toggle("clamped"));
   if (long) what.title = "Click to show all of it, or less";
   frame(
-    toolBar(c),
+    toolBar(c, v.version),
     menu,
     h(
       "div",

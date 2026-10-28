@@ -2,9 +2,9 @@
 // Real-browser E2E on a fresh workerd host (not part of npm test): the first run, an agent's
 // approval (from the Inbox), choosing who builds, a starter build, schedules, Info's own actions (Run,
 // a rule, Deny then Authorize, Restore… cancelled), a version's Files, a destructive call confirmed
-// from the banner, and the authority trail on Activity. The builder is scripted (copies the Running
-// Log seed; a change adds a line); builder/intake checks are stubbed as installed and signed in, so
-// it runs anywhere.
+// from the banner, Share… on a tool installed from a file, and the authority trail on Activity. The
+// builder is scripted (copies the Running Log seed; a change adds a line); builder/intake checks are
+// stubbed as installed and signed in, so it runs anywhere.
 //
 //   PLAYWRIGHT_NODE_MODULES=/path/to/node_modules/ node test/e2e/first-run.e2e.ts
 // With E2E_REAL_BUILDER=1 the starter is built by the real builder (Claude Code, signed in on this
@@ -18,10 +18,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
+import { packBundle } from "@hewntools/core/bundle.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor } from "@hewntools/cli/supervisor/index.ts";
 import { BUILDERS } from "@hewntools/cli/builders/cli-agents.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
+import { readTree } from "@hewntools/cli/workbench.ts";
 import { editJson, SEED } from "../helpers.ts";
 import { freePort } from "../workerd-helpers.ts";
 
@@ -312,10 +314,35 @@ export const operations = {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  await step("Activity shows who changed authority, and when", async () => {
+  await step("a tool from a file: Share… shows its sample data, and opens on the version on screen", async () => {
+    const files = { ...readTree(SEED), "sample/calls.json": Buffer.from(JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }])) };
+    const zip = packBundle(files, { format: 1, hewn: "e2e", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 1, hash: "d".repeat(64) } });
+    const installed = await sv.admin("install", { bundle: Buffer.from(zip).toString("base64"), name: "Shared Log", wait: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    const changed = await sv.admin("modify", { capabilityId: "shared-log", request: "a second version", wait: true });
+    if (changed.status !== "promoted") throw new Error(changed.log?.join("\n"));
+    await page.goto(`${web}/#/c/shared-log`);
+    await page.locator(".pill", { hasText: "from a file · Running Log v1" }).waitFor();
+    await page.getByRole("button", { name: "Share…" }).click();
+    let sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
+    await sheet.getByText(/sample\/calls\.json · 1 call · /).waitFor();
+    if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Info's Share… isn't on the live version");
+    if (await sheet.getByRole("button", { name: "Download" }).isDisabled()) throw new Error("Download is off");
+    await page.screenshot({ path: "/tmp/e2e-fr-share.png" });
+    await sheet.getByRole("button", { name: "Done" }).click();
+    await page.goto(`${web}/#/c/shared-log/v/1`);
+    await page.getByRole("button", { name: "Share…" }).click();
+    sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
+    await sheet.getByText(/sample\/calls\.json/).waitFor();
+    if ((await sheet.getByLabel("Version").inputValue()) !== "1") throw new Error("a version page's Share… isn't on that version");
+    await sheet.getByRole("button", { name: "Done" }).click();
+  });
+
+  await step("Activity shows who changed authority, and when, and an install from a file", async () => {
     await page.goto(`${web}/#/activity`);
     await page.getByText("Connected Claude Code").waitFor();
     await page.getByText(/Let Claude Code run/).waitFor();
+    await page.getByText("Installed from a file · v1").waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-activity.png", fullPage: true });
   });
 } finally {
