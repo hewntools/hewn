@@ -22,9 +22,8 @@ import { Connections, type ConnectionHealth } from "./platform/connections.ts";
 import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
-import type { BundleSummary } from "./bundle.ts";
+import type { BundleSummary, ShelfTool } from "./bundle.ts";
 import { type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
-import type { ShelfTool } from "./bundle.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport } from "./platform/builds.ts";
 import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
@@ -239,6 +238,9 @@ export class Platform {
   setSample(owner: Agent, capabilityId: string, json: string): Promise<BuildView> { return this.d.sharing.setSample(owner, capabilityId, json); }
   hubCards(owner: Agent, shelf: ShelfTool[]): HubCard[] { return this.d.sharing.hubCards(owner, shelf); }
   hubDetail(owner: Agent, shelf: ShelfTool[], id: string): HubDetail { return this.d.sharing.hubDetail(owner, shelf, id); }
+  hubCode(owner: Agent, shelf: ShelfTool[], id: string) { return this.d.sharing.hubCode(owner, shelf, id); }
+  hubFile(owner: Agent, shelf: ShelfTool[], id: string, path: string) { return this.d.sharing.hubFile(owner, shelf, id, path); }
+  hubImage(owner: Agent, shelf: ShelfTool[], id: string, name: string): { id: string; name: string } { return this.d.sharing.hubImage(owner, shelf, id, name); }
   hubStage(owner: Agent, shelf: ShelfTool[], id: string): Promise<BundlePreview> { return this.d.sharing.hubStage(owner, shelf, id); }
 
   // ---------- grants, secrets, config, agents, confirmations (platform/grants.ts) ----------

@@ -11,6 +11,7 @@ import { gzipSync } from "node:zlib";
 import { USER } from "@hewntools/core/auth.ts";
 import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
+import { readShelf } from "@hewntools/cli/shelf.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
 import { bundleWorkspace } from "@hewntools/cli/workbench.ts";
 import { editJson, editText, installFrom, installSeed, platformWith, SEED, setup } from "./helpers.ts";
@@ -499,6 +500,21 @@ describe("sharing: a tool as a file", () => {
     const left = Object.keys(extra).filter((p) => p.startsWith("tests/") && !read[p]);
     assert.ok(left.length > 0 && left.every((p) => input.cut.includes(p)), "no room left: named");
     await assert.rejects(t.platform.summaryInput(t.claude, preview.token), /cannot perform owner actions/);
+  });
+
+  test("the Hub: owner only; an Official tool staged from it carries Hewn's reading and the release that made it; only its own images", async () => {
+    const shelf = readShelf(resolve(import.meta.dirname, "../seeds")).tools;
+    for (const call of [() => t.platform.hubCards(t.claude, shelf), () => t.platform.hubDetail(t.claude, shelf, "plant-log"), () => t.platform.hubCode(t.claude, shelf, "plant-log"), () => t.platform.hubFile(t.claude, shelf, "plant-log", "capability.json"), () => t.platform.hubImage(t.claude, shelf, "plant-log", "screen")]) assert.throws(call, /cannot perform owner actions/);
+    await assert.rejects(t.platform.hubStage(t.claude, shelf, "plant-log"), /cannot perform owner actions/);
+    for (const call of [() => t.platform.hubDetail(USER, shelf, "nope"), () => t.platform.hubCode(USER, shelf, "nope"), () => t.platform.hubFile(USER, shelf, "nope", "capability.json"), () => t.platform.hubImage(USER, shelf, "nope", "screen")]) assert.throws(call, /isn't on the Hub/);
+    assert.deepEqual(t.platform.hubImage(USER, shelf, "plant-log", "screen"), { id: "plant-log", name: "screen" });
+    for (const name of ["listing", "../capability", "../../shelf"]) assert.throws(() => t.platform.hubImage(USER, shelf, "plant-log", name), (e: any) => e.code === "not_found", name);
+    t.platform.version = "0.4.9";
+    const preview = await t.platform.hubStage(USER, shelf, "plant-log");
+    assert.equal(preview.summaryBy, "hewn");
+    const { sidecar } = unpackBundle((await t.platform.blobs.get(`bundles/${preview.token}.zip`))!);
+    assert.equal(sidecar.hewn, "0.4.9");
+    assert.equal(sidecar.summary?.message, shelf.find((x) => x.id === "plant-log")!.listing.summary.message);
   });
 
   test("sample data that doesn't replay fails the version, and says which call", async () => {

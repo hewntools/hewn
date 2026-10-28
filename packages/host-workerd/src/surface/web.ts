@@ -7,9 +7,7 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { readSummary } from "@hewntools/core/bundle.ts";
-import { codeFiles, codeText } from "@hewntools/core/code.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
-import { hubBundle } from "@hewntools/core/platform/sharing.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
@@ -414,21 +412,15 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (!id && method === "GET") return { tools: platform.hubCards(owner, shelf.tools), firstRun: shelf.firstRun };
     if (id && !sub && method === "GET") return platform.hubDetail(owner, shelf.tools, id);
     if (id && sub === "image" && method === "GET") {
-      platform.hubDetail(owner, shelf.tools, id);
-      const png = await host.shelf?.image(id, arg ?? "");
+      const image = platform.hubImage(owner, shelf.tools, id, arg ?? "");
+      const png = await host.shelf?.image(image.id, image.name);
       if (!png) throw new PlatformError("not_found", "no such image");
+      // Its URL carries the release (?v=), so a day's caching never outlives an upgrade.
       return new Response(body(png), { status: 200, headers: { "content-type": "image/png", "cache-control": "private, max-age=86400", "x-content-type-options": "nosniff" } });
     }
     if (id && sub === "code" && method === "GET") {
-      const tool = shelf.tools.find((t) => t.id === id);
-      if (!tool) throw new PlatformError("not_found", `${id} isn't on the Hub`);
       const path = url.searchParams.get("path");
-      return path ? codeText(path, tool.files, null) : { version: tool.listing.version, base: null, files: codeFiles(tool.files, null) };
-    }
-    if (id && sub === "download" && method === "GET") {
-      const tool = shelf.tools.find((t) => t.id === id);
-      if (!tool) throw new PlatformError("not_found", `${id} isn't on the Hub`);
-      return new Response(body(hubBundle(tool)), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${id}.hewn.zip"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+      return path ? platform.hubFile(owner, shelf.tools, id, path) : platform.hubCode(owner, shelf.tools, id);
     }
     if (id && sub === "stage" && method === "POST") return platform.hubStage(owner, shelf.tools, id);
   }

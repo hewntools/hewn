@@ -8,7 +8,7 @@ import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, typ
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, contentHash, text } from "../files.ts";
-import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
+import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, type OperationManifest, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import type { Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
 import { randomToken } from "../sha256.ts";
@@ -47,6 +47,8 @@ export interface HubCard {
   installed: boolean;
   icon: { hue: number | null; saturation: number | null; glyph: Cells | null };
   images: string[];
+  /** The Hewn release it ships with: its images' URLs carry it, so an upgrade's new screens aren't hidden by a cached old one. */
+  release: string;
 }
 
 /** A tool's Hub page (Q3): the card, its reading, its operations and versions. */
@@ -55,6 +57,8 @@ export interface HubDetail extends HubCard {
   summary: BundleSummary;
   operations: { name: string; description: string; sideEffect: string }[];
   versions: HubListing["versions"];
+  /** Your tool that it is (installed from Hub, under any name, or one of the same id): Open opens it. */
+  installedAs: string | null;
 }
 
 /** What the install sheet shows before anything is installed. */
@@ -315,7 +319,7 @@ export class Sharing extends Domain {
       sample: sample?.length ?? null,
       files: Object.keys(files).length,
       suggestedName: this.freeName(m.name),
-      operations: m.operations.filter((o) => !o.deprecated).map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect })),
+      operations: newestOperations(m),
       icon: { hue: m.hue ?? null, saturation: m.saturation ?? null, glyph: files["ui/icon.svg"] ? (cellsFromSvg(text(files["ui/icon.svg"])) ?? null) : null },
     };
   }
@@ -357,25 +361,54 @@ export class Sharing extends Domain {
     return shelf.map((t) => this.card(t));
   }
 
+  /** A tool's Hub page: its card, Hewn's reading, its operations (the newest of each), its versions, and which of yours it is. */
   hubDetail(owner: Agent, shelf: ShelfTool[], id: string): HubDetail {
     requireOwner(owner);
-    const t = shelf.find((x) => x.id === id);
-    if (!t) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+    const t = shelfTool(shelf, id);
     const m = manifestOf(t.files);
-    return { ...this.card(t), purpose: m.purpose, summary: t.listing.summary, operations: m.operations.filter((o) => !o.deprecated).map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect })), versions: t.listing.versions };
+    return { ...this.card(t), purpose: m.purpose, summary: t.listing.summary, operations: newestOperations(m), versions: t.listing.versions, installedAs: this.installedAs(t) };
+  }
+
+  /** The code browser on an Official tool: its files as they ship (nothing to compare with). */
+  hubCode(owner: Agent, shelf: ShelfTool[], id: string): { version: number; base: null; files: CodeFile[] } {
+    requireOwner(owner);
+    const t = shelfTool(shelf, id);
+    return { version: t.listing.version, base: null, files: codeFiles(t.files, null) };
+  }
+
+  hubFile(owner: Agent, shelf: ShelfTool[], id: string, path: string): CodeText {
+    requireOwner(owner);
+    return codeText(path, shelfTool(shelf, id).files, null);
+  }
+
+  /** Which card image to hand out: one the tool has (`screen`, `widget`). The host reads the file. */
+  hubImage(owner: Agent, shelf: ShelfTool[], id: string, name: string): { id: string; name: string } {
+    requireOwner(owner);
+    const t = shelfTool(shelf, id);
+    if (!t.images.includes(name)) throw new PlatformError("not_found", `${t.id} has no ${name} image`);
+    return { id: t.id, name };
   }
 
   /** An Official tool, staged to install (from Hub, with Hewn's reading): the same sheet as a file's. */
   async hubStage(owner: Agent, shelf: ShelfTool[], id: string): Promise<BundlePreview> {
     requireOwner(owner);
-    const t = shelf.find((x) => x.id === id);
-    if (!t) throw new PlatformError("not_found", `${id} isn't on the Hub`);
-    return this.stageBundle(owner, hubBundle(t), { from: "hub" });
+    return this.stageBundle(owner, this.hubBundle(shelfTool(shelf, id)), { from: "hub" });
+  }
+
+  /** An Official tool as a bundle: its files, and Hewn's reading in the sidecar; made by this release. */
+  private hubBundle(t: ShelfTool): Uint8Array {
+    const m = manifestOf(t.files);
+    return packBundle(t.files, { format: 1, hewn: this.platform.version ?? "dev", abi: abiOf(m), exportedAt: new Date().toISOString(), tool: { id: t.id, version: t.listing.version, hash: contentHash(t.files, "") }, summary: t.listing.summary });
+  }
+
+  /** Your tool that is this one: installed from Hub (under any name) first, else one of the same id. */
+  private installedAs(t: ShelfTool): string | null {
+    const active = this.registry.listActiveCapabilities();
+    return (active.find((c) => c.source?.from === "hub" && c.source.id === t.id) ?? active.find((c) => c.id === t.id))?.id ?? null;
   }
 
   private card(t: ShelfTool): HubCard {
     const m = manifestOf(t.files);
-    const installed = this.registry.listActiveCapabilities().some((c) => c.id === t.id || (c.source?.from === "hub" && c.source.id === t.id));
     return {
       id: t.id,
       name: m.name,
@@ -384,9 +417,10 @@ export class Sharing extends Domain {
       version: t.listing.version,
       official: true,
       needs: { hosts: (m.requires?.hosts ?? []).filter((x) => !x.startsWith("config:")), model: m.requires?.model ? (m.requires.model.tier ?? "model") : null, tools: (m.requires?.capabilities ?? []).map((c) => c.id) },
-      installed,
+      installed: this.installedAs(t) !== null,
       icon: { hue: m.hue ?? null, saturation: m.saturation ?? null, glyph: t.files["ui/icon.svg"] ? (cellsFromSvg(text(t.files["ui/icon.svg"])) ?? null) : null },
       images: t.images,
+      release: this.platform.version ?? "dev",
     };
   }
 
@@ -505,8 +539,16 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
 
 const manifestOf = (files: Files) => JSON.parse(text(files["capability.json"])) as CapabilityManifest;
 
-/** An Official tool as a bundle: its files, and Hewn's reading in the sidecar. */
-export function hubBundle(t: ShelfTool): Uint8Array {
-  const m = manifestOf(t.files);
-  return packBundle(t.files, { format: 1, hewn: "shelf", abi: abiOf(m), exportedAt: new Date().toISOString(), tool: { id: t.id, version: t.listing.version, hash: contentHash(t.files, "") }, summary: t.listing.summary });
+/** A tool on the shelf, or not_found. */
+function shelfTool(shelf: ShelfTool[], id: string): ShelfTool {
+  const t = shelf.find((x) => x.id === id);
+  if (!t) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+  return t;
+}
+
+/** Its operations as a person reads them: the newest version of each (deprecated ones left out), in the manifest's order. */
+function newestOperations(m: CapabilityManifest): { name: string; description: string; sideEffect: string }[] {
+  const newest = new Map<string, OperationManifest>();
+  for (const o of m.operations) if (!o.deprecated && (newest.get(o.name)?.version ?? 0) < o.version) newest.set(o.name, o);
+  return [...newest.values()].map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect }));
 }
