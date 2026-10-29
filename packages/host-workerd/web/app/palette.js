@@ -101,6 +101,8 @@ async function commandPalette() {
         if (e.key === "ArrowDown") (e.preventDefault(), (at = Math.min(at + 1, shown.length - 1)), render());
         else if (e.key === "ArrowUp") (e.preventDefault(), (at = Math.max(at - 1, 0)), render());
         else if (e.key === "Enter" && shown[at]) (e.preventDefault(), run(shown[at]));
+        // At once, typed or not (a search field's own Escape only clears it); not one that cancels an IME composition.
+        else if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) (e.preventDefault(), close());
       });
       render();
       return [input, list];

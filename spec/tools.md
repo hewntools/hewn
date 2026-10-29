@@ -376,11 +376,13 @@ A tool can ship a UI for the owner: static files under `ui/`, with `ui/index.htm
 
 **The UI kit** at `/_platform/` (Apache-2.0, [`../packages/ui`](../packages/ui)):
 
-- `ui.css`: the design system (layout, controls, tokens, light and dark). Link it rather than restyling controls.
+- `ui.css`: the design system (layout, controls, tokens, light and dark). Link it and build on it. It's all in the cascade layer `hewn`, so your page's own CSS (outside any layer) always wins over it, whatever the selectors: your own tokens, light and dark, and a plain rule for a control. The exception is ui.css's `!important` rules: `[hidden]` and reduced motion. A token you set in plain `:root` applies in dark mode too, so give it a dark value as well, under `@media (prefers-color-scheme: dark) { :root { … } }`.
 - `chart.js`: `barChart(el, { labels, series, stacked?, unit? })` and `lineChart(el, { … })`.
 - `session.js`: the session shim. The host injects it into the `<head>` of every HTML page it serves, before any of the page's scripts.
 
 **Signing in.** The owner opens the UI from the host, which hands the page a one-time ticket; the page gets a session token (bound to this one tool, valid 12 hours) in its URL fragment. `session.js` takes it from there, keeps it for the tab, and removes it from the address bar.
+
+**Light and dark.** In Hewn's web client, the page can follow the owner's appearance. On System, that's the browser's `prefers-color-scheme`. When they pick Light or Dark, `session.js` sets `data-theme="light"` or `"dark"` and `color-scheme` on the page's `<html>` before any style loads (a sandboxed frame can't see the choice otherwise), changes them when they switch, and takes them off on System. The page follows if it links `ui.css`, which reads `data-theme`, or reads `data-theme` or `color-scheme` itself. For colours of your own, use `light-dark(<light>, <dark>)`: it follows `color-scheme`, which `ui.css` also sets for System (without `ui.css`, declare `:root { color-scheme: light dark }`). A plain `@media (prefers-color-scheme: dark)` follows only the browser's, as does a page opened on its own, outside the web client. A `data-theme` the page puts on its `<html>` itself stays: `session.js` neither replaces nor removes it, so a deliberately dark tool stays dark.
 
 **Calling operations.** The UI is just another client: it calls its own tool's operations, and nothing else. `session.js` patches `fetch`, so a request to `api/…` or `/api/…` goes to `<host>/tools/<id>/api/…` with the session token (`Authorization: Hewn <token>`) and the `x-hewn-ui: 1` header the API requires. Or use the helper it defines:
 

@@ -430,7 +430,10 @@ export class Builds extends Domain {
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     const existing = this.registry.getCapability(id);
     if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn (Settings › Data › Deleted tools), or pick another id`);
-    if (existing) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    // A create that never promoted (it failed or was cancelled) keeps its id for a retry; a new
+    // create of the same name takes it over instead (as `hewn install` does), unless one is being built.
+    if (existing) this.oneCreateAtATime(agent, id);
     if (req.kind !== undefined && req.kind !== "capability" && req.kind !== "connection") throw new PlatformError("invalid_request", 'kind must be "capability" or "connection"');
     const dependsOn = this.dependency(agent, req.after);
     // What a create asks for, and nothing else: an agent's arguments arrive as it sent them, and
@@ -444,7 +447,21 @@ export class Builds extends Domain {
       ...pickAsk(req),
       ...(dependsOn ? { after: dependsOn } : {}),
     };
-    return this.openCreateBuild(agent, id, request, true, undefined, undefined, dependsOn, conversation);
+    return this.openCreateBuild(agent, id, request, !existing, undefined, undefined, dependsOn, conversation);
+  }
+
+  /**
+   * One create of an id at a time: refused while another is waiting or being built. Not a widgets
+   * build chained after it (create with widgets): that one waits for it.
+   */
+  private oneCreateAtATime(agent: Agent, id: string) {
+    const building = this.registry.unfinishedBuild(id, { kind: "create" });
+    if (building) throw new PlatformError("conflict", `'${id}' is already being built${this.buildRef(agent, building)}; wait for it, or cancel it`);
+  }
+
+  /** " (build …)" in a message to `agent`, if it may see that build; else nothing. */
+  private buildRef(agent: Agent, b: BuildRow): string {
+    return this.sees(agent, b) ? ` (build ${b.id})` : "";
   }
 
   /** The build a new one should wait for (`after`, following retries), or undefined to start now. */
@@ -454,6 +471,13 @@ export class Builds extends Domain {
     this.visibleBuild(agent, after);
     const dep = this.currentBuild(after);
     if (dep.status === "promoted") return undefined;
+    if ((dep.status === "failed" || dep.status === "cancelled") && dep.kind === "create") {
+      // A new create of the same name took its id over (createBuild): that one stands in for it, live
+      // or on its way (waited for only by who may see it: its id is in the waiting build).
+      if (this.registry.getCapability(dep.capabilityId)?.activeVersion) return undefined;
+      const next = this.registry.unfinishedBuild(dep.capabilityId, { kind: "create" });
+      if (next && this.sees(agent, next)) return next.id;
+    }
     if (dep.status === "failed" || dep.status === "cancelled") throw new PlatformError("conflict", `build ${dep.id} (${dep.kind} ${dep.capabilityId}), which this would wait for, ${dep.status}; retry it first`);
     return dep.id;
   }
@@ -581,13 +605,18 @@ export class Builds extends Domain {
     return builder;
   }
 
-  /** A create build for `id` (newly reserved, or retrying a create that never promoted). */
+  /**
+   * A create build for `id`: newly reserved, or reserved by a create that never promoted (a retry of
+   * it, or a new create of the same name), which then shows this one's name and purpose.
+   */
   private async openCreateBuild(agent: Agent, id: string, req: CreateRequest, reserve: boolean, builderOverride?: string, seed?: Files, dependsOn?: string, conversation?: BuildTurn[]): Promise<BuildView> {
     const builder = builderOverride ?? this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const buildId = newBuildId();
     this.registry.transaction(() => {
-      if (reserve) this.registry.insertCapability({ id, name: req.name, purpose: req.purpose, createdBy: agent.id });
+      const reservation = { id, name: req.name, purpose: req.purpose, createdBy: agent.id };
+      if (reserve) this.registry.insertCapability(reservation);
+      else this.registry.takeOverCapability(reservation);
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, id, conversation);
@@ -620,7 +649,7 @@ export class Builds extends Domain {
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId))),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
@@ -640,6 +669,8 @@ export class Builds extends Domain {
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
     if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    // Takes over an id a create never promoted (as createBuild does), unless one is being built.
+    if (existing) this.oneCreateAtATime(owner, id);
     const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };
     return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
   }
@@ -717,7 +748,7 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
-    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
+    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
     await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
@@ -779,6 +810,10 @@ export class Builds extends Domain {
       if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
       if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
+      // A new create of the same name took the id over (createBuild) and is still being built. Not a
+      // widgets build chained after this one (create with widgets): that one follows the retry.
+      const building = this.registry.unfinishedBuild(old.capabilityId, { kind: "create" });
+      if (building) throw new PlatformError("conflict", `'${old.capabilityId}' is being built again${this.buildRef(agent, building)}; wait for it`);
       // An install retries with the same copy builder.
       const builder = old.builder?.startsWith("copy:") ? old.builder : undefined;
       const dependsOn = this.dependency(agent, req.after);
@@ -905,11 +940,16 @@ export class Builds extends Domain {
     }
   }
 
-  /** A build the agent may see: of a capability it can see, or one it requested. Else not found. */
+  /** A build the agent may see (see `sees`). Else not found. */
   private visibleBuild(agent: Agent, buildId: string): BuildRow {
     const b = this.registry.getBuild(buildId);
-    if (!b || (!canSee(agent, b.capabilityId) && b.requestedBy !== agent.id)) throw new PlatformError("not_found", `no build '${buildId}'`);
+    if (!b || !this.sees(agent, b)) throw new PlatformError("not_found", `no build '${buildId}'`);
     return b;
+  }
+
+  /** An agent may see a build of a capability it can see, or one it requested. */
+  private sees(agent: Agent, b: BuildRow): boolean {
+    return canSee(agent, b.capabilityId) || b.requestedBy === agent.id;
   }
 
   private assertSubmittable(build: BuildRow) {
@@ -959,8 +999,9 @@ export class Builds extends Domain {
       .catch((e) => {
         if (abort.signal.aborted) return;
         this.logger(`build ${buildId} crashed: ${(e as Error).message}`);
-        const log = [...this.mustBuild(buildId).log, `FAILED: ${(e as Error).message}`];
-        this.registry.updateBuild(buildId, { status: "failed", log });
+        // Gone (its capability purged meanwhile): nothing left to mark failed.
+        const b = this.registry.getBuild(buildId);
+        if (b) this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: ${(e as Error).message}`] });
       })
       .finally(async () => {
         await this.keepTranscript(buildId);
@@ -1390,6 +1431,16 @@ Change only what widgets need, and nothing else (validation enforces this):
 - add a new **read** operation per widget (\`widget_<name>@1\`) and its code in src/index.ts;
 - add a test case per widget operation to tests/cases.json (seed data with existing operations first).
 Don't change existing operations, \`requires\`, migrations or the UI. Existing widgets may be changed or removed.`;
+
+/**
+ * BUILDER.md's note on the schedules the owner approved with a build: Hewn sets them up once it's
+ * live, each running an operation by name (one that doesn't fit is skipped then), and the intake's
+ * brief leaves a new tool's operations to the builder.
+ */
+const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKind) =>
+  schedules?.length
+    ? `\n\nThe owner approved schedules that Hewn sets up once the ${kind === "create" ? "capability" : "change"} is live: ${schedules.map((x) => `\`${x.operation.split("@")[0]}\` (${x.cadence})`).join(", ")}. Each runs the operation of that exact name with no input, so ${kind === "create" ? "give the capability an operation by each name" : "the capability must have an operation by each name after this change"}: read or write (not destructive), accepting \`{}\`.`
+    : "";
 
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";
