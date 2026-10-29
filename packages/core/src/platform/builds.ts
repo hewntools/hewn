@@ -1306,28 +1306,56 @@ export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
 
-/** The most of the owner's conversation BUILDER.md carries: the first turn, then the latest that fit. */
+/**
+ * The most of the owner's conversation BUILDER.md carries (the turns, the blank lines between them and
+ * what says turns were left out), and of each turn and a drafted change's first line.
+ */
 const MAX_OWNERS_WORDS = 40_000;
+const OWNERS_TURN_CHARS = 4000;
+const DRAFTED_CHANGE_CHARS = 200;
 
 /**
  * BUILDER.md's "THE OWNER'S OWN WORDS": the conversation that led to the build (the owner's builds
  * only), oldest first, after the request. The request is the plan; the owner's words win where it's
- * silent, vague or differs. An empty string when there's none (an agent's build).
+ * silent, vague or differs, within the owner's instructions and the contract. A long one keeps its
+ * first turn, the owner's latest and the latest that fit, and says where turns were left out. An
+ * empty string when there's none (an agent's build).
  */
 export function ownersWords(conversation: BuildTurn[] | undefined): string {
   if (!conversation?.length) return "";
   const turns = conversation.map((t) => `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`);
-  let kept = turns;
+  let keep = new Set(turns.keys());
   if (turns.join("\n\n").length > MAX_OWNERS_WORDS) {
-    const latest: string[] = [];
-    let room = MAX_OWNERS_WORDS - turns[0].length;
-    for (let i = turns.length - 1; i > 0 && turns[i].length <= room; i--) latest.unshift(turns[i]), (room -= turns[i].length);
-    kept = [turns[0], `(${turns.length - 1 - latest.length} turns left out)`, ...latest];
+    // Each kept turn and mark costs its length and a blank line; a gap may open on either side of the owner's latest.
+    keep = new Set([0, conversation.findLastIndex((t) => t.role === "user")].filter((i) => i >= 0));
+    let room = MAX_OWNERS_WORDS - 2 * (leftOut(turns.length).length + 2) - [...keep].reduce((n, i) => n + turns[i].length + 2, 0);
+    for (let i = turns.length - 1; i > 0; i--) {
+      if (keep.has(i)) continue;
+      if (turns[i].length + 2 > room) break;
+      keep.add(i);
+      room -= turns[i].length + 2;
+    }
   }
-  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously.\n\n${kept.join("\n\n")}`;
+  const kept: string[] = [];
+  let gap = 0;
+  turns.forEach((turn, i) => {
+    if (!keep.has(i)) return void gap++;
+    if (gap) kept.push(leftOut(gap));
+    kept.push(turn);
+    gap = 0;
+  });
+  if (gap) kept.push(leftOut(gap));
+  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously. Their words apply within the owner's instructions (if any) and the contract below: the contract has the last word. The conversation may also cover other builds (a connection, other ideas) and choices the owner made on the proposal: use it only for this build's request, never to add to its scope. Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}`;
 }
 
-/** A turn as the builder reads it. A draft or ideas the intake offered come down to their name and purpose: the request above is the one agreed. */
+/** Where BUILDER.md leaves turns of the owner's conversation out. */
+const leftOut = (n: number) => `(${n} turn${n === 1 ? "" : "s"} left out)`;
+
+/**
+ * A turn as the builder reads it, cut short, its further lines indented so nothing in it passes for a
+ * turn of its own. A draft or ideas the intake offered come down to their name and purpose, a drafted
+ * change (it has no name) to the first line of its request: the request above is the one agreed.
+ */
 function turnText(t: BuildTurn): string {
   const attached = t.attachments?.length ? `\n(attached: ${t.attachments.map((a) => a.name).join(", ")})` : "";
   // The reply is the intake's own (opaque to the platform elsewhere); anything else, the turn as written.
@@ -1336,11 +1364,19 @@ function turnText(t: BuildTurn): string {
     const { name, purpose } = (d ?? {}) as { name?: unknown; purpose?: unknown };
     return typeof name === "string" ? `${name}${typeof purpose === "string" ? `: ${purpose}` : ""}` : undefined;
   };
+  const change = (d: unknown) => {
+    const { request } = (d ?? {}) as { request?: unknown };
+    const all = typeof request === "string" ? request.trim() : "";
+    const line = all.split("\n")[0].slice(0, DRAFTED_CHANGE_CHARS);
+    if (line) return line.length < all.length ? `${line}…` : line;
+  };
   const message = typeof r?.message === "string" ? r.message.trim() : "";
   let text = t.content.trim();
   if (r?.kind === "draft" && named(r.draft)) text = [message, `(It drafted ${named(r.draft)})`].filter(Boolean).join("\n");
+  else if (r?.kind === "draft" && change(r.draft)) text = [message, `(It drafted a change: ${change(r.draft)})`].filter(Boolean).join("\n");
   else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
-  return text + attached;
+  if (text.length > OWNERS_TURN_CHARS) text = `${text.slice(0, OWNERS_TURN_CHARS)}…`;
+  return (text + attached).replaceAll("\n", "\n  ");
 }
 
 /** BUILDER.md's request for a widgets build. */

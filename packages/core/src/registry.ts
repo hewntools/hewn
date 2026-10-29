@@ -99,7 +99,7 @@ export interface BuildTurn {
   content: string;
   /** What the owner attached with this turn (refs into `attachments`). */
   attachments?: AttachmentRef[];
-  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform, except that BUILDER.md names a draft or idea by its name and purpose. */
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform, except that BUILDER.md names a draft or idea by its name and purpose (a drafted change by the first line of its request). */
   reply?: unknown;
 }
 
