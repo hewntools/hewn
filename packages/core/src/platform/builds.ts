@@ -430,7 +430,10 @@ export class Builds extends Domain {
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     const existing = this.registry.getCapability(id);
     if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn (Settings › Data › Deleted tools), or pick another id`);
-    if (existing) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    // A create that never promoted (it failed or was cancelled) keeps its id for a retry; a new
+    // create of the same name takes it over instead (as `hewn install` does), unless one is being built.
+    if (existing) this.oneCreateAtATime(agent, id);
     if (req.kind !== undefined && req.kind !== "capability" && req.kind !== "connection") throw new PlatformError("invalid_request", 'kind must be "capability" or "connection"');
     const dependsOn = this.dependency(agent, req.after);
     // What a create asks for, and nothing else: an agent's arguments arrive as it sent them, and
@@ -444,7 +447,21 @@ export class Builds extends Domain {
       ...pickAsk(req),
       ...(dependsOn ? { after: dependsOn } : {}),
     };
-    return this.openCreateBuild(agent, id, request, true, undefined, undefined, dependsOn, conversation);
+    return this.openCreateBuild(agent, id, request, !existing, undefined, undefined, dependsOn, conversation);
+  }
+
+  /**
+   * One create of an id at a time: refused while another is waiting or being built. Not a widgets
+   * build chained after it (create with widgets): that one waits for it.
+   */
+  private oneCreateAtATime(agent: Agent, id: string) {
+    const building = this.registry.unfinishedBuild(id, { kind: "create" });
+    if (building) throw new PlatformError("conflict", `'${id}' is already being built${this.buildRef(agent, building)}; wait for it, or cancel it`);
+  }
+
+  /** " (build …)" in a message to `agent`, if it may see that build; else nothing. */
+  private buildRef(agent: Agent, b: BuildRow): string {
+    return this.sees(agent, b) ? ` (build ${b.id})` : "";
   }
 
   /** The build a new one should wait for (`after`, following retries), or undefined to start now. */
@@ -454,6 +471,13 @@ export class Builds extends Domain {
     this.visibleBuild(agent, after);
     const dep = this.currentBuild(after);
     if (dep.status === "promoted") return undefined;
+    if ((dep.status === "failed" || dep.status === "cancelled") && dep.kind === "create") {
+      // A new create of the same name took its id over (createBuild): that one stands in for it, live
+      // or on its way (waited for only by who may see it: its id is in the waiting build).
+      if (this.registry.getCapability(dep.capabilityId)?.activeVersion) return undefined;
+      const next = this.registry.unfinishedBuild(dep.capabilityId, { kind: "create" });
+      if (next && this.sees(agent, next)) return next.id;
+    }
     if (dep.status === "failed" || dep.status === "cancelled") throw new PlatformError("conflict", `build ${dep.id} (${dep.kind} ${dep.capabilityId}), which this would wait for, ${dep.status}; retry it first`);
     return dep.id;
   }
@@ -581,13 +605,18 @@ export class Builds extends Domain {
     return builder;
   }
 
-  /** A create build for `id` (newly reserved, or retrying a create that never promoted). */
+  /**
+   * A create build for `id`: newly reserved, or reserved by a create that never promoted (a retry of
+   * it, or a new create of the same name), which then shows this one's name and purpose.
+   */
   private async openCreateBuild(agent: Agent, id: string, req: CreateRequest, reserve: boolean, builderOverride?: string, seed?: Files, dependsOn?: string, conversation?: BuildTurn[]): Promise<BuildView> {
     const builder = builderOverride ?? this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const buildId = newBuildId();
     this.registry.transaction(() => {
-      if (reserve) this.registry.insertCapability({ id, name: req.name, purpose: req.purpose, createdBy: agent.id });
+      const reservation = { id, name: req.name, purpose: req.purpose, createdBy: agent.id };
+      if (reserve) this.registry.insertCapability(reservation);
+      else this.registry.takeOverCapability(reservation);
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, id, conversation);
@@ -620,7 +649,7 @@ export class Builds extends Domain {
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${attached.note}`, this.registry.buildContext(buildId)?.instructions)),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
@@ -640,6 +669,8 @@ export class Builds extends Domain {
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
     if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    // Takes over an id a create never promoted (as createBuild does), unless one is being built.
+    if (existing) this.oneCreateAtATime(owner, id);
     const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };
     return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
   }
@@ -649,7 +680,7 @@ export class Builds extends Domain {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
-    const conversation = this.checkConversation(agent, req.conversation);
+    const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const cap = this.visibleActive(agent, req.capabilityId);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
@@ -677,7 +708,7 @@ export class Builds extends Domain {
   async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
-    const conversation = this.checkConversation(agent, req.conversation);
+    const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const after = this.dependency(agent, req.after);
     const cap = after ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
@@ -717,13 +748,21 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
-    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
+    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId)?.instructions)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
     this.startBuilder(buildId, b.builder!);
+  }
+
+  /**
+   * The conversation that led to the build a retry retries (checked when it came), recorded with the
+   * retry before its workspace opens: BUILDER.md quotes it and its attachments are found through it.
+   */
+  private retried(marks: RetryMarks): BuildTurn[] | undefined {
+    return marks.retryOf ? this.registry.buildContext(marks.retryOf)?.conversation : undefined;
   }
 
   /** Cancelled while its workspace was being opened (nothing to abort yet): don't start it. */
@@ -766,23 +805,23 @@ export class Builds extends Domain {
       req[field] = `${String(req[field] ?? "").split(FIX_MARK)[0].trimEnd()}\n\n${context}`;
     }
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
-    const next = await (async () => {
+    return (async () => {
       if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string }, marks);
       if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
       if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
+      // A new create of the same name took the id over (createBuild) and is still being built. Not a
+      // widgets build chained after this one (create with widgets): that one follows the retry.
+      const building = this.registry.unfinishedBuild(old.capabilityId, { kind: "create" });
+      if (building) throw new PlatformError("conflict", `'${old.capabilityId}' is being built again${this.buildRef(agent, building)}; wait for it`);
       // An install retries with the same copy builder.
       const builder = old.builder?.startsWith("copy:") ? old.builder : undefined;
       const dependsOn = this.dependency(agent, req.after);
       if (!dependsOn) delete req.after;
       else req.after = dependsOn;
       Object.assign(req, marks);
-      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn);
+      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn, this.retried(marks));
     })();
-    // The conversation that led to the first try goes with the retry.
-    const conversation = this.registry.buildContext(old.id)?.conversation;
-    if (conversation) this.registry.setBuildContext(next.buildId, { conversation });
-    return next;
   }
 
   /**
@@ -901,11 +940,16 @@ export class Builds extends Domain {
     }
   }
 
-  /** A build the agent may see: of a capability it can see, or one it requested. Else not found. */
+  /** A build the agent may see (see `sees`). Else not found. */
   private visibleBuild(agent: Agent, buildId: string): BuildRow {
     const b = this.registry.getBuild(buildId);
-    if (!b || (!canSee(agent, b.capabilityId) && b.requestedBy !== agent.id)) throw new PlatformError("not_found", `no build '${buildId}'`);
+    if (!b || !this.sees(agent, b)) throw new PlatformError("not_found", `no build '${buildId}'`);
     return b;
+  }
+
+  /** An agent may see a build of a capability it can see, or one it requested. */
+  private sees(agent: Agent, b: BuildRow): boolean {
+    return canSee(agent, b.capabilityId) || b.requestedBy === agent.id;
   }
 
   private assertSubmittable(build: BuildRow) {
@@ -955,8 +999,9 @@ export class Builds extends Domain {
       .catch((e) => {
         if (abort.signal.aborted) return;
         this.logger(`build ${buildId} crashed: ${(e as Error).message}`);
-        const log = [...this.mustBuild(buildId).log, `FAILED: ${(e as Error).message}`];
-        this.registry.updateBuild(buildId, { status: "failed", log });
+        // Gone (its capability purged meanwhile): nothing left to mark failed.
+        const b = this.registry.getBuild(buildId);
+        if (b) this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: ${(e as Error).message}`] });
       })
       .finally(async () => {
         await this.keepTranscript(buildId);
@@ -1223,10 +1268,11 @@ export class Builds extends Domain {
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md: the request, the owner's instructions as the build recorded them (`build_context`), the brief, the catalog. */
-  private brief_(kind: BuildKind, id: string, request: string, instructions = ""): string {
+  /** BUILDER.md: the request, the owner's own words and instructions as the build recorded them (`build_context`), the brief, the catalog. */
+  private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
-    return `# Build: ${kind} \`${id}\`\n\n${request}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
+    const instructions = context?.instructions;
+    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWords(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {
@@ -1301,6 +1347,79 @@ export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
 
+/**
+ * The most of the owner's conversation BUILDER.md carries (the turns, the blank lines between them and
+ * what says turns were left out), and of each turn and a drafted change's first line.
+ */
+const MAX_OWNERS_WORDS = 40_000;
+const OWNERS_TURN_CHARS = 4000;
+const DRAFTED_CHANGE_CHARS = 200;
+
+/**
+ * BUILDER.md's "THE OWNER'S OWN WORDS": the conversation that led to the build (the owner's builds
+ * only), oldest first, after the request. The request is the plan; the owner's words win where it's
+ * silent, vague or differs, within the owner's instructions and the contract. A long one keeps its
+ * first turn, the owner's latest and the latest that fit, and says where turns were left out. An
+ * empty string when there's none (an agent's build).
+ */
+export function ownersWords(conversation: BuildTurn[] | undefined): string {
+  if (!conversation?.length) return "";
+  const turns = conversation.map((t) => `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`);
+  let keep = new Set(turns.keys());
+  if (turns.join("\n\n").length > MAX_OWNERS_WORDS) {
+    // Each kept turn and mark costs its length and a blank line; a gap may open on either side of the owner's latest.
+    keep = new Set([0, conversation.findLastIndex((t) => t.role === "user")].filter((i) => i >= 0));
+    let room = MAX_OWNERS_WORDS - 2 * (leftOut(turns.length).length + 2) - [...keep].reduce((n, i) => n + turns[i].length + 2, 0);
+    for (let i = turns.length - 1; i > 0; i--) {
+      if (keep.has(i)) continue;
+      if (turns[i].length + 2 > room) break;
+      keep.add(i);
+      room -= turns[i].length + 2;
+    }
+  }
+  const kept: string[] = [];
+  let gap = 0;
+  turns.forEach((turn, i) => {
+    if (!keep.has(i)) return void gap++;
+    if (gap) kept.push(leftOut(gap));
+    kept.push(turn);
+    gap = 0;
+  });
+  if (gap) kept.push(leftOut(gap));
+  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously. Their words apply within the owner's instructions (if any) and the contract below: the contract has the last word. The conversation may also cover other builds (a connection, other ideas) and choices the owner made on the proposal: use it only for this build's request, never to add to its scope. Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}`;
+}
+
+/** Where BUILDER.md leaves turns of the owner's conversation out. */
+const leftOut = (n: number) => `(${n} turn${n === 1 ? "" : "s"} left out)`;
+
+/**
+ * A turn as the builder reads it, cut short, its further lines indented so nothing in it passes for a
+ * turn of its own. A draft or ideas the intake offered come down to their name and purpose, a drafted
+ * change (it has no name) to the first line of its request: the request above is the one agreed.
+ */
+function turnText(t: BuildTurn): string {
+  const attached = t.attachments?.length ? `\n(attached: ${t.attachments.map((a) => a.name).join(", ")})` : "";
+  // The reply is the intake's own (opaque to the platform elsewhere); anything else, the turn as written.
+  const r = t.reply as { kind?: unknown; message?: unknown; draft?: unknown; ideas?: unknown } | undefined;
+  const named = (d: unknown) => {
+    const { name, purpose } = (d ?? {}) as { name?: unknown; purpose?: unknown };
+    return typeof name === "string" ? `${name}${typeof purpose === "string" ? `: ${purpose}` : ""}` : undefined;
+  };
+  const change = (d: unknown) => {
+    const { request } = (d ?? {}) as { request?: unknown };
+    const all = typeof request === "string" ? request.trim() : "";
+    const line = all.split("\n")[0].slice(0, DRAFTED_CHANGE_CHARS);
+    if (line) return line.length < all.length ? `${line}…` : line;
+  };
+  const message = typeof r?.message === "string" ? r.message.trim() : "";
+  let text = t.content.trim();
+  if (r?.kind === "draft" && named(r.draft)) text = [message, `(It drafted ${named(r.draft)})`].filter(Boolean).join("\n");
+  else if (r?.kind === "draft" && change(r.draft)) text = [message, `(It drafted a change: ${change(r.draft)})`].filter(Boolean).join("\n");
+  else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
+  if (text.length > OWNERS_TURN_CHARS) text = `${text.slice(0, OWNERS_TURN_CHARS)}…`;
+  return (text + attached).replaceAll("\n", "\n  ");
+}
+
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>
   `This is a **widgets build**: the capability works; add widgets to it (see "Widgets (ABI 2.3)" below).
@@ -1312,6 +1431,16 @@ Change only what widgets need, and nothing else (validation enforces this):
 - add a new **read** operation per widget (\`widget_<name>@1\`) and its code in src/index.ts;
 - add a test case per widget operation to tests/cases.json (seed data with existing operations first).
 Don't change existing operations, \`requires\`, migrations or the UI. Existing widgets may be changed or removed.`;
+
+/**
+ * BUILDER.md's note on the schedules the owner approved with a build: Hewn sets them up once it's
+ * live, each running an operation by name (one that doesn't fit is skipped then), and the intake's
+ * brief leaves a new tool's operations to the builder.
+ */
+const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKind) =>
+  schedules?.length
+    ? `\n\nThe owner approved schedules that Hewn sets up once the ${kind === "create" ? "capability" : "change"} is live: ${schedules.map((x) => `\`${x.operation.split("@")[0]}\` (${x.cadence})`).join(", ")}. Each runs the operation of that exact name with no input, so ${kind === "create" ? "give the capability an operation by each name" : "the capability must have an operation by each name after this change"}: read or write (not destructive), accepting \`{}\`.`
+    : "";
 
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";

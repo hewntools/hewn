@@ -94,9 +94,11 @@ Your votes are the ground truth. The judge is there to scale beyond what you hav
 - `sequential`: build the cases in order, each told how the earlier tools look (their hue and
   `ui/look.json`), as a Home fills up.
 - `spec`: where the spec comes from instead of the frozen requirements:
-  - `intake`: today's intake, from the case's `ask`;
-  - `intent`: the intake asked for UI intent instead of a sketch;
-  - `lean`: a lean intake brief plus the owner's own words, from a scripted conversation;
+  - `intake`: today's intake (the lean brief since 0.4.10), from the case's `ask`, its questions
+    answered with the defaults;
+  - `intent`: 0.4.9's intake spec (operations, state, tests) with UI intent instead of its UI sketch;
+  - `lean`: today's intake too, from a scripted conversation (the case's `ask`, then `talk`); the
+    builder also gets the owner's own words;
   - `thin`: an agent's one-liner.
 - `sample`: the builder writes `sample/calls.json`, which the bench replays instead of the case's seed.
 
@@ -107,7 +109,7 @@ can't quietly turn an arm into the baseline. `npm run bench -- list` shows them 
 
 `cases/<id>/`:
 
-- `requirements.md`: a frozen request in the intake's format (operations, state, tests, LATER, UI
+- `requirements.md`: a frozen request in 0.4.9's intake format (operations, state, tests, LATER, UI
   sketch).
 - `case.ts`:
   - the name and purpose;

@@ -99,7 +99,7 @@ export interface BuildTurn {
   content: string;
   /** What the owner attached with this turn (refs into `attachments`). */
   attachments?: AttachmentRef[];
-  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform. */
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform, except that BUILDER.md names a draft or idea by its name and purpose (a drafted change by the first line of its request). */
   reply?: unknown;
 }
 
@@ -650,6 +650,11 @@ export class Registry {
       .run(c.id, c.name, c.purpose, c.createdBy, now());
   }
 
+  /** A reserved id (one that never got a version) goes to the create opened on it now: its name, purpose and requester. */
+  takeOverCapability(c: { id: string; name: string; purpose: string; createdBy: string }) {
+    this.db.prepare("UPDATE capabilities SET name = ?, purpose = ?, created_by = ? WHERE id = ? AND active_version IS NULL").run(c.name, c.purpose, c.createdBy, c.id);
+  }
+
   /** The secret part of a capability's UI address, made on first use (a new capability under a purged id gets a new one). */
   uiKey(id: string, make: () => string): string {
     const cur = this.db.prepare("SELECT ui_key FROM capabilities WHERE id = ?").get(id)?.ui_key as string | null | undefined;
@@ -880,11 +885,14 @@ export class Registry {
 
   /**
    * The newest build of a capability still on its way: waiting, running or validating (not one done
-   * and waiting for the owner's review). `running`: only one running or validating now.
+   * and waiting for the owner's review). `running`: only one running or validating now. `kind`: only
+   * one of that kind.
    */
-  unfinishedBuild(capabilityId: string, { running = false, except = "" }: { running?: boolean; except?: string } = {}): BuildRow | undefined {
+  unfinishedBuild(capabilityId: string, { running = false, except = "", kind }: { running?: boolean; except?: string; kind?: BuildKind } = {}): BuildRow | undefined {
     const statuses = running ? "'open', 'building', 'validating'" : "'waiting', 'open', 'building', 'validating'";
-    const row = this.db.prepare(`SELECT * FROM builds WHERE capability_id = ? AND id != ? AND status IN (${statuses}) ORDER BY rowid DESC LIMIT 1`).get(capabilityId, except);
+    const row = this.db
+      .prepare(`SELECT * FROM builds WHERE capability_id = ? AND id != ? AND status IN (${statuses})${kind ? " AND kind = ?" : ""} ORDER BY rowid DESC LIMIT 1`)
+      .get(capabilityId, except, ...(kind ? [kind] : []));
     return row ? toBuild(row as Row) : undefined;
   }
 

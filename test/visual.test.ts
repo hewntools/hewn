@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
+import { text } from "@hewntools/core/files.ts";
+import { sourceAsset } from "@hewntools/cli/assets.ts";
+import { widgetAppHtml } from "@hewntools/host-workerd/surface/widget-app.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { Home } from "@hewntools/cli/home.ts";
@@ -135,6 +138,43 @@ describe("visual validation", () => {
     assert.equal(api.status, "promoted", api.log.join("\n"));
     platform.close();
   });
+
+  test("a real headless browser: a tool's own CSS wins over ui.css, its dark tokens and a plain rule for a control too", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+    const render = async (style: string, button: string) => {
+      const uiDir = mkdtempSync(join(tmpdir(), "hewn-ui-"));
+      writeFileSync(join(uiDir, "index.html"), `<!doctype html><html><head><link rel="stylesheet" href="/_platform/ui.css"><style>${style}</style></head><body><main class="page"><button ${button}>Save</button></main></body></html>`);
+      const r = await chromiumCheck(browser)({ uiDir, manifest: {}, invoke: async () => ({}) });
+      assert.deepEqual(r.errors, []);
+      return [r.screenshot, r.screenshotDark];
+    };
+    // The tool's own tokens, light and dark, and a rule for every button (ui.css's `button.primary` is more specific).
+    const own = await render(":root { --bg: rgb(0 0 255); } @media (prefers-color-scheme: dark) { :root { --bg: rgb(255 0 0); } } button { background: rgb(0 160 0); }", `class="primary"`);
+    // The same colours, set where nothing in ui.css can outrank them.
+    const fixed = await render("body { background: rgb(0 0 255); } @media (prefers-color-scheme: dark) { body { background: rgb(255 0 0); } }", `class="primary" style="background: rgb(0 160 0)"`);
+    assert.deepEqual(own[0], fixed[0], "light: the tool's background and button");
+    assert.deepEqual(own[1], fixed[1], "dark: the tool's dark background wins over ui.css's dark tokens");
+  });
+});
+
+/** A stylesheet's top-level blocks, by what comes before their `{`, comments dropped (and anything after the last block). */
+const topLevel = (css: string) => {
+  const src = css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => (m.startsWith("/*") ? "" : `""`));
+  const blocks: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < src.length; i++) {
+    if (src[i] === "{" && depth++ === 0) blocks.push(src.slice(from, i).trim());
+    else if (src[i] === "}" && --depth === 0) from = i + 1;
+  }
+  const rest = src.slice(from).trim();
+  return rest ? [...blocks, rest] : blocks;
+};
+
+test("Hewn's own CSS is all in the layer hewn, so a tool's own CSS wins over it (the browser test above, without a browser)", async () => {
+  for (const path of ["platform-ui/ui.css", "web/app.css"]) assert.deepEqual(topLevel(text((await sourceAsset(path))!)), ["@layer hewn"], path);
+  const style = /<style>([\s\S]*)<\/style>/.exec(await widgetAppHtml(sourceAsset))![1];
+  assert.deepEqual(topLevel(style), ["@layer hewn", "@layer hewn"], "the widget app: ui.css, then its own CSS");
+  assert.deepEqual(topLevel("@layer hewn { a { b: c } } d { e: f }"), ["@layer hewn", "d"], "a rule after the layer shows");
 });
 
 test("a browser that won't start skips the check (with the reason) instead of failing the build", async () => {

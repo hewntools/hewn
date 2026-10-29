@@ -167,7 +167,8 @@ async function serveCandidate(req: VisualRequest) {
     if (req.widgets) {
       const page = (type: string, body: string) => res.writeHead(200, { "content-type": type, "content-security-policy": SHEET_CSP, "cache-control": "no-store" }).end(body);
       if (url.pathname === "/") return page(TYPES[".html"], SHEET_HTML);
-      if (url.pathname === "/sheet.css") return page("text/css; charset=utf-8", SHEET_CSS);
+      // In ui.css's cascade layer ("hewn"), as app.css is on Home, so widgets cascade as they do there.
+      if (url.pathname === "/sheet.css") return page("text/css; charset=utf-8", `@layer hewn {${SHEET_CSS}}`);
       if (url.pathname === "/sheet.js") return page(TYPES[".js"], SHEET_JS);
       if (url.pathname === "/api/sheet") return page("application/json", JSON.stringify(req.widgets));
       return void res.writeHead(404).end();
