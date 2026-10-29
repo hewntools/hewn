@@ -101,6 +101,30 @@ describe("attachments: images and files the owner attaches in the intake's box",
     await assert.rejects(t.platform.attachmentsWithData(USER, [...refs, ...files]), /a short list of refs/);
   });
 
+  test("a retry gets the conversation's attachments and the owner's words, as the first try did", async () => {
+    const img = await t.platform.addAttachment(USER, { session: "s-r", kind: "image", name: "screen.png", mediaType: "image/png", data: PNG });
+    const conversation = [{ role: "user" as const, content: "like this screenshot", attachments: [{ ref: img.ref }] }];
+    const failed = await t.build(
+      () => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r", conversation: conversation as any }),
+      () => {
+        throw new Error("model overloaded");
+      },
+    );
+    assert.equal(failed.status, "failed");
+    let brief = "";
+    let shot = false;
+    t.queue((ws) => {
+      brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+      shot = existsSync(join(ws, "attachments/1-screen.png"));
+      seed(ws);
+    });
+    const retried = await t.platform.settle((await t.platform.retryBuild(USER, failed.buildId)).buildId);
+    assert.equal(retried.status, "promoted", retried.log.join("\n"));
+    assert.ok(shot, "the screenshot is in the retry's workspace");
+    assert.match(brief, /`attachments\/1-screen\.png`: an image/);
+    assert.match(brief, /THE OWNER'S OWN WORDS[^]*OWNER: like this screenshot\n  \(attached: screen\.png\)/);
+  });
+
   test("several tools from one conversation share its attachments; purging one leaves them for the other", async () => {
     const img = await t.platform.addAttachment(USER, { session: "s-6", kind: "image", name: "both.png", mediaType: "image/png", data: PNG });
     const conversation = [{ role: "user" as const, content: "two tools from this", attachments: [{ ref: img.ref }] }] as any;
