@@ -287,12 +287,20 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         uiDir: join(o.home.builds, String(b.buildId), "ui"),
         manifest: b.manifest,
         ...(Array.isArray(b.widgets) ? { widgets: b.widgets } : {}),
+        ...(b.measure === true ? { measure: true } : {}),
         invoke: async (body) => {
           const res = await fetch(`${url}/_admin/visual-invoke`, { method: "POST", headers: { "x-hewn-admin": adminToken, "content-type": "application/json" }, body: JSON.stringify({ buildId: b.buildId, body }) });
           return res.json();
         },
       });
-      return { skipped: r.skipped, errors: r.errors, screenshot: r.screenshot ? toBase64(new Uint8Array(r.screenshot)) : undefined, screenshotDark: r.screenshotDark ? toBase64(new Uint8Array(r.screenshotDark)) : undefined };
+      return {
+        skipped: r.skipped,
+        errors: r.errors,
+        screenshot: r.screenshot ? toBase64(new Uint8Array(r.screenshot)) : undefined,
+        screenshotDark: r.screenshotDark ? toBase64(new Uint8Array(r.screenshotDark)) : undefined,
+        ...(r.shots ? { shots: r.shots.map((s) => ({ name: s.name, png: toBase64(new Uint8Array(s.png)) })) } : {}),
+        ...(r.defects ? { defects: r.defects } : {}),
+      };
     },
     "/blobs/delete": async (b) => {
       const p = resolve(blobRoot, String(b.key));
