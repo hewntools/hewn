@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An opened tool (its own UI, or the Run view) and the change drawer beside it.
 import { api, appIcon, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
+import { themeNow, withTheme } from "./appearance.js";
 import { buildPanel } from "./build.js";
 import { bar, glassBack, hues, onLeave, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet } from "./grants.js";
@@ -160,13 +161,13 @@ async function appPage(id, q) {
   const c = all.get(id) ?? { id, name: id };
   // Sandboxed without allow-same-origin (the server's CSP says the same): the app runs on an
   // opaque origin and cannot touch or navigate the web client.
-  const frame = h("iframe", { class: "app-frame loading", src: url, title: c.name, sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals", allow: "clipboard-write" });
+  const frame = h("iframe", { class: "app-frame loading", src: withTheme(url), title: c.name, sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals", allow: "clipboard-write" });
   const scrollKey = `hewn.scroll.${id}`;
   const subtitle = h("span", { class: "app-subtitle muted" });
   const reload = async () => {
     invalidateCaps();
     frame.classList.add("loading");
-    frame.src = await openUrl();
+    frame.src = withTheme(await openUrl());
     // The bar's version follows (v1 → v2).
     const now = (await caps(true).catch(() => new Map())).get(c.id);
     const pill = barEl.querySelector(".app-title .pill");
@@ -201,12 +202,18 @@ async function appPage(id, q) {
     if (m.type === "failed") showFix();
     if (m.type === "ready") {
       frame.classList.remove("loading");
+      // A page the tool loaded itself had no fragment: tell it again.
+      postTheme();
       const y = Number(sessionStorage.getItem(scrollKey) ?? 0);
       if (y > 0) frame.contentWindow.postMessage({ hewn: 1, type: "restore-scroll", y }, "*");
     }
   };
   window.addEventListener("message", onMessage);
   onLeave(() => window.removeEventListener("message", onMessage));
+  // Light or dark changed (⌘K) while the tool is open.
+  const postTheme = () => frame.contentWindow?.postMessage({ hewn: 1, type: "theme", theme: themeNow() }, "*");
+  window.addEventListener("hewn:theme", postTheme);
+  onLeave(() => window.removeEventListener("hewn:theme", postTheme));
   // Older apps (or a slow first paint): don't stay invisible.
   const reveal = setInterval(() => frame.classList.remove("loading"), 1500);
   onLeave(() => clearInterval(reveal));
