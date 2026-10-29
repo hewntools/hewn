@@ -151,7 +151,8 @@ const hewn :Workerd.Worker = (
     (name = "capability-runtime.js", text = embed "capability-runtime.js"),
   ],
   compatibilityDate = "2026-09-01",
-  compatibilityFlags = ["experimental"],
+  # enable_request_signal: a request's signal aborts when its client goes (Stop in the chat stops the intake's CLI).
+  compatibilityFlags = ["experimental", "enable_request_signal"],
   bindings = [
     (name = "HEWN", durableObjectNamespace = "HewnDO"),
     (name = "CAPS", durableObjectNamespace = "CapabilityHost"),

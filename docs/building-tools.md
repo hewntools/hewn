@@ -10,9 +10,11 @@ In the web client: the **New** tile on Home, or press `n`. Describe it in plain 
 
 Paste a screenshot (Ctrl+V / ⌘V), drop files on the box, or **Attach**: a screenshot of the screen to change or the look you mean, a sketch, a script to port, data to import. Images (up to 5 per message, resized before they go up) and text files (up to 256 KB each) go with your message to the intake and, when you build, to the builder, in its workspace. They stay with the build, like the conversation.
 
-The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI) first talks it through: it asks until the request is clear (when you'd use it, what it keeps, the main action), each question with the default it would assume, so "ok" answers them all; **Draft now** skips the rest and takes its assumptions, listed with the proposal. Then it makes a **spec proposal**: the tool, what it will do, what it needs (a site to reach, a key, another tool, a model: its [grants](concepts.md#grants)), and any widgets or [schedules](concepts.md#schedules). A big request can become a few small tools that work together; untick the ones you don't want. Reply to change it, or press **Build** (it says how many tools: "Build 1 tool").
+The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI) first talks it through: it asks until the request is clear (when you'd use it, what it keeps, the main action), each question with the default it would assume, so "ok" answers them all; **Draft now** skips the rest and takes its assumptions, listed with the proposal. Then it makes a **spec proposal**: the tool, what it will do, what it needs (a site to reach, a key, another tool, a model: its [grants](concepts.md#grants)), and any widgets or [schedules](concepts.md#schedules). For a new tool the spec is a short brief, not a list of operations: what it's for, what it keeps, what you decided together, what it needs and how it should feel. The builder designs the operations and the screen from it and from your own words, so the card shows what it keeps and what's decided; **Show brief** has the whole brief. A big request can become a few small tools that work together; untick the ones you don't want. Reply to change it, or press **Build** (it says how many tools: "Build 1 tool").
 
-![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool; the box below has Attach](images/spec-proposal.png)
+![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, what it keeps and what's decided, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool; the box below has Attach](images/spec-proposal.png)
+
+Leave in the middle (to look something up in Activity, say) and come back, with Back or **New**: the conversation is where you left it in that browser tab, with what you'd typed and not sent, its last proposal ready to build. A reply still on its way when you left arrives there (or why it failed). It stays until you build from it or start a new one with **+ New** (top right, and it asks first; in a tool's **Change…** panel, next to ×), which keeps its own the same way. Opening one with its text already in the box (Info's **Change it**, **Ask builder to fix this**, **Ask builder** in Share…, Home's box) starts a new conversation too: the one kept is replaced once you send it. A conversation picked up with **Continue** isn't kept. While the intake is answering, **Send** is a stop button: it ends the run there and then, and your message goes back in the box.
 
 You can ask the box about Hewn too ("can a tool read my calendar?", "how do I undo a change?"): it answers from Hewn's docs instead of drafting, and says so when they don't cover it. Reply to carry on ("ok, draft one"). It sticks to Hewn: trivia, or something Hewn doesn't build (a Claude skill, a browser extension), gets a line saying so, and a tool if one would do.
 
@@ -20,7 +22,7 @@ You can also ask an agent ("make me a reading list in Hewn"), if you allowed it 
 
 ## The build
 
-The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. Then Hewn:
+The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. It works from the spec and, for a tool you asked for in the chat, from your conversation with the intake too, in your own words: where the spec is silent or vague, or you changed your mind along the way, what you said wins, within your [instructions](#instructions) and Hewn's rules for tools. Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
@@ -70,6 +72,8 @@ A host's builder can also **pause** a build part-way, with its work kept: for ex
 ![A paused change to Plant Care: the host's note that it has used its allowance and its work is kept, with Continue and Stop](images/build-paused.png)
 
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude`, `codex login` or `opencode auth login`), then try again.
+
+A new tool that failed or that you cancelled doesn't hold on to its name: ask for it again (or build the same proposal) and the new build takes it over. **Retry** on the old build is refused while the new one is being built, works again if the new one fails or you cancel it, and once the new one is live says the tool has been created since. A build that waited for the old one (a tool that calls it) follows the new one when you retry it.
 
 ## Versions
 

@@ -55,7 +55,7 @@ const BIKE = {
     name: "Bike Care",
     purpose: "Log bike rides and remember when the chain needs oiling.",
     requirements:
-      "Operations: log_ride (date, km, minutes; fetches that hour's weather from api.open-meteo.com for the ride's location), list_rides (newest first, with weather), mark_oiled (today, or a date), service_due (km since the last oiling against the interval), delete_ride.\nState: rides, oilings, the service interval (default 300 km).\nWidget: Since last oiling (km and days; turns amber past the interval).\nTests: the interval maths, a ride without weather, the widget's empty state.",
+      "FOR\nThe owner opens it after a ride, to log it in a few seconds, and on Sunday evenings, to see whether the chain needs oiling before the week's rides.\n\nKEEPS\nEach ride: the date, how far in km, how long, and the weather it was ridden in, looked up for that hour. When the chain was last oiled, and how often it needs it (300 km unless the owner changes it).\n\nDECIDED\nThe weather comes from api.open-meteo.com, for where and when the ride was; no key. A reminder on Sunday evenings at 18:00 when the chain is due. Rides can be deleted. Left for later: more than one bike, parts other than the chain.\n\nPLATFORM\nReaches api.open-meteo.com. One weekly schedule. No model.\n\nUI INTENT\nLogging a ride must be quick: distance and time, today by default. At a glance, the km since the last oiling against the interval, as a gauge that fills towards oil it. Recent rides with their weather. Outdoors and mechanical: a bit of grease, a lot of sky.",
     spec: {
       operations: [
         { name: "log_ride", sideEffect: "write" as const },

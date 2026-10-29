@@ -11,10 +11,25 @@
   const base = /^\/tools\/[a-z0-9][a-z0-9-]*\/(?:~[A-Za-z0-9_-]+\/)?/.exec(location.pathname)?.[0] ?? "/";
   const NAME = `hewn_session:${base}:`;
   let memory = null;
+  // The web client's light or dark (Settings › General), when it isn't the system's: a sandboxed
+  // frame doesn't see it, so it comes with the session (and by message, below) and goes on <html>
+  // before any style loads: data-theme for ui.css, and color-scheme, over any the page's CSS
+  // declares, for its own light-dark(). Unset: the browser's prefers-color-scheme. Only what this
+  // put there comes off again; a data-theme the page has of its own (a deliberately dark tool)
+  // stays, and isn't replaced.
+  let mine = null;
+  const setTheme = (t) => {
+    const root = document.documentElement;
+    if (root.dataset.theme === mine) delete root.dataset.theme;
+    if (root.style.colorScheme === mine) root.style.colorScheme = "";
+    mine = null;
+    if ((t === "light" || t === "dark") && root.dataset.theme === undefined) root.dataset.theme = root.style.colorScheme = mine = t;
+  };
   const m = /(?:^#|&)hewn_session=([^&]+)/.exec(location.hash);
   if (m) {
     memory = decodeURIComponent(m[1]);
     window.name = NAME + memory;
+    setTheme(/&theme=(light|dark)(?:&|$)/.exec(location.hash)?.[1]);
     // A widget's tap opens the UI at a section (`ui#today`): the page sees that as its fragment.
     const section = /&section=([A-Za-z0-9_-]{1,40})(?:&|$)/.exec(location.hash)?.[1];
     history.replaceState(null, "", location.pathname + location.search + (section ? `#${section}` : ""));
@@ -75,8 +90,8 @@
   };
 
   // Embedded in the Hewn web client: tell it the page's title, theme colour and scroll position
-  // (for its bar, and to come back to the same place), and accept a scroll position to restore.
-  // Nothing else crosses: the frame is sandboxed, on an opaque origin.
+  // (for its bar, and to come back to the same place), and accept a scroll position to restore and
+  // the owner's light or dark. Nothing else crosses: the frame is sandboxed, on an opaque origin.
   if (window.top !== window.self) {
     const post = (msg) => window.parent.postMessage({ hewn: 1, ...msg }, "*");
     const meta = () => post({ type: "meta", title: document.title.slice(0, 80), themeColor: document.querySelector('meta[name="theme-color"]')?.content?.slice(0, 40) ?? null });
@@ -86,7 +101,9 @@
       pending = setTimeout(() => post({ type: "scroll", y: Math.round(scrollY) }), 150);
     }, { passive: true });
     addEventListener("message", (e) => {
-      if (e.source !== window.parent || e.data?.hewn !== 1 || e.data.type !== "restore-scroll") return;
+      if (e.source !== window.parent || e.data?.hewn !== 1) return;
+      if (e.data.type === "theme") return setTheme(e.data.theme);
+      if (e.data.type !== "restore-scroll") return;
       const y = Number(e.data.y) || 0;
       // Content may still be rendering from API calls: try a few times.
       [0, 200, 600, 1200].forEach((ms) => setTimeout(() => scrollY < y && scrollTo(0, y), ms));
