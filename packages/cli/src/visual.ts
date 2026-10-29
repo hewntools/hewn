@@ -7,6 +7,7 @@ import { homedir, platform, tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import type { VisualWidget } from "@hewntools/core/ports.ts";
 import { sourceAsset } from "./assets.ts";
+import { clickThrough, defectLines, type LayoutDefects, layoutDefects, screenWords } from "./defects.ts";
 import { uiCsp, withShim } from "@hewntools/host-workerd/surface/ui.ts";
 
 /** The widget sheet: every widget in every size it offers, at Home's sizes, drawn by the platform renderer. */
@@ -44,11 +45,11 @@ for (const fig of sheet.children) {
 }`;
 
 /**
- * Visual validation: render a candidate capability UI in a headless Chromium-based browser,
- * collect page errors and console errors, and take a screenshot. The UI is served from the build
- * workspace by a throwaway server whose API runs the candidate against a fresh, empty state,
- * so this also checks the "empty data" case. Talks to the browser over the DevTools protocol
- * (Node's built-in WebSocket); no dependencies.
+ * Visual validation: render a candidate capability UI in a headless Chromium-based browser, on a
+ * desktop and a phone screen, collect page errors and console errors, and take screenshots. The UI
+ * is served from the build workspace by a throwaway server whose API runs the candidate against the
+ * state the caller gives it (a fresh, empty one checks the "empty data" case). Talks to the browser
+ * over the DevTools protocol (Node's built-in WebSocket); no dependencies.
  */
 
 export interface VisualRequest {
@@ -62,15 +63,32 @@ export interface VisualRequest {
   width?: number;
   height?: number;
   timeoutMs?: number;
+  /**
+   * Also measure what a builder should fix (defects.ts): what sticks out past each screen's edge,
+   * text cut short, and controls that break the page when clicked. Clicks write: give it state
+   * that's a copy.
+   */
+  measure?: boolean;
+}
+
+/** The UI rendered whole (down to 5,000 px), as a builder is shown it: "desktop-light", "mobile-dark"… */
+export interface VisualShot {
+  name: string;
+  png: Buffer;
 }
 
 export interface VisualResult {
   /** Why it didn't run (no browser found); the build is not failed for that. */
   skipped?: string;
+  /** From both screens, light and dark; one only the phone shows says so. */
   errors: string[];
-  /** Rendered with prefers-color-scheme: light, then dark (both are checked for errors). */
+  /** The desktop screen as it first shows, with prefers-color-scheme: light, then dark: the build page's. */
   screenshot?: Buffer;
   screenshotDark?: Buffer;
+  /** The UI (not the widget sheet) whole, 1280 and 390 px wide, light and dark: four images. */
+  shots?: VisualShot[];
+  /** With `measure`: what to fix, one line each (defectLines). */
+  defects?: string[];
 }
 
 export type VisualCheck = (req: VisualRequest) => Promise<VisualResult>;
@@ -121,6 +139,11 @@ const QUIET = [
   "--use-mock-keychain",
   "--disable-features=Translate,MediaRouter,OptimizationHints",
 ];
+
+/** The phone the UI is rendered on too, as the build-quality bench's: 390 × 844, touch, 2× pixels. */
+const PHONE = { name: "mobile", width: 390, height: 844, mobile: true, scale: 2 };
+/** How far down a whole-page render goes (CSS px). */
+const MAX_SHOT_HEIGHT = 5000;
 
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png" };
 
@@ -229,18 +252,16 @@ async function devtoolsUrl(profile: string, timeoutMs: number, exited: () => boo
 export function chromiumCheck(browser: string | undefined = findBrowser()): VisualCheck {
   return async (req) => {
     if (!browser) return { skipped: "no Chromium-based browser found (Chrome, Edge, Brave or Chromium)", errors: [] };
-    const width = req.width ?? 1280;
-    const height = req.height ?? 800;
+    const desktop = { name: "desktop", width: req.width ?? 1280, height: req.height ?? 800, mobile: false, scale: 1 };
     const timeoutMs = req.timeoutMs ?? 30_000;
     const profile = mkdtempSync(join(tmpdir(), "hewn-visual-"));
     const site = await serveCandidate(req);
-    const child = spawn(browser, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", ...QUIET, "--remote-debugging-port=0", `--user-data-dir=${profile}`, `--window-size=${width},${height}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(browser, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", ...QUIET, "--remote-debugging-port=0", `--user-data-dir=${profile}`, `--window-size=${desktop.width},${desktop.height}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     let exited = false;
     child.stderr!.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
     child.on("exit", () => (exited = true));
     child.on("error", (e) => ((exited = true), (stderr += `\nerror: ${e.message}`)));
-    const errors: string[] = [];
     try {
       let url: string;
       try {
@@ -254,37 +275,117 @@ export function chromiumCheck(browser: string | undefined = findBrowser()): Visu
       }
       const client = cdp(url);
       await client.open;
-      const { targetId } = await client.send("Target.createTarget", { url: "about:blank" });
-      const { sessionId } = await client.send("Target.attachToTarget", { targetId, flatten: true });
-      const s = (m: string, p: Record<string, unknown> = {}) => client.send(m, p, sessionId);
-      let loaded!: () => void;
-      const load = new Promise<void>((r) => (loaded = r));
-      client.on((m) => {
-        if (m.sessionId !== sessionId) return;
-        if (m.method === "Page.loadEventFired") loaded();
-        if (m.method === "Runtime.exceptionThrown") errors.push(`uncaught: ${m.params.exceptionDetails.exception?.description?.split("\n")[0] ?? m.params.exceptionDetails.text}`);
-        if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description ?? "").join(" ").slice(0, 300)}`);
-        // Not the UI's fault: the browser's own favicon request, and error answers from the
-        // capability's API (an operation failing on empty, offline data is data the UI shows).
-        const quiet = (u = "") => /\/favicon\.ico$/.test(u) || /^https?:\/\/[^/]+(\/tools\/[a-z0-9-]+)?\/api\//.test(u);
-        if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !(m.params.entry.source === "network" && quiet(m.params.entry.url))) errors.push(`${m.params.entry.source}: ${m.params.entry.text}${m.params.entry.url ? ` (${m.params.entry.url.replace(/^https?:\/\/[^/]+/, "")})` : ""}`);
-      });
-      await Promise.all([s("Page.enable"), s("Runtime.enable"), s("Log.enable")]);
-      await s("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
-      await s("Page.navigate", { url: site.url });
-      const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), timeoutMs));
-      if ((await Promise.race([load, timeout])) === "timeout") errors.push(`page didn't finish loading in ${timeoutMs / 1000}s`);
-      // Let the first round of API calls and rendering settle.
-      await new Promise((r) => setTimeout(r, 1500));
-      const scheme = (value: "light" | "dark") => s("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value }] });
-      await scheme("light");
-      await new Promise((r) => setTimeout(r, 300));
-      const light = await s("Page.captureScreenshot", { format: "png" });
-      await scheme("dark");
-      await new Promise((r) => setTimeout(r, 300));
-      const dark = await s("Page.captureScreenshot", { format: "png" });
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+      /** A tab at this screen's size, collecting what goes wrong on it. */
+      const open = async (screen: typeof desktop) => {
+        const { targetId } = await client.send("Target.createTarget", { url: "about:blank" });
+        const { sessionId } = await client.send("Target.attachToTarget", { targetId, flatten: true });
+        const s = (m: string, p: Record<string, unknown> = {}) => client.send(m, p, sessionId);
+        const errors: string[] = [];
+        const apiErrors: string[] = [];
+        const dialogs: string[] = [];
+        let loaded = () => {};
+        let loads = 0;
+        client.on((m) => {
+          if (m.sessionId !== sessionId) return;
+          if (m.method === "Page.loadEventFired") loaded();
+          // alert/confirm/prompt block the page until answered: dismiss them (a confirm is cancelled) and note it.
+          if (m.method === "Page.javascriptDialogOpening") {
+            dialogs.push(`${m.params.type}: ${String(m.params.message).slice(0, 120)}`);
+            void s("Page.handleJavaScriptDialog", { accept: false }).catch(() => {});
+          }
+          if (m.method === "Runtime.exceptionThrown") errors.push(`uncaught: ${m.params.exceptionDetails.exception?.description?.split("\n")[0] ?? m.params.exceptionDetails.text}`);
+          if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") errors.push(`console.error: ${m.params.args.map((a: any) => a.value ?? a.description ?? "").join(" ").slice(0, 300)}`);
+          // Not the UI's fault: the browser's own favicon request, and error answers from the
+          // capability's API (an operation failing on empty, offline data is data the UI shows).
+          const quiet = (u = "") => /\/favicon\.ico$/.test(u) || /^https?:\/\/[^/]+(\/tools\/[a-z0-9-]+)?\/api\//.test(u);
+          if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !(m.params.entry.source === "network" && quiet(m.params.entry.url))) errors.push(`${m.params.entry.source}: ${m.params.entry.text}${m.params.entry.url ? ` (${m.params.entry.url.replace(/^https?:\/\/[^/]+/, "")})` : ""}`);
+          if (m.method === "Network.responseReceived" && /\/api\/invoke$/.test(m.params.response.url) && m.params.response.status >= 400) apiErrors.push(`${m.params.response.status} ${m.params.response.url.replace(/^https?:\/\/[^/]+/, "")}`);
+        });
+        await Promise.all([s("Page.enable"), s("Runtime.enable"), s("Log.enable"), ...(req.measure ? [s("Network.enable")] : [])]);
+        await s("Emulation.setDeviceMetricsOverride", { width: screen.width, height: screen.height, deviceScaleFactor: screen.scale, mobile: screen.mobile });
+        if (screen.mobile) await s("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+        const page = {
+          errors,
+          apiErrors,
+          dialogs,
+          clear: () => ((errors.length = 0), (apiErrors.length = 0), (dialogs.length = 0)),
+          async goto(to: string, settleMs = 1500) {
+            const load = new Promise<void>((r) => (loaded = r));
+            // After the first, a fresh load every time: the same URL again (its fragment the same) would
+            // be a same-document navigation, with no load event and no new page.
+            const u = new URL(to);
+            if (loads++) u.searchParams.set("_load", String(loads));
+            await s("Page.navigate", { url: u.href });
+            const timeout = new Promise<"timeout">((r) => setTimeout(() => r("timeout"), timeoutMs));
+            if ((await Promise.race([load, timeout])) === "timeout") errors.push(`page didn't finish loading in ${timeoutMs / 1000}s`);
+            // Let the first round of API calls and rendering settle.
+            await sleep(settleMs);
+          },
+          async eval<T>(expression: string) {
+            const r = await s("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+            if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+            return r.result.value as T;
+          },
+          async scheme(value: "light" | "dark") {
+            await s("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value }] });
+            await sleep(300);
+          },
+          /** What's on screen, or (`whole`) the whole page down to MAX_SHOT_HEIGHT. */
+          async shot(whole = false) {
+            if (!whole) return Buffer.from((await s("Page.captureScreenshot", { format: "png" })).data, "base64");
+            const { cssContentSize } = await s("Page.getLayoutMetrics");
+            const height = Math.min(Math.max(Math.ceil(cssContentSize.height), screen.height), MAX_SHOT_HEIGHT);
+            const { data } = await s("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width: screen.width, height, scale: 1 } });
+            return Buffer.from(data, "base64");
+          },
+        };
+        return page;
+      };
+
+      // The widget sheet: on the desktop screen, light and dark.
+      if (req.widgets) {
+        const sheet = await open(desktop);
+        await sheet.goto(site.url);
+        await sheet.scheme("light");
+        const light = await sheet.shot();
+        await sheet.scheme("dark");
+        const dark = await sheet.shot();
+        client.close();
+        return { errors: [...new Set(sheet.errors)], screenshot: light, screenshotDark: dark };
+      }
+
+      // The UI: on the desktop screen (what's on screen is the build page's screenshot, light and
+      // dark), then on a phone, each also whole.
+      const shots: VisualShot[] = [];
+      const screens: { where: string; layout: LayoutDefects; errors: string[] }[] = [];
+      const render = async (screen: typeof desktop) => {
+        const page = await open(screen);
+        await page.goto(site.url);
+        await page.scheme("light");
+        const layout = req.measure ? await layoutDefects(page, screen.width) : undefined;
+        const light = await page.shot();
+        shots.push({ name: `${screen.name}-light`, png: await page.shot(true) });
+        await page.scheme("dark");
+        const dark = await page.shot();
+        shots.push({ name: `${screen.name}-dark`, png: await page.shot(true) });
+        const errors = [...page.errors];
+        // The phone's first, as a builder should fix them.
+        if (layout) screens.unshift({ where: screenWords(screen.width, screen.mobile), layout, errors });
+        return { page, errors, light, dark };
+      };
+      const wide = await render(desktop);
+      const phone = await render(PHONE);
+      const errors = [...new Set([...wide.errors, ...phone.errors.filter((e) => !wide.errors.includes(e)).map((e) => `${e} (on a phone, ${PHONE.width} px wide)`)])];
+      let defects: string[] | undefined;
+      if (req.measure) {
+        // The click-through reloads the page for each control: after the shots, on the desktop screen.
+        const clicks = await clickThrough(wide.page, site.url);
+        defects = defectLines(screens, clicks);
+      }
       client.close();
-      return { errors: [...new Set(errors)], screenshot: Buffer.from(light.data, "base64"), screenshotDark: Buffer.from(dark.data, "base64") };
+      return { errors, screenshot: wide.light, screenshotDark: wide.dark, shots, ...(defects ? { defects } : {}) };
     } finally {
       // Cleanup never fails the check: wait for the browser to be gone before removing its
       // profile (it may still be writing to it), and leave leftovers to the OS temp cleaner.

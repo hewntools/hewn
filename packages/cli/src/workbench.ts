@@ -215,8 +215,15 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     ...(opts.visualCheck
       ? {
           async visualCheck(buildId: string, args: VisualCheckArgs): Promise<VisualCheckResult> {
-            const r = await opts.visualCheck!({ uiDir: join(ws(buildId), "ui"), manifest: args.manifest, invoke: args.invoke, ...(args.widgets ? { widgets: args.widgets } : {}) });
-            return { skipped: r.skipped, errors: r.errors, screenshot: r.screenshot ? new Uint8Array(r.screenshot) : undefined, screenshotDark: r.screenshotDark ? new Uint8Array(r.screenshotDark) : undefined };
+            const r = await opts.visualCheck!({ uiDir: join(ws(buildId), "ui"), manifest: args.manifest, invoke: args.invoke, ...(args.widgets ? { widgets: args.widgets } : {}), ...(args.measure ? { measure: true } : {}) });
+            return {
+              skipped: r.skipped,
+              errors: r.errors,
+              screenshot: r.screenshot ? new Uint8Array(r.screenshot) : undefined,
+              screenshotDark: r.screenshotDark ? new Uint8Array(r.screenshotDark) : undefined,
+              ...(r.shots ? { shots: r.shots.map((s) => ({ name: s.name, png: new Uint8Array(s.png) })) } : {}),
+              ...(r.defects ? { defects: r.defects } : {}),
+            };
           },
         }
       : {}),

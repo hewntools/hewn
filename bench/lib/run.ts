@@ -10,7 +10,8 @@ import type { BuildView } from "@hewntools/core/platform.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { ARMS, briefFor, craftRequest, CRITIQUE_REQUEST, othersNote, runOrder, type Arm, type Pass } from "./arms.ts";
 import { ownersWords, specFor, type SpecSource } from "./intake.ts";
-import { DESKTOP, launchBrowser, layoutDefects, overflowX, PHONE, clickThrough, type ClickResult, type Page } from "./browser.ts";
+import { clickThrough, type ClickResult, defectLines, layoutDefects, overflowX, screenWords } from "@hewntools/cli/defects.ts";
+import { DESKTOP, launchBrowser, PHONE, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
 import { builderUsage, uiMetrics, type BuilderUsage, type UiMetrics } from "./metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle, type BenchPlatform } from "./platform.ts";
@@ -412,23 +413,19 @@ async function measureDefects(bp: BenchPlatform, capabilityId: string, versionDi
   const s = served(bp.platform, capabilityId, versionDir);
   const server = await startUiServer((k) => (k === "r" ? s : undefined));
   const browser = await launchBrowser();
-  const out: string[] = [];
+  const screens: Parameters<typeof defectLines>[0] = [];
   try {
     for (const v of [PHONE, DESKTOP]) {
       const page = await browser.page(v);
       await page.goto(server.url("r", capabilityId));
-      const d = await layoutDefects(page, v.width);
-      const where = v === PHONE ? "on the phone (390 px)" : "on desktop (1280 px)";
-      for (const x of d.sticksOut) out.push(`Sticks out ${where}: ${x}`);
-      for (const x of d.cutShort) out.push(`Text cut short ${where}: ${x}`);
-      for (const e of new Set(page.errors)) out.push(`Page error ${where}: ${e}`);
+      screens.push({ where: screenWords(v.width, v.mobile), layout: await layoutDefects(page, v.width), errors: page.errors });
       await page.close();
     }
   } finally {
     await browser.close();
     await server.close();
   }
-  return out.slice(0, 30);
+  return defectLines(screens);
 }
 
 /** Screenshots of the seeded UI: desktop and phone, light and dark, with the errors each showed. */

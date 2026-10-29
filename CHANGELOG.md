@@ -4,6 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
+- **A build's screen is checked on a phone too:** the visual check renders it 390 px wide as well as 1280, in light and dark, and an error only the phone shows fails the build (it says so: "on a phone, 390 px wide"). A page that opens `alert()`, `confirm()` or `prompt()` while it loads no longer stalls the check. The check now also renders the whole page on both screens, the images a builder will be shown of its work, and can measure what to fix (what sticks out past the phone's edge, text cut short, buttons that break the page); the build-quality bench measures with the same code.
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)
