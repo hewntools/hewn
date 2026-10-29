@@ -131,7 +131,7 @@ export const ARMS: Arm[] = [
   ...(
     [
       ["intake", "today's intake, from the owner's short request (questions answered with the defaults)"],
-      ["intent", "the intake asked for UI intent (what to draw, the subject's world) instead of a UI sketch"],
+      ["intent", "0.4.9's intake spec, with UI intent (what to draw, the subject's world) instead of a UI sketch"],
       ["thin", "an agent's thin requirements: the owner's request and little else"],
     ] as const
   ).map(
