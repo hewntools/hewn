@@ -80,13 +80,15 @@ export class Housekeeping extends Domain {
     for (const id of this.registry.unpromotedCapabilities()) {
       const builds = this.registry.buildIdsFor(id).map((b) => this.registry.getBuild(b)!);
       if (builds.some((b) => this.platform.isRunning(b.id) || !["failed", "cancelled"].includes(b.status) || b.updatedAt >= stale)) continue;
+      // Released before anything is awaited: a new create of the name in between would take the id
+      // over (createBuild) and go with it, mid-build. One after it reserves the id afresh.
+      this.registry.purgeCapability(id);
+      releasedIds.push(id);
       for (const b of builds) {
         await this.workbench.remove(b.id).catch(() => {});
         await this.workbench.removeTranscript(b.id).catch(() => {});
         await this.blobs.delete(`transcripts/${b.id}.log`);
       }
-      this.registry.purgeCapability(id);
-      releasedIds.push(id);
     }
     if (releasedIds.length) this.logger(`cleanup: released ids that never got a version: ${releasedIds.join(", ")}`);
     this.agentStore.cleanup();
