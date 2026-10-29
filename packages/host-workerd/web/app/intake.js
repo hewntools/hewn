@@ -27,7 +27,7 @@ async function intakePage(q) {
   if (!here()) return;
   const intake = intakeView({ mode: "create", q, connection: service, onBuilt: (b) => go(`#/b/${enc(b.buildId)}`) });
   // The normal top bar, its back button where the brand is.
-  view(...moment({ right: "-20px", top: "60px" }, topBar(service ? "accounts" : "", { back: service ? ["Accounts", "#/accounts"] : ["Home", "#/"] }), h("div", { class: "moment-col" }, intake.el)));
+  view(...moment({ right: "-20px", top: "60px" }, topBar(service ? "accounts" : "", { back: service ? ["Accounts", "#/accounts"] : ["Home", "#/"], extra: intake.newButton }), h("div", { class: "moment-col" }, intake.el)));
   intake.focus();
 }
 
@@ -145,7 +145,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const session = kept?.session ?? (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   // The conversation and what's typed but not sent.
   const keep = () => {
-    startOver.hidden = !messages.length;
+    talking(messages.length > 0);
     if (!keeps) return;
     const draft = input.value.trim() ? input.value : "";
     messages.length || draft ? sessionStorage.setItem(keepKey, JSON.stringify({ session, messages, ...(draft ? { draft } : {}) })) : finish();
@@ -191,14 +191,23 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
   composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
   composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
-  // + New: a new conversation (this one goes, with anything typed), once the owner says so. In the page's heading (the drawer puts it in its head).
+  // New conversation (this one goes, with anything typed), once the owner says so. Where chats have it, at the
+  // top: on the page, "+ New" by "‹ Home" in the top bar; in the drawer, "+" next to ×.
   const askNew = async () => {
     if (await confirmDialog({ title: "Start a new conversation?", body: "This one goes, with anything you've typed. Nothing has been built from it.", confirm: "Start new", cancel: "Keep it" })) clearConversation();
   };
-  const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, "+ New");
+  const newAction = h("button", { type: "button", title: "New conversation", "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, embedded ? "+" : "+ New");
+  if (embedded) newAction.className = "ghost sm icon-only";
+  const newBtn = embedded ? newAction : h("div", { class: "glass-bar" }, newAction);
+  newBtn.hidden = true;
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
-    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+    : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+  // Talking: New conversation shows; in the drawer, its title makes room for the conversation.
+  const talking = (on) => {
+    newBtn.hidden = !on;
+    if (embedded) heading.hidden = on;
+  };
   // Q1 New: or start from a tool someone made: one in Hub, or a file someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
   const hubLink =
@@ -296,7 +305,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     syncChips();
     messages.push({ role: "user", content: text, ...(attachments.length ? { attachments } : {}) });
     keep();
-    heading.hidden = embedded;
+    talking(true);
     offer.remove();
     say("me", text, attachments);
     input.value = "";
@@ -338,7 +347,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     thread.append(live, typing, activity);
     input.disabled = true;
     draftNow.disabled = true;
-    startOver.disabled = true;
+    newAction.disabled = true;
     const stopBtn = h("button", { type: "button", class: `stop-btn ${embedded ? "" : "lg"}`, "aria-label": "Stop", title: "Stop", onclick: () => flight.stop() }, h("span", { class: "stop-square", "aria-hidden": "true" }));
     send.replaceWith(stopBtn);
     const showProgress = (p) => {
@@ -357,7 +366,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       stopBtn.replaceWith(send);
       input.disabled = false;
       draftNow.disabled = false;
-      startOver.disabled = false;
+      newAction.disabled = false;
       syncSend();
       grow();
       input.focus();
@@ -389,9 +398,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     input.value = "";
     input.placeholder = placeholder;
     draftNow.hidden = true;
-    heading.hidden = false;
     if (hubLink) hubLink.hidden = false;
-    startOver.hidden = true;
+    talking(false);
     syncSend();
     grow();
     input.focus();
@@ -406,7 +414,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const turns = [...(kept.messages ?? [])];
     // A message the intake never answered (and isn't answering) goes back in the box, to send again.
     const unanswered = !flight && turns.at(-1)?.role === "user" ? turns.pop() : null;
-    if (turns.length) (offer.remove(), (heading.hidden = embedded), (input.placeholder = ""));
+    if (turns.length) (offer.remove(), talking(true), (input.placeholder = ""));
     let settle = null;
     const ready = (async () => {
       for (const t of turns) {
@@ -425,8 +433,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   if ((q?.get("send") === "1" || widgetsMode || connection) && input.value.trim()) setTimeout(ask);
   return {
     el,
-    // In a drawer, its head holds + New (the page has it in its heading).
-    startOver: embedded ? startOver : null,
+    // Where it goes is the caller's: the page's top bar, the drawer's head.
+    newButton: newBtn,
     focus: () => (input.focus(), grow()),
     setText: (t) => ((input.value = t), syncSend(), input.focus(), grow()),
   };
