@@ -103,10 +103,9 @@ You can't see the page while you build it, so check your markup and CSS against 
 versions make most often (a design review of many of them found the same ones again and again):
 
 - **Dark mode designed, not inverted.** Give every colour you set a dark value of its own, chosen
-  for the dark palette. The base applies its dark tokens with
-  `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { … } }`; set your own
-  dark values under that same selector (or a more specific one), or the base's win and yours
-  silently do nothing.
+  for the dark palette, under `@media (prefers-color-scheme: dark) { :root { … } }`. The base is in
+  a cascade layer, so your own CSS wins over it whatever the selectors; a colour you set only in
+  plain `:root` stays the same in dark mode.
 - **One answer first.** The top of the screen answers the owner's question; nothing above or beside
   it competes for the eye.
 - **Each piece of data in one place.** Don't show the same items in a hero and again in a list, or

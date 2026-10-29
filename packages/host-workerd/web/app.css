@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /* Web client page layout on top of the shared design system (/_platform/ui.css).
-   Components and colours live in ui.css; this file only places things. */
+   Components and colours live in ui.css; this file only places things. It's in ui.css's
+   cascade layer ("hewn"), so the two cascade as one sheet, by specificity and order. */
+@layer hewn {
 [hidden] { display: none !important; }
 body { min-height: 100vh; }
 body > .wallpaper { position: fixed; }
@@ -390,6 +392,8 @@ dialog.lightbox { width: min(1200px, 94vw); }
 .proposal-row > input[type="checkbox"] { margin-top: 12px; flex: none; }
 .proposal-row > .grow { gap: 4px; }
 .proposal-pills { margin-top: 4px; }
+/* A new tool's brief on its card: what it keeps and what's decided, three lines each (the rest under Show brief). */
+.brief-part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 .proposal-row .inset-block { margin-top: 6px; }
 .caret-btn { margin-top: 6px; color: var(--text-3); }
 .earlier-proposal { align-self: flex-start; padding: 0; color: var(--text-2); }
@@ -598,3 +602,5 @@ textarea.instructions { width: 100%; min-height: 160px; resize: vertical; }
 /* A page on its way (the one before stays until it's ready): a thin bar along the top. */
 body.routing::before { content: ""; position: fixed; z-index: 1000; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat; background-size: 40% 100%; animation: route-bar 1.1s var(--ease) infinite; pointer-events: none; }
 @keyframes route-bar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+
+} /* @layer hewn */
