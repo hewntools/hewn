@@ -4,7 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
-- **Tools follow Hewn's light or dark.** With Appearance set to Light or Dark (Settings › General, or `⌘K`), a tool's screen now follows it, as Hewn's own pages do, and switches with it; before, it followed the system's setting whatever Hewn showed. A tool's own colours follow it when written with `light-dark()`: see [Tool UIs](spec/tools.md#tool-uis).
+- **Tools follow Hewn's light or dark.** With Appearance set to Light or Dark (Settings › General, or `⌘K`), a tool open in Hewn now follows it from its first paint, as Hewn's own pages do, and switches with it; before, it followed the system's setting whatever Hewn showed. A screen built on Hewn's styles (`ui.css`) follows at once; a tool's own colours follow when written with `light-dark()`, and a tool that sets its own `data-theme` keeps it: see [Tool UIs](spec/tools.md#tool-uis).
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)

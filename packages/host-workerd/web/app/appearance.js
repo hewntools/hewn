@@ -22,7 +22,10 @@ function applyTheme(t = localStorage.getItem(THEME_KEY) ?? "system") {
  * ui.css (a sandboxed frame doesn't see the web client's choice). "system": the browser's.
  */
 const themeNow = () => document.documentElement.dataset.theme ?? "system";
-/** A tool's address with that in its fragment, so its first paint is already in it. */
-const withTheme = (url) => (themeNow() === "system" ? url : `${url}${url.includes("#") ? "&" : "#"}theme=${themeNow()}`);
+/**
+ * A tool's way in (`<ui>/auth?ticket=…`) with that in its query: /auth hands it to the page in its
+ * fragment, with the session, so its first paint is already in it.
+ */
+const withTheme = (url) => (themeNow() === "system" ? url : `${url}${url.includes("?") ? "&" : "?"}theme=${themeNow()}`);
 applyTheme();
 document.title = BRAND;
