@@ -61,6 +61,20 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     requestAnimationFrame(() => (composer.scrollIntoView({ block: "end" }), input.focus()));
   };
   if (from) continueFrom(from).catch(fail);
+  // The open conversation, kept for this tab per place (New, a tool's Change), so leaving and coming back
+  // finds it as it was, its last proposal still buildable. Gone once something is built from it, or on Start over.
+  // Not for a picked-up one (from=), widgets or a connection; opened with text to send (m=, fix=), it starts anew.
+  const keepKey = `hewn.intake.${mode === "create" ? "new" : `change.${capId}`}`;
+  const keeps = !from && !widgetsMode && !connection;
+  const kept = keeps && !q?.get("m") && !q?.get("fix") ? (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(keepKey) ?? "null");
+    } catch {
+      return null;
+    }
+  })() : null;
+  const finish = () => keeps && sessionStorage.removeItem(keepKey);
+  const built = (b) => (finish(), onBuilt(b));
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
   const offer = h("div", { class: "card continue-card", hidden: true });
   thread.append(offer);
@@ -100,7 +114,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const send = h("button", { type: "submit", class: embedded ? "" : "lg" }, "Send");
   // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
   // One session id for the conversation.
-  const session = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const session = kept?.session ?? (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const keep = () => keeps && (messages.length ? sessionStorage.setItem(keepKey, JSON.stringify({ session, messages })) : finish());
   // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
   const draftNow = h("button", { type: "button", class: "link sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
   // Images and files for the request: pasted, dropped or attached; uploaded as they're added, sent as refs.
@@ -186,6 +201,41 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   };
   const keepTalking = () => input.focus();
 
+  /** A reply in the thread and in the conversation: as it arrives (`live`), or again from the kept one. */
+  const showReply = async (reply, live) => {
+    // Questions come as one message, with the questions as a list; a proposal's message sits above its card.
+    if (reply.message && reply.kind !== "questions") say("them", reply.message);
+    draftNow.hidden = reply.kind !== "questions";
+    // What it remembered (or dropped) for later builds: shown as saved, with Undo.
+    if (live) for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
+    const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
+    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, done: (text) => (finish(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: finish };
+    if (reply.kind === "questions") {
+      messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
+      say("them", chatText(reply.message, reply.questions));
+    } else if (reply.kind === "answer") {
+      // A question about Hewn, answered above (no card): remembered, so "ok, build that" follows on.
+      messages.push({ role: "intake", content: reply.message, reply });
+    } else if (reply.kind === "widgets") {
+      // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
+      messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
+      if (!reply.proposals.length) say("them", "No widgets to suggest for this. Say what you'd like to see.");
+      else showProposal(...proposalCard("widgets", reply.proposals, ctx));
+    } else if (reply.kind === "ideas") {
+      // Remembered in full, so "build the first two" or "make #3 simpler" revises them rather than starting over.
+      messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n"), reply });
+      showProposal(...proposalCard("ideas", reply.ideas, ctx));
+    } else if (reply.kind === "schedules") {
+      messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n"), reply });
+      showProposal(...proposalCard("schedules", reply.schedules, ctx));
+    } else {
+      // The whole draft, so "Keep talking" changes it instead of starting over.
+      messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"), reply });
+      showProposal(...proposalCard("draft", [reply.draft], ctx));
+    }
+    keep();
+  };
+
   const ask = async (e) => {
     e?.preventDefault();
     const text = input.value.trim();
@@ -206,6 +256,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const attachments = pending.splice(0).map(({ ref, kind, name, mediaType, bytes, width, height }) => ({ ref, kind, name, mediaType, bytes, width, height }));
     syncChips();
     messages.push({ role: "user", content: text, ...(attachments.length ? { attachments } : {}) });
+    keep();
     heading.hidden = embedded;
     offer.remove();
     say("me", text, attachments);
@@ -237,36 +288,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       typing.remove();
       live.remove();
       activity.remove();
-      // Questions come as one message, with the questions as a list; a proposal's message sits above its card.
-      if (reply.message && reply.kind !== "questions") say("them", reply.message);
-      draftNow.hidden = reply.kind !== "questions";
-      // What it remembered (or dropped) for later builds: shown as saved, with Undo.
-      for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
-      const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
-      const ctx = { mode, cap, all, connection, keepTalking, onBuilt, embedded, nextVersion, messages, done: (text) => thread.append(h("div", { class: "notice ok" }, h("span", {}, text))) };
-      if (reply.kind === "questions") {
-        messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
-        say("them", chatText(reply.message, reply.questions));
-      } else if (reply.kind === "answer") {
-        // A question about Hewn, answered above (no card): remembered, so "ok, build that" follows on.
-        messages.push({ role: "intake", content: reply.message, reply });
-      } else if (reply.kind === "widgets") {
-        // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
-        messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
-        if (!reply.proposals.length) say("them", "No widgets to suggest for this. Say what you'd like to see.");
-        else showProposal(...proposalCard("widgets", reply.proposals, ctx));
-      } else if (reply.kind === "ideas") {
-        // Remembered in full, so "build the first two" or "make #3 simpler" revises them rather than starting over.
-        messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n"), reply });
-        showProposal(...proposalCard("ideas", reply.ideas, ctx));
-      } else if (reply.kind === "schedules") {
-        messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n"), reply });
-        showProposal(...proposalCard("schedules", reply.schedules, ctx));
-      } else {
-        // The whole draft, so "Keep talking" changes it instead of starting over.
-        messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"), reply });
-        showProposal(...proposalCard("draft", [reply.draft], ctx));
-      }
+      await showReply(reply, true);
     } catch (err) {
       typing.remove();
       live.remove();
@@ -274,6 +296,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       if (stop.signal.aborted) {
         // Stopped: the message goes back in the composer, out of the conversation.
         messages.pop();
+        keep();
         thread.lastElementChild?.classList.contains("me") && thread.lastElementChild.remove();
         input.value = text;
         thread.append(h("div", { class: "small faint" }, "Stopped."));
@@ -292,6 +315,40 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     }
   };
   composer.addEventListener("submit", ask);
+  // Back where it was left (this tab): the turns as they were, the last proposal buildable again.
+  if (kept?.messages?.length) {
+    const placeholder = input.placeholder;
+    const turns = [...kept.messages];
+    // A message the intake never answered goes back in the box, to send again.
+    const unanswered = turns.at(-1)?.role === "user" ? turns.pop() : null;
+    const startOver = () => {
+      finish();
+      messages.length = 0;
+      latest = null;
+      while (resumed.nextSibling) resumed.nextSibling.remove();
+      resumed.remove();
+      input.value = "";
+      input.placeholder = placeholder;
+      draftNow.hidden = true;
+      if (hubLink) hubLink.hidden = false;
+      syncSend();
+      grow();
+      input.focus();
+    };
+    const resumed = h("div", { class: "small faint row tight resumed" }, "Where you left off", h("button", { type: "button", class: "link sm", onclick: startOver }, "Start over"));
+    earlierEl.after(resumed);
+    offer.remove();
+    heading.hidden = embedded;
+    input.placeholder = "";
+    void (async () => {
+      for (const t of turns) {
+        if (t.role === "intake" && t.reply) await showReply(t.reply, false);
+        else (messages.push(t), say(t.role === "user" ? "me" : "them", t.content, t.attachments));
+      }
+      if (unanswered) (input.value = unanswered.content), syncSend(), grow();
+      keep();
+    })().catch(fail);
+  }
   // Opened with text to send (Info's "Change it", the first run, a new widget), send it.
   if ((q?.get("send") === "1" || widgetsMode || connection) && input.value.trim()) setTimeout(ask);
   return {
@@ -682,7 +739,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  */
 function proposalCard(kind, list, ctx) {
   // `readOnly`: a card from a kept conversation: as it was, nothing to tick or build.
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done, readOnly = false } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done, finished, readOnly = false } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -797,7 +854,7 @@ function proposalCard(kind, list, ctx) {
         }
         if (!n) return reenable();
         toast(n === 1 ? "Schedule set" : `${n} schedules set`);
-        return embedded ? done(n === 1 ? "Schedule set. It's under Info › Schedules." : `${n} schedules set. They're under Info › Schedules.`) : go(`#/c/${enc(cap.id)}`);
+        return embedded ? done(n === 1 ? "Schedule set. It's under Info › Schedules." : `${n} schedules set. They're under Info › Schedules.`) : (finished?.(), go(`#/c/${enc(cap.id)}`));
       }
       if (connection) {
         // Only the connection: the intake may have drafted a tool around it.
@@ -838,6 +895,7 @@ function proposalCard(kind, list, ctx) {
       if (!started.length) return reenable();
       if (started.length === 1 && !failed.length) return onBuilt(started[0]);
       // Several at once: Home, where each new tool is a tile that fills in as it builds.
+      finished?.();
       toast(`Building ${started.length} tools`);
       go("#/");
     } catch (e) {
