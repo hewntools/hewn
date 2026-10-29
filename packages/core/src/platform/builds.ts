@@ -509,7 +509,8 @@ export class Builds extends Domain {
       // Waiting for the owner's review: what needs it keeps waiting (approve or reject releases it).
       if (dep.status === "review" && !this.queued(b)) continue;
       if (dep.status !== "promoted" && !this.queued(b)) {
-        this.failBuild(b.id, `build ${buildId}, which it waited for, ${dep.status}; retry that one, then this one`);
+        const paused = dep.status === "failed" && explainFailure(dep.log).paused;
+        this.failBuild(b.id, `build ${buildId}, which it waited for, ${paused ? "paused; continue that one, then retry this one" : `${dep.status}; retry that one, then this one`}`);
         continue;
       }
       try {
@@ -794,8 +795,10 @@ export class Builds extends Domain {
     requireScope(agent, scopeOf(build.kind));
     if (agent.kind !== "user" && agent.id !== build.requestedBy) throw new PlatformError("forbidden", `only the owner or ${build.requestedBy} can cancel this build`);
     if (build.status === "validating") throw new PlatformError("conflict", "the candidate is being validated; it finishes in a moment");
-    if (build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review") throw new PlatformError("conflict", `build is already ${build.status}`);
-    const line = `CANCELLED by ${agent.id}`;
+    // Paused (its host kept the work for a Continue): Stop ends it.
+    const paused = build.status === "failed" && !!explainFailure(build.log).paused && !this.registry.retryOf(build.id);
+    if (!paused && build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review") throw new PlatformError("conflict", `build is already ${build.status}`);
+    const line = paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
     this.registry.updateBuild(buildId, { status: "cancelled", log: [...build.log, line] });
     this.buildEvent(buildId, line, `build ${buildId} [${build.kind} ${build.capabilityId}]`);
     this.aborts.get(buildId)?.abort();
@@ -1072,6 +1075,15 @@ export class Builds extends Domain {
         if ((e as { modelUnavailable?: boolean }).modelUnavailable) {
           // The model asked for can't run (retired, misspelled, not on this account): nothing is built.
           const line = `FAILED: model unavailable: ${(e as Error).message}`;
+          history.push(line);
+          this.buildEvent(buildId, line, tag);
+          this.registry.updateBuild(buildId, { status: "failed", log: history });
+          return;
+        }
+        if ((e as { paused?: boolean }).paused) {
+          // The builder's host paused it part-way (e.g. it has used a build's allowance), its work kept:
+          // not for Hewn to retry, the owner's to Continue (a retry picks the work up) or Stop.
+          const line = `PAUSED: ${(e as Error).message}`;
           history.push(line);
           this.buildEvent(buildId, line, tag);
           this.registry.updateBuild(buildId, { status: "failed", log: history });

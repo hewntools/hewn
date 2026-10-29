@@ -84,6 +84,7 @@ function activityRow(g, all, showCap) {
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
     if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    else if (g.outcome === "failed" && g.failure?.paused) (dot = "warn"), (text = on("Build paused", ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
@@ -230,8 +231,10 @@ async function buildsView(head, only, all0) {
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
           ? failed.has(b.buildId) && retryable(b)
-            ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
-            : kindTag("failed", "danger")
+            ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, b.failure?.paused ? "Continue" : "Retry")
+            : b.failure?.paused
+              ? kindTag("paused", "warn")
+              : kindTag("failed", "danger")
           : b.status === "review"
             ? h("span", { class: "pill warn with-dot" }, "needs you")
             : b.status === "waiting"

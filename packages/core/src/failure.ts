@@ -12,6 +12,8 @@ export interface BuildFailure {
   /** Builder attempts used, when the platform's builder ran it. */
   attempt?: number;
   maxAttempts?: number;
+  /** Not a failure: the builder's host paused it part-way with its work kept, for the owner to Continue (a retry) or Stop. */
+  paused?: true;
 }
 
 const clip = (s: string, n = 220) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -52,6 +54,9 @@ export function explainFailure(log: string[]): BuildFailure {
 
   const msg = cause ?? "";
   const say = (title: string, detail: string): BuildFailure => ({ title, detail: clip(detail), ...meta });
+  // Paused by the builder's host (the last word on the build): its own message says why and what's kept.
+  const last = [...log].reverse().find((l) => /^(FAILED|PAUSED): /.test(l));
+  if (last?.startsWith("PAUSED: ")) return { ...say("Paused", last.slice("PAUSED: ".length).trim() || "The builder paused it."), paused: true };
   if (/interrupted by platform restart/.test(msg)) return say("Interrupted by a restart", "The platform restarted while this was building.");
   const noModel = /^model unavailable: ([\s\S]*)$/.exec(msg);
   if (noModel) return say("Model not available", noModel[1].trim());

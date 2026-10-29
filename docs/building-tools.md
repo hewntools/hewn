@@ -65,6 +65,10 @@ A build gets up to three attempts on its own (Settings › AI › Build attempts
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
 
+A host's builder can also **pause** a build part-way, with its work kept: for example once the build has used its allowance. The build says so in the host's words, with **Continue** (it carries on from where it stopped) and **Stop**. It waits in the Inbox until you choose; Hewn doesn't carry on by itself.
+
+![A paused change to Plant Care: the host's note that it has used its allowance and its work is kept, with Continue and Stop](images/build-paused.png)
+
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude`, `codex login` or `opencode auth login`), then try again.
 
 ## Versions

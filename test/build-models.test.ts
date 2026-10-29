@@ -183,6 +183,32 @@ describe("models for builds", () => {
     assert.deepEqual(explainFailure(["FAILED: refused: no"]).title, "Not built");
   });
 
+  test("paused by the host: no further attempts, shown as paused; Continue is a retry, Stop ends it", async () => {
+    const pause = () => {
+      throw Object.assign(new Error("This build has used 300 points and isn't finished. Its work is kept: Continue lets it go on for up to 300 more, or Stop it."), { paused: true });
+    };
+    use(recorder("fake", pause), { attempts: 3 });
+    const first = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    assert.equal(first.status, "failed", "final for agents and waits");
+    assert.equal(b.jobs.length, 1, "not retried by Hewn");
+    assert.equal(first.failure!.title, "Paused");
+    assert.equal(first.failure!.paused, true);
+    assert.match(first.failure!.detail, /300 points[^]*Continue/);
+    // Continue: a retry of it, which the host picks up from the kept work.
+    const second = await platform.settle((await platform.retryBuild(t.claude, first.buildId)).buildId);
+    assert.equal(b.jobs.at(-1)!.retryOf, first.buildId);
+    assert.throws(() => platform.cancelBuild(t.claude, first.buildId), /already failed/, "continued: no Stop for it");
+    // Stop: the paused one ends (cancelled); a build that really failed can't be stopped.
+    assert.equal(platform.cancelBuild(t.claude, second.buildId).status, "cancelled");
+    assert.match(platform.getBuild(t.claude, second.buildId).log.at(-1)!, /CANCELLED by claude-code \(stopped while paused\)/);
+    use(recorder("fake", () => {
+      throw Object.assign(new Error("You've used this month's 40 builds."), { refused: true });
+    }), { attempts: 1 });
+    const refused = await platform.settle((await platform.create(t.claude, { ...ask, name: "Other Log" })).buildId);
+    assert.throws(() => platform.cancelBuild(t.claude, refused.buildId), /already failed/);
+    assert.deepEqual(explainFailure(["attempt 1: …", "FAILED: 1 of 2 test cases failed", "PAUSED: kept"]), { title: "Paused", detail: "kept", attempt: 1, paused: true });
+  });
+
   test("at most N builds run at once; the rest wait their turn, and a waiting one can be cancelled", async () => {
     const gates: (() => void)[] = [];
     // The seed, as the capability this build creates.

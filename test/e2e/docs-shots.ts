@@ -27,6 +27,8 @@ const builder: CapabilityBuilder = {
   name: "claude",
   build: async (job) => {
     builds[job.capabilityId] = (builds[job.capabilityId] ?? 0) + 1;
+    // Plant Care's second change: the builder's host pauses it part-way (as a host's builder at a build's allowance).
+    if (job.capabilityId === "plant-care" && builds[job.capabilityId] === 3) throw Object.assign(new Error("This build has used 300 points and isn't finished. Its work is kept: Continue lets it go on for up to 300 more, or Stop it."), { paused: true });
     cpSync(SEED, job.workspace, { recursive: true });
     editJson(join(job.workspace, "capability.json"), (m) => {
       m.id = job.capabilityId;
@@ -190,6 +192,19 @@ try {
     return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
   });
   await shot("build-failed", { width: 1280, height: 1000, clip: { x: card.x - 20, y: card.y - 20, width: card.width + 40, height: card.height + 40 } });
+
+  // 5b. Another change to Plant Care, paused by the builder's host: Continue or Stop.
+  const p3 = await post("/capabilities/plant-care/modify", { request: "Group the plants by room.", conversation: [{ role: "user", content: "Group the plants by room." }] });
+  console.log("   plant-care paused:", (await settle(p3.buildId)).status);
+  await page.goto(`${web}/#/b/${p3.buildId}`);
+  await page.getByRole("button", { name: "Continue" }).waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(500);
+  const pausedCard = await page.evaluate(() => {
+    const el = document.querySelector(".build-head")?.closest(".card") ?? document.querySelector(".build-center > *");
+    const r = el!.getBoundingClientRect();
+    return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
+  });
+  await shot("build-paused", { width: 1280, height: 1000, clip: { x: pausedCard.x - 20, y: pausedCard.y - 20, width: pausedCard.width + 40, height: pausedCard.height + 40 } });
 
   // 6. The Hub: Hewn's own tools, every card in the shot.
   await page.setViewportSize({ width: 1280, height: 1000 });

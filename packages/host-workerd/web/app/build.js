@@ -267,8 +267,46 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       );
     };
 
+    // Paused by the builder's host with its work kept: not a failure. Continue picks it up (a retry), Stop ends it.
+    const paused = (f) => {
+      const cont = h("button", { class: "primary" }, "Continue");
+      const stop = h("button", {}, "Stop");
+      const busy = (on) => (cont.disabled = stop.disabled = on);
+      cont.addEventListener("click", async () => {
+        busy(true);
+        try {
+          const next = await api(`/builds/${enc(id)}/retry`, { method: "POST" });
+          compact ? (put(card), card.replaceWith(buildPanel(next.buildId, { compact, onPromoted }).el)) : go(`#/b/${next.buildId}`);
+        } catch (e) {
+          busy(false);
+          fail(e);
+        }
+      });
+      stop.addEventListener("click", async () => {
+        busy(true);
+        try {
+          settle(await api(`/builds/${enc(id)}/cancel`, { method: "POST" }));
+        } catch (e) {
+          busy(false);
+          fail(e);
+        }
+      });
+      put(
+        card,
+        head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), "Paused", `${cap().name} · ${kindWord(b)}`),
+        h("div", { class: "notice warn" }, h("span", {}, f.detail)),
+        builtWith(b),
+        convoView,
+        specView,
+        retryable(b) && h("div", { class: "row tight" }, cont, stop),
+        logBlock(false),
+      );
+      requestAnimationFrame(keepScroll);
+    };
+
     const failed = () => {
       const f = b.failure ?? { title: "The build didn't pass", detail: b.log.at(-1) ?? "" };
+      if (f.paused) return paused(f);
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
       // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
       const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");

@@ -36,8 +36,11 @@ export function remoteJobsFromEnv(env: NodeJS.ProcessEnv = process.env): RemoteJ
 const stamp = () => new Date().toTimeString().slice(0, 8);
 const endpoint = (r: RemoteJobs, path: string) => new URL(path, r.url.endsWith("/") ? r.url : `${r.url}/`);
 
-/** A service failure: refused (it declined, e.g. over quota) or unavailable (bad token, gone) never retry. */
-const failure = (message: string, kind?: "refused" | "unavailable") => Object.assign(new Error(message), kind ? { [kind]: true } : {});
+/**
+ * A service failure: refused (it declined, e.g. over quota) or unavailable (bad token, gone) never retry;
+ * paused (a build stopped part-way, its work kept by the service) waits for the owner's Continue.
+ */
+const failure = (message: string, kind?: "refused" | "unavailable" | "paused") => Object.assign(new Error(message), kind ? { [kind]: true } : {});
 
 /** A path the service may write: relative, inside the workspace, and not an artefact (node_modules …). */
 const writable = (p: string) => !!p && !p.startsWith("/") && !p.includes("\\") && !p.split("/").some((s) => s === "" || s === "." || s === "..") && !isArtefact(p);
@@ -116,7 +119,8 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
         r,
         "v1/builds",
         // `session`: one per build, so the service may resume its own session on a later attempt (the prompt stays whole).
-        { buildId: job.buildId, session: job.buildId, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), prompt: builderPrompt(job), files },
+        // `pause`: this Hewn shows a `{ paused }` outcome as paused, with Continue and Stop (an older one gets `refused`).
+        { buildId: job.buildId, session: job.buildId, pause: true, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), prompt: builderPrompt(job), files },
         (e) => {
           if (typeof e.activity === "string") {
             write(e.activity);
@@ -137,11 +141,13 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
           if (e.files && typeof e.files === "object") result = e.files;
           if (e.done === true) done = true;
           if (typeof e.refused === "string") error = { refused: e.refused };
+          else if (typeof e.paused === "string") error = { paused: e.paused };
           else if (typeof e.error === "string") error = e;
         },
         job.signal,
       );
       if (error?.refused) throw failure(error.refused, "refused");
+      if (error?.paused) throw failure(error.paused, "paused");
       if (error) throw failure(error.error, error.unavailable ? "unavailable" : undefined);
       // The stream closing early (the service crashed, a proxy cut it) isn't a finished build.
       if (!done) throw new Error(`${r.label} ended without finishing`);

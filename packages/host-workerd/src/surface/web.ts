@@ -7,6 +7,7 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { readSummary } from "@hewntools/core/bundle.ts";
+import { explainFailure } from "@hewntools/core/failure.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
@@ -841,7 +842,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder } : null,
+      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
     });
   }
@@ -932,7 +933,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const b of builds.filter((x) => x.status === "review"))
     needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} changed it: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
   for (const b of unresolvedFailures(builds))
-    needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger", action: "Show", at: b.updatedAt });
+    needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), ...(b.failure?.paused ? { detail: `Paused · ${b.failure.detail}`, severity: "warn" as const, action: "Continue…" } : { detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger" as const, action: "Show" }), at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
     needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, agentId: x.createdBy, title: nameOf(x.capabilityId), detail: `${who(x.createdBy)} wants to run ${x.operation.split("@")[0]} ${x.cadence}`, severity: "warn", action: "Review", at: x.createdAt });
   // A schedule that stopped itself after failing in a row: whatever it keeps fresh goes stale quietly otherwise.
