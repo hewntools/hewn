@@ -376,7 +376,7 @@ A tool can ship a UI for the owner: static files under `ui/`, with `ui/index.htm
 
 **The UI kit** at `/_platform/` (Apache-2.0, [`../packages/ui`](../packages/ui)):
 
-- `ui.css`: the design system (layout, controls, tokens, light and dark). Link it rather than restyling controls. It's all in the cascade layer `hewn`, so your page's own CSS (outside any layer) always wins over it, whatever the selectors: your own tokens, light and dark, and a plain rule for a control.
+- `ui.css`: the design system (layout, controls, tokens, light and dark). Link it and build on it. It's all in the cascade layer `hewn`, so your page's own CSS (outside any layer) always wins over it, whatever the selectors: your own tokens, light and dark, and a plain rule for a control. The exception is ui.css's `!important` rules: `[hidden]` and reduced motion. A token you set in plain `:root` applies in dark mode too, so give it a dark value as well, under `@media (prefers-color-scheme: dark) { :root { … } }`.
 - `chart.js`: `barChart(el, { labels, series, stacked?, unit? })` and `lineChart(el, { … })`.
 - `session.js`: the session shim. The host injects it into the `<head>` of every HTML page it serves, before any of the page's scripts.
 

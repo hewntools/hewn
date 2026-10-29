@@ -11,7 +11,8 @@
  *
  * Everything here is in the cascade layer "hewn", so a page's own CSS (outside any layer)
  * always wins, whatever its selectors: its own tokens, light and dark, or a plain rule
- * for a control.
+ * for a control. Except ui.css's `!important` rules: `[hidden]` and reduced motion (in a
+ * layer, `!important` beats a page's own `!important`).
  */
 @layer hewn {
 
@@ -368,7 +369,9 @@ dialog h2, .dialog h2 { margin-top: 0; }
 /* ======================= motion ======================= */
 @keyframes ws-pulse { 50% { opacity: .45; } }
 @keyframes ws-shimmer { to { background-position: -150% 0; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; } }
+/* 0.01ms, not 0s: transitionend and animationend still fire for a page that waits on them.
+   Once, so an infinite animation (ws-pulse, ws-shimmer) doesn't flicker at a new phase each frame. */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
 /* ======================= list rows (grants, operations, permissions) ======================= */
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

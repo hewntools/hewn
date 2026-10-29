@@ -81,6 +81,7 @@ export async function widgetAppHtml(asset: (path: string) => Promise<Uint8Array 
   }));
   const script = [inline(chart), inline(widgets), BRIDGE].join("\n");
   if (/<\/(script|style)/i.test(script + css)) throw new Error("widget app sources must not contain closing script/style tags");
+  // CSS joins ui.css's cascade layer ("hewn"), so the two cascade as one sheet, by specificity and order.
   return `<!doctype html>
 <html lang="en">
 <head>

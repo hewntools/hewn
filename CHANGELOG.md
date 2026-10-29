@@ -4,7 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
-- **A tool's own CSS wins over the design system.** `ui.css` is now in the cascade layer `hewn`, so a tool's own rules always apply, whatever their selectors. Before, a tool's dark colours lost to the design system's own (its dark-mode rule was more specific), so a tool with its own palette looked like Hewn in dark mode. Hewn's own pages look the same as before. See [`ui.css` in the tool docs](spec/tools.md).
+- **A tool's own CSS wins over the design system.** `ui.css` is now in the cascade layer `hewn`, so a tool's own rules always apply, whatever their selectors, except `ui.css`'s `!important` rules: `[hidden]` and reduced motion. Before, a tool's dark colours lost to the design system's own (its dark-mode rule was more specific), so a tool with its own palette looked like Hewn in dark mode. A token a tool sets in plain `:root` now applies in dark mode too, so give it a dark value as well; a tool that set only light colours may now keep them in dark mode, and **Ask builder to fix** sorts it. Hewn's own pages look the same as before. See [`ui.css` in the tool docs](spec/tools.md).
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)
