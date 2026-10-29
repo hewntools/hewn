@@ -653,7 +653,7 @@ export class Builds extends Domain {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
-    const conversation = this.checkConversation(agent, req.conversation);
+    const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const cap = this.visibleActive(agent, req.capabilityId);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
@@ -681,7 +681,7 @@ export class Builds extends Domain {
   async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
     await this.checkEffort(agent, req);
-    const conversation = this.checkConversation(agent, req.conversation);
+    const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const after = this.dependency(agent, req.after);
     const cap = after ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
@@ -730,6 +730,14 @@ export class Builds extends Domain {
     this.startBuilder(buildId, b.builder!);
   }
 
+  /**
+   * The conversation that led to the build a retry retries (checked when it came), recorded with the
+   * retry before its workspace opens: BUILDER.md quotes it and its attachments are found through it.
+   */
+  private retried(marks: RetryMarks): BuildTurn[] | undefined {
+    return marks.retryOf ? this.registry.buildContext(marks.retryOf)?.conversation : undefined;
+  }
+
   /** Cancelled while its workspace was being opened (nothing to abort yet): don't start it. */
   private cancelledWhileOpening(buildId: string): boolean {
     if (this.mustBuild(buildId).status !== "cancelled") return false;
@@ -770,7 +778,7 @@ export class Builds extends Domain {
       req[field] = `${String(req[field] ?? "").split(FIX_MARK)[0].trimEnd()}\n\n${context}`;
     }
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
-    const next = await (async () => {
+    return (async () => {
       if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string }, marks);
       if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
@@ -781,12 +789,8 @@ export class Builds extends Domain {
       if (!dependsOn) delete req.after;
       else req.after = dependsOn;
       Object.assign(req, marks);
-      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn);
+      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn, this.retried(marks));
     })();
-    // The conversation that led to the first try goes with the retry.
-    const conversation = this.registry.buildContext(old.id)?.conversation;
-    if (conversation) this.registry.setBuildContext(next.buildId, { conversation });
-    return next;
   }
 
   /**
