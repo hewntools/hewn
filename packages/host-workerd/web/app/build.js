@@ -312,7 +312,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           fail(e);
         }
       });
-      put(card, head(appIcon(cap(), { size: compact ? 36 : 56 }), "Build cancelled", `${cap().name} · nothing changed`), h("div", { class: "row tight" }, retry, !compact && h("a", { class: "btn", href: "#/" }, "Home")), logBlock(false));
+      // What it was asked to do stays, as on a failed build: the conversation and the spec, to start again from.
+      put(card, head(appIcon(cap(), { size: compact ? 36 : 56 }), "Build cancelled", `${cap().name} · nothing changed`), convoView, specView, h("div", { class: "row tight" }, retry, !compact && h("a", { class: "btn", href: "#/" }, "Home")), logBlock(false));
     };
 
     const inReview = () => {

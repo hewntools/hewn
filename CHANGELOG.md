@@ -4,6 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
+- **A cancelled build keeps its context:** its page shows **Conversation** and **Spec agreed**, as a failed build's does.
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)
