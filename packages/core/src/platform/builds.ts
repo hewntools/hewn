@@ -328,11 +328,14 @@ export class Builds extends Domain {
 
   /**
    * A manifest-only change makes a new version at once: a change on its way would then fail at the
-   * end ("capability changed since this build started"), so it waits until that one is done.
+   * end ("capability changed since this build started"), so it waits until that one is done. So does
+   * a paused change (its Continue carries on from work kept before it) until it's continued and done, or stopped.
    */
   noChangeOnItsWay(capabilityId: string, what: string) {
     const ahead = this.registry.unfinishedBuild(capabilityId);
     if (ahead) throw new PlatformError("conflict", `a change to ${capabilityId} is on its way (build ${ahead.id}); ${what} once it's done`);
+    const paused = this.pausedBuild(capabilityId, "change");
+    if (paused) throw new PlatformError("conflict", `a change to ${capabilityId} is paused (build ${paused.id}); ${what} once it's continued and done, or stopped`);
   }
 
   /**
@@ -453,17 +456,33 @@ export class Builds extends Domain {
   }
 
   /**
-   * One create of an id at a time: refused while another is waiting or being built. Not a widgets
-   * build chained after it (create with widgets): that one waits for it.
+   * One create of an id at a time: refused while another is waiting or being built, or paused with
+   * its work kept (taking the id over would strand it). Not a widgets build chained after it (create
+   * with widgets): that one waits for it.
    */
   private oneCreateAtATime(agent: Agent, id: string) {
     const building = this.registry.unfinishedBuild(id, { kind: "create" });
     if (building) throw new PlatformError("conflict", `'${id}' is already being built${this.buildRef(agent, building)}; wait for it, or cancel it`);
+    const paused = this.pausedBuild(id, "create");
+    if (paused) throw this.pausedFirst(agent, `'${id}'`, paused);
   }
 
   /** " (build …)" in a message to `agent`, if it may see that build; else nothing. */
   private buildRef(agent: Agent, b: BuildRow): string {
     return this.sees(agent, b) ? ` (build ${b.id})` : "";
+  }
+
+  /**
+   * A paused build of the capability that nobody has continued or stopped: its create, or a change
+   * (modify or widgets). It keeps its place, its work kept for the owner's Continue.
+   */
+  private pausedBuild(capabilityId: string, kind: "create" | "change"): BuildRow | undefined {
+    return this.registry.failedBuilds(capabilityId, kind === "create" ? ["create"] : ["modify", "widgets"]).find((b) => isPaused(b) && !this.registry.retryOf(b.id));
+  }
+
+  /** Refused while `b` is paused: the owner continues or stops it in Hewn first. */
+  private pausedFirst(agent: Agent, what: string, b: BuildRow): PlatformError {
+    return new PlatformError("conflict", `${what} is paused${this.buildRef(agent, b)}: ${agent.kind === "user" ? "Continue or Stop it in Hewn first" : "the owner continues or stops it in Hewn first"}`);
   }
 
   /** The build a new one should wait for (`after`, following retries), or undefined to start now. */
@@ -480,6 +499,7 @@ export class Builds extends Domain {
       const next = this.registry.unfinishedBuild(dep.capabilityId, { kind: "create" });
       if (next && this.sees(agent, next)) return next.id;
     }
+    if (isPaused(dep)) throw new PlatformError("conflict", `build ${dep.id} (${dep.kind} ${dep.capabilityId}), which this would wait for, is paused; ${agent.kind === "user" ? "Continue it in Hewn" : "the owner continues it in Hewn"} first`);
     if (dep.status === "failed" || dep.status === "cancelled") throw new PlatformError("conflict", `build ${dep.id} (${dep.kind} ${dep.capabilityId}), which this would wait for, ${dep.status}; retry it first`);
     return dep.id;
   }
@@ -487,13 +507,14 @@ export class Builds extends Domain {
   /**
    * The build to queue a change behind: the newest unfinished one of the same capability, so two
    * changes never run at once (the second would fail at the end: "capability changed since this
-   * build started"). A change waiting for the owner's review doesn't hold others up. Not for an
-   * automatic retry, or the Continue of a paused build: it takes the place of the build it retries,
-   * and what queued behind that one waits for it (`takePlace`).
+   * build started"), or else a paused change nobody has continued or stopped (its Continue would
+   * carry on from work kept before this one). A change waiting for the owner's review doesn't hold
+   * others up. Not for an automatic retry, or the Continue of a paused build: it takes the place of
+   * the build it retries, and what queued behind that one waits for it (`takePlace`).
    */
   private queueBehind(capabilityId: string, marks: RetryMarks): string | undefined {
     if (marks.autoRetryOf || this.continues(marks)) return undefined;
-    return this.registry.unfinishedBuild(capabilityId)?.id;
+    return (this.registry.unfinishedBuild(capabilityId) ?? this.pausedBuild(capabilityId, "change"))?.id;
   }
 
   /** The paused build a retry continues (the owner's Continue), if it does. */
@@ -647,7 +668,8 @@ export class Builds extends Domain {
 
   private waitFor(buildId: string, capabilityId: string, dependsOn: string, tag: string, queued = false) {
     const dep = this.mustBuild(dependsOn);
-    this.buildEvent(buildId, queued ? `waiting for build ${dependsOn}, the change to ${capabilityId} before it; starts when it ends` : `waiting for build ${dependsOn} (${dep.kind} ${dep.capabilityId}); starts when it promotes`, tag);
+    const when = isPaused(dep) ? ", which is paused; starts once it's continued and ends, or stopped" : "; starts when it ends";
+    this.buildEvent(buildId, queued ? `waiting for build ${dependsOn}, the change to ${capabilityId} before it${when}` : `waiting for build ${dependsOn} (${dep.kind} ${dep.capabilityId}); starts when it promotes`, tag);
     this.setStep(buildId, capabilityId, "waiting");
   }
 
@@ -752,8 +774,8 @@ export class Builds extends Domain {
   /** Open a modify (or widgets) build's workspace from the active version (at start time) and start its builder. */
   private async startModify(buildId: string) {
     const b = this.mustBuild(buildId);
-    // Another change to this capability started while this one waited for its `after`: its turn comes after that one.
-    const ahead = this.registry.unfinishedBuild(b.capabilityId, { running: true, except: buildId });
+    // Another change to this capability started (or paused) while this one waited for its `after`: its turn comes after that one.
+    const ahead = this.registry.unfinishedBuild(b.capabilityId, { running: true, except: buildId }) ?? this.pausedBuild(b.capabilityId, "change");
     if (ahead) {
       this.registry.updateBuild(buildId, { status: "waiting", dependsOn: ahead.id });
       this.waitFor(buildId, b.capabilityId, ahead.id, `build ${buildId} [${b.kind} ${b.capabilityId} by ${b.requestedBy}]`, true);
@@ -837,6 +859,9 @@ export class Builds extends Domain {
       // widgets build chained after this one (create with widgets): that one follows the retry.
       const building = this.registry.unfinishedBuild(old.capabilityId, { kind: "create" });
       if (building) throw new PlatformError("conflict", `'${old.capabilityId}' is being built again${this.buildRef(agent, building)}; wait for it`);
+      // Or took it over and paused, its work kept: retrying this one would strand it (unless this is its Continue).
+      const paused = this.pausedBuild(old.capabilityId, "create");
+      if (paused && paused.id !== old.id) throw this.pausedFirst(agent, `'${old.capabilityId}'`, paused);
       // An install retries with the same copy builder.
       const builder = old.builder?.startsWith("copy:") ? old.builder : undefined;
       const dependsOn = this.dependency(agent, req.after);
@@ -1359,7 +1384,11 @@ export class Builds extends Domain {
     if (charge) view.charge = charge;
     if (b.status === "waiting" && this.queued(b)) {
       view.queued = true;
-      view.instructions = `This change waits for build ${b.dependsOn}, the change to the same capability before it, and starts on its own once that one ends, from the version it leaves. Call builds_wait to follow it.`;
+      const dep = this.registry.getBuild(b.dependsOn!);
+      view.instructions =
+        dep && isPaused(dep)
+          ? `This change waits for build ${b.dependsOn}, the change to the same capability before it, which the builder's host paused: it starts on its own once the owner continues that one in Hewn and it ends, or stops it. Tell the owner.`
+          : `This change waits for build ${b.dependsOn}, the change to the same capability before it, and starts on its own once that one ends, from the version it leaves. Call builds_wait to follow it.`;
     } else if (b.status === "waiting") {
       view.instructions = `This build waits for build ${b.dependsOn} and starts on its own once that one promotes (if it fails, this one fails too). Call builds_wait to follow it.`;
     }

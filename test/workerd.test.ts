@@ -116,9 +116,13 @@ describe("workerd host (integration)", () => {
     const paused = await modify("running-log", pause("This build has used 300 points and isn't finished."));
     assert.equal(paused.status, "failed");
     assert.deepEqual(paused.failure, { title: "Paused", detail: "This build has used 300 points and isn't finished.", paused: true });
+    // Stopped: the next change would otherwise wait behind it.
+    const stop = (buildId: string) => sv.admin("call", { method: "cancelBuild", args: [buildId] });
+    assert.equal((await stop(paused.buildId)).result.status, "cancelled");
     // An empty message is still the builder's failure (not a finished build), and still a pause.
     const quiet = await modify("running-log", pause(""));
     assert.deepEqual(quiet.failure, { title: "Paused", detail: "The builder paused it.", paused: true });
+    await stop(quiet.buildId);
   });
 
   test("composition through the host: not ready until granted, then calls go through", async () => {
