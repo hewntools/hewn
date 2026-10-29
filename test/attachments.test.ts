@@ -122,7 +122,7 @@ describe("attachments: images and files the owner attaches in the intake's box",
     assert.equal(retried.status, "promoted", retried.log.join("\n"));
     assert.ok(shot, "the screenshot is in the retry's workspace");
     assert.match(brief, /`attachments\/1-screen\.png`: an image/);
-    assert.match(brief, /THE OWNER'S OWN WORDS[^]*OWNER: like this screenshot\n\(attached: screen\.png\)/);
+    assert.match(brief, /THE OWNER'S OWN WORDS[^]*OWNER: like this screenshot\n  \(attached: screen\.png\)/);
   });
 
   test("several tools from one conversation share its attachments; purging one leaves them for the other", async () => {
