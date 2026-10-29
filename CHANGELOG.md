@@ -5,6 +5,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.10 (unreleased)
 
 - **The builder reads what you said, not only the spec.** A tool or change you asked for in the chat goes to the builder with your conversation with the intake, in your own words, oldest first, after the request: where the spec is silent, vague or differs, your words win, the latest where you changed your mind. A draft the intake showed you along the way comes down to its name and purpose. A build an agent asks for is unchanged. See [The build](docs/building-tools.md#the-build).
+- **Fixed:** a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) didn't give the builder the screenshots and files attached in the conversation; it does now, with the conversation, as the first try did.
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)

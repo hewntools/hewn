@@ -70,12 +70,15 @@ describe("what a build keeps", () => {
     });
     assert.equal(w.status, "failed");
     assert.deepEqual(t.platform.buildContext(USER, w.buildId).conversation, turns);
-    t.queue(() => {
+    let retried = "";
+    t.queue((ws) => {
+      retried = readFileSync(join(ws, "BUILDER.md"), "utf8");
       throw new Error("again");
     });
     const again = await t.platform.retryBuild(USER, w.buildId);
     await t.platform.settle(again.buildId);
     assert.deepEqual(t.platform.buildContext(USER, again.buildId).conversation, turns, "the retry carries the conversation");
+    assert.match(retried, /THE OWNER'S OWN WORDS[^]*OWNER: track my runs/, "and its builder reads it");
 
     // A month later the workbench's copy goes; the build's stays.
     const kept = await t.platform.buildTranscript(USER, m.buildId);
