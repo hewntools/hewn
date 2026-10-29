@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { RemoteJobs } from "@hewntools/cli/builders/remote.ts";
+import type { Intake } from "@hewntools/cli/intake.ts";
 import type { Hosted } from "@hewntools/cli/supervisor/index.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
@@ -77,7 +78,7 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
   const scripts: Script[] = [];
   const scripted: CapabilityBuilder = {
@@ -89,7 +90,7 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
     },
   };
   // A host that doesn't start leaves nothing behind: the suite's after() has no host to stop.
-  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, log, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" })).catch((e) => {
+  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, ...(opts.intake ? { intake: () => opts.intake! } : {}), log, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" })).catch((e) => {
     rmSync(root, { recursive: true, force: true });
     throw e;
   });
