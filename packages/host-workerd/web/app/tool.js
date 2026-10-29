@@ -75,11 +75,13 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
   const close = h("button", { class: "ghost sm icon-only", "aria-label": "Close", onclick: () => onClose() }, "×");
   // Its left edge drags to make it wider or narrower; the width is kept (in this browser).
   const grip = h("div", { class: "drawer-grip", role: "separator", "aria-orientation": "vertical", "aria-label": "Drawer width", tabindex: 0 });
-  const el = h("aside", { class: "drawer", "aria-label": `Change ${c.name}` }, grip, h("div", { class: "drawer-head" }, h("span", { class: "row tight" }, h("span", { class: "eyebrow" }, "Change"), capRef(c)), close), body);
+  const headTools = h("span", { class: "row tight" });
+  const el = h("aside", { class: "drawer", "aria-label": `Change ${c.name}` }, grip, h("div", { class: "drawer-head" }, h("span", { class: "row tight" }, h("span", { class: "eyebrow" }, "Change"), capRef(c)), h("span", { class: "row tight" }, headTools, close)), body);
   resizable(el, grip);
   let intake = null;
   const showBuild = (buildId) => {
     intake = null;
+    put(headTools);
     const panel = buildPanel(buildId, {
       compact: true,
       onPromoted: (b) => {
@@ -99,6 +101,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
   const showIntake = () => {
     intake = intakeView({ mode: "modify", cap: c, q, embedded: true, onBuilt: (b) => (invalidateCaps(), showBuild(b.buildId)) });
     put(body, intake.el);
+    put(headTools, intake.startOver);
     setTimeout(() => intake?.focus());
   };
   // A change already building: follow it here.
