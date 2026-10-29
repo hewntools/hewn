@@ -37,7 +37,7 @@ A [capability](../../spec/capability-model.md#capability) is called a tool in ev
 | `packages/core` | The platform logic: `Platform` and its domains (`src/platform/`), the registry, manifest and contract checks, migrations rules, auth, OAuth, schedules, widgets, the model port. Pure: no Node, no workerd. | AGPL |
 | `packages/host-workerd` | What runs inside workerd: the Worker and its Durable Objects, the capability runtime wrapper, the HTTP and MCP surface, the web client (`web/`: `app.js`, one module per section in `web/app/`, the shared `kit.js`). | AGPL |
 | `packages/ui` | The UI kit tool UIs load from `/_platform/`: `ui.css`, `session.js`, `widgets.js`, `chart.js`, `ascii.js`. | Apache-2.0 |
-| `packages/cli` | `hewn`: the CLI, the supervisor, setup, builders, the intake, backups, the visual check. The only package published to npm. | AGPL |
+| `packages/cli` | `hewn`: the CLI, the supervisor, setup, builders, the intake, backups, the visual check and its measures (`defects.ts`, which the bench uses too). The only package published to npm. | AGPL |
 | `packages/test-host` | The core on Node for fast tests: `node:sqlite`, a blob directory, capability code run in-process with no isolation. Never shipped. | AGPL |
 
 Integration tests are in `test/`. Example tools are in `seeds/`.
@@ -71,7 +71,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | `widgets.ts` | running widgets, and Home's layout |
 | `schedules.ts` | schedules, and the ones the owner approves with a build |
 | `builds.ts` | builds: requests, the order they run in, the builder's attempts, retries, cancels, the owner's review, what a build keeps |
-| `validation.ts` | `validateAndPromote` ([Builds](#builds)) and promotion |
+| `validation.ts` | `validate` (a build's candidate checked, nothing promoted) and `promote` ([Builds](#builds)); `validateAndPromote` is the two in a row |
 | `sharing.ts` | a tool as a file, owner only: Share… (a version's files, the scan, the bundle), Install from a file (staged and checked, read by the owner's builder (the intake's `summarize`), then a create build with no builder, `bundle`, through the normal validation), and sample data (replayed after an install or Start over, or written by the owner as a new version); the Hub's Official shelf, which the host hands over (`SurfaceHost.shelf`, read from the release's `seeds/`): its cards, a tool's page, code and images, and staging one to install |
 | `attachments.ts` | what the owner attaches in the intake's box |
 | `instructions.ts` | the owner's instructions for building |
@@ -139,13 +139,13 @@ What led to a build stays with it for the capability's life: `build_context` hol
 
 The brief is [`spec/builder-brief.md`](../../spec/builder-brief.md), with the request and the owner's other capabilities appended.
 
-`validateAndPromote` (`platform/validation.ts`), in order:
+`validateAndPromote` (`platform/validation.ts`), in order. Steps 1 to 6 are `validate`, which changes nothing about the tool and returns the `Candidate` (its files and bundle, its UI rendered, with the measured defects when asked); 7 and 8 are `promote`, which may come later or not at all:
 
 1. the manifest: the platform's own fields stamped first (`stampSource`: `source` from the capability's record, or on an install from a file the install's; a builder's `hub` and `minVersion` removed), then schema, id, ABI, kind, connection and widget rules, `ui/index.html` when `ui.available`
 2. bundle `src/index.ts` with its npm dependencies (imports resolve inside the workspace only, links followed, and take no import attribute but `type: "json"`; npm runs on the machine, outside the builder sandbox, so every build asks it for registry versions only and carries no `.npmrc`: `dependencyProblems`, checked on the whole workspace and again by the workbench before npm starts); the bundle exports every declared `name@version`
 3. contract compatibility with the active version; a widgets build changes only widgets; declared callees offer the pinned operations
 4. migrations are append-only and non-destructive
-5. `tests/cases.json` on fresh state through the real runtime; the sample data (`sample/calls.json`) replays on another fresh state with nothing granted (no network, other tools or model); every widget has a case; the UI renders headlessly without errors, in light and dark, on an empty state and, with sample data, again on the sample's (that screenshot is the one the build page shows); changed widgets render in every size, from what each shows on the sample's state when there is one, else from its test case. A render that fails keeps its screenshot and logs "(screenshot attached", the line `buildView` reads, so the owner sees what broke
+5. `tests/cases.json` on fresh state through the real runtime; the sample data (`sample/calls.json`) replays on another fresh state with nothing granted (no network, other tools or model); every widget has a case; the UI renders headlessly without errors, in light and dark, at 1280 and 390 px wide, on an empty state and, with sample data, again on the sample's (that screenshot is the one the build page shows, and the candidate keeps the four whole-page images); changed widgets render in every size, from what each shows on the sample's state when there is one, else from its test case. A render that fails keeps its screenshot and logs "(screenshot attached", the line `buildView` reads, so the owner sees what broke
 6. migrations dry-run on a copy of live state
 7. freeze the version; an agent's change to a connection, or one that adds operations, stops here as `review` until the owner approves it
 8. back up live state, migrate it, promote (an install from a file records where it came from, `setSource`, the record later versions are stamped from), and drop grants the new version no longer asks for; a quick change (manifest only, builder `keep`) keeps the owner's declines for what it still asks for; then an install's sample data replays on the live state when the owner asked (`afterInstall`; a failed call is noted, the tool stays)
@@ -164,7 +164,7 @@ A refreshed login is copied back. Versions never keep builder configuration (dot
 
 **Attempts resume.** A failed validation doesn't start the builder over: the next attempt resumes the first one's session with the failure (`resumePrompt`), so the brief isn't re-read and the candidate not rewritten. Claude Code: `--session-id` on the first attempt, `--resume` after. Codex: its thread id from `thread.started`, `codex exec … resume <id>`. OpenCode: the `sessionID` on every event, `opencode run -s <id>`. Each builder keeps its session in the build's own home (`builder-home/<builder>/<buildId>`): only the login file goes after each run, the directory goes with the workspace, and no other build's sandbox can read it. The sessions are known to the running process only; after a restart, or when a resume fails before the builder used any tool, the attempt starts fresh (a resume that fails after is a failed attempt: the workspace may be half-changed). The host's builder gets `session` (the build id) with every attempt and may do the same.
 
-**The visual check** (`packages/cli/src/visual.ts`) renders a candidate UI, or a sheet of its changed widgets, in a local Chromium over the DevTools protocol, with the UI's API running the candidate on scratch state. Uncaught errors, console errors and failed requests fail the build; the screenshots are kept. It is skipped when no browser is found.
+**The visual check** (`packages/cli/src/visual.ts`) renders a candidate UI, or a sheet of its changed widgets, in a local Chromium over the DevTools protocol (`launchBrowser`, which the bench drives too), with the UI's API running the candidate on scratch state. The UI renders on a desktop screen (1280 × 800: the build page's screenshot, light and dark) and on a phone (390 × 844, touch, 2×), each also as the whole page in light and dark (`shots`, four images). Uncaught errors, console errors and failed requests on either screen fail the build (a phone-only one says so); alert, confirm and prompt are dismissed, and a call the page blocks fails after 60 s. With `measure`, it also returns what to fix (`defects.ts`: what sticks out past each screen's edge, text cut short, page errors, controls that break the page when clicked). It is skipped when no browser is found.
 
 ## Intake
 

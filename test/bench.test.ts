@@ -251,7 +251,7 @@ describe("bench runs", () => {
       await desktop.goto(url);
       // The seeded count is what the page shows: the shim sent /api/invoke to this tool's state.
       assert.equal(await desktop.eval("document.getElementById('n').textContent"), "3");
-      const png = await desktop.shot();
+      const png = await desktop.wholePage();
       assert.equal(png.subarray(1, 4).toString(), "PNG");
       assert.deepEqual(desktop.errors, []);
       const clicks = await clickThrough(desktop, url);

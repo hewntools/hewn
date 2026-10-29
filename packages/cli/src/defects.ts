@@ -145,14 +145,21 @@ export async function clickThrough(page: MeasuredPage, url: string, limit = 20):
   return out;
 }
 
-/** Where a screen's defects were found, in a builder's words: "on the phone (390 px)". */
-export const screenWords = (width: number, phone: boolean) => (phone ? `on the phone (${width} px)` : `on desktop (${width} px)`);
+/** Which screen, in a builder's words: "on the phone (390 px)", "on desktop (1280 px)". */
+export const onScreen = (width: number, phone: boolean) => (phone ? `on the phone (${width} px)` : `on desktop (${width} px)`);
+
+/** One screen's measures: where (`onScreen`), its layout defects and the page's errors. */
+export interface ScreenDefects {
+  where: string;
+  layout: LayoutDefects;
+  errors: string[];
+}
 
 /**
  * The measures as a builder is told them, one line each (at most 30): per screen, what sticks out,
  * text cut short and page errors; then clicks that broke the page.
  */
-export function defectLines(screens: { where: string; layout: LayoutDefects; errors: string[] }[], clicks?: ClickResult): string[] {
+export function defectLines(screens: ScreenDefects[], clicks?: ClickResult): string[] {
   const out: string[] = [];
   for (const s of screens) {
     for (const x of s.layout.sticksOut) out.push(`Sticks out ${s.where}: ${x}`);

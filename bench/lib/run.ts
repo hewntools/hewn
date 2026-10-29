@@ -10,7 +10,7 @@ import type { BuildView } from "@hewntools/core/platform.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { ARMS, briefFor, craftRequest, CRITIQUE_REQUEST, othersNote, runOrder, type Arm, type Pass } from "./arms.ts";
 import { ownersWords, specFor, type SpecSource } from "./intake.ts";
-import { clickThrough, type ClickResult, defectLines, layoutDefects, overflowX, screenWords } from "@hewntools/cli/defects.ts";
+import { clickThrough, type ClickResult, defectLines, layoutDefects, onScreen, overflowX, type ScreenDefects } from "@hewntools/cli/defects.ts";
 import { DESKTOP, launchBrowser, PHONE, type Page } from "./browser.ts";
 import { loadCases, seedKit } from "./cases.ts";
 import { builderUsage, uiMetrics, type BuilderUsage, type UiMetrics } from "./metrics.ts";
@@ -413,12 +413,12 @@ async function measureDefects(bp: BenchPlatform, capabilityId: string, versionDi
   const s = served(bp.platform, capabilityId, versionDir);
   const server = await startUiServer((k) => (k === "r" ? s : undefined));
   const browser = await launchBrowser();
-  const screens: Parameters<typeof defectLines>[0] = [];
+  const screens: ScreenDefects[] = [];
   try {
     for (const v of [PHONE, DESKTOP]) {
       const page = await browser.page(v);
       await page.goto(server.url("r", capabilityId));
-      screens.push({ where: screenWords(v.width, v.mobile), layout: await layoutDefects(page, v.width), errors: page.errors });
+      screens.push({ where: onScreen(v.width, v.mobile), layout: await layoutDefects(page, v.width), errors: page.errors });
       await page.close();
     }
   } finally {
@@ -441,7 +441,7 @@ async function capture(dir: string, bp: BenchPlatform, capabilityId: string, res
       for (const scheme of ["light", "dark"] as const) {
         await page.scheme(scheme);
         await page.goto(server.url("r", capabilityId));
-        writeFileSync(join(dir, "shots", `${v.name}-${scheme}.png`), await page.shot());
+        writeFileSync(join(dir, "shots", `${v.name}-${scheme}.png`), await page.wholePage());
         if (v === PHONE && scheme === "light") result.overflowMobile = await overflowX(page, v.width);
       }
       result.pageErrors[v.name] = [...new Set(page.errors)];

@@ -29,21 +29,26 @@ export interface Candidate {
   shots?: VisualShot[];
   /** With `measure`: what the visual check measured for the builder to fix. */
   defects?: string[];
+  /** The build page's screenshot of it (light, dark): written again when it's promoted, so the page shows this candidate. */
+  screenshot?: Uint8Array;
+  screenshotDark?: Uint8Array;
 }
 
 export class Validation extends Domain {
   /** Validate a build's candidate and promote it (or hold it for the owner's review). Throws with what failed. */
   async validateAndPromote(build: BuildRow, step: (message: string) => void, onTests: (passed: number, total: number) => void = () => {}): Promise<{ version: number } | { review: BuildReview }> {
-    return this.promote(build, await this.validate(build, step, onTests), step);
+    return this.promote(build, await this.validate(build, step, { onTests }), step);
   }
 
   /**
    * Steps 1 to 6: check a build's candidate (its workspace) without promoting it. The tool, its
    * versions and its data stay as they were, and the workspace stays (only the build page's
-   * screenshot is kept), so it can be promoted later (`promote`), or not at all. `measure` has the
-   * visual check measure what a builder should fix, too. Throws with what failed.
+   * screenshot is kept), so it can be promoted later (`promote`), or not at all. `onTests` follows
+   * the tests; `measure` has the visual check measure what a builder should fix, too. Throws with
+   * what failed.
    */
-  async validate(build: BuildRow, step: (message: string) => void, onTests: (passed: number, total: number) => void = () => {}, opts: { measure?: boolean } = {}): Promise<Candidate> {
+  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean } = {}): Promise<Candidate> {
+    const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
       throw new Error(problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
@@ -133,6 +138,7 @@ export class Validation extends Domain {
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
     let rendered: { shots?: VisualShot[]; defects?: string[] } = {};
+    let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
@@ -179,8 +185,8 @@ export class Validation extends Domain {
       // The screenshot the build page shows, kept whether the check passed or not (a failed one shows
       // what broke). "(screenshot attached" in the log is what tells the build page there's one.
       const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
-        if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-        if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+        kept = { screenshot: v.screenshot, screenshotDark: v.screenshotDark };
+        await this.keepScreenshots(build, v);
       };
 
       // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
@@ -269,7 +275,23 @@ export class Validation extends Domain {
     } finally {
       for (const s of [testState, visualState, dryRun, sampleState]) await this.runtime.dropState(s).catch(() => {});
     }
-    return { manifest, files, code, ...(base ? { base: { manifest: base.row.manifest, files: base.files } } : {}), views, ...(rendered.shots ? { shots: rendered.shots } : {}), ...(rendered.defects ? { defects: rendered.defects } : {}) };
+    return {
+      manifest,
+      files,
+      code,
+      ...(base ? { base: { manifest: base.row.manifest, files: base.files } } : {}),
+      views,
+      ...(rendered.shots ? { shots: rendered.shots } : {}),
+      ...(rendered.defects ? { defects: rendered.defects } : {}),
+      ...(kept.screenshot ? { screenshot: kept.screenshot } : {}),
+      ...(kept.screenshotDark ? { screenshotDark: kept.screenshotDark } : {}),
+    };
+  }
+
+  /** The build page's screenshot of a build, light and dark. */
+  private async keepScreenshots(build: BuildRow, v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) {
+    if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
+    if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
   }
 
   /**
@@ -279,6 +301,8 @@ export class Validation extends Domain {
   async promote(build: BuildRow, candidate: Candidate, step: (message: string) => void): Promise<{ version: number } | { review: BuildReview }> {
     const id = build.capabilityId;
     const { manifest, files, code, base, views } = candidate;
+    // A later check of the same build (another pass) may have drawn over the build page's screenshot.
+    await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
     this.loaded.set(code.hash, { files, bundle: code.js });
     // A follow-up chained to the creation of the same capability (create with widgets) is part of that creation.
