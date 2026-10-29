@@ -92,7 +92,10 @@ export async function handleUi(platform: Platform, host: SurfaceHost, site: Site
     const session = platform.redeemUiTicket(url.searchParams.get("ticket") ?? "", capabilityId);
     if (!session || !key) return send(401, { error: "invalid or expired ticket; open it again from Hewn" });
     const section = /^[A-Za-z0-9_-]{1,40}$/.exec(url.searchParams.get("section") ?? "")?.[0];
-    return new Response(`<!doctype html><meta http-equiv="refresh" content="0;url=${base}#hewn_session=${session}${section ? `&section=${section}` : ""}"><title>Opening…</title>`, {
+    // The web client's light or dark (the system's when it has none), for session.js to put on
+    // the page before any style loads.
+    const theme = /^(?:light|dark)$/.exec(url.searchParams.get("theme") ?? "")?.[0];
+    return new Response(`<!doctype html><meta http-equiv="refresh" content="0;url=${base}#hewn_session=${session}${section ? `&section=${section}` : ""}${theme ? `&theme=${theme}` : ""}"><title>Opening…</title>`, {
       status: 200,
       headers: headers({ "content-type": "text/html; charset=utf-8" }),
     });
