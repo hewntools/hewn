@@ -1354,6 +1354,8 @@ const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "mod
 const MAX_OWNERS_WORDS = 40_000;
 const OWNERS_TURN_CHARS = 4000;
 const DRAFTED_CHANGE_CHARS = 200;
+/** The heading a change's brief starts with ("CHANGES", "**Changes:**", "## Changes"), and a list marker after it. */
+const CHANGES_HEADING = /^[#*\s]*changes[*\s]*?(?::[* \t]*|(?=\n))\s*(?:(?:[-*•]|\d+[.)])\s+)?/i;
 
 /**
  * BUILDER.md's "THE OWNER'S OWN WORDS": the conversation that led to the build (the owner's builds
@@ -1395,7 +1397,7 @@ const leftOut = (n: number) => `(${n} turn${n === 1 ? "" : "s"} left out)`;
 /**
  * A turn as the builder reads it, cut short, its further lines indented so nothing in it passes for a
  * turn of its own. A draft or ideas the intake offered come down to their name and purpose, a drafted
- * change (it has no name) to the first line of its request: the request above is the one agreed.
+ * change (it has no name) to the first line of what it changes: the request above is the one agreed.
  */
 function turnText(t: BuildTurn): string {
   const attached = t.attachments?.length ? `\n(attached: ${t.attachments.map((a) => a.name).join(", ")})` : "";
@@ -1407,7 +1409,7 @@ function turnText(t: BuildTurn): string {
   };
   const change = (d: unknown) => {
     const { request } = (d ?? {}) as { request?: unknown };
-    const all = typeof request === "string" ? request.trim() : "";
+    const all = typeof request === "string" ? request.trim().replace(CHANGES_HEADING, "") : "";
     const line = all.split("\n")[0].slice(0, DRAFTED_CHANGE_CHARS);
     if (line) return line.length < all.length ? `${line}…` : line;
   };

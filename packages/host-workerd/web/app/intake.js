@@ -910,11 +910,13 @@ function proposalCard(kind, list, ctx) {
   if (readOnly) rows.forEach((r) => ((r.box.disabled = true), r.ticks.set(false)));
 
   const preview = (d) => (kind === "widgets" || kind === "schedules" || mode === "modify" ? cap : { id: slug(d.name ?? connection ?? "new"), name: d.name ?? connection });
-  // A new tool's brief by its parts: its operations are the builder's to design, so the card shows what it
-  // keeps and what's decided instead. Without one to read (a change, a connection's spec, a draft from
-  // before 0.4.10 read back on its build or version page), the card lists the operations.
-  const briefOf = (d) => (mode === "modify" ? {} : briefParts(d.requirements));
-  const listsOperations = (brief) => !brief.KEEPS && !brief.DECIDED;
+  // A brief by its parts: a new tool's operations are the builder's to design, and so are a change's new
+  // ones, so the card shows what it keeps (a change: what changes) and what's decided instead. Without one
+  // to read (a connection's spec, a draft from before 0.4.10 read back on its build or version page), the
+  // card lists the operations.
+  const briefOf = (d) => briefParts(mode === "modify" ? d.request : d.requirements);
+  const [lead, leadLabel] = mode === "modify" ? ["CHANGES", "Changes "] : ["KEEPS", "Keeps "];
+  const listsOperations = (brief) => !brief[lead] && !brief.DECIDED;
   const toolPills = (d) => {
     const spec = d.spec ?? { operations: [], uses: [], hosts: [], secrets: [] };
     const on = plan ? plan.needs(d) : [];
@@ -942,7 +944,7 @@ function proposalCard(kind, list, ctx) {
       existing.length > 0 && h("div", { class: "small row tight wrap" }, "Uses ", existing.map((u) => capRef(all.get(u), u))),
       (spec.hosts.length > 0 || spec.secrets.length > 0) && h("div", { class: "small row tight wrap" }, "Needs ", spec.hosts.map((x) => kindTag(x)), spec.secrets.map((x) => kindTag(`secret ${x}`))),
       connectionLine(d.connection, all),
-      brief.KEEPS && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, "Keeps "), brief.KEEPS),
+      brief[lead] && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, leadLabel), brief[lead]),
       brief.DECIDED && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, "Decided "), brief.DECIDED),
       listsOperations(brief) && spec.operations.length > 0 && h("div", { class: "row tight wrap" }, spec.operations.map((o) => kindTag(o.name, o.sideEffect === "read" ? "" : "accent"))),
       r.ticks.el,
@@ -958,14 +960,15 @@ function proposalCard(kind, list, ctx) {
     // What it builds on, needs and runs: always in view (the raw spec or brief stays behind "Show spec" or "Show brief").
     const block = h("div", { class: "inset-block stack-sm" }, details(r));
     const name = kind === "widgets" ? d.title : kind === "schedules" ? d.operation : mode === "modify" ? `${cap.name} · v${ctx.nextVersion ?? (cap.version ?? 0) + 1}` : d.name;
-    const purpose = kind === "widgets" ? d.shows : kind === "schedules" ? cadenceText(d.cadence) : mode === "modify" ? d.request : d.purpose;
+    // A change's brief says what it changes in the block below, not raw here.
+    const purpose = kind === "widgets" ? d.shows : kind === "schedules" ? cadenceText(d.cadence) : mode === "modify" ? !briefOf(d).CHANGES && d.request : d.purpose;
     const pills = kind === "widgets" ? [kindTag(TEMPLATE_LABEL[d.template] ?? d.template), kindTag(d.sizes.map((s) => SIZE_LETTER[s]).join(" "))] : kind === "schedules" ? [kindTag("schedule", "accent")] : toolPills(d);
     return h(
       "li",
       { class: "proposal-row" },
       !single && r.box,
       appIcon(p, { size: 40 }),
-      h("div", { class: "grow" }, h("span", { class: "strong" }, name), h("span", { class: "sub clip" }, purpose), h("div", { class: "row tight wrap proposal-pills" }, pills.filter(Boolean)), block),
+      h("div", { class: "grow" }, h("span", { class: "strong" }, name), purpose && h("span", { class: "sub clip" }, purpose), h("div", { class: "row tight wrap proposal-pills" }, pills.filter(Boolean)), block),
     );
   };
 

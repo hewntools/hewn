@@ -45,6 +45,8 @@ When it's live, the tool may still need you: **Allowed to** on its Info lists th
 
 **Change…** (in the tool's bar, its menu, or Info's **Change it** box) opens a panel next to the tool, so you can describe the change while you look at it; drag its left edge to make it wider. The tool keeps running its current version while the change builds. When the new version is live, **Reload** shows it, and **Undo** goes back to the one before.
 
+The proposal for a change is a short brief too: what changes, what must keep working (the operations agents and other tools call today, and the data), what you decided, what it needs and what should look or feel different. The card shows what changes and what's decided; **Show brief** has the whole brief. The builder designs any new operations from it and from your own words, and must keep the existing ones working: Hewn's checks refuse a version that breaks one. A change to a connection still lists the operations it adds.
+
 Changes to one tool take turns: ask for another while one builds (or an agent does) and it waits, then starts from the version the first one leaves, whether that one goes live or fails. An agent's change waiting for your approval doesn't hold the next one up. The box and your agents see the changes on their way, so the next one builds on them instead of asking for the same thing again.
 
 A tool without a screen of its own shows its operations as forms. **Give it a proper screen** asks for one.
