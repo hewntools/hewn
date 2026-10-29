@@ -420,8 +420,8 @@ their height, padding, border, background or font size).
 - **Errors:** an operation's `{ error }` is shown in the page; nothing is thrown or logged as an error.
 
 **The platform renders your UI before promotion**, headlessly, against a fresh empty state, in
-light and dark, and again filled with your sample data. Any uncaught error, `console.error` or failed
-request fails the build, and the owner sees the screenshot (with the sample data, when there is some).
+light and dark, at 1280 and 390 px wide, and again filled with your sample data. Any uncaught error,
+`console.error` or failed request, on either screen, fails the build, and the owner sees the screenshot (with the sample data, when there is some).
 So the empty state and a full one must both render cleanly.
 
 - `POST /api/invoke` takes `{ operation, input, operationVersion? }`. Without `operationVersion` it calls the

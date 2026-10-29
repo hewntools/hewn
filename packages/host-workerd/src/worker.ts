@@ -230,8 +230,15 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     async visualCheck(buildId, args) {
       visualInvokers.set(buildId, args.invoke);
       try {
-        const r = await sv.json<{ skipped?: string; errors: string[]; screenshot?: string; screenshotDark?: string }>("/workbench/visual", { buildId, manifest: args.manifest, ...(args.widgets ? { widgets: args.widgets } : {}) });
-        return { skipped: r.skipped, errors: r.errors ?? [], screenshot: r.screenshot ? fromBase64(r.screenshot) : undefined, screenshotDark: r.screenshotDark ? fromBase64(r.screenshotDark) : undefined };
+        const r = await sv.json<{ skipped?: string; errors: string[]; screenshot?: string; screenshotDark?: string; shots?: { name: string; png: string }[]; defects?: string[] }>("/workbench/visual", { buildId, manifest: args.manifest, ...(args.widgets ? { widgets: args.widgets } : {}), ...(args.measure ? { measure: true } : {}) });
+        return {
+          skipped: r.skipped,
+          errors: r.errors ?? [],
+          screenshot: r.screenshot ? fromBase64(r.screenshot) : undefined,
+          screenshotDark: r.screenshotDark ? fromBase64(r.screenshotDark) : undefined,
+          ...(r.shots ? { shots: r.shots.map((s) => ({ name: s.name, png: fromBase64(s.png) })) } : {}),
+          ...(r.defects ? { defects: r.defects } : {}),
+        };
       } finally {
         visualInvokers.delete(buildId);
       }

@@ -176,6 +176,8 @@ export interface VisualCheckArgs {
   /** Render these widgets (each in each size, from its test case's view) instead of the candidate's UI. */
   widgets?: VisualWidget[];
   invoke: (body: { operation: string; operationVersion?: number; input?: unknown }) => Promise<{ result: unknown }>;
+  /** Also measure what a builder should fix: what sticks out or is cut short, and controls that break the page (clicks write to the state `invoke` runs on). */
+  measure?: boolean;
 }
 export interface VisualWidget {
   name: string;
@@ -190,6 +192,14 @@ export interface VisualCheckResult {
   screenshot?: Uint8Array;
   /** The same screen in dark mode. */
   screenshotDark?: Uint8Array;
+  /** The UI whole, 1280 and 390 px wide, light and dark: "desktop-light", "desktop-dark", "mobile-light", "mobile-dark". */
+  shots?: VisualShot[];
+  /** With `measure`: what to fix, one line each. */
+  defects?: string[];
+}
+export interface VisualShot {
+  name: string;
+  png: Uint8Array;
 }
 
 // ---------- Secrets & agents ----------
