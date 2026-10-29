@@ -100,7 +100,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
   const showIntake = () => {
     intake = intakeView({ mode: "modify", cap: c, q, embedded: true, onBuilt: (b) => (invalidateCaps(), showBuild(b.buildId)) });
     put(body, intake.el);
-    put(headTools, intake.newButton);
+    put(headTools, intake.startOver);
     setTimeout(() => intake?.focus());
   };
   // A change already building: follow it here.
