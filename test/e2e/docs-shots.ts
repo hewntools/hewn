@@ -72,6 +72,8 @@ const BIKE = {
     schedules: [{ operation: "service_due", cadence: "weekly sun 18:00", why: "Sunday evening, before the week's rides" }],
   },
 };
+// The host's builder (as with HEWN_BUILD_URL), for the paused change: the same stub, under the name the owner sees.
+const REMOTE = { url: "http://127.0.0.1:9/", token: "t", label: "Remote builder" };
 // Both agents found on this Mac, neither connected yet (what the first run shows).
 const harness = (agentId: string, label: string) => ({ agentId, label, pointerRequired: false, pointerNote: "", detect: () => true, registered: () => false, steps: () => [], login: () => [], loginFix: () => "" });
 const sv = await startSupervisor({
@@ -79,7 +81,8 @@ const sv = await startSupervisor({
   setup: { harnesses: () => [harness("claude-code", "Claude Code"), harness("codex", "Codex")] as any, userHome: root, appInstalled: () => false },
   port,
   publicPort: await freePort(),
-  builders: { claude: builder },
+  builders: { claude: builder, remote: builder },
+  remote: REMOTE,
   intake: () => async () => BIKE as any,
   log: () => {},
   keySource: "file",
@@ -193,10 +196,13 @@ try {
   });
   await shot("build-failed", { width: 1280, height: 1000, clip: { x: card.x - 20, y: card.y - 20, width: card.width + 40, height: card.height + 40 } });
 
-  // 5b. Another change to Plant Care, paused by the builder's host: Continue or Stop.
+  // 5b. Another change to Plant Care, on the host's builder, which pauses it: Continue or Stop.
+  await sv.admin("settings", { builder: "remote", intake: "claude", maxBuildAttempts: 1 });
   const p3 = await post("/capabilities/plant-care/modify", { request: "Group the plants by room.", conversation: [{ role: "user", content: "Group the plants by room." }] });
   console.log("   plant-care paused:", (await settle(p3.buildId)).status);
   await page.goto(`${web}/#/b/${p3.buildId}`);
+  // The page learns the host's builder's name as it loads with that builder chosen.
+  await page.reload();
   await page.getByRole("button", { name: "Continue" }).waitFor({ timeout: 30_000 });
   await page.waitForTimeout(500);
   const pausedCard = await page.evaluate(() => {
@@ -205,6 +211,7 @@ try {
     return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
   });
   await shot("build-paused", { width: 1280, height: 1000, clip: { x: pausedCard.x - 20, y: pausedCard.y - 20, width: pausedCard.width + 40, height: pausedCard.height + 40 } });
+  await sv.admin("settings", { builder: "claude", intake: "claude", maxBuildAttempts: 1 });
 
   // 6. The Hub: Hewn's own tools, every card in the shot.
   await page.setViewportSize({ width: 1280, height: 1000 });

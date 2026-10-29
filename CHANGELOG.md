@@ -4,7 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
-- **A build can pause.** A host's builder can stop a build part-way with its work kept (for example once it has used a build's allowance) and leave the choice to you: the build shows as paused, not failed, with the host's words, **Continue** (it carries on from where it stopped) and **Stop**, on its page, in the Inbox, in Activity and on the tool. See [When a build fails](docs/building-tools.md#when-a-build-fails). For hosts: Hewn sends `pause: true` with a build and takes a `{ "paused": "…" }` outcome ([remote builder](docs/internal/remote-builder.md)).
+- **A build can pause.** A host's builder can stop a build part-way with its work kept (for example once it has used a build's allowance) and leave the choice to you: the build shows as paused, not failed, with the host's words, **Continue** (it carries on from where it stopped) and **Stop**, on its page, in the Inbox, in Activity and on the tool. Only you can continue it (agents see it paused and tell you), and changes queued behind it wait until you choose. See [When a build fails](docs/building-tools.md#when-a-build-fails). For hosts: Hewn sends `pause: true` with a build and takes a `{ "paused": "…" }` outcome ([remote builder](docs/internal/remote-builder.md)).
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)

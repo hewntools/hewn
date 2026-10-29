@@ -100,6 +100,9 @@ describe("remote builder and intake", () => {
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { refused?: boolean }) => e.refused === true && /40 builds/.test(e.message));
     handle = (_b, _r, res) => ndjson(res, [{ activity: "→ Edit src/index.ts" }, { paused: "This build has used 300 points and isn't finished." }]);
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { paused?: boolean; refused?: boolean }) => e.paused === true && !e.refused && /300 points/.test(e.message));
+    // Paused without a note: still a pause, in Hewn's words.
+    handle = (_b, _r, res) => ndjson(res, [{ paused: "" }]);
+    await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { paused?: boolean }) => e.paused === true && e.message === "The builder's host paused it.");
     handle = (_b, _r, res) => void res.writeHead(429, { "content-type": "application/json" }).end(JSON.stringify({ refused: "Five builds are running already." }));
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { refused?: boolean }) => e.refused === true && /Five builds/.test(e.message));
     handle = (_b, _r, res) => void res.writeHead(401).end();

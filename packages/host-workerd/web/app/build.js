@@ -298,7 +298,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         builtWith(b),
         convoView,
         specView,
-        retryable(b) && h("div", { class: "row tight" }, cont, stop),
+        // Continued already: the choice is made; the build that carries it on is one link away.
+        b.continuedAs ? h("div", { class: "small muted row tight wrap" }, "Continued as ", h("a", { href: `#/b/${enc(b.continuedAs)}` }, b.continuedAs)) : retryable(b) && h("div", { class: "row tight" }, cont, stop),
         logBlock(false),
       );
       requestAnimationFrame(keepScroll);

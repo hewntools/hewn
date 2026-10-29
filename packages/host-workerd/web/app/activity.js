@@ -226,12 +226,15 @@ async function buildsView(head, only, all0) {
       const first = String(b.request?.request || b.request?.purpose || "").split("\n")[0];
       return h("span", { class: "sub clip-1" }, (b.status === "failed" && b.failure?.title) || (first.length > 140 ? `${first.slice(0, 140)}…` : first) || (b.kind === "widgets" ? "Suggested by the builder" : " "));
     };
+    // A paused build's Continue spends more of the host's allowance: it's chosen on the build page, next to the host's note (as from the Inbox and Info).
     const right = (b) =>
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
           ? failed.has(b.buildId) && retryable(b)
-            ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, b.failure?.paused ? "Continue" : "Retry")
+            ? b.failure?.paused
+              ? h("a", { class: "btn sm", href: `#/b/${enc(b.buildId)}`, onclick: (e) => e.stopPropagation() }, "Continue…")
+              : h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
             : b.failure?.paused
               ? kindTag("paused", "warn")
               : kindTag("failed", "danger")
@@ -248,7 +251,7 @@ async function buildsView(head, only, all0) {
       return h(
         "li",
         { class: "link build-row", tabindex: 0, onclick: () => go(`#/b/${enc(b.buildId)}`), onkeydown: (e) => e.key === "Enter" && go(`#/b/${enc(b.buildId)}`) },
-        appIcon(c, { size: 36, ...(LIVE_BUILD.has(b.status) ? { progress: lit, waiting: !lit } : {}), badge: failed.has(b.buildId) ? "danger" : null }),
+        appIcon(c, { size: 36, ...(LIVE_BUILD.has(b.status) ? { progress: lit, waiting: !lit } : {}), badge: failed.has(b.buildId) ? (b.failure?.paused ? "warn" : "danger") : null }),
         h("div", { class: "grow" }, h("span", {}, `${nameOf(b)} · ${kindWord(b)}`), sub(b)),
         h("span", { class: "small faint" }, LIVE_BUILD.has(b.status) ? "" : ago(b.updatedAt ?? b.createdAt)),
         right(b),

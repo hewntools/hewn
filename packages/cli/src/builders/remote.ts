@@ -147,7 +147,8 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
         job.signal,
       );
       if (error?.refused) throw failure(error.refused, "refused");
-      if (error?.paused) throw failure(error.paused, "paused");
+      // Paused even without a note (`{ "paused": "" }`): Hewn has words of its own.
+      if (error && "paused" in error) throw failure(error.paused || "The builder's host paused it.", "paused");
       if (error) throw failure(error.error, error.unavailable ? "unavailable" : undefined);
       // The stream closing early (the service crashed, a proxy cut it) isn't a finished build.
       if (!done) throw new Error(`${r.label} ended without finishing`);

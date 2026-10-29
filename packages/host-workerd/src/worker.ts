@@ -250,7 +250,8 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
           if (e.activity) hooks.onActivity(e.activity);
           if (e.model) hooks.onModel?.(e.model);
           if (e.charge) hooks.onCharge?.(e.charge);
-          if (e.error) failure = e;
+          // An empty message is still a failure (a pause without a note).
+          if (e.error !== undefined) failure = e;
         }, hooks.signal);
       } catch (e) {
         // The supervisor (where the builder runs) went away mid-build: Hewn is likely restarting.

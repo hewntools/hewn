@@ -50,6 +50,8 @@ export interface BuildView {
   dependsOn?: string;
   /** Waiting its turn behind an earlier change to the same capability (starts when that one ends, however it ends). */
   queued?: boolean;
+  /** Paused, and continued since: the build that carries it on (Continue and Stop are done with). */
+  continuedAs?: string;
   /** Status "review": what the change would add; it goes live once the owner approves it. */
   review?: BuildReview;
   /** What it runs on: the model and effort (as asked for or set), and the model it ran on. */
@@ -462,12 +464,26 @@ export class Builds extends Domain {
    * The build to queue a change behind: the newest unfinished one of the same capability, so two
    * changes never run at once (the second would fail at the end: "capability changed since this
    * build started"). A change waiting for the owner's review doesn't hold others up. Not for an
-   * automatic retry: it takes the place of the build it retries, and what queued behind that one
-   * waits for it.
+   * automatic retry, or the Continue of a paused build: it takes the place of the build it retries,
+   * and what queued behind that one waits for it (`takePlace`).
    */
   private queueBehind(capabilityId: string, marks: RetryMarks): string | undefined {
-    if (marks.autoRetryOf) return undefined;
+    if (marks.autoRetryOf || this.continues(marks)) return undefined;
     return this.registry.unfinishedBuild(capabilityId)?.id;
+  }
+
+  /** The paused build a retry continues (the owner's Continue), if it does. */
+  private continues(marks: RetryMarks): string | undefined {
+    return marks.retryOf && isPaused(this.mustBuild(marks.retryOf)) ? marks.retryOf : undefined;
+  }
+
+  /**
+   * A Continue takes the paused build's place: what queued behind it waits for the new build now,
+   * as after a restart (`resumeWaitingBuilds`). Called before the new build starts.
+   */
+  private takePlace(buildId: string, marks: RetryMarks) {
+    const paused = this.continues(marks);
+    if (paused) for (const w of this.registry.waitingBuilds(paused)) this.registry.updateBuild(w.id, { dependsOn: buildId });
   }
 
   /**
@@ -497,19 +513,21 @@ export class Builds extends Domain {
   /**
    * A build ended: builds waiting for it start if it promoted, and fail otherwise (they can be
    * retried once it has been). A change queued behind it starts either way, and already when it
-   * waits for the owner's review.
+   * waits for the owner's review; not while it is paused (Stop releases it, a Continue takes it over).
    */
   private async releaseDependents(buildId: string) {
     const dep = this.registry.getBuild(buildId);
     if (!dep) return;
+    const paused = isPaused(dep);
     for (const listed of this.registry.waitingBuilds(buildId)) {
       // Re-read: an earlier start awaited, and this one may have been cancelled meanwhile.
       const b = this.mustBuild(listed.id);
       if (b.status !== "waiting") continue;
       // Waiting for the owner's review: what needs it keeps waiting (approve or reject releases it).
       if (dep.status === "review" && !this.queued(b)) continue;
+      // Paused: the change queued behind it keeps its turn.
+      if (paused && this.queued(b)) continue;
       if (dep.status !== "promoted" && !this.queued(b)) {
-        const paused = dep.status === "failed" && explainFailure(dep.log).paused;
         this.failBuild(b.id, `build ${buildId}, which it waited for, ${paused ? "paused; continue that one, then retry this one" : `${dep.status}; retry that one, then this one`}`);
         continue;
       }
@@ -663,6 +681,7 @@ export class Builds extends Domain {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, cap.id, conversation);
+      this.takePlace(buildId, marks);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`, !after);
     else await this.startModify(buildId);
@@ -692,6 +711,7 @@ export class Builds extends Domain {
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "widgets", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, cap.id, conversation);
+      this.takePlace(buildId, marks);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [widgets ${cap.id} by ${agent.id}]`, !after);
     else await this.startModify(buildId);
@@ -749,6 +769,8 @@ export class Builds extends Domain {
       const ended = cur.status === "failed" || cur.status === "cancelled";
       throw new PlatformError("conflict", `build ${old.id} was already retried as ${cur.id}${ended ? `, which ${cur.status}; retry ${cur.id} instead` : ` (${cur.status}); wait for that one`}`);
     }
+    // Paused by the builder's host: going on spends more of the owner's allowance, so it's theirs to decide.
+    if (isPaused(old) && agent.kind !== "user") throw new PlatformError("forbidden", "the owner continues a paused build in Hewn");
     // No builder ran, so none can run again: an install from a file is installed again, the owner's own edit saved again.
     if (old.builder === "bundle") throw new PlatformError("conflict", "this was an install from a file; install the file again instead of retrying");
     if (old.request.filesOnly) throw new PlatformError("conflict", "this saved files you wrote; save them again instead of retrying");
@@ -795,8 +817,10 @@ export class Builds extends Domain {
     requireScope(agent, scopeOf(build.kind));
     if (agent.kind !== "user" && agent.id !== build.requestedBy) throw new PlatformError("forbidden", `only the owner or ${build.requestedBy} can cancel this build`);
     if (build.status === "validating") throw new PlatformError("conflict", "the candidate is being validated; it finishes in a moment");
-    // Paused (its host kept the work for a Continue): Stop ends it.
-    const paused = build.status === "failed" && !!explainFailure(build.log).paused && !this.registry.retryOf(build.id);
+    // Paused (its host kept the work for a Continue): Stop ends it, unless it was continued.
+    const paused = isPaused(build);
+    const continued = paused ? this.registry.retryOf(build.id) : undefined;
+    if (continued) throw new PlatformError("conflict", `build ${buildId} was continued as ${continued}`);
     if (!paused && build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review") throw new PlatformError("conflict", `build is already ${build.status}`);
     const line = paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
     this.registry.updateBuild(buildId, { status: "cancelled", log: [...build.log, line] });
@@ -1276,6 +1300,13 @@ export class Builds extends Domain {
     const tests = testCounts(b.log);
     if (tests) view.tests = tests;
     if (b.status === "failed") view.failure = explainFailure(b.log);
+    if (view.failure?.paused) {
+      const next = this.registry.retryOf(b.id);
+      if (next) view.continuedAs = next;
+      view.instructions = next
+        ? `The owner continued this build as build ${next}. Call builds_wait on that one to follow it.`
+        : "The builder's host paused this build part-way, its work kept (failure.detail says why). Tell the owner; they Continue or Stop it in Hewn.";
+    }
     const model = this.registry.buildModel(b.id);
     if (model && Object.keys(model).length) view.model = model;
     const charge = this.registry.buildCharge(b.id);
@@ -1312,6 +1343,9 @@ export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
 
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
+
+/** Paused by the builder's host, its work kept: failed for waits and agents, the owner's to Continue or Stop. */
+const isPaused = (b: BuildRow) => b.status === "failed" && !!explainFailure(b.log).paused;
 
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>
