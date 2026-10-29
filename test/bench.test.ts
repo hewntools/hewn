@@ -16,7 +16,7 @@ import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
 import { benchPlatform, caller, exportVersion, served, settle } from "../bench/lib/platform.ts";
 import { checkOut, cleanEnv, otherTools, runOne } from "../bench/lib/run.ts";
 import { summarize } from "../bench/lib/summary.ts";
-import { INTENT_INSTRUCTION, LEAN_INSTRUCTION, ownersWords, promptFor, SKETCH_INSTRUCTION, SPEC_INSTRUCTION } from "../bench/lib/intake.ts";
+import { EXPECTED_SUMMARY, INTENT_INSTRUCTION, LEAN_INSTRUCTION, ownersWords, promptFor, SKETCH_INSTRUCTION, SPEC_INSTRUCTION, SPEC_SUMMARY } from "../bench/lib/intake.ts";
 import { setHidden, writeOwner } from "../bench/lib/view.ts";
 import { startUiServer } from "../bench/lib/ui-server.ts";
 
@@ -73,8 +73,11 @@ describe("bench specs", () => {
     assert.ok(today.includes(LEAN_INSTRUCTION));
     assert.ok(!today.includes(SPEC_INSTRUCTION) && !today.includes(SKETCH_INSTRUCTION));
     assert.match(today, /UI INTENT \(what must be visible[^"]*\. Leave "request" empty\./);
+    // The card's summary is what the intake expects (only a schedule's name binds the builder); a connection keeps its spec.
+    assert.ok(EXPECTED_SUMMARY.every((x) => today.includes(x)) && !SPEC_SUMMARY.some((x) => today.includes(x)));
+    assert.match(today, /A draft that is a connection itself \(the owner asked for one: "A connection to …"\) keeps builder-ready "requirements" instead/);
     assert.equal(promptFor(messages, "lean"), today);
-    assert.equal(promptFor(messages, "intent"), today.replace(LEAN_INSTRUCTION, `${SPEC_INSTRUCTION} ${INTENT_INSTRUCTION}`));
+    assert.equal(promptFor(messages, "intent"), today.replace(LEAN_INSTRUCTION, `${SPEC_INSTRUCTION} ${INTENT_INSTRUCTION}`).replace(EXPECTED_SUMMARY[0], SPEC_SUMMARY[0]).replace(EXPECTED_SUMMARY[1], SPEC_SUMMARY[1]));
   });
 
   test("the builder gets the owner's own words, with which to follow when they differ from the brief", () => {

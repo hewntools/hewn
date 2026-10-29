@@ -9,7 +9,7 @@ import type { IntakeMessage } from "@hewntools/host-workerd/surface/intake-types
 import type { BenchCase } from "./cases.ts";
 import { ask } from "./judge.ts";
 
-/** Where a spec comes from: today's intake, the intake asked for UI intent instead of a sketch, or an agent's thin requirements. */
+/** Where a spec comes from: today's intake (from the short request, or "lean": a conversation), 0.4.9's spec with UI intent, or an agent's thin requirements. */
 export type SpecSource = "intake" | "intent" | "thin" | "lean";
 
 export interface Spec {
@@ -29,14 +29,19 @@ export const LEAN_INSTRUCTION = `"requirements": a lean brief for the builder, n
 /** 0.4.9's instruction for the UI part of a draft, after its spec (the lean brief has UI INTENT instead). */
 export const SKETCH_INSTRUCTION = `If it gets a UI, end with a "UI sketch" (4–8 short lines): when the owner opens it and what they want from it; what's at the top (the one number, list or chart that answers that); the main action and its fields, with sensible defaults; what the screen shows on day one with no data; anything shown as a chart. Write it in the owner's words, not the API's.`;
 
+/** How the card's summary of a create draft names operations: today's (expected; the builder names them), and 0.4.9's, which the intent variant puts back with its spec. */
+export const EXPECTED_SUMMARY = [`"operations" (the operations you expect, snake_case name + sideEffect; the builder designs and names them, so only a schedule's operation name is binding)`, "The rest must match the requirements."];
+export const SPEC_SUMMARY = [`"operations" (each operation the capability will have, snake_case name + sideEffect)`, "These must match the spec."];
+
 export const INTENT_INSTRUCTION = `If it gets a UI, end with "UI intent" (4–8 short lines, no layout): who opens it and when, and the question it must answer at a glance; what in the data is worth drawing as a picture (what changes over time, what's due or late, what's compared with a goal); the main action and how quick it must be; the subject's world and the feeling it should have (a builder takes the tool's character and colours from it); anything the owner said about how it should look. Don't prescribe layout, sections, fields or components: the builder designs the screen.`;
 
 /** The intake's prompt for a conversation: today's (the lean brief; "lean" is the same), or 0.4.9's spec with UI intent. */
 export function promptFor(messages: IntakeMessage[], source: "intake" | "intent" | "lean"): string {
   const prompt = intakePrompt({ mode: "create", messages, catalog: [] }, { web: false });
   if (!prompt.includes(LEAN_INSTRUCTION)) throw new Error("the intake's requirements instruction changed: update bench/lib/intake.ts");
+  if (!EXPECTED_SUMMARY.every((x) => prompt.includes(x))) throw new Error("the intake's summary of a draft changed: update bench/lib/intake.ts");
   if (source !== "intent") return prompt;
-  return prompt.replace(LEAN_INSTRUCTION, `${SPEC_INSTRUCTION} ${INTENT_INSTRUCTION}`);
+  return EXPECTED_SUMMARY.reduce((p, x, i) => p.replace(x, SPEC_SUMMARY[i]), prompt.replace(LEAN_INSTRUCTION, `${SPEC_INSTRUCTION} ${INTENT_INSTRUCTION}`));
 }
 
 /** The conversation as the builder reads it: the owner's words, and what the intake said in between. */

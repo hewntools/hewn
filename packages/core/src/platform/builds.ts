@@ -614,17 +614,13 @@ export class Builds extends Domain {
     // kind is an ABI 2.1 field.
     const skeleton: CapabilityManifest = { id, name: req.name, purpose: req.purpose, abi: connection ? "2.1" : DEFAULT_ABI, ...(connection ? { kind: "connection" as const } : {}), operations: [] };
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
-    // The intake's brief leaves operations to the builder, but an approved schedule calls one by name.
-    const scheduled = req.schedules?.length
-      ? `\n\nThe owner approved these schedules, set up once the tool is live: ${req.schedules.map((x) => `\`${x.operation.split("@")[0]}\` (${x.cadence})`).join(", ")}. Each calls the operation by that name with no input (\`{}\`): give the tool operations named exactly so that accept it.`
-      : "";
     await this.workbench.open(buildId, {
       ...(seed ? versionFiles(seed) : {
         "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduled}${attached.note}`, this.registry.buildContext(buildId))),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
@@ -721,7 +717,7 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
-    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${attached.note}`;
+    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
     await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
@@ -1358,6 +1354,16 @@ Change only what widgets need, and nothing else (validation enforces this):
 - add a new **read** operation per widget (\`widget_<name>@1\`) and its code in src/index.ts;
 - add a test case per widget operation to tests/cases.json (seed data with existing operations first).
 Don't change existing operations, \`requires\`, migrations or the UI. Existing widgets may be changed or removed.`;
+
+/**
+ * BUILDER.md's note on the schedules the owner approved with a build: Hewn sets them up once it's
+ * live, each running an operation by name (one that doesn't fit is skipped then), and the intake's
+ * brief leaves a new tool's operations to the builder.
+ */
+const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKind) =>
+  schedules?.length
+    ? `\n\nThe owner approved schedules that Hewn sets up once the ${kind === "create" ? "capability" : "change"} is live: ${schedules.map((x) => `\`${x.operation.split("@")[0]}\` (${x.cadence})`).join(", ")}. Each runs the operation of that exact name with no input, so ${kind === "create" ? "give the capability an operation by each name" : "the capability must have an operation by each name after this change"}: read or write (not destructive), accepting \`{}\`.`
+    : "";
 
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";

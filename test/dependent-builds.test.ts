@@ -337,7 +337,7 @@ describe("schedules approved with a build", () => {
     t.cleanup();
   });
 
-  test("the owner's approved schedules are set up when the build promotes; one that doesn't fit is skipped", async () => {
+  test("the owner's approved schedules are set up when the build promotes, one that doesn't fit skipped; the builder is told their names", async () => {
     const { USER } = await import("@hewntools/core/auth.ts");
     let brief = "";
     t.queue((ws, job) => ((brief = readFileSync(join(ws, "BUILDER.md"), "utf8")), writeConnection(ws, job)));
@@ -353,7 +353,13 @@ describe("schedules approved with a build", () => {
     assert.ok(done.log.some((l) => /schedule .* set: site daily 07:00/.test(l)));
     assert.ok(done.log.some((l) => /schedule skipped \(nope hourly\)/.test(l)));
     // The builder is told the names: the intake's brief leaves operations to it.
-    assert.match(brief, /The owner approved these schedules, set up once the tool is live: `site` \(daily 07:00\), `nope` \(hourly\)\. Each calls the operation by that name with no input/);
+    assert.match(brief, /The owner approved schedules that Hewn sets up once the capability is live: `site` \(daily 07:00\), `nope` \(hourly\)\. Each runs the operation of that exact name with no input, so give the capability an operation by each name: read or write \(not destructive\), accepting `\{\}`\./);
+    // A change that carries schedules says so too.
+    let change = "";
+    t.queue((ws) => void (change = readFileSync(join(ws, "BUILDER.md"), "utf8")));
+    const c = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-connection", request: "a note", schedules: [{ operation: "site", cadence: "hourly" }] })).buildId);
+    assert.equal(c.status, "promoted", c.log.join("\n"));
+    assert.match(change, /Requested change: a note\n\nThe owner approved schedules that Hewn sets up once the change is live: `site` \(hourly\)\. [^]*the capability must have an operation by each name after this change: read or write/);
   });
 
   test("only the owner attaches schedules (agents propose them), and cadences are checked up front", async () => {
@@ -428,7 +434,11 @@ describe("intake: a connection first", () => {
     assert.throws(() => parseIntake(JSON.stringify({ ...base, ideas: [idea("")] }), "create"), /ideas missing/);
     // Ideas only exist when creating.
     assert.throws(() => parseIntake(JSON.stringify({ ...base, ideas: [idea("A")] }), "modify"), /missing 'request'/);
-    assert.match(intakePrompt({ mode: "create", messages: [{ role: "user", content: "suggest some tools" }] }), /reply kind "ideas"[^]*build on another idea[^]*Never a cycle/);
+    const prompt = intakePrompt({ mode: "create", messages: [{ role: "user", content: "suggest some tools" }] });
+    assert.match(prompt, /reply kind "ideas"[^]*build on another idea[^]*Never a cycle/);
+    // One idea building on another: each says under PLATFORM what passes between them; the builder finds the operation names.
+    assert.match(prompt, /in "uses" and say under PLATFORM what it needs from that one, and under that idea's PLATFORM what this one will read or do through it\. Hewn builds that one first, so this one's builder takes the real operation names from its contract/);
+    assert.doesNotMatch(prompt, /name the operations it calls/);
     assert.doesNotMatch(intakePrompt({ mode: "modify", messages: [{ role: "user", content: "x" }] }), /reply kind "ideas"/);
   });
 
