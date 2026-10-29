@@ -4,7 +4,8 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
-- **A conversation waits for you.** Leave New (or a tool's **Change it**) in the middle and come back, with Back or New: it's where you left it in that browser tab, its last proposal still buildable, until you build from it or press **Start over**. A message the intake never answered goes back in the box. See [Asking for a tool](docs/building-tools.md#asking-for-a-tool).
+- **A conversation waits for you.** Leave New (or a tool's **Change it**) in the middle and come back, with Back or New: it's where you left it in that browser tab, with what you'd typed and not sent, its last proposal still buildable; a reply that was on its way arrives there. It stays until you build from it or press **Start over**. See [Asking for a tool](docs/building-tools.md#asking-for-a-tool).
+- The intake no longer ends its questions with "Just say ok if that looks good." An "ok" still takes all its defaults.
 - **Esc closes `⌘K`** at once, also with something typed (it used to clear the search first).
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 

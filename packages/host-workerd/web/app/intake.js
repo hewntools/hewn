@@ -31,6 +31,36 @@ async function intakePage(q) {
   intake.focus();
 }
 
+/** A reply as a turn of the conversation: its text, as the intake reads it back next turn, and the reply (for its card). */
+const turnOf = (reply) => ({
+  role: "intake",
+  content:
+    reply.kind === "questions"
+      ? [reply.message, ...reply.questions].filter(Boolean).join("\n")
+    : reply.kind === "answer"
+      ? reply.message
+    : reply.kind === "widgets"
+      ? [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n")
+    : reply.kind === "ideas"
+      ? [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n")
+    : reply.kind === "schedules"
+      ? [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n")
+    : [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"),
+  reply,
+});
+
+/** Replies on their way, per kept conversation, so a view of it opened meanwhile picks them up. */
+const inflight = new Map();
+/** The view showing a kept conversation now, per key: where a reply lands when its own view was left. */
+const shownViews = new Map();
+const readKept = (key) => {
+  try {
+    return JSON.parse(sessionStorage.getItem(key) ?? "null");
+  } catch {
+    return null;
+  }
+};
+
 /**
  * The intake conversation. `mode` "create" (a new tool, or a connection) or "modify" (a change to
  * `cap`, in the drawer). Every reply that proposes something is one proposalCard; an earlier
@@ -66,13 +96,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // Not for a picked-up one (from=), widgets or a connection; opened with text to send (m=, fix=), it starts anew.
   const keepKey = `hewn.intake.${mode === "create" ? "new" : `change.${capId}`}`;
   const keeps = !from && !widgetsMode && !connection;
-  const kept = keeps && !q?.get("m") && !q?.get("fix") ? (() => {
-    try {
-      return JSON.parse(sessionStorage.getItem(keepKey) ?? "null");
-    } catch {
-      return null;
-    }
-  })() : null;
+  const kept = keeps && !q?.get("m") && !q?.get("fix") ? readKept(keepKey) : null;
+  // This view, for a reply that arrives after its own view was left.
+  const me = { arrive: null };
+  if (keeps) (shownViews.set(keepKey, me), onLeave(() => shownViews.get(keepKey) === me && shownViews.delete(keepKey)));
   const finish = () => keeps && sessionStorage.removeItem(keepKey);
   const built = (b) => (finish(), onBuilt(b));
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
@@ -102,6 +129,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     "aria-label": "Message",
   });
   input.value = q?.get("m") || (widgetsMode ? "Suggest some widgets." : connection ? `A connection to ${connection}, so my tools can use it.` : "");
+  const placeholder = input.placeholder;
   const grow = () => ((input.style.height = "auto"), (input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`));
   input.addEventListener("input", grow);
   // Text put in for you ("Ask builder to fix this"): tall enough to read it whole, once it's on screen.
@@ -115,7 +143,13 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // One box: the message, then the model it builds with (Settings › AI, changeable right here) and Send.
   // One session id for the conversation.
   const session = kept?.session ?? (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const keep = () => keeps && (messages.length ? sessionStorage.setItem(keepKey, JSON.stringify({ session, messages })) : finish());
+  // The conversation and what's typed but not sent.
+  const keep = () => {
+    startOver.hidden = !messages.length;
+    if (!keeps) return;
+    const draft = input.value.trim() ? input.value : "";
+    messages.length || draft ? sessionStorage.setItem(keepKey, JSON.stringify({ session, messages, ...(draft ? { draft } : {}) })) : finish();
+  };
   // After a round of questions: the owner's way to stop them and get a draft on the intake's assumptions.
   const draftNow = h("button", { type: "button", class: "link sm", hidden: true, onclick: () => ((input.value = "Draft it now with your assumptions, and list them."), composer.requestSubmit()) }, "Draft now");
   // Images and files for the request: pasted, dropped or attached; uploaded as they're added, sent as refs.
@@ -157,9 +191,11 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
   composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
   composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
+  // Start over: the conversation goes, with anything typed. In the page's heading (the drawer puts it in its head).
+  const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => clearConversation() }, "Start over");
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
-    : h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
   // Q1 New: or start from a tool someone made: one in Hub, or a file someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
   const hubLink =
@@ -211,26 +247,26 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const nextVersion = capId ? await api(`/capabilities/${enc(capId)}`).then((d) => Math.max(0, ...d.versions.map((v) => v.version)) + 1).catch(() => null) : null;
     const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, done: (text) => (finish(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: finish };
     if (reply.kind === "questions") {
-      messages.push({ role: "intake", content: [reply.message, ...reply.questions].filter(Boolean).join("\n"), reply });
+      messages.push(turnOf(reply));
       say("them", chatText(reply.message, reply.questions));
     } else if (reply.kind === "answer") {
       // A question about Hewn, answered above (no card): remembered, so "ok, build that" follows on.
-      messages.push({ role: "intake", content: reply.message, reply });
+      messages.push(turnOf(reply));
     } else if (reply.kind === "widgets") {
       // Remembered as text, so a follow-up ("make the second one bigger") can refer to them.
-      messages.push({ role: "intake", content: [reply.message, ...reply.proposals.map((p, i) => `${i + 1}. ${p.title} (${p.template}; ${p.sizes.join(", ")}${p.replaces ? `; replaces ${p.replaces}` : ""}): ${p.shows}`)].filter(Boolean).join("\n"), reply });
+      messages.push(turnOf(reply));
       if (!reply.proposals.length) say("them", "No widgets to suggest for this. Say what you'd like to see.");
       else showProposal(...proposalCard("widgets", reply.proposals, ctx));
     } else if (reply.kind === "ideas") {
       // Remembered in full, so "build the first two" or "make #3 simpler" revises them rather than starting over.
-      messages.push({ role: "intake", content: [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n"), reply });
+      messages.push(turnOf(reply));
       showProposal(...proposalCard("ideas", reply.ideas, ctx));
     } else if (reply.kind === "schedules") {
-      messages.push({ role: "intake", content: [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n"), reply });
+      messages.push(turnOf(reply));
       showProposal(...proposalCard("schedules", reply.schedules, ctx));
     } else {
       // The whole draft, so "Keep talking" changes it instead of starting over.
-      messages.push({ role: "intake", content: [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"), reply });
+      messages.push(turnOf(reply));
       showProposal(...proposalCard("draft", [reply.draft], ctx));
     }
     keep();
@@ -262,17 +298,45 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     say("me", text, attachments);
     input.value = "";
     input.placeholder = ""; // the example is for an empty conversation
+    keep();
     grow();
     syncSend();
+    // The request outlives this view: leave and come back, and the view then showing this conversation takes the reply.
+    const stop = new AbortController();
+    const flight = { listeners: new Set(), last: null, stop: () => stop.abort() };
+    if (keeps) inflight.set(keepKey, flight);
+    const settle = awaitReply(flight);
+    let result;
+    try {
+      let reply = null;
+      let failure = null;
+      const progress = (data) => ((flight.last = { ...flight.last, ...data }), flight.listeners.forEach((f) => f(data)));
+      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
+      if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
+      result = { reply };
+    } catch (err) {
+      result = stop.signal.aborted ? { stopped: true } : { error: err };
+    }
+    if (keeps) inflight.delete(keepKey);
+    settle();
+    const there = keeps ? shownViews.get(keepKey) : me;
+    if (!keeps || there === me) return land(result, text);
+    // This view was left: the one showing the conversation now takes it, or it's kept for when it's opened.
+    if (there?.arrive) return there.arrive(result, text);
+    const k = readKept(keepKey);
+    if (k && result.reply) sessionStorage.setItem(keepKey, JSON.stringify({ ...k, messages: [...k.messages, turnOf(result.reply)] }));
+  };
+
+  /** A reply on its way, shown here: the typing dots, what it's doing, its words as they come. Send is Stop. Returns the clean-up. */
+  const awaitReply = (flight) => {
     const typing = h("div", { class: "bubble them typing", role: "status", "aria-label": "Thinking" }, h("i"), h("i"), h("i"));
     const activity = h("div", { class: "small faint intake-activity" });
     const live = h("div", { class: "thread" });
     thread.append(live, typing, activity);
     input.disabled = true;
     draftNow.disabled = true;
-    // While it answers, Send is Stop: the request closes and the intake stops.
-    const stop = new AbortController();
-    const stopBtn = h("button", { type: "button", class: `stop-btn ${embedded ? "" : "lg"}`, "aria-label": "Stop", title: "Stop", onclick: () => stop.abort() }, h("span", { class: "stop-square", "aria-hidden": "true" }));
+    startOver.disabled = true;
+    const stopBtn = h("button", { type: "button", class: `stop-btn ${embedded ? "" : "lg"}`, "aria-label": "Stop", title: "Stop", onclick: () => flight.stop() }, h("span", { class: "stop-square", "aria-hidden": "true" }));
     send.replaceWith(stopBtn);
     const showProgress = (p) => {
       if (p.activity) activity.textContent = `${p.activity}…`;
@@ -280,79 +344,86 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       activity.textContent = "";
       put(live, p.message || p.questions?.length ? themBubble(chatText(p.message, p.questions)) : null);
     };
-    try {
-      let reply = null;
-      let failure = null;
-      await postStream("/intake", (name, data) => (name === "progress" ? showProgress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
-      if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
+    if (flight.last) showProgress(flight.last);
+    flight.listeners.add(showProgress);
+    return () => {
+      flight.listeners.delete(showProgress);
       typing.remove();
       live.remove();
       activity.remove();
-      await showReply(reply, true);
-    } catch (err) {
-      typing.remove();
-      live.remove();
-      activity.remove();
-      if (stop.signal.aborted) {
-        // Stopped: the message goes back in the composer, out of the conversation.
-        messages.pop();
-        keep();
-        thread.lastElementChild?.classList.contains("me") && thread.lastElementChild.remove();
-        input.value = text;
-        thread.append(h("div", { class: "small faint" }, "Stopped."));
-        return;
-      }
-      thread.append(errorBox(err));
-      // Widgets don't need the intake: the builder can still make what was asked (or pick itself).
-      if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, messages).then(onBuilt, fail) }, "Build without suggestions")));
-    } finally {
       stopBtn.replaceWith(send);
       input.disabled = false;
       draftNow.disabled = false;
-      syncSend();
-      grow();
-      input.focus();
-    }
-  };
-  composer.addEventListener("submit", ask);
-  // Back where it was left (this tab): the turns as they were, the last proposal buildable again.
-  if (kept?.messages?.length) {
-    const placeholder = input.placeholder;
-    const turns = [...kept.messages];
-    // A message the intake never answered goes back in the box, to send again.
-    const unanswered = turns.at(-1)?.role === "user" ? turns.pop() : null;
-    const startOver = () => {
-      finish();
-      messages.length = 0;
-      latest = null;
-      while (resumed.nextSibling) resumed.nextSibling.remove();
-      resumed.remove();
-      input.value = "";
-      input.placeholder = placeholder;
-      draftNow.hidden = true;
-      if (hubLink) hubLink.hidden = false;
+      startOver.disabled = false;
       syncSend();
       grow();
       input.focus();
     };
-    const resumed = h("div", { class: "small faint row tight resumed" }, "Where you left off", h("button", { type: "button", class: "link sm", onclick: startOver }, "Start over"));
-    earlierEl.after(resumed);
-    offer.remove();
-    heading.hidden = embedded;
-    input.placeholder = "";
-    void (async () => {
+  };
+
+  /** Where a turn ends up in this view: the reply, why it failed, or (stopped) its message back in the box. */
+  const land = async (result, text) => {
+    if (result.reply) return showReply(result.reply, true);
+    if (result.stopped) {
+      messages.pop();
+      thread.lastElementChild?.classList.contains("me") && thread.lastElementChild.remove();
+      input.value = text;
+      keep();
+      thread.append(h("div", { class: "small faint" }, "Stopped."));
+      return;
+    }
+    thread.append(errorBox(result.error));
+    // Widgets don't need the intake: the builder can still make what was asked (or pick itself).
+    if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, messages).then(onBuilt, fail) }, "Build without suggestions")));
+  };
+
+  /** Start over: the conversation and anything typed go; the page is as new. */
+  const clearConversation = () => {
+    finish();
+    messages.length = 0;
+    latest = null;
+    while (earlierEl.nextSibling) earlierEl.nextSibling.remove();
+    input.value = "";
+    input.placeholder = placeholder;
+    draftNow.hidden = true;
+    heading.hidden = false;
+    if (hubLink) hubLink.hidden = false;
+    startOver.hidden = true;
+    syncSend();
+    grow();
+    input.focus();
+  };
+  input.addEventListener("input", () => keep());
+
+  composer.addEventListener("submit", ask);
+  // Back where it was left (this tab): the turns as they were, the last proposal buildable again, what was
+  // typed in the box; and a reply still on its way lands here.
+  if (kept?.messages?.length || kept?.draft) {
+    const flight = inflight.get(keepKey);
+    const turns = [...(kept.messages ?? [])];
+    // A message the intake never answered (and isn't answering) goes back in the box, to send again.
+    const unanswered = !flight && turns.at(-1)?.role === "user" ? turns.pop() : null;
+    if (turns.length) (offer.remove(), (heading.hidden = embedded), (input.placeholder = ""));
+    let settle = null;
+    const ready = (async () => {
       for (const t of turns) {
         if (t.role === "intake" && t.reply) await showReply(t.reply, false);
         else (messages.push(t), say(t.role === "user" ? "me" : "them", t.content, t.attachments));
       }
-      if (unanswered) (input.value = unanswered.content), syncSend(), grow();
+      input.value = unanswered?.content ?? kept.draft ?? "";
+      syncSend();
+      grow();
       keep();
+      if (flight && inflight.get(keepKey) === flight) settle = awaitReply(flight);
     })().catch(fail);
+    me.arrive = (result, text) => ready.then(() => (settle?.(), land(result, text)));
   }
   // Opened with text to send (Info's "Change it", the first run, a new widget), send it.
   if ((q?.get("send") === "1" || widgetsMode || connection) && input.value.trim()) setTimeout(ask);
   return {
     el,
+    // In a drawer, its head holds Start over (the page has it in its heading).
+    startOver: embedded ? startOver : null,
     focus: () => (input.focus(), grow()),
     setText: (t) => ((input.value = t), syncSend(), input.focus(), grow()),
   };
