@@ -12,7 +12,7 @@ import type { Server } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { serverUrl } from "@hewntools/test-host/server.ts";
-import { editJson, editText, FIXTURES, installFrom, serve, setup, TOKENS } from "./helpers.ts";
+import { editJson, editText, FIXTURES, installFrom, platformWith, type Script, serve, setup, TOKENS } from "./helpers.ts";
 
 const op = (name: string, sideEffect = "read") => ({ name, description: "d", version: 1, inputSchema: { type: "object" }, outputSchema: { type: "object" }, sideEffect });
 const manifest = (extra: Record<string, unknown> = {}, widget: Record<string, unknown> = {}) => ({
@@ -439,6 +439,30 @@ describe("create with widgets", () => {
     assert.equal(w.status, "promoted", w.log.join("\n"));
     assert.deepEqual(t.platform.activeManifest("ui-counter").widgets?.map((x) => x.name), ["count"]);
     await assert.rejects(t.platform.create(t.claude, { name: "Conn", purpose: "p", requirements: "r", kind: "connection", widgets: true }), /connection has no widgets/);
+  });
+});
+
+describe("create with widgets across a restart", () => {
+  test("the interrupted create is retried, and its widgets build follows the retry", async () => {
+    const t = setup();
+    // The first platform's builder never finishes: Hewn "stops" mid-build.
+    t.queue(() => new Promise<void>(() => {}));
+    const b = await t.platform.create(t.claude, { name: "UI Counter", purpose: "Count taps.", requirements: "A counter.", widgets: true });
+    t.platform.close();
+
+    const scripts: Script[] = [(ws) => cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true }), addCountWidget];
+    const fresh = platformWith(t.home, () => ({ name: "script", build: async (job) => scripts.shift()!(job.workspace, job) }), { attempts: 1 });
+    try {
+      const [retry] = await fresh.recoverInterruptedBuilds();
+      assert.ok(retry, "the widgets build waiting for it doesn't stop the retry");
+      assert.equal(fresh.registry.getBuild(b.widgetsBuildId!)!.dependsOn, retry, "re-pointed to the retry");
+      assert.equal((await fresh.settle(retry)).status, "promoted");
+      const w = await fresh.settle(b.widgetsBuildId!);
+      assert.equal(w.status, "promoted", w.log.join("\n"));
+    } finally {
+      await fresh.drain();
+      fresh.close();
+    }
   });
 });
 

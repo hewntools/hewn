@@ -67,7 +67,7 @@ A build gets up to three attempts on its own (Settings › AI › Build attempts
 
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude`, `codex login` or `opencode auth login`), then try again.
 
-A new tool that failed or that you cancelled doesn't hold on to its name: ask for it again (or build the same proposal) and the new build takes it over. Until then, **Retry** on the old build still works.
+A new tool that failed or that you cancelled doesn't hold on to its name: ask for it again (or build the same proposal) and the new build takes it over. **Retry** on the old build is refused while the new one is being built, works again if the new one fails or you cancel it, and once the new one is live says the tool has been created since. A build that waited for the old one (a tool that calls it) follows the new one when you retry it.
 
 ## Versions
 

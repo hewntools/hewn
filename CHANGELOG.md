@@ -4,7 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.10 (unreleased)
 
-- **Fixed:** a new tool you cancelled, or that failed, held on to its name: asking for it again said "capability '…' already exists". The new build now takes the name over; only one that's still being built says so ("already being built"), and the old build's **Retry** stops working once the new one has it.
+- **Fixed:** a new tool you cancelled, or that failed, held on to its name: asking for it again said "capability '…' already exists". The new build now takes the name over. While one is being built (or waits to start), asking again says "already being built", and so does `hewn install` under that name, which ran alongside it before. The old build's **Retry** is refused while the new one is being built, works again if it fails or you cancel it, and says "created since" once it's live. A build that waited for the old one follows the new one when you retry it.
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
 
 ## 0.4.9 (2026-10-28)

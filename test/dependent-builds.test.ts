@@ -118,6 +118,36 @@ describe("dependent builds", () => {
     assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
   });
 
+  test("when the dependency failed and a new create of its name went live, the waiting build's retry starts at once", async () => {
+    t.queue(broken);
+    const conn = await t.platform.create(t.claude, connReq);
+    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
+    t.queue(writeConnection, writeConsumer);
+    assert.equal((await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId)).status, "promoted");
+    await assert.rejects(t.platform.retryBuild(t.claude, conn.buildId), /has been created since/);
+    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    assert.notEqual(consumer2.status, "waiting");
+    assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
+  });
+
+  test("when the dependency failed and a new create of its name is on its way, the waiting build's retry waits for that one", async () => {
+    t.queue(broken);
+    const conn = await t.platform.create(t.claude, connReq);
+    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws, job) => (await gate, writeConnection(ws, job)), writeConsumer);
+    const conn2 = await t.platform.create(t.claude, connReq);
+    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    assert.equal(consumer2.status, "waiting");
+    assert.equal(consumer2.dependsOn, conn2.buildId);
+    release();
+    assert.equal((await t.platform.settle(conn2.buildId)).status, "promoted");
+    assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
+  });
+
   test("after a promoted build starts at once; after a failed one is refused", async () => {
     t.queue(writeConnection);
     const conn = await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
