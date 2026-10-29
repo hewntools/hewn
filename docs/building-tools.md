@@ -14,7 +14,7 @@ The agent that [builds your tools](concepts.md#hewns-two-jobs) (Settings › AI)
 
 ![A spec proposal for one tool, Bike Care: what it's for, that it needs api.open-meteo.com, its five operations, a weekly schedule to approve and a widget, with Keep talking and Build 1 tool; the box below has Attach](images/spec-proposal.png)
 
-Leave in the middle (to look something up in Activity, say) and come back, with Back or **New**: the conversation is where you left it in that browser tab, with what you'd typed and not sent, its last proposal ready to build. A reply still on its way when you left arrives there. It stays until you build from it or press **Start over** (top right; in a tool's **Change it**, next to ×), which keeps its own the same way.
+Leave in the middle (to look something up in Activity, say) and come back, with Back or **New**: the conversation is where you left it in that browser tab, with what you'd typed and not sent, its last proposal ready to build. A reply still on its way when you left arrives there. It stays until you build from it or start a new one with **+ New** (top right, and it asks first; in a tool's **Change it**, next to ×), which keeps its own the same way.
 
 You can ask the box about Hewn too ("can a tool read my calendar?", "how do I undo a change?"): it answers from Hewn's docs instead of drafting, and says so when they don't cover it. Reply to carry on ("ok, draft one"). It sticks to Hewn: trivia, or something Hewn doesn't build (a Claude skill, a browser extension), gets a line saying so, and a tool if one would do.
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
-import { ago, api, appIcon, builderLabel, capRef, caps, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
+import { ago, api, appIcon, builderLabel, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
 import { brandTile, go, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
 import { installFromFile } from "./install.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
@@ -92,7 +92,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   };
   if (from) continueFrom(from).catch(fail);
   // The open conversation, kept for this tab per place (New, a tool's Change), so leaving and coming back
-  // finds it as it was, its last proposal still buildable. Gone once something is built from it, or on Start over.
+  // finds it as it was, its last proposal still buildable. Gone once something is built from it, or on + New.
   // Not for a picked-up one (from=), widgets or a connection; opened with text to send (m=, fix=), it starts anew.
   const keepKey = `hewn.intake.${mode === "create" ? "new" : `change.${capId}`}`;
   const keeps = !from && !widgetsMode && !connection;
@@ -191,8 +191,11 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
   composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
   composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
-  // Start over: the conversation goes, with anything typed. In the page's heading (the drawer puts it in its head).
-  const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, onclick: () => clearConversation() }, "Start over");
+  // + New: a new conversation (this one goes, with anything typed), once the owner says so. In the page's heading (the drawer puts it in its head).
+  const askNew = async () => {
+    if (await confirmDialog({ title: "Start a new conversation?", body: "This one goes, with anything you've typed. Nothing has been built from it.", confirm: "Start new", cancel: "Keep it" })) clearConversation();
+  };
+  const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, "+ New");
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
@@ -377,7 +380,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, messages).then(onBuilt, fail) }, "Build without suggestions")));
   };
 
-  /** Start over: the conversation and anything typed go; the page is as new. */
+  /** A new conversation: this one and anything typed go; the page is as new. */
   const clearConversation = () => {
     finish();
     messages.length = 0;
@@ -422,7 +425,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   if ((q?.get("send") === "1" || widgetsMode || connection) && input.value.trim()) setTimeout(ask);
   return {
     el,
-    // In a drawer, its head holds Start over (the page has it in its heading).
+    // In a drawer, its head holds + New (the page has it in its heading).
     startOver: embedded ? startOver : null,
     focus: () => (input.focus(), grow()),
     setText: (t) => ((input.value = t), syncSend(), input.focus(), grow()),
