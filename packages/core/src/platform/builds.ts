@@ -8,7 +8,7 @@ import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
 import type { BundleSummary } from "../bundle.ts";
-import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection, type ToolSource } from "../manifest.ts";
+import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection, type OperationManifest, opKey, type SideEffect, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { Files } from "../ports.ts";
@@ -691,6 +691,7 @@ export class Builds extends Domain {
         "tests/cases.json": bytes("[]\n"),
       }),
       "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      ...this.contractFiles(id),
       ...(connection ? {} : await this.looksFile(id, "create")),
       ...attached.files,
       ...this.agentsFile(buildId),
@@ -794,7 +795,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1306,16 +1307,33 @@ export class Builds extends Domain {
 
   // ---------- helpers ----------
 
-  /** Public manifests of the owner's other capabilities: what a builder may compose with. */
+  /**
+   * The owner's other capabilities a build may compose with, from their active manifests; for a change,
+   * with the operations the tool calls on each today (an older version than the newest, perhaps).
+   */
+  private callees(exclude: string): Callee[] {
+    const own = this.registry.getCapability(exclude)?.activeVersion ? (this.activeManifest(exclude).requires?.capabilities ?? []) : [];
+    return this.registry
+      .listActiveCapabilities()
+      .filter((c) => c.id !== exclude)
+      .map((c) => ({ id: c.id, manifest: this.activeManifest(c.id), calls: own.filter((d) => d.id === c.id).flatMap((d) => d.operations) }));
+  }
+
+  /** BUILDER.md's end: the owner's other capabilities by name (`catalogNote`); what they offer is in files of their own. */
   private catalogForBuilder(exclude: string): string {
-    const caps = this.registry.listActiveCapabilities().filter((c) => c.id !== exclude);
-    if (!caps.length) return "";
-    const lines = caps.map((c) => {
-      const m = this.activeManifest(c.id);
-      const ops = m.operations.map((o) => `  - \`${o.name}@${o.version}\` (${o.sideEffect}): ${o.description}\n    input: ${JSON.stringify(o.inputSchema)}\n    output: ${JSON.stringify(o.outputSchema)}`);
-      return `### ${m.name} (\`${c.id}\`)\n${m.purpose}\n${ops.join("\n")}`;
-    });
-    return `\n## The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities"). You see only their public contracts, never their data or code.\n\n${lines.join("\n\n")}\n`;
+    return catalogNote(this.callees(exclude));
+  }
+
+  /**
+   * CONTRACTS.md and contracts/<id>.md for a workspace: what each other capability offers
+   * (`contractsIndex`), and its contract in full (`contractFile`). Files of their own, as a builder
+   * may not read BUILDER.md to its end (OpenCode reads 50 KB of a file), and the owner's contracts
+   * together can run to hundreds of KB. None without other capabilities; never part of a version (`isWorkspaceOnly`).
+   */
+  private contractFiles(exclude: string): Files {
+    const callees = this.callees(exclude);
+    if (!callees.length) return {};
+    return { "CONTRACTS.md": bytes(contractsIndex(callees)), ...Object.fromEntries(callees.map((c) => [`contracts/${c.id}.md`, bytes(contractFile(c))])) };
   }
 
   /**
@@ -1574,7 +1592,75 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
     kind === "create"
       ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual (its colour still comes from its subject)."
       : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
-  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule} Their public contracts are at the end of \`BUILDER.md\`.\n\n${lines.join("\n")}\n`;
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule} What each one does is listed in \`BUILDER.md\`.\n\n${lines.join("\n")}\n`;
+}
+
+/** One of the owner's other capabilities as a build is told it: its active manifest, and the operations ("name@N") the tool being changed calls on it today. */
+export interface Callee {
+  id: string;
+  manifest: CapabilityManifest;
+  calls: string[];
+}
+
+/** How much of a capability's purpose CONTRACTS.md shows (`contracts/<id>.md` has all of it). */
+export const INDEX_PURPOSE_CHARS = 200;
+
+const SIDE_EFFECTS: SideEffect[] = ["read", "write", "destructive"];
+
+/**
+ * What another capability may call, in the manifest's order: the newest version of each operation
+ * that isn't deprecated, and any the tool being changed calls today. Never a widget's operation (it
+ * returns what Home draws) or a connection's sign-in step (the owner's alone), unless called today.
+ */
+export function callableOperations(m: CapabilityManifest, calls: string[] = []): OperationManifest[] {
+  const widgets = new Set((m.widgets ?? []).map((w) => w.operation));
+  const offered = m.operations.filter((o) => !o.deprecated && !widgets.has(opKey(o.name, o.version)) && !(isConnection(m) && o.name === "connect"));
+  const newest = new Map<string, OperationManifest>();
+  for (const o of offered) if ((newest.get(o.name)?.version ?? 0) < o.version) newest.set(o.name, o);
+  return m.operations.filter((o) => newest.get(o.name) === o || calls.includes(opKey(o.name, o.version)));
+}
+
+/**
+ * BUILDER.md's end: the owner's other capabilities by name, and where to read what they offer. A
+ * line per capability at most, so BUILDER.md stays small however many there are and however big
+ * their schemas. Empty when there are none.
+ */
+export function catalogNote(callees: Callee[]): string {
+  if (!callees.length) return "";
+  return `\n## The owner's other capabilities\n\nYou can compose with these via ctx.call (see "Calling other capabilities"): ${callees.map((c) => `${c.manifest.name} (\`${c.id}\`)`).join(", ")}. \`CONTRACTS.md\` in your workspace lists the operations each one offers, and \`contracts/<id>.md\` has each one's full contract. You see only their public contracts, never their data or code.\n`;
+}
+
+/**
+ * CONTRACTS.md: the owner's other capabilities, each one's purpose, cut short, and the operations it
+ * offers by side effect, names only. The full contracts are `contractFile`s.
+ */
+export function contractsIndex(callees: Callee[]): string {
+  const entry = ({ id, manifest: m, calls }: Callee) => {
+    const ops = callableOperations(m, calls);
+    const bySideEffect = SIDE_EFFECTS.flatMap((s) => {
+      const named = ops.filter((o) => o.sideEffect === s).map((o) => `\`${opKey(o.name, o.version)}\``);
+      return named.length ? [`${s}: ${named.join(", ")}`] : [];
+    });
+    const purpose = m.purpose.replace(/\s+/g, " ").trim();
+    return `- **${m.name}** (\`${id}\`): ${purpose.length > INDEX_PURPOSE_CHARS ? `${purpose.slice(0, INDEX_PURPOSE_CHARS - 1)}…` : purpose}\n  ${bySideEffect.join(" · ") || "nothing to call"}`;
+  };
+  return `# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BUILDER.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`contracts/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`;
+}
+
+/** contracts/<id>.md: one capability's contract in full, the operations `callableOperations` gives. */
+export function contractFile({ id, manifest: m, calls }: Callee): string {
+  const op = (o: OperationManifest) => {
+    const key = opKey(o.name, o.version);
+    const top = Math.max(...m.operations.filter((x) => x.name === o.name && !x.deprecated).map((x) => x.version));
+    const notes = [
+      o.sideEffect,
+      ...(calls.includes(key) ? ["this tool calls it today"] : []),
+      ...(o.deprecated ? [`deprecated${o.deprecated.replacement ? `: use ${o.deprecated.replacement}` : ""}`] : o.version < top ? [`the newest is ${opKey(o.name, top)}`] : []),
+    ];
+    return `## \`${key}\` (${notes.join("; ")})\n\n${o.description}\n\ninput: ${JSON.stringify(o.inputSchema)}\noutput: ${JSON.stringify(o.outputSchema)}`;
+  };
+  const ops = callableOperations(m, calls);
+  return `# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BUILDER.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`;
 }
 
 /** BUILDER.md's request for a widgets build. */
