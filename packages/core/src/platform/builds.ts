@@ -690,7 +690,8 @@ export class Builds extends Domain {
         "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(await this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId), connection)),
+      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      ...(connection ? {} : await this.looksFile(id, "create")),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
@@ -793,7 +794,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(await this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId), isConnection(this.activeManifest(cap.id)))), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1305,11 +1306,8 @@ export class Builds extends Domain {
 
   // ---------- helpers ----------
 
-  /**
-   * Public manifests of the owner's other capabilities (what a builder may compose with), then their
-   * tools' looks (a connection's build has no UI, so it gets no looks).
-   */
-  private async catalogForBuilder(exclude: string, kind: BuildKind, connection: boolean): Promise<string> {
+  /** Public manifests of the owner's other capabilities: what a builder may compose with. */
+  private catalogForBuilder(exclude: string): string {
     const caps = this.registry.listActiveCapabilities().filter((c) => c.id !== exclude);
     if (!caps.length) return "";
     const lines = caps.map((c) => {
@@ -1317,14 +1315,24 @@ export class Builds extends Domain {
       const ops = m.operations.map((o) => `  - \`${o.name}@${o.version}\` (${o.sideEffect}): ${o.description}\n    input: ${JSON.stringify(o.inputSchema)}\n    output: ${JSON.stringify(o.outputSchema)}`);
       return `### ${m.name} (\`${c.id}\`)\n${m.purpose}\n${ops.join("\n")}`;
     });
-    return `\n## The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities"). You see only their public contracts, never their data or code.\n\n${lines.join("\n\n")}\n${connection ? "" : await this.othersLooks(exclude, kind)}`;
+    return `\n## The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities"). You see only their public contracts, never their data or code.\n\n${lines.join("\n\n")}\n`;
+  }
+
+  /**
+   * OTHER_TOOLS.md for a workspace: the other tools' looks (`othersLooks`), in a file of its own, as a
+   * builder may not read BUILDER.md to its end (OpenCode reads 50 KB of a file). None when there are
+   * no other tools; a connection's build (no UI) gets none. Never part of a version (`isWorkspaceOnly`).
+   */
+  private async looksFile(exclude: string, kind: BuildKind): Promise<Files> {
+    const looks = await this.othersLooks(exclude, kind);
+    return looks ? { "OTHER_TOOLS.md": bytes(looks) } : {};
   }
 
   /**
    * The owner's other tools as a build is told them, to look clearly different from: each one's hue
-   * (and saturation) on Home and the look its builder recorded in `ui/look.json`, cut short. A section
-   * of BUILDER.md, and what a design pass is told too. Connections (no UI) are left out; a version
-   * that can't be read is listed without its look. Empty when there are none.
+   * (and saturation) on Home and the look its builder recorded in `ui/look.json`, cut short. The
+   * workspace's OTHER_TOOLS.md, and what a design pass is told too. Connections (no UI) are left out;
+   * a version that can't be read is listed without its look. Empty when there are none.
    */
   async othersLooks(exclude: string, kind: BuildKind = "create"): Promise<string> {
     const caps = this.registry.listActiveCapabilities().filter((c) => c.id !== exclude && !isConnection(this.activeManifest(c.id)));
@@ -1356,10 +1364,10 @@ export class Builds extends Domain {
   }
 
   /** BUILDER.md: the request, the owner's own words and instructions as the build recorded them (`build_context`), the brief, the catalog. */
-  private async brief_(kind: BuildKind, id: string, request: string, context: BuildContext | undefined, connection: boolean): Promise<string> {
+  private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
     const instructions = context?.instructions;
-    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWords(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${await this.catalogForBuilder(id, kind, connection)}`;
+    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWords(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {
@@ -1555,8 +1563,8 @@ export function lookText(raw: string): string | undefined {
 }
 
 /**
- * The other tools' looks, a section of BUILDER.md: on the owner's Home already, so a new tool must
- * look clearly different from each; a change keeps its own. Empty when there are none.
+ * The other tools' looks, OTHER_TOOLS.md: on the owner's Home already, so a new tool must look
+ * clearly different from each; a change keeps its own. Empty when there are none.
  */
 export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string {
   if (!tools.length) return "";
@@ -1566,7 +1574,7 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
     kind === "create"
       ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual (its colour still comes from its subject)."
       : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
-  return `\n## The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n`;
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule} Their public contracts are at the end of \`BUILDER.md\`.\n\n${lines.join("\n")}\n`;
 }
 
 /** BUILDER.md's request for a widgets build. */
