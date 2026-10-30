@@ -40,6 +40,8 @@ export interface Candidate {
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
+/** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
+export const MAX_PARTS_BYTES = 10_000_000;
 
 export class Validation extends Domain {
   /** Validate a build's candidate and promote it (or hold it for the owner's review). Throws with what failed. */
@@ -351,7 +353,9 @@ export class Validation extends Domain {
     // it was shown); the rest in files beside them, to open when needed.
     const shots = candidate?.shots ?? [];
     const images = shots.filter((s) => !/-\d+$/.test(s.name));
-    const parts = shots.filter((s) => /-\d+$/.test(s.name));
+    // Within MAX_PARTS_BYTES (an answer crosses to the host's builder whole): what doesn't fit is left out, the phone's dark first.
+    let room = MAX_PARTS_BYTES;
+    const parts = shots.filter((s) => /-\d+$/.test(s.name) && (room -= s.png.length) >= 0);
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
     return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };

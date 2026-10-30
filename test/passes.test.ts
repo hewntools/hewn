@@ -181,6 +181,20 @@ describe("passes after a new tool's build", () => {
     assert.match(results[1].text, /A long page shows its top part; the rest is in screenshots\/mobile-light-2\.png \(top to bottom\): open those to see it\./);
   });
 
+  test("a check's further parts stay within their budget: what doesn't fit is left out, never the top images", async () => {
+    const heavy = setup({ attempts: 1, visualCheck: async () => ({ errors: [], screenshot: Buffer.from("x"), shots: ["desktop-light", "desktop-light-2", "desktop-light-3", "mobile-light", "mobile-light-2"].map((name) => ({ name, png: Buffer.alloc(4_000_000) })) }) });
+    try {
+      let r: CheckResult | undefined;
+      const b = await heavy.build(() => heavy.platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" }), async (ws, job) => void (counter("v:build")(ws, job), (r = await job.check!("c1"))));
+      assert.equal(b.status, "promoted", b.log.join("\n"));
+      assert.deepEqual(r!.images.map((i) => i.name), ["desktop-light", "mobile-light"]);
+      assert.deepEqual(r!.parts?.map((i) => i.name), ["desktop-light-2", "desktop-light-3"], "10 MB: two of three");
+      assert.doesNotMatch(r!.text, /mobile-light-2/);
+    } finally {
+      heavy.cleanup();
+    }
+  });
+
   test("a check on this machine writes every part to screenshots/, none left from before, and attaches the top ones", async () => {
     const ws = mkdtempSync(join(tmpdir(), "hewn-parts-"));
     mkdirSync(join(ws, "screenshots"));

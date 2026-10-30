@@ -99,7 +99,7 @@ or `{ "error": "…" }` when the check couldn't run. Answer with any 2xx.
 
 - **Hand `text` and the images to the model** as the tool's result, not as a tool error, passed or not:
   some clients drop the images from an error. Use an error only for `{ "error" }`.
-- The images show the top of a long page (each at most 2,000 px tall and 1.6 megapixels, as a model reads them), four a call whatever the page's length. The rest of a long page comes in `parts` (`[{ "name": "mobile-light-2", "png": "<base64>" }, …]`, only when there are some): write them into `screenshots/` too (clear the folder first, so no render of an earlier check is left), but don't hand them to the model; the text names them, for the builder to open when it needs to.
+- The images show the top of a long page (each at most 2,000 px tall and 1.6 megapixels, as a model reads them), four a call whatever the page's length. The rest of a long page comes in `parts` (`[{ "name": "mobile-light-2", "png": "<base64>" }, …]`, only when there are some): write them into `screenshots/` too (clear the folder first, so no render of an earlier check is left), but don't hand them to the model; the text names them, for the builder to open when it needs to. A page renders down to 5,000 CSS px, so there are at most 14 (desktop in up to 4 parts, the phone in up to 5, light and dark), and Hewn sends at most 10 MB of them (PNG bytes; what doesn't fit is left out). Typical: under 2 MB.
 - **Write the images into the workspace's `screenshots/`** too (`screenshots/desktop-light.png` …), as
   Hewn's own builders get them: the result's text points there, for a builder whose client drops images.
   `screenshots/` is never part of a version.
