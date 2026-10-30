@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A new tool's brief read back into its parts for the proposal card (web/app/brief.js): the headings
-// as the intake writes them and as a model might vary them, list items, and text that isn't a brief.
+// A brief (a new tool's or a change's) read back into its parts for the proposal card (web/app/brief.js):
+// the headings as the intake writes them and as a model might vary them, list items, and text that isn't
+// a brief.
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 
-const { briefParts } = (await import(join(import.meta.dirname, "../packages/host-workerd/web/app/brief.js"))) as { briefParts: (text?: string | null) => Record<string, string> };
+const { briefParts, changeLine } = (await import(join(import.meta.dirname, "../packages/host-workerd/web/app/brief.js"))) as { briefParts: (text?: string | null) => Record<string, string>; changeLine: (text?: string) => string };
 
 describe("a brief's parts", () => {
   test("each heading on a line of its own, its lines after it", () => {
@@ -36,6 +37,28 @@ describe("a brief's parts", () => {
   test("a sentence that starts like a heading stays in its part", () => {
     assert.deepEqual(briefParts("DECIDED\nFOR now, one bike.\nKEEPS track of nothing else.\nPlatform fees aside."), { DECIDED: "FOR now, one bike. · KEEPS track of nothing else. · Platform fees aside." });
     assert.equal(briefParts("KEEPS\nRides, good for: commutes.").KEEPS, "Rides, good for: commutes.", "a lower-case word and a colon mid-line isn't a heading");
+  });
+
+  test("a change's brief: what changes and what stays, as the other parts", () => {
+    const brief = "CHANGES\n- Each run gets an optional note.\n- The list shows it.\n\nSTAYS\nExisting operation contracts stay backward compatible.\nEvery run logged so far.\n\nDECIDED\nOld runs get no note.\n\nPLATFORM\nNothing new.";
+    assert.deepEqual(briefParts(brief), {
+      CHANGES: "Each run gets an optional note. · The list shows it.",
+      STAYS: "Existing operation contracts stay backward compatible. · Every run logged so far.",
+      DECIDED: "Old runs get no note.",
+      PLATFORM: "Nothing new.",
+    });
+    for (const heading of ["CHANGES", "Changes:", "**Changes**", "**CHANGES:**", "## Changes"]) assert.deepEqual(briefParts(`${heading}\nA note per run.`), { CHANGES: "A note per run." }, heading);
+    for (const heading of ["STAYS", "stays:", "**Stays:**", "### STAYS"]) assert.deepEqual(briefParts(`${heading}\nThe runs.`), { STAYS: "The runs." }, heading);
+    assert.deepEqual(briefParts("CHANGES: A note per run. STAYS: Existing operation contracts stay backward compatible. DECIDED: Optional."), { CHANGES: "A note per run.", STAYS: "Existing operation contracts stay backward compatible.", DECIDED: "Optional." });
+    assert.deepEqual(briefParts("DECIDED\nChanges to old runs are out of scope.\nStays the same for agents."), { DECIDED: "Changes to old runs are out of scope. · Stays the same for agents." }, "sentences that start with the words aren't headings");
+  });
+
+  test("a request in one line: a change's brief by what it changes, anything else by its first line", () => {
+    assert.equal(changeLine("CHANGES\n- Each run gets a note.\n- The list shows it.\n\nSTAYS\nExisting operation contracts stay backward compatible."), "Each run gets a note. · The list shows it.");
+    assert.equal(changeLine("**Changes:** A note per run.\n**Decided:** Optional."), "A note per run.");
+    assert.equal(changeLine("Add a notes field to each run.\nrecord_run@2: add optional notes."), "Add a notes field to each run.", "a change from before 0.4.10");
+    assert.equal(changeLine("Log bike rides and remember when the chain needs oiling."), "Log bike rides and remember when the chain needs oiling.", "a new tool's purpose");
+    assert.equal(changeLine(""), "");
   });
 
   test("missing parts are missing; text before the first heading, and text without headings, is no part", () => {

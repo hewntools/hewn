@@ -562,6 +562,19 @@ describe("intake: a connection first", () => {
     assert.doesNotMatch(ruled, /the moment \(when the owner opens/);
   });
 
+  test("a change's draft is a lean brief too: what changes, what stays (existing contracts compatible), what's decided", async () => {
+    const { intakePrompt } = await import("@hewntools/cli/intake.ts");
+    const p = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "add a note to each run" }] });
+    assert.match(p, /Fill "request": a lean brief for the builder, not a spec\. Plain short sentences under these headings and nothing else: CHANGES \(what the owner wants different[^)]*\), STAYS \(what must keep working: always "Existing operation contracts stay backward compatible\.", then the data and anything the owner wants kept\), DECIDED \([^)]*out of scope\), PLATFORM \([^)]*"nothing new"\), UI INTENT \([^)]*leave it out when the UI doesn't change\)\./);
+    assert.match(p, /Existing operations may be named; no new operation names, inputs, outputs or test lists: the builder designs those, and it reads the owner's own words/);
+    assert.doesNotMatch(p, /builder-ready description of the change|operations added\/changed and how/);
+    assert.match(p, /A change to a connection \(the capability above is of kind "connection"\) keeps a builder-ready "request" instead/);
+    // The card's summary is what the intake expects; only a schedule's name binds the builder.
+    assert.match(p, /"operations" \(the operations you expect this change to add or change, snake_case name \+ sideEffect; the builder designs new ones, so only a schedule's operation name is binding\)[^]*The rest must match the request\./);
+    assert.doesNotMatch(p, /These must match the spec/);
+    assert.doesNotMatch(intakePrompt({ mode: "create", messages: [{ role: "user", content: "x" }] }), /CHANGES \(|STAYS \(/, "a new tool's brief is unchanged");
+  });
+
   test("creating: several ideas at once, each a full draft (incomplete ones dropped, at most five)", async () => {
     const { parseIntake, intakePrompt } = await import("@hewntools/cli/intake.ts");
     const none = { action: "none", capabilityId: "", name: "", purpose: "", requirements: "", request: "" };
