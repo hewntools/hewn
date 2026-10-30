@@ -281,7 +281,7 @@ returns a view model for one of five templates, and declare the widget:
 
 ### Connections (ABI 2.1)
 
-A connection wraps **one** external service that needs credentials (GitHub, Spotify, a self-hosted server…) and
+A connection wraps **one** external service that needs credentials (GitHub, Notion, a self-hosted server…) and
 exposes its API as operations. It is the only kind of capability that may declare `secrets`.
 
 ```json

@@ -508,7 +508,7 @@ Capability A must not receive direct database or filesystem access to Capability
 
 ## Connection
 
-A **Connection** (since 2.1) is a Capability that wraps one external service (GitHub, Spotify, a self-hosted server)
+A **Connection** (since 2.1) is a Capability that wraps one external service (GitHub, Notion, a self-hosted server)
 and exposes that service's API as generic operations. It is not a new entity: it has operations,
 grants, versions and rollback like any Capability.
 
