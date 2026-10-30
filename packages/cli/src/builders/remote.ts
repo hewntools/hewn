@@ -130,7 +130,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
     name: "remote",
     build: async (job: BuildJob) => {
       const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
-      write(`===== attempt ${job.attempt}: ${r.label} =====`);
+      write(`===== attempt ${job.attempt}${job.pass ? `, the ${job.pass.name} pass` : ""}: ${r.label} =====`);
       const files = Object.fromEntries(Object.entries(readTree(job.workspace)).map(([p, b]) => [p, toBase64(b)]));
       let result: Record<string, string> | undefined;
       let error: Record<string, any> | undefined;

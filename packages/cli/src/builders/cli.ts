@@ -77,7 +77,7 @@ export const builderEnv = (env: NodeJS.ProcessEnv = process.env, also?: RegExp):
 
 function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
   const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
-  write(`===== attempt ${job.attempt}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
+  write(`===== attempt ${job.attempt}${job.pass ? `, the ${job.pass.name} pass` : ""}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
   if (job.platformRoot) {
     ({ command, args } = wrapBuilder(command, args, { workspace: job.workspace, platformRoot: job.platformRoot, ...confine }));
   }
