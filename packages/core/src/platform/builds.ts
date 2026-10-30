@@ -1137,7 +1137,7 @@ export class Builds extends Domain {
       }, this.platform.heartbeatMs);
       (heartbeat as { unref?: () => void }).unref?.();
       // The builder checking its work as it goes (its `check` tool): validation's steps, without promoting.
-      const checks = this.d.validation.checksFor(build, (line) => ((live.lastActivity = line), (live.lastActivityAt = Date.now()), this.events.emit(buildId, line)));
+      const checks = this.d.validation.checksFor(build, signal, (line) => ((live.lastActivity = line), (live.lastActivityAt = Date.now()), this.events.emit(buildId, line)));
       try {
         const asked = this.registry.buildModel(buildId);
         await this.workbench.build(

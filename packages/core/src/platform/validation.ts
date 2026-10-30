@@ -59,14 +59,14 @@ export class Validation extends Domain {
     const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
-      throw new Error(problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
+      throw new Error(listed(msg, problems));
     };
-    // A failure what follows can still run after: a check notes it and goes on (so the builder sees
-    // every one, and its UI when it renders); validation stops there. The others always stop.
+    // A failure the later steps can still run after. Validation stops at it, as at any other; a check
+    // notes it and goes on, so the builder sees every one (and its UI, when the code bundles).
     const failures: string[] = [];
-    const problem = (msg: string, problems: string[] = []): void => {
+    const softFail = (msg: string, problems: string[] = []): void => {
       if (!opts.check) fail(msg, problems);
-      failures.push(problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
+      failures.push(listed(msg, problems));
     };
     const workspace = await this.workbench.read(build.id);
 
@@ -113,14 +113,14 @@ export class Validation extends Domain {
     }
     const exported = new Set(exportedKeys);
     const missing = manifest.operations.map((o) => opKey(o.name, o.version)).filter((k) => !exported.has(k));
-    if (missing.length) problem("implementation does not export declared operations", missing);
+    if (missing.length) softFail("implementation does not export declared operations", missing);
     step(`implementation exports ${[...exported].join(", ")}`);
 
     // 3. contract compatibility with the active version
     const base = build.baseVersion ? await this.loadVersion(id, build.baseVersion) : undefined;
     if (base) {
       const breaks = contractBreaks(base.row.manifest, manifest, (key) => this.d.grants.operationUsers(id, key));
-      if (breaks.length) problem("breaking change to a published operation contract (add a new operation version instead)", breaks);
+      if (breaks.length) softFail("breaking change to a published operation contract (add a new operation version instead)", breaks);
       else {
         const removed = base.row.manifest.operations.map((o) => opKey(o.name, o.version)).filter((k) => !manifest.operations.some((o) => opKey(o.name, o.version) === k));
         step(`operation contracts compatible with active version${removed.length ? ` (removed deprecated ${removed.join(", ")})` : ""}`);
@@ -130,20 +130,20 @@ export class Validation extends Domain {
     if (build.kind === "widgets") {
       if (!base) fail("a widgets build needs an active version to add widgets to");
       const problems = widgetsBuildProblems({ manifest: base!.row.manifest, files: base!.files }, { manifest, files });
-      if (problems.length) problem("a widgets build changed more than widgets", problems);
+      if (problems.length) softFail("a widgets build changed more than widgets", problems);
       else step(`widgets only: ${manifest.widgets!.map((w) => w.name).join(", ")}`);
     }
 
     // 3b. declared callees exist and offer the pinned operation versions
     const deps = (manifest.requires?.capabilities ?? []).flatMap((d) => d.operations.map((op) => ({ id: d.id, op })));
     const badDeps = deps.filter((d) => d.id === id || !this.d.grants.offers(d.id, d.op)).map((d) => (d.id === id ? `${d.id}: a capability cannot call itself` : `${d.id}/${d.op} does not exist`));
-    if (badDeps.length) problem("requires.capabilities references unavailable operations", badDeps);
+    if (badDeps.length) softFail("requires.capabilities references unavailable operations", badDeps);
     if (deps.length) step(`calls ${deps.map((d) => `${d.id}/${d.op}`).join(", ")}`);
 
     // 4. migrations are append-only and non-destructive
     const migrations = migrationsOf(files);
     const migrationErrors = migrationProblems(migrations, base ? migrationsOf(base.files) : []);
-    if (migrationErrors.length) problem("migrations rejected", migrationErrors);
+    if (migrationErrors.length) softFail("migrations rejected", migrationErrors);
 
     // 5. candidate test cases against fresh state
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };
@@ -164,12 +164,12 @@ export class Validation extends Domain {
         cases = readCases(workspace);
       } catch (e) {
         if (!opts.check) throw e;
-        problem(`tests/cases.json: ${(e as Error).message}`);
+        softFail(`tests/cases.json: ${(e as Error).message}`);
         cases = [];
       }
-      if (!cases.length) problem("tests/cases.json must contain at least one case");
+      if (!cases.length) softFail("tests/cases.json must contain at least one case");
       const untested = (manifest.widgets ?? []).filter((w) => !cases.some((c) => !c.expectError && `${c.operation}@${c.version ?? manifest.operations.filter((o) => o.name === c.operation).reduce((n, o) => Math.max(n, o.version), 0)}` === w.operation));
-      if (untested.length) problem("every widget needs a test case for its operation (the case's output must match a template)", untested.map((w) => `${w.name}: no case calls ${w.operation}`));
+      if (untested.length) softFail("every widget needs a test case for its operation (the case's output must match a template)", untested.map((w) => `${w.name}: no case calls ${w.operation}`));
       // Run every case (not just up to the first failure) so the owner and the builder see the whole picture.
       const failed: string[] = [];
       onTests(0, cases.length);
@@ -183,7 +183,7 @@ export class Validation extends Domain {
         }
         onTests(i + 1 - failed.length, cases.length);
       }
-      if (failed.length) problem(`${failed.length} of ${cases.length} test cases failed`, failed);
+      if (failed.length) softFail(`${failed.length} of ${cases.length} test cases failed`, failed);
       else if (cases.length) step(`${cases.length} test cases passed`);
 
       // 5a. sample data replays on a fresh state, as installing (or starting over) with it does
@@ -191,7 +191,7 @@ export class Validation extends Domain {
       try {
         sample = readSample(files);
       } catch (e) {
-        problem((e as Error).message);
+        softFail((e as Error).message);
       }
       if (sample) {
         await this.runtime.dropState(sampleState);
@@ -201,7 +201,7 @@ export class Validation extends Domain {
           try {
             await this.replayCall(manifest, sampleTarget, c);
           } catch (e) {
-            problem(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
+            softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
             replayed = false;
             break;
           }
@@ -256,7 +256,7 @@ export class Validation extends Domain {
           if (empty.errors.length) {
             await keep(empty);
             if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
-            problem("UI didn't render cleanly", empty.errors);
+            softFail("UI didn't render cleanly", empty.errors);
           }
           const filled = sample ? await check(sampleState, measure) : undefined;
           const v = filled && !filled.skipped ? filled : empty;
@@ -264,7 +264,7 @@ export class Validation extends Domain {
           rendered = { shots: v.shots, defects: v.defects, sampled: v === filled };
           if (filled?.errors.length) {
             if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
-            problem("UI didn't render cleanly with its sample data", filled.errors);
+            softFail("UI didn't render cleanly with its sample data", filled.errors);
           }
           if (!empty.errors.length && !filled?.errors.length) step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
@@ -290,7 +290,7 @@ export class Validation extends Domain {
           const filled = sampled.size ? ", with the sample data" : "";
           if (v.errors.length) {
             if (v.screenshot) step(`widgets rendered with errors (screenshot attached${filled})`);
-            problem("widgets didn't render cleanly", v.errors);
+            softFail("widgets didn't render cleanly", v.errors);
           } else step(`widgets render in every size (screenshot attached${filled})`);
         }
       }
@@ -303,7 +303,7 @@ export class Validation extends Domain {
           step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
         } catch (e) {
           if (!opts.check) throw e;
-          problem(`the upgrade dry run failed: ${(e as Error).message}`);
+          softFail(`the upgrade dry run failed: ${(e as Error).message}`);
         }
       }
     } finally {
@@ -333,33 +333,41 @@ export class Validation extends Domain {
     const passed: string[] = [];
     let candidate: Candidate | undefined;
     let failures: string[];
+    // A copy of the workspace out of the builder's reach: the builder goes on writing its own while
+    // this one is checked, and bundling runs npm on it.
+    const copy: BuildRow = { ...build, id: `${build.id}-check` };
     try {
-      candidate = await this.validate(build, (l) => passed.push(l), { check: true, measure: true });
+      await this.workbench.snapshot(build.id, copy.id);
+      candidate = await this.validate(copy, (l) => passed.push(l), { check: true, measure: true });
       failures = candidate.failures ?? [];
     } catch (e) {
       // A step nothing after it can run without (the manifest, the bundle).
       failures = [(e as Error).message];
+    } finally {
+      await this.workbench.remove(copy.id).catch(() => {});
     }
     const defects = candidate?.defects ?? [];
     const images = candidate?.shots ?? [];
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
-    return { passed: !failures.length, text: checkText(failures, defects, images.map((i) => i.name), passed, ui, !!candidate?.sampled), failures, defects, images };
+    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images };
   }
 
-  /** One attempt's checks: one at a time (a second waits for the first), at most MAX_CHECKS; `settled` when none is running. */
-  checksFor(build: BuildRow, note: (line: string) => void): { run: (id: string) => Promise<CheckResult>; settled: () => Promise<void> } {
+  /**
+   * One attempt's checks: one at a time (a second waits for the first), at most MAX_CHECKS, none
+   * once the build is cancelled; `settled` when none is running.
+   */
+  checksFor(build: BuildRow, signal: AbortSignal, note: (line: string) => void): { run: (id: string) => Promise<CheckResult>; settled: () => Promise<void> } {
     let used = 0;
     let queue: Promise<unknown> = Promise.resolve();
+    const refused = (text: string): CheckResult => ({ passed: false, text, failures: [text], defects: [], images: [] });
     const run = (_id: string) => {
       const next = queue.then(async (): Promise<CheckResult> => {
-        if (++used > MAX_CHECKS) {
-          const text = `No checks left: this attempt has had its ${MAX_CHECKS}. Fix what the last one showed and stop; Hewn validates your work when you do.`;
-          return { passed: false, text, failures: [text], defects: [], images: [] };
-        }
+        if (signal.aborted) return refused("The build was cancelled.");
+        if (++used > MAX_CHECKS) return refused(`No checks left: this attempt has had its ${MAX_CHECKS}. Fix what the last one showed and stop; Hewn validates your work when you do.`);
         note(`Checking its work (${used} of ${MAX_CHECKS})`);
         const r = await this.check(build);
-        note(r.passed ? `Check passed${r.defects.length ? `, ${r.defects.length} measured on the screen to fix` : ""}` : `Check: ${r.failures.length} ${r.failures.length === 1 ? "problem" : "problems"} to fix`);
+        note(r.passed ? `Check passed${r.defects.length ? `, ${counted(r.defects.length, "thing")} measured on the screen to fix` : ""}` : `Check: ${counted(r.failures.length, "problem")} to fix`);
         return r;
       });
       queue = next.catch(() => {});
@@ -591,13 +599,23 @@ function installedFrom(build: BuildRow): ToolSource | undefined {
   return build.builder === "bundle" ? (build.request as { source?: ToolSource }).source : undefined;
 }
 
-/** What a builder reads back from its check. `ui`: whether its UI should have rendered (unknown when validation stopped early). */
-function checkText(failures: string[], defects: string[], images: string[], passed: string[], ui: boolean | undefined, sampled: boolean): string {
+/** A message with its list under it, as validation reports a failure. */
+const listed = (msg: string, problems: string[]) => (problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
+/** "1 problem", "3 problems". */
+const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/**
+ * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
+ * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
+ * `sampled`: whether the renders show the sample data.
+ */
+function checkText(c: { failures: string[]; defects: string[]; images: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
+  const { failures, defects, images, passed, ui, sampled } = c;
   const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
   const shots = images.map((n) => `screenshots/${n}.png`);
   const skipped = passed.find((l) => /visual check skipped/.test(l));
   return [
-    failures.length ? `FAIL: ${failures.length} ${failures.length === 1 ? "problem" : "problems"}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || images.length ? " Look at what follows before you stop." : ""}`,
+    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || images.length ? " Look at what follows before you stop." : ""}`,
     failures.length ? `What failed:\n${list(failures)}` : "",
     defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
     images.length

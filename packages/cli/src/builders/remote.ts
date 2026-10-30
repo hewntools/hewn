@@ -137,53 +137,64 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
       let done = false;
       // One check at a time, in the order asked; each answered to the service, which waits for it.
       let checking = Promise.resolve();
+      // Once the stream has ended, a check still waiting its turn touches nothing: it answers that the build ended.
+      let ended = false;
+      // A check as sent: the workspace written as it is, checked, and the result (or why it couldn't run) for the service.
+      const check = async (c: { id: string; files?: unknown }): Promise<CheckJson | { error: string }> => {
+        try {
+          if (c.files && typeof c.files === "object") replaceWorkspace(r, job.workspace, c.files as Record<string, unknown>);
+          const checked = checkToJson(await job.check!(c.id));
+          write(`check ${c.id}: ${checked.passed ? "passed" : "failed"}`);
+          return checked;
+        } catch (e) {
+          write(`check ${c.id} couldn't run: ${(e as Error).message}`);
+          return { error: (e as Error).message };
+        }
+      };
       const answer = (c: { id: string; files?: unknown }) =>
         (checking = checking.then(async () => {
-          let out: CheckJson | { error: string };
-          try {
-            if (c.files && typeof c.files === "object") replaceWorkspace(r, job.workspace, c.files as Record<string, unknown>);
-            const checked = checkToJson(await job.check!(c.id));
-            out = checked;
-            write(`check ${c.id}: ${checked.passed ? "passed" : "failed"}`);
-          } catch (e) {
-            out = { error: (e as Error).message };
-            write(`check ${c.id} couldn't run: ${(e as Error).message}`);
-          }
+          const out = ended ? { error: "the build ended" } : await check(c);
           await post(r, `v1/builds/${encodeURIComponent(job.buildId)}/checks/${c.id}`, out, job.signal).catch((e) => write(`check ${c.id}: couldn't send the result: ${(e as Error).message}`));
         }));
-      await stream(
-        r,
-        "v1/builds",
-        // `session`: one per build, so the service may resume its own session on a later attempt (the prompt stays whole).
-        // `pause`: this Hewn shows a `{ paused }` outcome as paused, with Continue and Stop (an older one gets `refused`).
-        // `check`: Hewn answers `check` events (a service that doesn't know it builds without).
-        { buildId: job.buildId, session: job.buildId, pause: true, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), ...(job.check ? { check: true } : {}), prompt: builderPrompt(job), files },
-        (e) => {
-          if (typeof e.activity === "string") {
-            write(e.activity);
-            job.onActivity?.(e.activity);
-          }
-          if (typeof e.model === "string") job.onModel?.(e.model);
-          // What the host charged for this attempt, in its own unit; shown as given.
-          if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
-          // One file mid-build (the icon, written first), so Home and the build page show it while it builds.
-          // The final `files` event still replaces the whole tree.
-          if (e.file && typeof e.file.path === "string" && typeof e.file.content === "string" && writable(e.file.path)) {
-            try {
-              writeTree(job.workspace, { [e.file.path]: fromBase64(e.file.content) });
-            } catch {
-              // Can't be written as sent (a file where a directory is): it's only a preview, skip it.
+      try {
+        await stream(
+          r,
+          "v1/builds",
+          // `session`: one per build, so the service may resume its own session on a later attempt (the prompt stays whole).
+          // `pause`: this Hewn shows a `{ paused }` outcome as paused, with Continue and Stop (an older one gets `refused`).
+          // `check`: Hewn answers `check` events (a service that doesn't know it builds without).
+          { buildId: job.buildId, session: job.buildId, pause: true, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), ...(job.check ? { check: true } : {}), prompt: builderPrompt(job), files },
+          (e) => {
+            if (typeof e.activity === "string") {
+              write(e.activity);
+              job.onActivity?.(e.activity);
             }
-          }
-          if (e.check && typeof e.check.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(e.check.id) && job.check) void answer(e.check);
-          if (e.files && typeof e.files === "object") result = e.files;
-          if (e.done === true) done = true;
-          if (typeof e.refused === "string") error = { refused: e.refused };
-          else if (typeof e.paused === "string") error = { paused: e.paused };
-          else if (typeof e.error === "string") error = e;
-        },
-        job.signal,
-      );
+            if (typeof e.model === "string") job.onModel?.(e.model);
+            // What the host charged for this attempt, in its own unit; shown as given.
+            if (e.charge && typeof e.charge.amount === "number" && typeof e.charge.unit === "string") job.onCharge?.({ amount: e.charge.amount, unit: e.charge.unit });
+            // One file mid-build (the icon, written first), so Home and the build page show it while it builds.
+            // The final `files` event still replaces the whole tree.
+            if (e.file && typeof e.file.path === "string" && typeof e.file.content === "string" && writable(e.file.path)) {
+              try {
+                writeTree(job.workspace, { [e.file.path]: fromBase64(e.file.content) });
+              } catch {
+                // Can't be written as sent (a file where a directory is): it's only a preview, skip it.
+              }
+            }
+            if (e.check && typeof e.check.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(e.check.id) && job.check) void answer(e.check);
+            if (e.files && typeof e.files === "object") result = e.files;
+            if (e.done === true) done = true;
+            if (typeof e.refused === "string") error = { refused: e.refused };
+            else if (typeof e.paused === "string") error = { paused: e.paused };
+            else if (typeof e.error === "string") error = e;
+          },
+          job.signal,
+        );
+      } finally {
+        // Whatever the outcome (finished, refused, paused, failed, cancelled): no check runs after the attempt.
+        ended = true;
+        await checking;
+      }
       if (error?.refused) throw failure(error.refused, "refused");
       // Paused even without a note (`{ "paused": "" }`): Hewn has words of its own.
       if (error && "paused" in error) throw failure(error.paused || "The builder's host paused it.", "paused");
@@ -191,8 +202,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
       // The stream closing early (the service crashed, a proxy cut it) isn't a finished build.
       if (!done) throw new Error(`${r.label} ended without finishing`);
       if (!result) throw new Error(`${r.label} finished without returning the workspace`);
-      // A check still running finishes on the tree it was sent; the returned tree is the whole candidate.
-      await checking;
+      // The returned tree is the whole candidate.
       replaceWorkspace(r, job.workspace, result);
     },
   };

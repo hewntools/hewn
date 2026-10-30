@@ -11,7 +11,7 @@ import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./ac
 import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./models.ts";
 import { OPENCODE_NO_UPDATE, opencodeUserDirs } from "./opencode-dirs.ts";
 import { wrapBuilder } from "./sandbox.ts";
-import { CHECK_CLIENT_TIMEOUT_MS, CHECK_SERVER, type CheckServer, openCheck } from "./check.ts";
+import { CHECK_CLIENT_TIMEOUT_MS, CHECK_SERVER_NAME, type CheckServer, openCheck } from "./check.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 
 export function builderPrompt(job: BuildJob): string {
@@ -449,7 +449,7 @@ export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): 
     "-c", 'project_root_markers=["BUILDER.md"]',
     // Its `check` tool (no other MCP server: --ignore-user-config), waited on as long as a check takes.
     ...(check
-      ? ["-c", `mcp_servers.${CHECK_SERVER}.command=${JSON.stringify(check.command)}`, "-c", `mcp_servers.${CHECK_SERVER}.args=${JSON.stringify(check.args)}`, "-c", `mcp_servers.${CHECK_SERVER}.tool_timeout_sec=${CHECK_CLIENT_TIMEOUT_MS / 1000}`]
+      ? ["-c", `mcp_servers.${CHECK_SERVER_NAME}.command=${JSON.stringify(check.command)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.args=${JSON.stringify(check.args)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.tool_timeout_sec=${CHECK_CLIENT_TIMEOUT_MS / 1000}`]
       : []),
     "-C", job.workspace,
   ];
@@ -549,8 +549,8 @@ async function opencodeRun(job: BuildJob) {
 /** OpenCode's rules and MCP servers with `check` offered: its one tool allowed, waited on as long as a check takes. */
 export function opencodeCheck(check: CheckServer): { rules: OpencodeRules; mcp: Record<string, unknown> } {
   return {
-    rules: { ...OPENCODE_BUILDER_RULES, permission: { ...OPENCODE_BUILDER_RULES.permission, [`${CHECK_SERVER}_*`]: "allow" } },
-    mcp: { [CHECK_SERVER]: { type: "local", command: [check.command, ...check.args], enabled: true, timeout: CHECK_CLIENT_TIMEOUT_MS } },
+    rules: { ...OPENCODE_BUILDER_RULES, permission: { ...OPENCODE_BUILDER_RULES.permission, [`${CHECK_SERVER_NAME}_*`]: "allow" } },
+    mcp: { [CHECK_SERVER_NAME]: { type: "local", command: [check.command, ...check.args], enabled: true, timeout: CHECK_CLIENT_TIMEOUT_MS } },
   };
 }
 
@@ -567,7 +567,7 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
     ...(session.resume ? ["--resume", session.id] : ["--session-id", session.id]),
     "--output-format", "stream-json", "--verbose",
     ...claudeModelArgs(job),
-    "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: check ? { [CHECK_SERVER]: { command: check.command, args: check.args } } : {} }),
+    "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: check ? { [CHECK_SERVER_NAME]: { command: check.command, args: check.args } } : {} }),
     // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
     // No project settings either: the workspace is the builder's to write, and settings there
     // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
@@ -575,7 +575,7 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
     "--permission-mode", "acceptEdits",
     // File tools only: no shell now, and --restricted drops every code-running tool, also ones added later.
     "--restricted",
-    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", ...(check ? [`mcp__${CHECK_SERVER}__check`] : []),
+    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", ...(check ? [`mcp__${CHECK_SERVER_NAME}__check`] : []),
     "--disallowedTools", "Bash",
   ];
 }

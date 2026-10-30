@@ -167,6 +167,11 @@ export interface Workbench {
   open(buildId: string, files: Files): Promise<void>;
   /** The candidate as it stands (build artefacts such as node_modules excluded). */
   read(buildId: string): Promise<Files>;
+  /**
+   * Copy a build's workspace into a new one (`to`) its builder can't reach: what a check of its work
+   * in progress runs on (bundling with npm included) while the builder goes on writing its own.
+   */
+  snapshot(buildId: string, to: string): Promise<void>;
   /** One workspace file, if present (e.g. the icon a builder writes first). */
   file(buildId: string, path: string): Promise<Uint8Array | undefined>;
   remove(buildId: string): Promise<void>;

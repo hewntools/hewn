@@ -93,11 +93,19 @@ event with the workspace and waits for Hewn's answer, which Hewn posts (the buil
 }
 ```
 
-or `{ "error": "…" }` when the check couldn't run. Hand `text` and the images to the model as the
-tool's result: a check that ran is not a tool error, passed or not (some clients drop the images
-from an error). Hewn's builders on this machine also get the images in `screenshots/`. Answer with any
-2xx. Hewn runs one check at a time per build, ten per attempt; an eleventh answers "No checks left".
-A check takes up to about a minute.
+or `{ "error": "…" }` when the check couldn't run. Answer with any 2xx.
+
+- **Hand `text` and the images to the model** as the tool's result, not as a tool error, passed or not:
+  some clients drop the images from an error. Use an error only for `{ "error" }`.
+- **Write the images into the workspace's `screenshots/`** too (`screenshots/desktop-light.png` …), as
+  Hewn's own builders get them: the result's text points there, for a builder whose client drops images.
+  `screenshots/` is never part of a version.
+- **Wait long enough.** A check takes up to about a minute (validation, two renders and the click-through);
+  give your builder's MCP client a tool timeout of 5 minutes (some default to 60 s).
+- **Accept a result only from the token the build came with, and only for a check you're waiting on**
+  (a service serving several Hewns must not let one answer another's check).
+- Hewn runs one check at a time per build, ten per attempt; an eleventh answers "No checks left", and a
+  check sent after the build ended (refused, paused, failed, cancelled) answers `{ "error": "the build ended" }`.
 
 ## The intake: `POST /v1/intake`
 

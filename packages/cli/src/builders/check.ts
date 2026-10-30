@@ -15,7 +15,7 @@ export const CHECK_DIR = ".hewn-check";
 export const CHECK_WAIT_MS = 300_000;
 export const CHECK_CLIENT_TIMEOUT_MS = CHECK_WAIT_MS + 15_000;
 /** The MCP server and its one tool, as each builder's config names them (Claude Code: mcp__hewn__check; OpenCode: hewn_check). */
-export const CHECK_SERVER = "hewn";
+export const CHECK_SERVER_NAME = "hewn";
 
 /** How a builder's CLI starts the shim: Hewn's own Node, the shim copied into the scratch folder (the sandbox can't read Hewn's install). */
 export interface CheckServer {
@@ -142,7 +142,7 @@ export function openCheck(workspace: string, run: (id: string) => Promise<CheckR
   folderInside(workspace, join(CHECK_DIR, "results"));
   const seen = new Set<string>();
   let closed = false;
-  const answer = async (id: string) => {
+  const answerRequest = async (id: string) => {
     let out: Record<string, unknown>;
     try {
       const r = await run(id);
@@ -174,7 +174,7 @@ export function openCheck(workspace: string, run: (id: string) => Promise<CheckR
       const id = REQUEST.exec(f)?.[1];
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      void answer(id);
+      void answerRequest(id);
     }
   };
   let watcher: FSWatcher | undefined;

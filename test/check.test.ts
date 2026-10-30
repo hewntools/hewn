@@ -15,12 +15,14 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import type { VisualCheck } from "@hewntools/cli/visual.ts";
 import { CHECK_DIR, openCheck } from "@hewntools/cli/builders/check.ts";
 import { claudeArgs, codexArgs, opencodeCheck } from "@hewntools/cli/builders/cli.ts";
+import { builderSandboxAvailable } from "@hewntools/cli/builders/sandbox.ts";
+import { localWorkbench } from "@hewntools/cli/workbench.ts";
 import { FIXTURES, platformWith, setup } from "./helpers.ts";
 
 const SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
 /** A visual check that renders nothing: four images named for the render, and a defect when asked to measure. */
-const fakeVisual = (seen: { measure?: boolean }[] = []): VisualCheck => async (req) => {
-  seen.push({ measure: req.measure });
+const fakeVisual = (seen: { measure?: boolean; uiDir?: string }[] = []): VisualCheck => async (req) => {
+  seen.push({ measure: req.measure, uiDir: req.uiDir });
   return { errors: [], screenshot: Buffer.from("png"), shots: SHOTS.map((name) => ({ name, png: Buffer.from(name) })), ...(req.measure ? { defects: ["Sticks out on the phone (390 px): div.row: 12px past the edge"] } : {}) };
 };
 const editFile = (path: string, edit: (s: string) => string) => writeFileSync(path, edit(readFileSync(path, "utf8")));
@@ -51,9 +53,10 @@ describe("the builder's check", () => {
   afterEach(() => t.cleanup());
 
   test("failing tests and a bad widget come back as failures, with the four images; nothing about the tool changes", async () => {
-    const seen: { measure?: boolean }[] = [];
+    const seen: { measure?: boolean; uiDir?: string }[] = [];
     let checked: CheckResult | undefined;
     let toolDuringCheck: unknown = "unset";
+    let copyAfterCheck: boolean | undefined;
     const builder: CapabilityBuilder = {
       name: "wc",
       build: async (job) => {
@@ -68,6 +71,7 @@ describe("the builder's check", () => {
         writeFileSync(join(job.workspace, "sample", "calls.json"), JSON.stringify([{ operation: "increment" }, { operation: "increment" }]));
         checked = await job.check!("c1");
         toolDuringCheck = t.platform.registry.getCapability("widget-counter")?.activeVersion ?? null;
+        copyAfterCheck = existsSync(`${job.workspace}-check`);
         // Fixed, so the build itself goes through.
         rmSync(join(job.workspace, "ui"), { recursive: true });
         cpSync(join(FIXTURES, "widget-counter"), job.workspace, { recursive: true });
@@ -85,7 +89,10 @@ describe("the builder's check", () => {
     // The UI was still rendered (measured too), and shown back.
     assert.deepEqual(checked.images.map((i) => i.name), SHOTS);
     assert.deepEqual(checked.defects, ["Sticks out on the phone (390 px): div.row: 12px past the edge"]);
-    assert.deepEqual(seen.slice(0, 2), [{ measure: undefined }, { measure: true }], "the check measured it filled with the sample data");
+    assert.deepEqual(seen.slice(0, 2).map((s) => s.measure), [undefined, true], "the check measured it filled with the sample data");
+    // It rendered (and bundled) a copy out of the builder's reach, not the workspace the builder goes on writing; the copy is gone after.
+    assert.deepEqual(seen.slice(0, 2).map((s) => s.uiDir), Array(2).fill(join(t.home.builds, `${done.buildId}-check`, "ui")));
+    assert.equal(copyAfterCheck, false);
     assert.match(checked.text, /Measured on the UI[^]*div\.row/);
     assert.match(checked.text, /Your UI filled with your sample data, at 1280 and 390 px wide[^]*screenshots\/desktop-light\.png, screenshots\/desktop-dark\.png, screenshots\/mobile-light\.png, screenshots\/mobile-dark\.png/);
     assert.match(checked.text, /What passed:\n- manifest valid/);
@@ -120,9 +127,12 @@ describe("the builder's check", () => {
     let reply: any;
     let tools: any;
     let other: any;
+    let widgetBuild = "";
     const builder: CapabilityBuilder = {
       name: "cli",
       build: async (job) => {
+        // Another tool, built first: a request naming its build is still answered for this one.
+        if (job.capabilityId === "widget-counter") return void cpSync(join(FIXTURES, "widget-counter"), job.workspace, { recursive: true });
         cpSync(join(FIXTURES, "ui-counter"), job.workspace, { recursive: true });
         // What a CLI builder does (cli.ts): the scratch folder with the shim, its CLI starting it inside the sandbox.
         const check = openCheck(job.workspace, async (id) => (ran.push(id), job.check!(id)));
@@ -134,7 +144,7 @@ describe("the builder's check", () => {
           await client.close();
           // A request is answered for this build whatever it says; and only a request of the shim's own naming is.
           writeFileSync(join(job.workspace, CHECK_DIR, "requests", "settings.json"), "{}");
-          writeFileSync(join(job.workspace, CHECK_DIR, "requests", "c7.json"), JSON.stringify({ buildId: "someone-else" }));
+          writeFileSync(join(job.workspace, CHECK_DIR, "requests", "c7.json"), JSON.stringify({ buildId: widgetBuild, capabilityId: "widget-counter" }));
           for (let i = 0; i < 100 && !existsSync(join(job.workspace, CHECK_DIR, "results", "c7.json")); i++) await new Promise((r) => setTimeout(r, 50));
           other = JSON.parse(readFileSync(join(job.workspace, CHECK_DIR, "results", "c7.json"), "utf8"));
           // A builder with a shell points the results at a folder of the owner's: Hewn writes nothing there.
@@ -146,16 +156,24 @@ describe("the builder's check", () => {
         } finally {
           check.close();
         }
+        // A builder that leaves the scratch folder and screenshots behind: neither reaches the version.
+        mkdirSync(join(job.workspace, CHECK_DIR), { recursive: true });
+        writeFileSync(join(job.workspace, CHECK_DIR, "leftover.json"), "{}");
+        writeFileSync(join(job.workspace, "screenshots", "extra.png"), "png");
       },
     };
     const platform = platformWith(t.home, () => builder, { visualCheck: fakeVisual(), attempts: 1 });
+    const widgets = await platform.settle((await platform.create(USER, { name: "Widget Counter", purpose: "x", requirements: "x" })).buildId);
+    assert.equal(widgets.status, "promoted", widgets.log.join("\n"));
+    widgetBuild = widgets.buildId;
     const done = await platform.settle((await platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.deepEqual(tools.map((x: { name: string }) => x.name), ["check"]);
     assert.equal(reply.isError, false);
     assert.match(reply.content[0].text, /^PASS/);
     assert.deepEqual(reply.content.slice(1).map((c: { type: string; data: string }) => [c.type, Buffer.from(c.data, "base64").toString()]), SHOTS.map((s) => ["image", s]));
-    assert.match(other.text, /^PASS[^]*implementation exports/);
+    assert.match(other.text, /^PASS[^]*implementation exports increment@1, get@1/);
+    assert.doesNotMatch(other.text, /widget_count/, "the other tool's build wasn't read");
     assert.deepEqual(ran, ["c1", "c7", "c8"], "settings.json isn't a request");
     assert.deepEqual(readdirSync(outside), [], "nothing written through the link");
     // The images were in screenshots/ for file tools; neither folder is part of the version.
@@ -196,7 +214,7 @@ describe("the builder's check", () => {
       return { passed: true, text: "PASS", failures: [], defects: [], images: [] };
     };
     const notes: string[] = [];
-    const checks = validation.checksFor({ id: "b", capabilityId: "x" } as any, (l) => notes.push(l));
+    const checks = validation.checksFor({ id: "b", capabilityId: "x" } as any, new AbortController().signal, (l) => notes.push(l));
     const results = await Promise.all(Array.from({ length: MAX_CHECKS + 1 }, (_, i) => checks.run(`c${i + 1}`)));
     await checks.settled();
     assert.equal(most, 1);
@@ -204,7 +222,30 @@ describe("the builder's check", () => {
     assert.match(results[MAX_CHECKS].text, /^No checks left: this attempt has had its 10/);
     assert.equal(notes[0], `Checking its work (1 of ${MAX_CHECKS})`);
     assert.equal(notes[1], "Check passed");
+    // Cancelled: a check waiting its turn doesn't run.
+    const cancel = new AbortController();
+    const after = validation.checksFor({ id: "b", capabilityId: "x" } as any, cancel.signal, () => {});
+    cancel.abort();
+    assert.equal((await after.run("c1")).text, "The build was cancelled.");
     platform.close();
+  });
+
+  test("a check runs on a copy the builder can't reach: no links, no artefacts, no scratch folders; read through its sandbox when it's confined", async (tc) => {
+    for (const confined of [false, true]) {
+      if (confined && !(process.platform === "darwin" && builderSandboxAvailable().ok)) {
+        tc.diagnostic("no Seatbelt here: the confined copy isn't tried");
+        continue;
+      }
+      const root = mkdtempSync(join(tmpdir(), "hewn-snap-"));
+      const wb = localWorkbench({ root: join(root, "builds"), builders: {}, confineTo: confined ? () => root : undefined });
+      await wb.open("b-1", { "capability.json": new TextEncoder().encode("{}"), "src/index.ts": new TextEncoder().encode("// code"), "node_modules/x/index.js": new TextEncoder().encode("x"), [`${CHECK_DIR}/shim.mjs`]: new TextEncoder().encode("shim"), "screenshots/desktop-light.png": new TextEncoder().encode("png") });
+      // A secret beside the workspace (the platform home, which a confined builder can't read), linked in.
+      writeFileSync(join(root, "secret.txt"), "the owner's");
+      symlinkSync(join(root, "secret.txt"), join(root, "builds", "b-1", "src", "secret.ts"));
+      await wb.snapshot("b-1", "b-1-check");
+      assert.deepEqual(Object.keys(await wb.read("b-1-check")).sort(), ["capability.json", "src/index.ts"], confined ? "confined" : "unconfined");
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

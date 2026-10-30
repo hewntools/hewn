@@ -251,6 +251,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
       return r.data === null ? undefined : fromBase64(r.data);
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
+    snapshot: async (buildId, to) => void (await sv.json("/workbench/snapshot", { buildId, to })),
     build: async (job: BuildJob, hooks) => {
       let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean } | undefined;
       // The builder's checks, run here (the core) and answered to the supervisor, where the builder waits.

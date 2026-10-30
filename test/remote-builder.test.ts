@@ -139,6 +139,18 @@ describe("remote builder and intake", () => {
     };
     await remoteBuilder(remote).build(job(dir, { check: async () => Promise.reject(new Error("no browser")) }));
     assert.deepEqual(await errored, { error: "no browser" });
+    // The build ends (here: fails) with a check still waiting its turn: it runs nothing, and says the build ended.
+    const posts: { url: string; body: any }[] = [];
+    handle = async (b, req, res) => {
+      if (req.url!.startsWith("/v1/builds/b-1/checks/")) return void (posts.push({ url: req.url!, body: b }), res.writeHead(204).end());
+      ndjson(res, [{ check: { id: "c3", files: { "src/index.ts": b64("// first") } } }, { check: { id: "c4", files: { "src/index.ts": b64("// second") } } }, { error: "the builder crashed" }]);
+    };
+    const ran: string[] = [];
+    const slow = async (id: string) => (ran.push(id), await new Promise((r) => setTimeout(r, 100)), { passed: true, text: "PASS", failures: [], defects: [], images: [] });
+    await assert.rejects(remoteBuilder(remote).build(job(dir, { check: slow })), /crashed/);
+    assert.deepEqual(ran, ["c3"], "only the check already running ran");
+    assert.deepEqual(posts.map((p) => [p.url, p.body.error ?? p.body.text]), [["/v1/builds/b-1/checks/c3", "PASS"], ["/v1/builds/b-1/checks/c4", "the build ended"]]);
+    assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// first", "the second never touched the workspace");
     rmSync(dir, { recursive: true, force: true });
   });
 

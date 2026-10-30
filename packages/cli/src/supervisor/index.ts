@@ -254,6 +254,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       return { data: f ? toBase64(f) : null };
     },
     "/workbench/remove": async (b) => workbench.remove(b.buildId),
+    "/workbench/snapshot": async (b) => workbench.snapshot(String(b.buildId), String(b.to)),
     "/workbench/bundle": async (b) => workbench.bundle(b.buildId),
     "/workbench/note": async (b) => workbench.note(b.buildId, b.line),
     "/workbench/transcript": async (b) => ({ text: (await workbench.transcript(b.buildId)) ?? null }),
@@ -279,7 +280,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       } catch (e) {
         send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, paused: (e as { paused?: boolean }).paused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
       }
-      for (const key of asked) checks.get(key)?.reject(new Error("the build ended")), checks.delete(key);
+      // Checks still waiting when the build ends get no answer from the core: say so.
+      for (const key of asked) {
+        checks.get(key)?.reject(new Error("the build ended"));
+        checks.delete(key);
+      }
       res.end();
       return STREAMED;
     },
