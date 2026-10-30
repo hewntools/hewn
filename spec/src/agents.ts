@@ -159,7 +159,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "builds_get",
     scopes: ["create", "modify"],
-    description: "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn. queued: true while it waits its turn behind an earlier change to the same capability.",
+    description:
+      "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn. queued: true while it waits its turn behind an earlier change to the same capability. failed with failure.paused: the builder's host paused it part-way, its work kept; tell the owner, who continues or stops it in Hewn (continuedAs: the build that carries it on).",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
   },
   {
@@ -172,7 +173,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "builds_retry",
     scopes: ["create", "modify"],
-    description: "Re-run a failed build with the same request (e.g. after a transient builder failure). Returns the new build; follow it with builds_wait.",
+    description:
+      "Re-run a failed build with the same request (e.g. after a transient builder failure). Returns the new build; follow it with builds_wait. Not a paused one (failure.paused): only the owner continues it, in Hewn.",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
   },
   {

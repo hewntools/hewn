@@ -896,6 +896,14 @@ export class Registry {
     return row ? toBuild(row as Row) : undefined;
   }
 
+  /** A capability's failed builds of one of `kinds` (a paused one is stored as failed), newest first. */
+  failedBuilds(capabilityId: string, kinds: BuildKind[]): BuildRow[] {
+    return this.db
+      .prepare(`SELECT * FROM builds WHERE capability_id = ? AND status = 'failed' AND kind IN (${kinds.map(() => "?").join(", ")}) ORDER BY rowid DESC`)
+      .all(capabilityId, ...kinds)
+      .map((r) => toBuild(r as Row));
+  }
+
   /**
    * A capability's changes on their way (modify and widgets builds), oldest first: waiting, running
    * or validating. Not one in review: a new change doesn't wait for it (see unfinishedBuild).

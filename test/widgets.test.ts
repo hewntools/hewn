@@ -258,6 +258,15 @@ describe("widgets: running", () => {
     await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), /a change to widget-counter is on its way/);
     release();
     await t.platform.settle(change.buildId);
+    // So would a paused change's Continue (it carries on from work kept before this version): it waits until that one is stopped.
+    t.queue(() => {
+      throw Object.assign(new Error("used its allowance"), { paused: true });
+    });
+    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "widget-counter", request: "y" })).buildId);
+    await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), {
+      message: `a change to widget-counter is paused (build ${paused.buildId}); delete the widget once it's continued and done, or stopped`,
+    });
+    t.platform.cancelBuild(USER, paused.buildId);
     const b = await t.platform.settle((await t.platform.removeWidget(USER, "widget-counter", "count")).buildId);
     assert.equal(b.status, "promoted", b.log.join("\n"));
     assert.equal(b.builder, "keep");
