@@ -9,7 +9,8 @@ import { describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
 import { ARMS, briefFor, othersNote, replaceSection, runOrder } from "../bench/lib/arms.ts";
-import { DESKTOP, PHONE, clickThrough, launchBrowser, layoutDefects, overflowX } from "../bench/lib/browser.ts";
+import { clickThrough, layoutDefects, overflowX } from "@hewntools/cli/defects.ts";
+import { DESKTOP, PHONE, launchBrowser } from "../bench/lib/browser.ts";
 import { idOf, loadCases, seedKit } from "../bench/lib/cases.ts";
 import { parseJson, total } from "../bench/lib/judge.ts";
 import { builderUsage, uiMetrics } from "../bench/lib/metrics.ts";
@@ -249,7 +250,7 @@ describe("bench runs", () => {
       await desktop.goto(url);
       // The seeded count is what the page shows: the shim sent /api/invoke to this tool's state.
       assert.equal(await desktop.eval("document.getElementById('n').textContent"), "3");
-      const png = await desktop.shot();
+      const png = await desktop.wholePage();
       assert.equal(png.subarray(1, 4).toString(), "PNG");
       assert.deepEqual(desktop.errors, []);
       const clicks = await clickThrough(desktop, url);

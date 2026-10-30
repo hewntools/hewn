@@ -35,7 +35,7 @@ export const operations = {
 
 - **Contracts don't break.** A published `name@version` keeps its inputs, outputs and side effect. A breaking change is a new `name@2`, next to the old one.
 - **Migrations are append-only**, and never destroy data: no `DROP`, `DELETE FROM` or `TRUNCATE`. Before a version is promoted, they're dry-run on a copy of your live data, and the data is backed up before they're applied.
-- **Tests pass before promotion.** The UI is rendered headlessly and must load without errors.
+- **Tests pass before promotion.** The UI is rendered headlessly, on a desktop screen and a phone's, in light and dark, and must load without errors on both.
 
 ## Changing one
 

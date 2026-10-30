@@ -67,6 +67,10 @@ A build gets up to three attempts on its own (Settings › AI › Build attempts
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
 
+A host's builder can also **pause** a build part-way, with its work kept: for example once the build has used its allowance. The build says so in the host's words, with **Continue** (it carries on from where it stopped) and **Stop**. It waits in the Inbox until you choose, and so do changes to that tool, also ones asked for after it paused (they queue behind it); Hewn doesn't carry on by itself, and an agent can't continue it for you. A new tool that's paused keeps its name: asking for it again (or installing one by that name) says it's paused.
+
+![A paused change to Plant Care: the host's note that it has used its allowance and its work is kept, with Continue and Stop](images/build-paused.png)
+
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude`, `codex login` or `opencode auth login`), then try again.
 
 A new tool that failed or that you cancelled doesn't hold on to its name: ask for it again (or build the same proposal) and the new build takes it over. **Retry** on the old build is refused while the new one is being built, works again if the new one fails or you cancel it, and once the new one is live says the tool has been created since. A build that waited for the old one (a tool that calls it) follows the new one when you retry it.
