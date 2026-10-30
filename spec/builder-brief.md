@@ -368,8 +368,9 @@ before you write the files):
 2. **The answer first, as a picture:** what answers that question, at the top and big, drawn
    where it can be (the plants that are thirsty, the week's sleep, the budget left) rather than
    written out. A big number only when the number really is the answer.
-3. **Its own identity:** this tool lives on the owner's Home among their other tools (listed at the
-   end of this file). It needs an identity of its own: someone glancing at two of the owner's tools
+3. **Its own identity:** this tool lives on the owner's Home among their other tools; read how each
+   of them looks in `OTHER_TOOLS.md` (in your workspace when there are any). It needs an identity
+   of its own: someone glancing at two of the owner's tools
    should never mistake one for the other. Tell it apart by its concept, layout, type and signature
    visual. **Colour comes from the subject:** use the colours the subject is known for when it has
    them (green for money and plants, purple or deep blue for sleep, blue for water, red for

@@ -691,6 +691,7 @@ export class Builds extends Domain {
         "tests/cases.json": bytes("[]\n"),
       }),
       "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      ...(connection ? {} : await this.looksFile(id, "create")),
       ...attached.files,
       ...this.agentsFile(buildId),
       ...(await this.designSystemFile()),
@@ -793,7 +794,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1318,6 +1319,34 @@ export class Builds extends Domain {
   }
 
   /**
+   * OTHER_TOOLS.md for a workspace: the other tools' looks (`othersLooks`), in a file of its own, as a
+   * builder may not read BUILDER.md to its end (OpenCode reads 50 KB of a file). None when there are
+   * no other tools; a connection's build (no UI) gets none. Never part of a version (`isWorkspaceOnly`).
+   */
+  private async looksFile(exclude: string, kind: BuildKind): Promise<Files> {
+    const looks = await this.othersLooks(exclude, kind);
+    return looks ? { "OTHER_TOOLS.md": bytes(looks) } : {};
+  }
+
+  /**
+   * The owner's other tools as a build is told them, to look clearly different from: each one's hue
+   * (and saturation) on Home and the look its builder recorded in `ui/look.json`, cut short. The
+   * workspace's OTHER_TOOLS.md, and what a design pass is told too. Connections (no UI) are left out;
+   * a version that can't be read is listed without its look. Empty when there are none.
+   */
+  async othersLooks(exclude: string, kind: BuildKind = "create"): Promise<string> {
+    const caps = this.registry.listActiveCapabilities().filter((c) => c.id !== exclude && !isConnection(this.activeManifest(c.id)));
+    const tools = await Promise.all(
+      caps.map(async (c): Promise<ToolLook> => {
+        const raw = await this.loadVersion(c.id, c.activeVersion!, { keep: false }).then((v) => v.files["ui/look.json"], () => undefined);
+        const look = raw && lookText(text(raw));
+        return { id: c.id, name: c.displayName ?? this.activeManifest(c.id).name, hue: this.d.presentation.hueOf(c.id), saturation: this.d.presentation.saturationOf(c.id), ...(look ? { look } : {}) };
+      }),
+    );
+    return looksNote(tools, kind);
+  }
+
+  /**
    * AGENTS.md for a workspace, for builders that read it on their own (Codex, OpenCode): where the
    * brief is, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
    */
@@ -1500,6 +1529,52 @@ function turnText(t: BuildTurn): string {
   else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
   if (text.length > OWNERS_TURN_CHARS) text = `${text.slice(0, OWNERS_TURN_CHARS)}…`;
   return (text + attached).replaceAll("\n", "\n  ");
+}
+
+/** One of the owner's other tools as a build is told it (`othersLooks`). */
+export interface ToolLook {
+  id: string;
+  /** As Home shows it (the owner's name for it, else the manifest's). */
+  name: string;
+  /** Home's hue and saturation (the owner's, else the manifest's); null when it has none. */
+  hue: number | null;
+  saturation: number | null;
+  /** Its `ui/look.json` (`lookText`); none when it has none. */
+  look?: string;
+}
+
+/** How much of a tool's recorded look another build is told. */
+export const LOOK_CHARS = 700;
+
+/**
+ * A tool's `ui/look.json` on one line: compact JSON, or the text with its whitespace collapsed when
+ * it isn't JSON, cut short at `LOOK_CHARS`. Undefined when there's nothing in it.
+ */
+export function lookText(raw: string): string | undefined {
+  let s = raw;
+  try {
+    s = JSON.stringify(JSON.parse(raw) ?? "");
+  } catch {
+    // Not JSON: the builder's words as they are.
+  }
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s || s === '""' || s === "{}") return undefined;
+  return s.length > LOOK_CHARS ? `${s.slice(0, LOOK_CHARS - 1)}…` : s;
+}
+
+/**
+ * The other tools' looks, OTHER_TOOLS.md: on the owner's Home already, so a new tool must look
+ * clearly different from each; a change keeps its own. Empty when there are none.
+ */
+export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string {
+  if (!tools.length) return "";
+  const shade = (t: ToolLook) => (t.hue === null ? "" : `, hue ${t.hue}${t.saturation === null ? "" : `, saturation ${t.saturation}%`}`);
+  const lines = tools.map((t) => `- **${t.name}** (\`${t.id}\`)${shade(t)}: ${t.look ?? "no look recorded"}`);
+  const rule =
+    kind === "create"
+      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual (its colour still comes from its subject)."
+      : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule} Their public contracts are at the end of \`BUILDER.md\`.\n\n${lines.join("\n")}\n`;
 }
 
 /** BUILDER.md's request for a widgets build. */
