@@ -11,6 +11,7 @@ import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./ac
 import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./models.ts";
 import { OPENCODE_NO_UPDATE, opencodeUserDirs } from "./opencode-dirs.ts";
 import { wrapBuilder } from "./sandbox.ts";
+import { CHECK_CLIENT_TIMEOUT_MS, CHECK_SERVER_NAME, type CheckServer, openCheck } from "./check.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 
 export function builderPrompt(job: BuildJob): string {
@@ -266,6 +267,8 @@ export interface OpencodeHomeOptions {
   yours?: { config: string; data: string; cache: string };
   /** Your custom providers (`provider` in your config), carried over. Default: read from OpenCode. */
   providers?: () => Record<string, unknown> | undefined;
+  /** MCP servers the run gets (a build's `check`), with the rules (above a project config). */
+  mcp?: Record<string, unknown>;
 }
 
 /**
@@ -312,7 +315,7 @@ export async function opencodeHome(dir: string, o: OpencodeHomeOptions): Promise
       XDG_DATA_HOME: join(dir, "data"),
       XDG_CACHE_HOME: join(dir, "cache"),
       XDG_STATE_HOME: join(dir, "state"),
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: "disabled", ...o.rules }),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: "disabled", ...o.rules, ...(o.mcp ? { mcp: o.mcp } : {}) }),
       OPENCODE_DISABLE_CLAUDE_CODE: "1",
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
     },
@@ -436,7 +439,7 @@ export const codexBuilder: CapabilityBuilder = {
  * Sessions stay on disk in its own home (no --ephemeral), so a thread can be resumed. `exec`'s own
  * options (the sandbox, the project root, the directory) go before `resume`, the shared ones after.
  */
-export function codexArgs(job: BuildJob, resume?: string): string[] {
+export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): string[] {
   const shared = ["--ignore-user-config", "--skip-git-repo-check", "--json", ...codexModelArgs(job)];
   const where = [
     // Codex's own sandbox cannot nest inside ours. When the platform confines the
@@ -444,6 +447,10 @@ export function codexArgs(job: BuildJob, resume?: string): string[] {
     "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
     // The workspace is the project root: never walk up looking for other AGENTS.md files.
     "-c", 'project_root_markers=["BUILDER.md"]',
+    // Its `check` tool (no other MCP server: --ignore-user-config), waited on as long as a check takes.
+    ...(check
+      ? ["-c", `mcp_servers.${CHECK_SERVER_NAME}.command=${JSON.stringify(check.command)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.args=${JSON.stringify(check.args)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.tool_timeout_sec=${CHECK_CLIENT_TIMEOUT_MS / 1000}`]
+      : []),
     "-C", job.workspace,
   ];
   return resume ? ["exec", ...where, "resume", ...shared, resume, resumePrompt(job)] : ["exec", ...shared, ...where, builderPrompt(job)];
@@ -474,10 +481,11 @@ async function codexRun(job: BuildJob) {
   const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
   await withResume("codex", job, async (resume) => {
     const isolated = codexHome(home);
+    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "codex",
-        codexArgs(job, resume),
+        codexArgs(job, resume, check?.server),
         job,
         codexActivity,
         TIMEOUT_MS,
@@ -488,6 +496,7 @@ async function codexRun(job: BuildJob) {
         (e) => e?.type === "thread.started" && typeof e.thread_id === "string" && noteSession("codex", job.buildId, e.thread_id),
       );
     } finally {
+      check?.close();
       isolated.done();
     }
   });
@@ -512,7 +521,8 @@ async function opencodeRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
   await withResume("opencode", job, async (resume) => {
-    const isolated = await opencodeHome(home, { rules: OPENCODE_BUILDER_RULES });
+    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
+    const isolated = await opencodeHome(home, check ? opencodeCheck(check.server) : { rules: OPENCODE_BUILDER_RULES });
     try {
       // Asked from the run's own home, not the workspace (builder-written from the second attempt on).
       if (job.model && !(await opencodeHasModel(job.model, isolated.env, isolated.dir))) throw opencodeModelRejected(job.model);
@@ -530,25 +540,34 @@ async function opencodeRun(job: BuildJob) {
         OPENCODE_QUIET_START_MS,
       );
     } finally {
+      check?.close();
       isolated.done();
     }
   });
 }
 
-/** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
+/** OpenCode's rules and MCP servers with `check` offered: its one tool allowed, waited on as long as a check takes. */
+export function opencodeCheck(check: CheckServer): { rules: OpencodeRules; mcp: Record<string, unknown> } {
+  return {
+    rules: { ...OPENCODE_BUILDER_RULES, permission: { ...OPENCODE_BUILDER_RULES.permission, [`${CHECK_SERVER_NAME}_*`]: "allow" } },
+    mcp: { [CHECK_SERVER_NAME]: { type: "local", command: [check.command, ...check.args], enabled: true, timeout: CHECK_CLIENT_TIMEOUT_MS } },
+  };
+}
+
+/** Claude Code, headless, in its own config dir. File tools only, no shell; no MCP server but Hewn's `check`. */
 export const claudeBuilder: CapabilityBuilder = {
   name: "claude",
   build: (job) => withModelCheck("claude", job, claudeRun),
 };
 
 /** Claude Code's arguments for an attempt: fresh with a session id of its own, or resuming the build's earlier session with the failure. */
-export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean }): string[] {
+export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean }, check?: CheckServer): string[] {
   return [
     "-p", session.resume ? resumePrompt(job) : builderPrompt(job),
     ...(session.resume ? ["--resume", session.id] : ["--session-id", session.id]),
     "--output-format", "stream-json", "--verbose",
     ...claudeModelArgs(job),
-    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: check ? { [CHECK_SERVER_NAME]: { command: check.command, args: check.args } } : {} }),
     // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
     // No project settings either: the workspace is the builder's to write, and settings there
     // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
@@ -556,7 +575,7 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
     "--permission-mode", "acceptEdits",
     // File tools only: no shell now, and --restricted drops every code-running tool, also ones added later.
     "--restricted",
-    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep",
+    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", ...(check ? [`mcp__${CHECK_SERVER_NAME}__check`] : []),
     "--disallowedTools", "Bash",
   ];
 }
@@ -567,20 +586,23 @@ async function claudeRun(job: BuildJob) {
   await withResume("claude", job, async (resume) => {
     const session = { id: resume ?? randomUUID(), resume: !!resume };
     const isolated = claudeHome(home, undefined, { keepSessions: true });
+    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "claude",
-        claudeArgs(job, session),
+        claudeArgs(job, session, check?.server),
         job,
         claudeActivity,
         TIMEOUT_MS,
         // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
         { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
-        isolated.env,
+        // A check takes longer than an MCP call usually does.
+        check ? { ...isolated.env, MCP_TOOL_TIMEOUT: String(CHECK_CLIENT_TIMEOUT_MS) } : isolated.env,
         // The session it ran as (the one asked for), for the next attempt to resume.
         (e) => e?.type === "system" && e.subtype === "init" && typeof e.session_id === "string" && noteSession("claude", job.buildId, e.session_id),
       );
     } finally {
+      check?.close();
       isolated.done();
     }
   });
