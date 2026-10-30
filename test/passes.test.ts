@@ -4,7 +4,8 @@
 // validated in turn; a pass that doesn't leave a valid candidate keeps the one before it. Only creates
 // run them; the host's builder gets them as attempts marked `pass`.
 import assert from "node:assert/strict";
-import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import type { BuildStepState } from "@hewntools/core/platform/builds.ts";
 import type { CheckResult } from "@hewntools/core/ports.ts";
 import { builderPrompt, claudeArgs, resumePrompt } from "@hewntools/cli/builders/cli.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
+import { CHECK_DIR, openCheck } from "@hewntools/cli/builders/check.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { readConfig, writeConfig } from "@hewntools/cli/config.ts";
 import type { VisualCheck } from "@hewntools/cli/visual.ts";
@@ -173,9 +175,28 @@ describe("passes after a new tool's build", () => {
     const { view } = await follow(async (ws, job) => (counter("v:build")(ws, job), await check(ws, job)), async (ws, job) => (markUi(ws, "v:critique"), await check(ws, job)), (ws) => markUi(ws, "v:craft"));
     assert.equal(view.status, "promoted", view.log.join("\n"));
     assert.deepEqual(results.map((r) => r.passed), [true, true]);
-    // A check shows the top of a long page: four images, whatever its length.
+    // A check shows the top of a long page: four images, whatever its length; the rest in files beside them.
     assert.deepEqual(results[1].images.map((i) => i.name), ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]);
-    assert.match(results[1].text, /A long page shows its top part\./);
+    assert.deepEqual(results[1].parts?.map((i) => i.name), ["mobile-light-2"]);
+    assert.match(results[1].text, /A long page shows its top part; the rest is in screenshots\/mobile-light-2\.png \(top to bottom\): open those to see it\./);
+  });
+
+  test("a check on this machine writes every part to screenshots/, none left from before, and attaches the top ones", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "hewn-parts-"));
+    mkdirSync(join(ws, "screenshots"));
+    writeFileSync(join(ws, "screenshots", "mobile-light-3.png"), "a pass's, from before");
+    const check = openCheck(ws, async () => ({ passed: true, text: "PASS", failures: [], defects: [], images: [{ name: "mobile-light", png: Buffer.from("top") }], parts: [{ name: "mobile-light-2", png: Buffer.from("rest") }] }));
+    try {
+      writeFileSync(join(ws, CHECK_DIR, "requests", "c1.json"), "{}");
+      const result = join(ws, CHECK_DIR, "results", "c1.json");
+      for (let i = 0; i < 100 && !existsSync(result); i++) await new Promise((r) => setTimeout(r, 50));
+      assert.deepEqual(JSON.parse(readFileSync(result, "utf8")).images, ["c1-mobile-light.png"], "only the top is shown");
+      assert.deepEqual(readdirSync(join(ws, "screenshots")).sort(), ["mobile-light-2.png", "mobile-light.png"]);
+      assert.equal(readFileSync(join(ws, "screenshots", "mobile-light-2.png"), "utf8"), "rest");
+    } finally {
+      check.close();
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 
   test("only new tools run them: not a change, not an install, not a connection, not a tool without a screen", async () => {

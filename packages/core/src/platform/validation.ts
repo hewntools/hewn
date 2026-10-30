@@ -347,12 +347,14 @@ export class Validation extends Domain {
       await this.workbench.remove(copy.id).catch(() => {});
     }
     const defects = candidate?.defects ?? [];
-    // The top of a long page: four images a call, whatever the page's length (a session keeps every image it was shown).
+    // The top of a long page shown, four images a call whatever its length (a session keeps every image
+    // it was shown); the rest in files beside them, to open when needed.
     const shots = candidate?.shots ?? [];
     const images = shots.filter((s) => !/-\d+$/.test(s.name));
+    const parts = shots.filter((s) => /-\d+$/.test(s.name));
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
-    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled, cut: shots.length > images.length }), failures, defects, images };
+    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };
   }
 
   /**
@@ -609,10 +611,10 @@ const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`
 /**
  * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
  * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
- * `sampled`: whether the renders show the sample data; `cut`: whether a page was too long to show whole.
+ * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page, in files only.
  */
-function checkText(c: { failures: string[]; defects: string[]; images: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean; cut: boolean }): string {
-  const { failures, defects, images, passed, ui, sampled, cut } = c;
+function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
+  const { failures, defects, images, parts, passed, ui, sampled } = c;
   const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
   const files = images.map((n) => `screenshots/${n}.png`);
   const skipped = passed.find((l) => /visual check skipped/.test(l));
@@ -621,7 +623,7 @@ function checkText(c: { failures: string[]; defects: string[]; images: string[];
     failures.length ? `What failed:\n${list(failures)}` : "",
     defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
     images.length
-      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${files.join(", ")}.${cut ? " A long page shows its top part." : ""} Open every one and fix what looks broken, cramped, cut off or unreadable.`
+      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${files.join(", ")}.${parts.length ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.` : ""} Open every one and fix what looks broken, cramped, cut off or unreadable.`
       : ui === false
         ? ""
         : `No screenshots: the UI wasn't rendered${skipped ? ` (${skipped})` : ui === undefined ? " (fix the failures first)" : ""}.`,

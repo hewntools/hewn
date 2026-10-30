@@ -147,13 +147,15 @@ export function openCheck(workspace: string, run: (id: string) => Promise<CheckR
     try {
       const r = await run(id);
       const images: string[] = [];
+      const fileName = (n: string) => `${n.replace(/[^a-z0-9-]/gi, "")}.png`;
       for (const img of r.images) {
-        const name = img.name.replace(/[^a-z0-9-]/gi, "");
-        writeInside(workspace, join(CHECK_DIR, "results", `${id}-${name}.png`), img.png);
-        // Also where file tools find them, for a builder whose MCP client drops images.
-        writeInside(workspace, join("screenshots", `${name}.png`), img.png);
-        images.push(`${id}-${name}.png`);
+        writeInside(workspace, join(CHECK_DIR, "results", `${id}-${fileName(img.name)}`), img.png);
+        images.push(`${id}-${fileName(img.name)}`);
       }
+      // Also where file tools find them, for a builder whose MCP client drops images, with the rest of a
+      // long page: this check's renders only, none left from an earlier one (or a pass) to mistake for them.
+      rmSync(join(workspace, "screenshots"), { recursive: true, force: true });
+      for (const img of [...r.images, ...(r.parts ?? [])]) writeInside(workspace, join("screenshots", fileName(img.name)), img.png);
       out = { passed: r.passed, text: r.text, images };
     } catch (e) {
       out = { error: (e as Error).message };

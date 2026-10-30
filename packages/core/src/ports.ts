@@ -165,8 +165,10 @@ export interface CheckResult {
   failures: string[];
   /** Measured on the UI: what sticks out or is cut short, page errors, controls that break the page. */
   defects: string[];
-  /** The UI filled with its sample data: desktop-light, desktop-dark, mobile-light, mobile-dark (none when it didn't render). */
+  /** The UI filled with its sample data: desktop-light, desktop-dark, mobile-light, mobile-dark (none when it didn't render), a long page's top part. */
   images: VisualShot[];
+  /** The rest of a long page ("mobile-light-2" …): written to `screenshots/` beside the images, not shown with them. */
+  parts?: VisualShot[];
 }
 
 /** A host's charge for a build, as the owner sees it ("12 points"); Hewn shows it as given. */
