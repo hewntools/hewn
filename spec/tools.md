@@ -19,6 +19,7 @@ tests/cases.json       test cases the host runs before it promotes a version
 sample/calls.json      sample data (since 2.5): calls replayed on an empty tool, on request
 ui/index.html          optional: the tool's own UI (with any other files under ui/)
 ui/icon.svg            optional: the app icon (Hewn's convention is a 5×5 pixel glyph)
+ui/look.json           optional: the UI's look (palette, type, layout), as Hewn's builders record it
 ```
 
 Widgets have no files of their own: they are declared in the manifest and backed by read operations (see [Widgets](#widgets-since-23)).

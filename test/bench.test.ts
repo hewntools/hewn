@@ -32,7 +32,8 @@ describe("bench arms", () => {
       assert.match(brief, /### Contract rules \(enforced\)/);
       assert.match(brief, /\*\*The platform renders your UI before promotion\*\*/);
     }
-    assert.match(briefFor(ARMS.find((a) => a.name === "design-forward")!, BRIEF), /#### The UI is the product/);
+    // An arm's UI section replaces today's whole, never lands beside it.
+    for (const arm of ARMS.filter((a) => a.brief)) assert.equal(briefFor(arm, BRIEF).split("#### The UI is the product").length, 2, `${arm.name} has one UI section`);
   });
 
   test("a section that isn't there is an error, not a silent no-op", () => {

@@ -22,7 +22,11 @@ You can also ask an agent ("make me a reading list in Hewn"), if you allowed it 
 
 ## The build
 
-The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. It works from the spec and, for a tool you asked for in the chat, from your conversation with the intake too, in your own words: where the spec is silent or vague, or you changed your mind along the way, what you said wins, within your [instructions](#instructions) and Hewn's rules for tools. Then Hewn:
+The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. It works from the spec and, for a tool you asked for in the chat, from your conversation with the intake too, in your own words: where the spec is silent or vague, or you changed your mind along the way, what you said wins, within your [instructions](#instructions) and Hewn's rules for tools.
+
+The screen gets the most care. Before writing it, the builder works out when you'll open the tool and what you want to see first, and draws that big at the top. Then it gives the tool a look of its own, so it isn't mistaken for your other tools: a palette from its subject (green for plants or money, purple for sleep) for light and dark, its own type, and your data drawn as a picture (a timeline, a ring, a calendar) rather than a form. It records the look in `ui/look.json`. A change keeps a tool's look unless you ask for a new one.
+
+Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data

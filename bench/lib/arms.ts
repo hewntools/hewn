@@ -72,7 +72,9 @@ export function insertBefore(brief: string, before: string, text: string): strin
   return brief.slice(0, at) + text.trimEnd() + "\n\n" + brief.slice(at);
 }
 
-const oneshot = (b: string) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("character-oneshot.md"));
+/** The brief with its UI design section ("The UI is the product" up to "The platform renders your UI") replaced by an arm's. */
+const uiSection = (b: string, file: string) => replaceSection(b, "#### The UI is the product", "**The platform renders your UI before promotion**", section(file));
+const oneshot = (b: string) => uiSection(b, "character-oneshot.md");
 const withSample = (b: string) => insertBefore(oneshot(b), "### Contract rules (enforced)", section("sample-data.md"));
 
 export const ARMS: Arm[] = [
@@ -83,7 +85,7 @@ export const ARMS: Arm[] = [
   {
     name: "design-forward",
     about: "UI section rewritten: the UI is the product; a concept, a signature visual and something extra; ui.css is a base, not a limit.",
-    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("design-forward.md")),
+    brief: (b) => uiSection(b, "design-forward.md"),
   },
   {
     name: "design-forward+critique",
@@ -94,7 +96,7 @@ export const ARMS: Arm[] = [
   {
     name: "distinct",
     about: "design-forward, plus three directions and a written colour/type plan before code, and the common AI looks named as ones to avoid.",
-    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("distinct.md")),
+    brief: (b) => uiSection(b, "distinct.md"),
   },
   {
     name: "distinct+critique",
@@ -105,7 +107,7 @@ export const ARMS: Arm[] = [
   {
     name: "identity",
     about: "distinct, but each tool anchors on its icon's hue, is told how the owner's other tools look and must differ, and picks the least typical of its three directions. Cases built in order.",
-    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("identity.md")),
+    brief: (b) => uiSection(b, "identity.md"),
     sequential: true,
   },
   {
@@ -118,7 +120,7 @@ export const ARMS: Arm[] = [
   {
     name: "character",
     about: "identity, after the owner's votes: colour from the subject (no forced hue spread), a real palette (not one hue in shades), big visuals instead of label: value lists, the strongest direction rather than the least typical. Cases built in order.",
-    brief: (b) => replaceSection(b, "#### Design it before you write it", "**The platform renders your UI before promotion**", section("character.md")),
+    brief: (b) => uiSection(b, "character.md"),
     sequential: true,
   },
   {
