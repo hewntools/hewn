@@ -147,6 +147,16 @@ describe("bench metrics and judging", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("builder usage counts a resumed session once: each attempt's copy holds the ones before it, and its cost is the session's so far", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-usage-"));
+    // One build, three runs of one session (an attempt, then two passes), as Claude Code reports them.
+    const result = (uuid: string, ms: number, usd: number, out: number) => JSON.stringify({ type: "result", uuid, session_id: "s-1", duration_ms: ms, num_turns: 5, total_cost_usd: usd, usage: { output_tokens: out } });
+    const runs = [result("r1", 60_000, 2.5, 100), result("r2", 30_000, 4.5, 50), result("r3", 6_000, 5, 10)];
+    runs.forEach((_, i) => writeFileSync(join(dir, `b-1-a${i + 1}.jsonl`), runs.slice(0, i + 1).join("\n")));
+    assert.deepEqual(builderUsage(runs.map((_, i) => join(dir, `b-1-a${i + 1}.jsonl`))), { attempts: 3, minutes: 1.6, turns: 15, usd: 5, outputTokens: 160, thinkingTokens: 0 });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("the judge's reply is read even with prose around it; design and originality count double", () => {
     assert.deepEqual(parseJson('Here it is:\n{"a": 1, "b": {"c": 2}}\nThanks'), { a: 1, b: { c: 2 } });
     assert.throws(() => parseJson("no json"), /no JSON/);
