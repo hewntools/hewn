@@ -392,7 +392,7 @@ dialog.lightbox { width: min(1200px, 94vw); }
 .proposal-row > input[type="checkbox"] { margin-top: 12px; flex: none; }
 .proposal-row > .grow { gap: 4px; }
 .proposal-pills { margin-top: 4px; }
-/* A new tool's brief on its card: what it keeps and what's decided, three lines each (the rest under Show brief). */
+/* A brief on its card: what a new tool keeps (a change: what it changes) and what's decided, three lines each (the rest under Show brief). */
 .brief-part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 .proposal-row .inset-block { margin-top: 6px; }
 .caret-btn { margin-top: 6px; color: var(--text-3); }
