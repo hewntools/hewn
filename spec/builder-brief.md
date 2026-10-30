@@ -412,12 +412,13 @@ so everything works and fits Hewn. Build on it, and add your own CSS (inline `<s
 `ui/*.css` file) for the concept: your own palette (several colours led by the tool's `hue`,
 defined for light and dark, readable contrast), a type scale with real hierarchy (clear steps in
 size and weight), gradients, shadows, borders, radii, textures and illustration where they serve
-the concept. System font stacks only (no web fonts are reachable): `ui-serif`, `ui-rounded`,
-`ui-monospace` and `system-ui` already give you plenty of range.
+the concept. System font stacks only (a tool can't load fonts from the web): `ui-serif`,
+`ui-rounded`, `ui-monospace` and `system-ui` already give you plenty of range.
 
 - Useful classes from the base: layout (`.page`, `.stack`, `.row`, `.grid`), `.card`, `.stats`,
   `.pill`, `.chip`, `.segmented`, `.switch`, `.stepper`, `.field`, `.table-wrap`, `.empty`,
-  `.skeleton`, `.toast-region`/`.toast`. Use them when they fit; don't let them dictate the layout.
+  `.skeleton`, `.toast-region`/`.toast`. Use them when they fit; don't let them dictate the layout
+  (`.page` is a centred column up to 960 px: widen it when the data is worth the width).
 - The base's accent is Hewn's own (an acid green). Set `--accent` (a fill: its primary buttons),
   `--accent-text` (the text on it), `--accent-ink` (links, focus rings) and `--accent-soft` from
   your palette, so its controls wear your colours, not Hewn's.
@@ -495,14 +496,16 @@ Before you stop, read your UI files once more against this list and fix what you
 #### Checklist (do all of these)
 
 - **Forms:** sensible defaults (today's date, the last value used, the most common choice); Enter
-  submits; the button is disabled while saving; after success the new item shows up at once
-  (animated in); after a failure the input stays and the error is shown next to the form.
+  submits; the first field is focused; the button is disabled while saving; after success the form
+  clears (or closes) and the new item shows up at once (animated in); after a failure the input
+  stays and the error is shown next to the form (`.notice.danger` with the operation's `message`).
 - **Formatting:** dates and times readable and local (`Intl.DateTimeFormat`, "today", "3 days ago"),
-  numbers with units, never raw ISO strings, ids, or JSON.
+  numbers with units (`12.4 km`, `5:12 /km`), never raw ISO strings, ids, or JSON.
 - **Order:** the most useful first (newest, most urgent, highest rated), not insertion order.
 - **Destructive actions:** ask first (or offer Undo in the toast); say what will be lost.
-- **Copy:** plain words from the owner's world, not the API's. Sentence case. Short, warm, specific.
-  Emoji only if they truly belong to the concept; prefer drawn SVG icons.
+- **Copy:** plain words from the owner's world, not the API's ("Add a word", not "Invoke add_word";
+  no "payload", "record", "operation"). Sentence case. Short, warm, specific; no welcome text at the
+  top. Emoji only if they truly belong to the concept, never as icons: draw icons as SVG.
 - **Small screens:** works at 375 px wide: one column, nothing cut off, tap targets ≥ 36 px.
 - **Accessible:** real `<button>`s and `<label>`s, visible focus, keyboard reachable, readable contrast.
 - **Errors:** an operation's `{ error }` is shown in the page; nothing is thrown or logged as an error.
