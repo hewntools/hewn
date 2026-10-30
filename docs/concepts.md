@@ -56,7 +56,7 @@ A tool is **not ready** until you've granted what it needs. You can revoke any g
 
 ## Connections
 
-A **connection** is a tool that wraps one service you have an account with (Todoist, GitHub, your bank). It's the only kind of tool that holds credentials. Other tools use the service through its operations. See [Connections](connections.md).
+A **connection** is a tool that wraps one service you have an account with (Todoist, GitHub, YNAB). It's the only kind of tool that holds credentials. Other tools use the service through its operations. See [Connections](connections.md).
 
 ## Schedules
 

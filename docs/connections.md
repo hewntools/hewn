@@ -1,6 +1,6 @@
 # Connections
 
-A **connection** is a [tool](concepts.md#tools) that wraps one service you have an account with: Todoist, GitHub, Notion, your bank, a server at home. It's the only kind of tool that holds credentials. Other tools reach the service through the connection's [operations](concepts.md#tools), so a tool can do exactly what those operations allow: a GitHub connection without `delete_repo` can't delete a repository.
+A **connection** is a [tool](concepts.md#tools) that wraps one service you have an account with: Todoist, GitHub, Notion, YNAB, a server at home. It's the only kind of tool that holds credentials. Other tools reach the service through the connection's [operations](concepts.md#tools), so a tool can do exactly what those operations allow: a GitHub connection without `delete_repo` can't delete a repository.
 
 Connections are on **Accounts**.
 
@@ -16,7 +16,9 @@ When it's built, the connection asks you for what it needs (its [grants](concept
 - **hosts** it may reach, such as `api.todoist.com`
 - **a key** (API token), with where to find it in the service
 - **settings** that aren't secret, such as your server's address
-- **a sign-in**, for services that use a login flow instead of a pasted key: Hewn walks you through it step by step
+- **a sign-in**, for services you sign in to with a username and password instead of a key: Hewn walks you through it step by step, with the code the service sends if it sends one
+
+Not yet: services that only let other apps in through their own **Sign in with…** or **Allow access** page (OAuth), such as Google Calendar, Gmail, Spotify or Strava. Hewn can't connect to those. Ask for one, and the intake says so and offers what works, such as a calendar's secret iCal address or an export to import.
 
 Keys are stored encrypted, with the secrets key in your Keychain (macOS) or keyring (Linux), and passed to the connection per call. No tool or agent ever sees them, and a result that contains one is withheld.
 

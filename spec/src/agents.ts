@@ -96,6 +96,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     description:
       "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. " +
       "Only connections hold credentials: if it needs a service with a key, token or login (GitHub, Notion, a self-hosted server…), it must call a connection (kind 'connection') that wraps the service. " +
+      "A connection signs in with a key or token the user pastes, or with a username-and-password sign-in step; services that only allow OAuth (Google Calendar, Gmail, Spotify…) can't be connected yet. " +
       "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes. " +
       "If the connection lacks an operation you need, capabilities_modify the connection first and pass its buildId as after.",
     inputSchema: obj(
