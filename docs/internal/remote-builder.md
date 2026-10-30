@@ -49,7 +49,7 @@ Request:
 - `pause` (since 0.4.10): this Hewn takes a `{ "paused": … }` outcome (below). Without it, send `refused` instead.
 - `session` is the same for every attempt of one build (the build id), so the service may resume its own model session on a later attempt instead of starting over; `prompt` and `files` are still whole each time, so a stateless service works.
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
-- `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract, and quotes the owner's conversation with the intake after the request when there is one, up to 40,000 characters). `OTHER_TOOLS.md`, when the owner has other tools, says how each looks, and `CONTRACTS.md` and `contracts/<id>.md` what each offers to call (the brief sends the builder to them). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
+- `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract, and quotes the owner's conversation with the intake after the request when there is one, up to 40,000 characters). `OTHER_TOOLS.md`, when the owner has other tools, says how each looks, and `CONTRACTS.md` and `.hewn-contracts/<id>.md` what each offers to call (the brief sends the builder to them). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
 
 Events:
 
@@ -68,7 +68,7 @@ Events:
 
 ### A paused build
 
-- **Continue** is the owner's alone (an agent's `builds_retry` of a paused build is refused). It is a retry: a new build, with a new `buildId` and `session`, whose `retryOf` is the first build of the chain, for the service to pick the kept work up. Its `files` is the tool as it is now (its live version and `BUILDER.md`), not the paused build's workspace: the kept work is the service's to bring back. The service may pause it again.
+- **Continue** is the owner's alone (an agent's `builds_retry` of a paused build is refused). It is a retry: a new build, with a new `buildId` and `session`, whose `retryOf` is the first build of the chain, for the service to pick the kept work up. Its `files` is the tool as it is now (its live version, with `BUILDER.md`, `OTHER_TOOLS.md`, `CONTRACTS.md` and `.hewn-contracts/` written afresh), not the paused build's workspace: the kept work is the service's to bring back. The service may pause it again.
 - **Stop** only ends it in Hewn (cancelled); nothing is sent to the service. A service that keeps paused work learns of a Stop only in that no Continue comes, so it keeps the work as long as its own policy says.
 - Hewn doesn't tell a Continue apart from other retries of the same chain: a **Retry** of a later failure, or a **Start again** after Stop, carries the same `retryOf`. A service that keeps work per chain may pick it up then too.
 

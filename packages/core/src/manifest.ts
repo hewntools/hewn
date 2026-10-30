@@ -2,9 +2,9 @@
 import { Validator } from "@cfworker/json-schema";
 
 // The contract's types and constants live in the spec (Apache-2.0); the checks below are the host's.
-import { RUNTIME_PROFILES, WIDGET_SIZES, MODEL_TIERS, MODEL_PROVIDERS, HEALTH_STATUSES, CONNECT_OUTPUT, HEALTH_OUTPUT } from "@hewntools/spec/manifest.ts";
+import { RUNTIME_PROFILES, WIDGET_SIZES, MODEL_TIERS, MODEL_PROVIDERS, HEALTH_STATUSES, CONNECT_OUTPUT, HEALTH_OUTPUT, SIDE_EFFECTS } from "@hewntools/spec/manifest.ts";
 import type { RuntimeProfile, JSONSchema, SideEffect, OperationManifest, CapabilityManifest, WidgetSize, WidgetManifest, ModelTier, ModelProvider, ModelRequirement, ToolSource } from "@hewntools/spec/manifest.ts";
-export { RUNTIME_PROFILES, WIDGET_SIZES, MODEL_TIERS, MODEL_PROVIDERS, HEALTH_STATUSES, CONNECT_OUTPUT, HEALTH_OUTPUT };
+export { RUNTIME_PROFILES, WIDGET_SIZES, MODEL_TIERS, MODEL_PROVIDERS, HEALTH_STATUSES, CONNECT_OUTPUT, HEALTH_OUTPUT, SIDE_EFFECTS };
 export type { RuntimeProfile, JSONSchema, SideEffect, OperationManifest, CapabilityManifest, WidgetSize, WidgetManifest, ModelTier, ModelProvider, ModelRequirement, ToolSource };
 
 /** The grant a model requirement becomes: "model:standard" or "model:anthropic/claude-sonnet-5-5". */
@@ -185,6 +185,32 @@ export function refreshMs(w: WidgetManifest): number {
 }
 
 export const widgetOf = (m: CapabilityManifest, name: string) => (m.widgets ?? []).find((w) => w.name === name);
+
+/** The newest version of each operation in `ops`, by name, in the order the names first appear. */
+export function newestByName(ops: OperationManifest[]): Map<string, OperationManifest> {
+  const newest = new Map<string, OperationManifest>();
+  for (const o of ops) if ((newest.get(o.name)?.version ?? 0) < o.version) newest.set(o.name, o);
+  return newest;
+}
+
+/**
+ * What another capability is offered to call: every version that isn't deprecated, a widget's
+ * operation (it returns what Home draws) or a connection's sign-in step (the owner's alone).
+ */
+export function offeredOperations(m: CapabilityManifest): OperationManifest[] {
+  const widgets = new Set((m.widgets ?? []).map((w) => w.operation));
+  return m.operations.filter((o) => !o.deprecated && !widgets.has(opKey(o.name, o.version)) && !(isConnection(m) && o.name === "connect"));
+}
+
+/**
+ * What another capability may call, in the manifest's order: the newest version of each offered
+ * operation (`offeredOperations`), and any the tool being changed calls today (`calls`, "name@N"),
+ * whatever it is.
+ */
+export function callableOperations(m: CapabilityManifest, calls: string[] = []): OperationManifest[] {
+  const newest = newestByName(offeredOperations(m));
+  return m.operations.filter((o) => newest.get(o.name) === o || calls.includes(opKey(o.name, o.version)));
+}
 
 /** The rules for a manifest's widgets beyond their shape. */
 function widgetErrors(m: CapabilityManifest): string[] {

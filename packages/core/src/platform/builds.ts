@@ -8,7 +8,7 @@ import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
 import type { BundleSummary } from "../bundle.ts";
-import { ABI, type CapabilityManifest, DEFAULT_ABI, isConnection, type OperationManifest, opKey, type SideEffect, type ToolSource } from "../manifest.ts";
+import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { Files } from "../ports.ts";
@@ -1325,21 +1325,22 @@ export class Builds extends Domain {
   }
 
   /**
-   * CONTRACTS.md and contracts/<id>.md for a workspace: what each other capability offers
-   * (`contractsIndex`), and its contract in full (`contractFile`). Files of their own, as a builder
+   * CONTRACTS.md and .hewn-contracts/<id>.md for a workspace: what each other capability offers
+   * (`contractsIndex`), and its contract in full (`contractText`). Files of their own, as a builder
    * may not read BUILDER.md to its end (OpenCode reads 50 KB of a file), and the owner's contracts
-   * together can run to hundreds of KB. None without other capabilities; never part of a version (`isWorkspaceOnly`).
+   * together can run to hundreds of KB. None without other capabilities. Never part of a version
+   * (`isWorkspaceOnly`; the folder is a dot-folder, `isBuilderConfig`, so it never shadows one of a tool's own).
    */
   private contractFiles(exclude: string): Files {
     const callees = this.callees(exclude);
     if (!callees.length) return {};
-    return { "CONTRACTS.md": bytes(contractsIndex(callees)), ...Object.fromEntries(callees.map((c) => [`contracts/${c.id}.md`, bytes(contractFile(c))])) };
+    return { "CONTRACTS.md": bytes(contractsIndex(callees)), ...Object.fromEntries(callees.map((c) => [`${CONTRACTS_DIR}/${c.id}.md`, bytes(contractText(c))])) };
   }
 
   /**
    * OTHER_TOOLS.md for a workspace: the other tools' looks (`othersLooks`), in a file of its own, as a
    * builder may not read BUILDER.md to its end (OpenCode reads 50 KB of a file). None when there are
-   * no other tools; a connection's build (no UI) gets none. Never part of a version (`isWorkspaceOnly`).
+   * no other tools; the callers leave it out of a connection's build (no UI). Never part of a version (`isWorkspaceOnly`).
    */
   private async looksFile(exclude: string, kind: BuildKind): Promise<Files> {
     const looks = await this.othersLooks(exclude, kind);
@@ -1348,8 +1349,8 @@ export class Builds extends Domain {
 
   /**
    * The owner's other tools as a build is told them, to look clearly different from: each one's hue
-   * (and saturation) on Home and the look its builder recorded in `ui/look.json`, cut short. The
-   * workspace's OTHER_TOOLS.md, and what a design pass is told too. Connections (no UI) are left out;
+   * (and saturation) on Home and the look its builder recorded in `ui/look.json`, cut short: the
+   * workspace's OTHER_TOOLS.md. Connections (no UI) are left out;
    * a version that can't be read is listed without its look. Empty when there are none.
    */
   async othersLooks(exclude: string, kind: BuildKind = "create"): Promise<string> {
@@ -1575,10 +1576,15 @@ export function lookText(raw: string): string | undefined {
   } catch {
     // Not JSON: the builder's words as they are.
   }
-  s = s.replace(/\s+/g, " ").trim();
-  if (!s || s === '""' || s === "{}") return undefined;
-  return s.length > LOOK_CHARS ? `${s.slice(0, LOOK_CHARS - 1)}…` : s;
+  s = oneLine(s, LOOK_CHARS);
+  return !s || s === '""' || s === "{}" ? undefined : s;
 }
+
+/** `s` on one line, its whitespace collapsed, cut at `max` characters with "…". */
+const oneLine = (s: string, max: number) => {
+  const line = s.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};
 
 /**
  * The other tools' looks, OTHER_TOOLS.md: on the owner's Home already, so a new tool must look
@@ -1592,7 +1598,7 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
     kind === "create"
       ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual (its colour still comes from its subject)."
       : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
-  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule} What each one does is listed in \`BUILDER.md\`.\n\n${lines.join("\n")}\n`;
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n`;
 }
 
 /** One of the owner's other capabilities as a build is told it: its active manifest, and the operations ("name@N") the tool being changed calls on it today. */
@@ -1602,23 +1608,11 @@ export interface Callee {
   calls: string[];
 }
 
-/** How much of a capability's purpose CONTRACTS.md shows (`contracts/<id>.md` has all of it). */
+/** How much of a capability's purpose CONTRACTS.md shows (`.hewn-contracts/<id>.md` has all of it). */
 export const INDEX_PURPOSE_CHARS = 200;
 
-const SIDE_EFFECTS: SideEffect[] = ["read", "write", "destructive"];
-
-/**
- * What another capability may call, in the manifest's order: the newest version of each operation
- * that isn't deprecated, and any the tool being changed calls today. Never a widget's operation (it
- * returns what Home draws) or a connection's sign-in step (the owner's alone), unless called today.
- */
-export function callableOperations(m: CapabilityManifest, calls: string[] = []): OperationManifest[] {
-  const widgets = new Set((m.widgets ?? []).map((w) => w.operation));
-  const offered = m.operations.filter((o) => !o.deprecated && !widgets.has(opKey(o.name, o.version)) && !(isConnection(m) && o.name === "connect"));
-  const newest = new Map<string, OperationManifest>();
-  for (const o of offered) if ((newest.get(o.name)?.version ?? 0) < o.version) newest.set(o.name, o);
-  return m.operations.filter((o) => newest.get(o.name) === o || calls.includes(opKey(o.name, o.version)));
-}
+/** The workspace folder with each other capability's contract in full: a dot-folder, which no version can hold. */
+export const CONTRACTS_DIR = ".hewn-contracts";
 
 /**
  * BUILDER.md's end: the owner's other capabilities by name, and where to read what they offer. A
@@ -1627,12 +1621,12 @@ export function callableOperations(m: CapabilityManifest, calls: string[] = []):
  */
 export function catalogNote(callees: Callee[]): string {
   if (!callees.length) return "";
-  return `\n## The owner's other capabilities\n\nYou can compose with these via ctx.call (see "Calling other capabilities"): ${callees.map((c) => `${c.manifest.name} (\`${c.id}\`)`).join(", ")}. \`CONTRACTS.md\` in your workspace lists the operations each one offers, and \`contracts/<id>.md\` has each one's full contract. You see only their public contracts, never their data or code.\n`;
+  return `\n## The owner's other capabilities\n\nYou can compose with these via ctx.call (see "Calling other capabilities"): ${callees.map((c) => `${c.manifest.name} (\`${c.id}\`)`).join(", ")}. \`CONTRACTS.md\` in your workspace lists the operations each one offers, and \`${CONTRACTS_DIR}/<id>.md\` has each one's full contract. You see only their public contracts and recorded looks, never their data or code.\n`;
 }
 
 /**
  * CONTRACTS.md: the owner's other capabilities, each one's purpose, cut short, and the operations it
- * offers by side effect, names only. The full contracts are `contractFile`s.
+ * offers by side effect, names only. The full contracts are `contractText`s.
  */
 export function contractsIndex(callees: Callee[]): string {
   const entry = ({ id, manifest: m, calls }: Callee) => {
@@ -1641,21 +1635,22 @@ export function contractsIndex(callees: Callee[]): string {
       const named = ops.filter((o) => o.sideEffect === s).map((o) => `\`${opKey(o.name, o.version)}\``);
       return named.length ? [`${s}: ${named.join(", ")}`] : [];
     });
-    const purpose = m.purpose.replace(/\s+/g, " ").trim();
-    return `- **${m.name}** (\`${id}\`): ${purpose.length > INDEX_PURPOSE_CHARS ? `${purpose.slice(0, INDEX_PURPOSE_CHARS - 1)}…` : purpose}\n  ${bySideEffect.join(" · ") || "nothing to call"}`;
+    return `- **${m.name}** (\`${id}\`): ${oneLine(m.purpose, INDEX_PURPOSE_CHARS)}\n  ${bySideEffect.join(" · ") || "nothing to call"}`;
   };
-  return `# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BUILDER.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`contracts/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`;
+  return `# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BUILDER.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`${CONTRACTS_DIR}/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`;
 }
 
-/** contracts/<id>.md: one capability's contract in full, the operations `callableOperations` gives. */
-export function contractFile({ id, manifest: m, calls }: Callee): string {
+/** .hewn-contracts/<id>.md: one capability's contract in full, the operations `callableOperations` gives. */
+export function contractText({ id, manifest: m, calls }: Callee): string {
+  const newest = newestByName(offeredOperations(m));
   const op = (o: OperationManifest) => {
     const key = opKey(o.name, o.version);
-    const top = Math.max(...m.operations.filter((x) => x.name === o.name && !x.deprecated).map((x) => x.version));
+    const top = newest.get(o.name);
     const notes = [
       o.sideEffect,
       ...(calls.includes(key) ? ["this tool calls it today"] : []),
-      ...(o.deprecated ? [`deprecated${o.deprecated.replacement ? `: use ${o.deprecated.replacement}` : ""}`] : o.version < top ? [`the newest is ${opKey(o.name, top)}`] : []),
+      ...(o.deprecated ? [`deprecated${o.deprecated.replacement ? `: use ${o.deprecated.replacement}` : ""}`] : []),
+      ...(top && top !== o ? [`the newest is ${opKey(top.name, top.version)}`] : []),
     ];
     return `## \`${key}\` (${notes.join("; ")})\n\n${o.description}\n\ninput: ${JSON.stringify(o.inputSchema)}\noutput: ${JSON.stringify(o.outputSchema)}`;
   };
