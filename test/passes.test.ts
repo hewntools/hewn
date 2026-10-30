@@ -315,9 +315,15 @@ describe("the host's builder: a pass is an attempt marked `pass`", () => {
       assert.deepEqual(sent.map((b) => [b.attempt, b.pass ?? null, b.session]), [[1, null, done.buildId], [2, "critique", done.buildId], [3, "craft", done.buildId]]);
       assert.ok(!Object.keys(sent[0].files).some((p) => p.startsWith("screenshots/")));
       assert.deepEqual(Object.keys(sent[1].files).filter((p) => p.startsWith("screenshots/")).sort(), SHOTS.map((s) => `screenshots/${s}.png`).sort());
-      // A stateless service gets the whole prompt: the brief, then the pass.
-      assert.match(sent[1].prompt, /Read BUILDER\.md[^]*critique pass on it:\n\nDesign review pass\./);
-      assert.match(sent[2].prompt, /craft pass on it:\n\nCraft pass\./);
+      // A stateless service gets the whole prompt, a fresh session can work from: the brief, that the
+      // candidate is built (not to start over), what the pass asks and where its screenshots are.
+      for (const [i, pass] of [[1, "critique"], [2, "craft"]] as const) {
+        const prompt: string = sent[i].prompt;
+        assert.match(prompt, /^You are a builder for Hewn[^]*Read BUILDER\.md/);
+        assert.match(prompt, new RegExp(`The candidate in this workspace is built and passed validation: don't start over\\.[^]*${pass} pass on it:\\n\\n${pass === "critique" ? "Design review pass" : "Craft pass"}\\.`));
+        assert.match(prompt, /The screenshots: screenshots\/desktop-light\.png, [^]*screenshots\/mobile-dark\.png\./);
+        assert.doesNotMatch(prompt, /write ui\/icon\.svg/);
+      }
       const cap = platform.registry.getCapability("ui-counter")!;
       assert.match(text((await platform.loadVersion("ui-counter", cap.activeVersion!)).files["ui/index.html"]), /v:craft/);
     } finally {
