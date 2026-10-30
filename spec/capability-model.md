@@ -517,7 +517,7 @@ grants, versions and rollback like any Capability.
   expressed by which operations exist: a blog connection without `publish` can't publish.
 - Credentials live in the platform's secret store, never in state; refreshed tokens go back there.
 - Non-secret settings (a site URL) are config, not secrets.
-- Each connection reports its health, and may have an owner-only sign-in step for login flows.
+- Each connection reports its health, and may have an owner-only sign-in step for a login (a username and password, and a code if the service sends one). There is no OAuth for services yet: one that only lets apps in through its own "Allow access" page can't be connected.
 - Use-case logic (a weekly review) belongs in the Capabilities that use the connection.
 
 ## Natural-language invocation
