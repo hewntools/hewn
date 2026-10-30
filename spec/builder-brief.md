@@ -466,11 +466,8 @@ versions make most often (a design review of many of them found the same ones ag
 - **Dark mode designed, not inverted.** Write each colour with both its values, the dark one chosen
   for the dark palette: `--leaf: light-dark(#2f7a4a, #8fd4a6)` (colours only: for a shadow or a
   gradient, use such tokens inside it). That follows Hewn's Light or Dark as well as the system's;
-  a plain `@media (prefers-color-scheme: dark)` follows only the system's. Give your palette names
-  of its own (`--leaf`, `--soil`) and use them in your rules; set the base's tokens you use from
-  them (`--accent: var(--leaf)`). The base is in a cascade layer, so your own CSS wins over it
-  whatever the selectors. (A tool can be shared to an older Hewn, whose base isn't, and whose dark
-  values win over any of its tokens you set: names of your own keep your palette there.)
+  a plain `@media (prefers-color-scheme: dark)` follows only the system's. The base is in a cascade
+  layer, so your own CSS wins over it whatever the selectors.
 - **One answer first.** The top of the screen answers the owner's question; nothing above or beside
   it competes for the eye.
 - **Each piece of data in one place.** Don't show the same items in a hero and again in a list, or
