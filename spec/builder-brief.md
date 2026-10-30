@@ -161,8 +161,10 @@ Ordinary capabilities can't declare `secrets`; they call the connection's operat
 ### Calling other capabilities (composition)
 
 Use another capability's public operations instead of duplicating its data. Example: record runs
-in Running Log rather than keeping your own runs table. The owner's capabilities and their contracts
-are listed at the end of this file.
+in Running Log rather than keeping your own runs table. The owner's other capabilities, when there
+are any, are named at the end of this file; `CONTRACTS.md` in your workspace lists their operations,
+and `.hewn-contracts/<id>.md` has each one's full contract (input and output schemas). Read it
+before you call one.
 
 1. Declare every call, pinned to a contract version:
    ```json
