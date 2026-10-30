@@ -14,6 +14,7 @@ migrations/NNN_*.sql the database schema (SQLite), append-only
 tests/cases.json     test cases Hewn runs before promoting a version
 ui/icon.svg          a 5×5 pixel glyph for Home
 ui/index.html        optional: the tool's own UI
+ui/look.json         with a UI: its look (palette, type, layout), as the builder recorded it
 ```
 
 ## Operations
