@@ -1,6 +1,6 @@
 # Connections
 
-A **connection** is a [tool](concepts.md#tools) that wraps one service you have an account with: Todoist, GitHub, Google Calendar, your bank, a server at home. It's the only kind of tool that holds credentials. Other tools reach the service through the connection's [operations](concepts.md#tools), so a tool can do exactly what those operations allow: a GitHub connection without `delete_repo` can't delete a repository.
+A **connection** is a [tool](concepts.md#tools) that wraps one service you have an account with: Todoist, GitHub, Notion, your bank, a server at home. It's the only kind of tool that holds credentials. Other tools reach the service through the connection's [operations](concepts.md#tools), so a tool can do exactly what those operations allow: a GitHub connection without `delete_repo` can't delete a repository.
 
 Connections are on **Accounts**.
 

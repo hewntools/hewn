@@ -156,7 +156,9 @@ export interface Workbench {
   /**
    * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
    * help, `refused: true` that the builder's host declined it (e.g. over quota; the message says why),
-   * and `modelUnavailable: true` that the model asked for can't run (the owner picks another).
+   * `paused: true` that the builder's host paused it part-way with its work kept (the owner continues
+   * or stops it; the message says why), and `modelUnavailable: true` that the model asked for can't
+   * run (the owner picks another).
    */
   build(job: BuildJob, hooks: BuildHooks): Promise<void>;
   /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */
@@ -174,6 +176,8 @@ export interface VisualCheckArgs {
   /** Render these widgets (each in each size, from its test case's view) instead of the candidate's UI. */
   widgets?: VisualWidget[];
   invoke: (body: { operation: string; operationVersion?: number; input?: unknown }) => Promise<{ result: unknown }>;
+  /** Also measure what a builder should fix: what sticks out or is cut short, and controls that break the page (clicks write to the state `invoke` runs on). */
+  measure?: boolean;
 }
 export interface VisualWidget {
   name: string;
@@ -188,6 +192,14 @@ export interface VisualCheckResult {
   screenshot?: Uint8Array;
   /** The same screen in dark mode. */
   screenshotDark?: Uint8Array;
+  /** The UI whole, 1280 and 390 px wide, light and dark: "desktop-light", "desktop-dark", "mobile-light", "mobile-dark". */
+  shots?: VisualShot[];
+  /** With `measure`: what to fix, one line each. */
+  defects?: string[];
+}
+export interface VisualShot {
+  name: string;
+  png: Uint8Array;
 }
 
 // ---------- Secrets & agents ----------

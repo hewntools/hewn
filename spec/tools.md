@@ -218,7 +218,7 @@ A host validates a new version, then promotes it. Hewn does this, in order:
 4. Every operation in `requires.capabilities` exists.
 5. Migrations are append-only and non-destructive.
 6. All test cases pass. Every widget's operation needs a case, and its output must be a view a template can draw. Since 2.5: if there's `sample/calls.json`, it replays in order on a fresh database, every call without an error.
-7. If there's a UI, it's rendered headlessly on an empty database, in light and dark mode, and (since 2.5, with sample data) again on a database filled with it; an uncaught error, a `console.error` or a failed request fails the version. The owner's screenshot is the filled one. Changed widgets are drawn in every size they offer, showing what they'd show with the sample data when there is some.
+7. If there's a UI, it's rendered headlessly on an empty database, in light and dark mode, on a desktop screen (1280 px wide) and a phone's (390 px), and (since 2.5, with sample data) again on a database filled with it; an uncaught error, a `console.error` or a failed request on either screen fails the version. The owner's screenshot is the filled one. Changed widgets are drawn in every size they offer, showing what they'd show with the sample data when there is some.
 8. Migrations are dry-run on a copy of the live database.
 9. The version is frozen (immutable). If an agent asked for a change to an existing tool, and the change is to a connection or adds operations, it waits for the owner's review (build status `review`); the owner approves or rejects exactly this version.
 10. The live database is backed up, migrations are applied, and the version becomes active.

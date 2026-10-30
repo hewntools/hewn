@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Validation: a build's candidate checked step by step (manifest, bundle, contracts, migrations,
-// tests, the UI and widgets, an upgrade dry run), frozen, and promoted, or held for the owner's review.
+// tests, the UI and widgets, an upgrade dry run), then frozen and promoted, or held for the owner's
+// review. The check and the promotion are separate steps: a candidate can be checked and never promoted.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
@@ -9,14 +10,45 @@ import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
-import type { CallHandler, CodeRef, ExecutionTarget, Files, StateRef } from "../ports.ts";
+import type { CallHandler, CodeRef, ExecutionTarget, Files, StateRef, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
 import { Domain } from "./context.ts";
 
+/** A candidate that passed validation, held in memory: nothing about the tool has changed yet. */
+export interface Candidate {
+  manifest: CapabilityManifest;
+  files: Files;
+  code: CodeRef;
+  /** The active version it was checked against. */
+  base?: { manifest: CapabilityManifest; files: Files };
+  /** Each operation's first passing result in the tests. */
+  views: Map<string, unknown>;
+  /** Its UI as the visual check rendered it (filled with the sample data when there is some): 1280 and 390 px wide, light and dark, the whole page. */
+  shots?: VisualShot[];
+  /** With `measure`: what the visual check measured for the builder to fix. */
+  defects?: string[];
+  /** The build page's screenshot of it (light, dark): written again when it's promoted, so the page shows this candidate. */
+  screenshot?: Uint8Array;
+  screenshotDark?: Uint8Array;
+}
+
 export class Validation extends Domain {
+  /** Validate a build's candidate and promote it (or hold it for the owner's review). Throws with what failed. */
   async validateAndPromote(build: BuildRow, step: (message: string) => void, onTests: (passed: number, total: number) => void = () => {}): Promise<{ version: number } | { review: BuildReview }> {
+    return this.promote(build, await this.validate(build, step, { onTests }), step);
+  }
+
+  /**
+   * Steps 1 to 6: check a build's candidate (its workspace) without promoting it. The tool, its
+   * versions and its data stay as they were, and the workspace stays (only the build page's
+   * screenshot is kept), so it can be promoted later (`promote`), or not at all. `onTests` follows
+   * the tests; `measure` has the visual check measure what a builder should fix, too. Throws with
+   * what failed.
+   */
+  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean } = {}): Promise<Candidate> {
+    const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
       throw new Error(problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
@@ -105,6 +137,8 @@ export class Validation extends Domain {
     const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
+    let rendered: { shots?: VisualShot[]; defects?: string[] } = {};
+    let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
@@ -151,8 +185,8 @@ export class Validation extends Domain {
       // The screenshot the build page shows, kept whether the check passed or not (a failed one shows
       // what broke). "(screenshot attached" in the log is what tells the build page there's one.
       const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
-        if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-        if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+        kept = { screenshot: v.screenshot, screenshotDark: v.screenshotDark };
+        await this.keepScreenshots(build, v);
       };
 
       // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
@@ -164,8 +198,9 @@ export class Validation extends Domain {
         await this.runtime.migrate(visualState, migrations, code);
         const secrets = cases.find((c) => c.secrets)?.secrets ?? Object.fromEntries((manifest.requires?.secrets ?? []).map((x) => [x.name, "visual-check"]));
         const config = cases.find((c) => c.config)?.config ?? Object.fromEntries((manifest.config ?? []).map((x) => [x.name, "visual-check"]));
-        const check = (state: StateRef) =>
+        const check = (state: StateRef, measure: boolean) =>
           visualCheck(build.id, {
+            ...(measure ? { measure } : {}),
             manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
             invoke: async (body) => {
               const { result } = await this.d.invocation.execute(
@@ -184,7 +219,8 @@ export class Validation extends Domain {
               return { result };
             },
           });
-        const empty = await check(visualState);
+        const measure = !!opts.measure;
+        const empty = await check(visualState, measure && !sample);
         if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
         else {
           if (empty.errors.length) {
@@ -192,9 +228,10 @@ export class Validation extends Domain {
             if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
             fail("UI didn't render cleanly", empty.errors);
           }
-          const filled = sample ? await check(sampleState) : undefined;
+          const filled = sample ? await check(sampleState, measure) : undefined;
           const v = filled && !filled.skipped ? filled : empty;
           await keep(v);
+          rendered = { shots: v.shots, defects: v.defects };
           if (filled?.errors.length) {
             if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
             fail("UI didn't render cleanly with its sample data", filled.errors);
@@ -238,14 +275,40 @@ export class Validation extends Domain {
     } finally {
       for (const s of [testState, visualState, dryRun, sampleState]) await this.runtime.dropState(s).catch(() => {});
     }
+    return {
+      manifest,
+      files,
+      code,
+      ...(base ? { base: { manifest: base.row.manifest, files: base.files } } : {}),
+      views,
+      ...(rendered.shots ? { shots: rendered.shots } : {}),
+      ...(rendered.defects ? { defects: rendered.defects } : {}),
+      ...(kept.screenshot ? { screenshot: kept.screenshot } : {}),
+      ...(kept.screenshotDark ? { screenshotDark: kept.screenshotDark } : {}),
+    };
+  }
 
-    // 7. freeze; an agent's change that adds operations or changes a connection waits for the owner
+  /** The build page's screenshot of a build, light and dark. */
+  private async keepScreenshots(build: BuildRow, v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) {
+    if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
+    if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+  }
+
+  /**
+   * 7. freeze a validated candidate; an agent's change that adds operations or changes a connection
+   * waits for the owner, anything else is promoted (8).
+   */
+  async promote(build: BuildRow, candidate: Candidate, step: (message: string) => void): Promise<{ version: number } | { review: BuildReview }> {
+    const id = build.capabilityId;
+    const { manifest, files, code, base, views } = candidate;
+    // A later check of the same build (another pass) may have drawn over the build page's screenshot.
+    await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
     this.loaded.set(code.hash, { files, bundle: code.js });
     // A follow-up chained to the creation of the same capability (create with widgets) is part of that creation.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
-    const review = partOfCreate || !base ? undefined : reviewFor(build, { manifest: base.row.manifest, files: base.files }, { manifest, files }, code.hash, views);
+    const review = partOfCreate || !base ? undefined : reviewFor(build, base, { manifest, files }, code.hash, views);
     if (review) {
       await this.workbench.remove(build.id);
       return { review };
