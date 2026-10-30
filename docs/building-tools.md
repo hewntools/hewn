@@ -22,11 +22,15 @@ You can also ask an agent ("make me a reading list in Hewn"), if you allowed it 
 
 ## The build
 
-The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. It works from the spec and, for a tool you asked for in the chat, from your conversation with the intake too, in your own words: where the spec is silent or vague, or you changed your mind along the way, what you said wins, within your [instructions](#instructions) and Hewn's rules for tools. Then Hewn:
+The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode on your machine, in a sandbox, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or with OpenCode a local model server) writes the tool. It works from the spec and, for a tool you asked for in the chat, from your conversation with the intake too, in your own words: where the spec is silent or vague, or you changed your mind along the way, what you said wins, within your [instructions](#instructions) and Hewn's rules for tools.
+
+As it works, the builder checks its own work: its `check` tool runs what Hewn runs below, without making anything live, and shows it its screen filled with its sample data on a desktop and a phone, light and dark, with what to fix measured on it (what sticks out past the phone's edge, text cut short, buttons that break the page). It fixes what it finds before it stops, so fewer builds need another attempt. The build's activity shows each check ("Checking its work (1 of 10)", "Check: 2 problems to fix"), up to 10 an attempt. The tool runs in the builder's sandbox and reaches Hewn only through files in the build's folder: no port, no key.
+
+Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen, empty and filled with its sample data, and checks it loads without errors
+3. renders its screen, empty and filled with its sample data, on a desktop and a phone screen, and checks it loads without errors
 4. makes it live if all of that passes
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
