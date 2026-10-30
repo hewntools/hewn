@@ -378,10 +378,15 @@ dialog.lightbox { width: min(1200px, 94vw); }
 .with-drawer { min-height: 0; }
 .drawer-main { display: flex; flex-direction: column; min-height: 0; }
 .drawer-main > .run { overflow: auto; }
-.drawer-intake { display: flex; flex-direction: column; gap: var(--s3); min-height: 100%; }
+/* flex: none: as tall as its conversation, at least the drawer's height. Allowed to shrink, it stayed
+   the drawer's height and a long conversation ran out of it, so the drawer's bottom padding scrolled
+   away and the box sat on the screen's edge. */
+.drawer-intake { display: flex; flex-direction: column; gap: var(--s3); min-height: 100%; flex: none; }
 .drawer-intake > :first-child { margin-top: auto; }
 .drawer-title { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
 .drawer .composer textarea { min-height: 72px; }
+/* Continuing an earlier conversation scrolls the box into view: with the same space under it. */
+.drawer .composer { scroll-margin-bottom: 20px; }
 .drawer .bubble { max-width: 90%; }
 .drawer .proposal { gap: 12px; }
 .log.short { max-height: 150px; }

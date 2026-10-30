@@ -5,7 +5,8 @@ promote it. The platform validates and tests the candidate. If it passes, the pl
 freezes it as a new immutable version and makes that version active. Until then the
 current version keeps serving.
 
-{{SUBMIT}}
+{{SUBMIT}} If you have a `check` tool, check your work with it before you stop (see "Check your
+work" at the end).
 
 Workspace layout:
 
@@ -460,8 +461,8 @@ it's made. Don't use these (if the concept truly needs one, say why in your plan
 
 #### Get it right the first time
 
-You can't see the page while you build it, so check your markup and CSS against the mistakes first
-versions make most often (a design review of many of them found the same ones again and again):
+Check your markup and CSS against the mistakes first versions make most often (a design review of
+many of them found the same ones again and again):
 
 - **Dark mode designed, not inverted.** Write each colour with both its values, the dark one chosen
   for the dark palette: `--leaf: light-dark(#2f7a4a, #8fd4a6)` (colours only: for a shadow or a
@@ -488,7 +489,8 @@ versions make most often (a design review of many of them found the same ones ag
 - **States are unmistakable.** Done and not done, due and late, selected and not: tell them apart
   at a glance, not by a subtle shade.
 
-Before you stop, read your UI files once more against this list and fix what you find.
+Before you stop, read your UI files once more against this list and fix what you find; with a
+`check` tool, look for them in its screenshots too.
 
 #### Checklist (do all of these)
 
@@ -569,3 +571,17 @@ owner, before anything is granted: plain writes only, no network, no other tools
 made-up names, places and dates that look real and fill the UI and widgets well; never anything
 from the owner's own data or the conversation. The platform replays it on a fresh database before
 promotion, and a call that fails fails the version. It needs no `"abi"` change.
+
+### Check your work: the `check` tool
+
+When you have a `check` tool, call it before you stop. It runs what the platform runs before
+promotion (the manifest, bundling, contracts, migrations, `tests/cases.json`, `sample/calls.json`,
+the widgets) and renders your UI filled with your sample data, 1280 and 390 px wide, light and
+dark. It answers PASS or FAIL with every failure, what it measured on the UI (what sticks out past
+the phone's edge, text cut short, page errors, buttons that break the page), and the four
+screenshots (also in `screenshots/`).
+
+Fix every failure, then open each screenshot and fix what looks broken, cramped, cut off or
+unreadable; check again until it passes. A check takes up to a minute, and you have 10 in an
+attempt. Nothing you check goes live: what you leave when you stop does, after the platform
+validates it. `screenshots/` isn't part of the tool: don't link to it.

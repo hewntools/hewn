@@ -26,11 +26,13 @@ The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCod
 
 The screen gets the most care. Before writing it, the builder works out when you'll open the tool and what you want to see first, and draws that big at the top. Then it gives the tool a look of its own, so it isn't mistaken for your other tools: a palette from its subject (green for plants or money, purple for sleep) for light and dark, its own type, and your data drawn as a picture (a timeline, a ring, a calendar) rather than a form. It records the look in `ui/look.json`. A change keeps a tool's look unless you ask for a new one.
 
+As it works, the builder checks its own work: its `check` tool runs what Hewn runs below, without making anything live, and shows it its screen filled with its sample data on a desktop and a phone, light and dark, with what to fix measured on it (what sticks out past the phone's edge, text cut short, buttons that break the page). It fixes what it finds before it stops, so fewer builds need another attempt. The build's activity shows each check ("Checking its work (1 of 10)", "Check: 2 problems to fix"), up to 10 an attempt. The tool runs in the builder's sandbox and reaches Hewn only through files in the build's folder: no port, no key.
+
 Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen, empty and filled with its sample data, and checks it loads without errors
+3. renders its screen, empty and filled with its sample data, on a desktop and a phone screen, and checks it loads without errors
 4. makes it live if all of that passes
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
