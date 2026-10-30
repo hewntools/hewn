@@ -14,6 +14,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Stop stops the intake.** Stop in the chat while it's answering ends the run (its CLI, or the host's) instead of letting it finish unseen.
 - The intake no longer ends its questions with "Just say ok if that looks good." An "ok" still takes all its defaults.
 - **Esc closes `⌘K`** at once, also with something typed (it used to clear the search first).
+- **A cancelled build keeps its context:** its page shows **Conversation** and **Spec agreed**, as a failed build's does.
 - For hosts: `BUILDER.md` in a build request's `files` now quotes the owner's conversation with the intake after the request (up to 40,000 characters) when the owner asked for the build in the chat ([remote builder](docs/internal/remote-builder.md)).
 - For hosts: Hewn sends `pause: true` with a build and takes a `{ "paused": "…" }` outcome ([remote builder](docs/internal/remote-builder.md)).
 - For hosts: a retry (**Retry**, **Ask builder to fix**, or Hewn's own after a restart) sends `retryOf` to your builder's service, the first build of the chain it retries, the same on every retry of it, so you can count the chain as one build ([remote builder](docs/internal/remote-builder.md)).
