@@ -9,7 +9,7 @@ import { describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
 import { ARMS, briefFor, othersNote, replaceSection, runOrder } from "../bench/lib/arms.ts";
-import { clickThrough, layoutDefects, overflowX } from "@hewntools/cli/defects.ts";
+import { clickThrough, defectLines, layoutDefects, overflowX } from "@hewntools/cli/defects.ts";
 import { DESKTOP, PHONE, launchBrowser } from "../bench/lib/browser.ts";
 import { idOf, loadCases, seedKit } from "../bench/lib/cases.ts";
 import { parseJson, total } from "../bench/lib/judge.ts";
@@ -279,6 +279,30 @@ describe("bench runs", () => {
       const defects = await layoutDefects(phone, PHONE.width);
       assert.equal(defects.sticksOut.length, 1, JSON.stringify(defects));
       assert.match(defects.sticksOut[0], /\("wide"\): 2\d\dpx past the edge, 600px wide/);
+      assert.deepEqual(defects.overlaps, [], "nothing on it covers anything else");
+      // Things drawn over each other: a chevron placed over a chip, a chart's labels run into each other.
+      // Not: a big number set tight over its label, a sticky bar, text kept for screen readers under its input, a closed <details>.
+      writeFileSync(
+        page,
+        readFileSync(page, "utf8").replace(
+          "</main>",
+          [
+            `<div style="position: relative; padding: 12px"><span>Monstera</span><span class="chip" style="margin-left: 40px">Repot</span><span class="chev" style="position: absolute; left: 140px; top: 10px; font-size: 24px">›</span></div>`,
+            `<svg width="200" height="40"><text x="10" y="30">Monday</text><text x="34" y="31">Tuesday</text></svg>`,
+            `<p style="font-size: 48px; line-height: 1; margin: 0">42</p><p style="font-size: 14px; margin: 0">days since watering</p>`,
+            `<header style="position: sticky; top: 0">Sticky</header>`,
+            `<label style="position: relative; display: block"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap">Amount in euros</span><input value="12"></label>`,
+            `<details><summary>More</summary><div style="margin-top: -20px">Hidden away</div></details>`,
+          ].join(""),
+        ),
+      );
+      await phone.goto(url);
+      const covered = (await layoutDefects(phone, PHONE.width)).overlaps;
+      assert.equal(covered.length, 2, covered.join("\n"));
+      assert.ok(covered.some((l) => /^"›" \(span\.chev\) covers "Repot" \(span\.chip\), \d+×\d+ px$/.test(l)), covered.join("\n"));
+      assert.ok(covered.some((l) => /^"Tuesday" \(text\) covers "Monday" \(text\)/.test(l)), covered.join("\n"));
+      // What a builder is told.
+      assert.match(defectLines([{ where: "on the phone (390 px)", layout: { sticksOut: [], cutShort: [], overlaps: covered }, errors: [] }])[0], /^Drawn over each other on the phone \(390 px\): "/);
     } finally {
       await b.close();
       await server.close();

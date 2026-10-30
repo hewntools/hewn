@@ -28,6 +28,7 @@ import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type M
 import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
+import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
 // What the domains define, importable from here as before.
@@ -76,6 +77,8 @@ export interface PlatformOptions {
   /** Builds that may run at once (the rest wait their turn). Default 5. */
   maxRunningBuilds?: number;
   maxBuildAttempts?: () => number;
+  /** The passes a new tool's build runs once it validates (Settings: buildPasses), in the order they run. Default: none. */
+  buildPasses?: () => Pass[];
   /** The owner's timezone (IANA name) for schedules. Default UTC. */
   timezone?: () => string;
   /** Called when the next schedule time may have changed (the host re-arms its timer). */
@@ -120,6 +123,7 @@ export class Platform {
   /** Builds that may run at once; the rest wait their turn. */
   maxRunningBuilds: number;
   maxBuildAttempts: () => number;
+  buildPasses: () => Pass[];
   secrets: SecretStore;
   schedules: ScheduleStore;
   timezone: () => string;
@@ -152,6 +156,7 @@ export class Platform {
     this.builderFor = opts.builder ?? (() => undefined);
     this.maxRunningBuilds = opts.maxRunningBuilds ?? MAX_RUNNING_BUILDS;
     this.maxBuildAttempts = opts.maxBuildAttempts ?? (() => 3);
+    this.buildPasses = () => passesIn(opts.buildPasses?.());
     this.secrets = opts.secrets ?? new MemorySecretStore();
     this.schedules = new ScheduleStore(opts.sql);
     this.timezone = opts.timezone ?? (() => "UTC");

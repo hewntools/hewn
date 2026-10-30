@@ -2,7 +2,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
+import { DEFAULT_BUILD_PASSES, type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
+import { type Pass, passesIn } from "@hewntools/core/passes.ts";
 import type { Home } from "./home.ts";
 
 /** User-owned platform settings. Agents have no API to change them. */
@@ -33,14 +34,16 @@ export interface PlatformConfig {
   jobModels?: { builder?: Record<string, JobModel>; intake?: Record<string, JobModel> };
   /** Model names agents may ask builds to use, per builder agent. */
   agentModels?: Record<string, string[]>;
+  /** The passes a new tool's build runs once its candidate validates ("critique", "craft"); [] for none. */
+  buildPasses: Pass[];
 }
 
-export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14 };
+export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: DEFAULT_BUILD_PASSES };
 
 /** The defaults here: a host that runs the builder and intake (HEWN_BUILD_URL) makes them the default. */
 const defaults = (): PlatformConfig => ({ ...DEFAULT_CONFIG, ...(process.env.HEWN_BUILD_URL ? { builder: "remote", intake: "remote" } : {}) });
 
-const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels"] as const;
+const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"] as const;
 
 const path = (home: Home) => join(home.root, "platform.json");
 
@@ -63,13 +66,14 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 /** Re-read on every call so edits apply without restarting Hewn. */
 export function readConfig(home: Home): PlatformConfig {
   // Unknown keys (e.g. the retired "discovery") are ignored.
-  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels } = { ...defaults(), ...stored(home) } as Record<string, any>;
+  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels, buildPasses } = { ...defaults(), ...stored(home) } as Record<string, any>;
   return {
     builder,
     maxBuildAttempts,
     sandbox,
     intake,
     logRetentionDays,
+    buildPasses: Array.isArray(buildPasses) ? passesIn(buildPasses) : DEFAULT_BUILD_PASSES,
     ...(typeof backupDir === "string" && backupDir ? { backupDir } : {}),
     ...(firstRunDone === true ? { firstRunDone } : {}),
     ...(typeof publicListen === "string" && IPV4.test(publicListen) ? { publicListen } : {}),

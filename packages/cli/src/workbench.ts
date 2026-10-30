@@ -9,7 +9,7 @@ import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
 import { CLI_AGENTS } from "./builders/cli-agents.ts";
 import { forgetSession } from "./builders/cli.ts";
-import { CHECK_DIR } from "./builders/check.ts";
+import { CHECK_DIR, writeInside } from "./builders/check.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { dependencyProblems } from "@hewntools/core/bundle.ts";
 import { ARTEFACTS, isArtefact } from "@hewntools/core/files.ts";
@@ -221,6 +221,14 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
       // A fresh folder only Hewn writes; writeTree keeps every path inside it.
       writeTree(ws(to), files);
     },
+    async writeFolder(buildId, folder, files) {
+      // The builder may have made the folder (or put a link there): gone first, then written only inside the workspace.
+      rmSync(join(ws(buildId), folder), { recursive: true, force: true });
+      for (const [p, b] of Object.entries(files)) {
+        if (!p.startsWith(`${folder}/`)) throw new Error(`${p} isn't in ${folder}/`);
+        writeInside(ws(buildId), p, b);
+      }
+    },
     async file(buildId, path) {
       const p = join(ws(buildId), path);
       if (!p.startsWith(ws(buildId) + "/") || !existsSync(p)) return undefined;
@@ -255,6 +263,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         onModel: hooks.onModel,
         onCharge: hooks.onCharge,
         ...(hooks.onCheck ? { check: hooks.onCheck } : {}),
+        ...(job.pass ? { pass: job.pass } : {}),
       });
     },
     async bundle(buildId) {

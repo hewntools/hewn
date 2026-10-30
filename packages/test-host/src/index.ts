@@ -15,6 +15,7 @@ import { nodeSql } from "./sql.ts";
 import { localWorkbench } from "@hewntools/cli/workbench.ts";
 import { APP_DIR } from "@hewntools/cli/app-dir.ts";
 import { readConfig } from "@hewntools/cli/config.ts";
+import type { Pass } from "@hewntools/core/passes.ts";
 import { agentModels, jobModel, type ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { offlineCatalog } from "@hewntools/cli/builders/models.ts";
 
@@ -25,6 +26,8 @@ export interface NodePlatformOptions {
   /** Which builder new builds use. */
   builder?: () => string | undefined;
   maxBuildAttempts?: () => number;
+  /** The passes new tools' builds run (default: none, whatever the settings say: a test asks for them). */
+  buildPasses?: () => Pass[];
   logRetentionDays?: () => number;
   secrets?: SecretStore;
   logger?: (message: string) => void;
@@ -58,6 +61,7 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
     logger: opts.logger,
     builder: opts.builder,
     maxBuildAttempts: opts.maxBuildAttempts,
+    buildPasses: opts.buildPasses,
     logRetentionDays: opts.logRetentionDays,
     timezone: () => readConfig(home).timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     modelFetch: opts.modelFetch,

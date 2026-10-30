@@ -118,7 +118,7 @@ function folderInside(workspace: string, rel: string): string {
  * link) inside it, and the file itself isn't followed if it's a link. Hewn runs unconfined; a builder
  * with a shell could otherwise point a folder at one of the owner's and have Hewn write into it.
  */
-function writeInside(workspace: string, rel: string, data: Uint8Array | string) {
+export function writeInside(workspace: string, rel: string, data: Uint8Array | string) {
   const target = join(folderInside(workspace, dirname(rel)), rel.split(sep).at(-1)!);
   if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(target);
   const fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644);

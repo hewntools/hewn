@@ -5,6 +5,7 @@ import type { Agent, Scope } from "./auth.ts";
 import type { Deadline } from "./deadline.ts";
 import type { Migration } from "./migrations.ts";
 import type { ModelHandler } from "./models.ts";
+import type { Pass } from "./passes.ts";
 
 /** Implementation files by POSIX path ("src/index.ts", "ui/index.html"). */
 export type Files = Record<string, Uint8Array>;
@@ -125,6 +126,18 @@ export interface BuildJob {
   model?: string;
   /** Reasoning effort, as the builder's CLI names it (low, medium, high …). Unset: the model's default. */
   effort?: string;
+  /**
+   * A pass on a candidate that already validated (see passes.ts): what it asks of the builder, with
+   * screenshots of the candidate in the workspace's `screenshots/`. The builder resumes its session
+   * with `request` when it can, else starts afresh with it after the usual prompt. Unset: an attempt.
+   */
+  pass?: BuildPass;
+}
+
+/** A pass's attempt: which pass, and what it asks. */
+export interface BuildPass {
+  name: Pass;
+  request: string;
 }
 
 /**
@@ -189,6 +202,8 @@ export interface Workbench {
   note(buildId: string, line: string): Promise<void>;
   transcript(buildId: string): Promise<string | undefined>;
   removeTranscript(buildId: string): Promise<void>;
+  /** Replace one folder of a build's workspace (`screenshots`) with `files`, their paths inside it: what a pass looks at. */
+  writeFolder(buildId: string, folder: string, files: Files): Promise<void>;
   /** Render the candidate's UI headlessly (optional). */
   visualCheck?(buildId: string, args: VisualCheckArgs): Promise<VisualCheckResult>;
 }
@@ -214,7 +229,10 @@ export interface VisualCheckResult {
   screenshot?: Uint8Array;
   /** The same screen in dark mode. */
   screenshotDark?: Uint8Array;
-  /** The UI whole, 1280 and 390 px wide, light and dark: "desktop-light", "desktop-dark", "mobile-light", "mobile-dark". */
+  /**
+   * The UI whole, 1280 and 390 px wide, light and dark: "desktop-light", "desktop-dark", "mobile-light",
+   * "mobile-dark", a long page in parts a model can read ("mobile-light-2" carries on from "mobile-light").
+   */
   shots?: VisualShot[];
   /** With `measure`: what to fix, one line each. */
   defects?: string[];

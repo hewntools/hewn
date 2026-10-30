@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { BuildKind } from "@hewntools/core/registry.ts";
-import type { CheckResult } from "@hewntools/core/ports.ts";
+import type { BuildPass, CheckResult } from "@hewntools/core/ports.ts";
 
 export interface BuildJob {
   buildId: string;
@@ -33,6 +33,8 @@ export interface BuildJob {
   onCharge?: (charge: { amount: number; unit: string }) => void;
   /** Check the workspace as validation will, without promoting: the builder's `check` tool. Unset: not offered. */
   check?: (id: string) => Promise<CheckResult>;
+  /** A pass on a candidate that already validated: what it asks, with its screenshots in `screenshots/`. Unset: an attempt. */
+  pass?: BuildPass;
 }
 
 /**

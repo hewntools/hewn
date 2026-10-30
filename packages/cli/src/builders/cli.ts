@@ -21,15 +21,21 @@ export function builderPrompt(job: BuildJob): string {
     `Only change files inside this directory. Do not try to start, call or promote anything on the platform. When the candidate is complete, stop. The platform validates it automatically.`,
   ];
   // The owner watches Home while it builds: the glyph first, not after reading everything.
-  if (job.kind === "create") lines.push(`Right after reading BUILDER.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BUILDER.md): the owner's Home shows the icon while you build.`);
+  if (job.kind === "create" && !job.pass) lines.push(`Right after reading BUILDER.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BUILDER.md): the owner's Home shows the icon while you build.`);
+  // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
+  if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }
   return lines.join("\n");
 }
 
-/** A later attempt in the resumed session: the builder has read the brief and written the candidate; only the failure is new. */
+/**
+ * A later attempt in the resumed session: the builder has read the brief and written the candidate;
+ * only the failure is new. Or a pass on the candidate that validated: what the pass asks.
+ */
 export function resumePrompt(job: BuildJob): string {
+  if (job.pass && !job.feedback) return `${job.pass.request}\n\nOnly change files inside this directory. When it's complete, stop.`;
   return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, and BUILDER.md still holds the request and the contract. Only change files inside this directory. When it's complete, stop.`;
 }
 

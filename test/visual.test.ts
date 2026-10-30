@@ -272,18 +272,29 @@ describe("the eyes: a candidate checked without promoting it, rendered whole on 
   /** A PNG's size in pixels (its IHDR). */
   const size = (png: Uint8Array) => ({ width: Buffer.from(png).readUInt32BE(16), height: Buffer.from(png).readUInt32BE(20) });
 
-  test("a real headless browser: the render is four images, the whole page at 1280 and 390 px wide, light and dark", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+  test("a real headless browser: the render is the whole page at 1280 and 390 px wide, light and dark, a long one in parts a model can read", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
     const r = await chromiumCheck(browser)(counterPage(`<div style="height: 2400px">tall</div>`));
     assert.deepEqual(r.errors, []);
-    assert.deepEqual(r.shots?.map((s) => s.name), ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]);
-    for (const s of r.shots!) assert.equal(Buffer.from(s.png).subarray(1, 4).toString(), "PNG", s.name);
-    const [dl, dd, ml, md] = r.shots!.map((s) => size(s.png));
-    assert.equal(dl.width, 1280);
-    assert.ok(dl.height > 2400, `the whole page, not the first screen: ${dl.height}`);
-    assert.deepEqual(ml.width, 390 * 2, "the phone, at 2x");
-    assert.ok(ml.height > 2400 * 2, `${ml.height}`);
-    assert.deepEqual([dd, md], [dl, ml]);
-    assert.notDeepEqual(r.shots![0].png, r.shots![1].png, "light and dark differ");
+    const names = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
+    const parts = (name: string) => r.shots!.filter((s) => s.name === name || s.name.startsWith(`${name}-`));
+    assert.deepEqual(r.shots?.filter((s) => names.includes(s.name)).map((s) => s.name), names, "each screen and scheme starts with its plain name");
+    for (const name of names) {
+      // Top to bottom: "desktop-light", then "desktop-light-2" …
+      assert.deepEqual(parts(name).map((s) => s.name), parts(name).map((_, i) => (i ? `${name}-${i + 1}` : name)));
+      assert.ok(parts(name).length > 1, `${name} comes in parts`);
+      for (const s of parts(name)) {
+        assert.equal(Buffer.from(s.png).subarray(1, 4).toString(), "PNG", s.name);
+        const { width, height } = size(s.png);
+        assert.ok(height <= 2000 && width * height <= 1_600_000, `${s.name} is ${width}×${height}: small enough to read as it is`);
+      }
+    }
+    const whole = (name: string) => parts(name).reduce((n, s) => n + size(s.png).height, 0);
+    assert.equal(size(parts("desktop-light")[0].png).width, 1280);
+    assert.ok(whole("desktop-light") > 2400, `the whole page, not the first screen: ${whole("desktop-light")}`);
+    assert.equal(size(parts("mobile-light")[0].png).width, 390 * 2, "the phone, at 2x");
+    assert.ok(whole("mobile-light") > 2400 * 2, `${whole("mobile-light")}`);
+    assert.deepEqual([whole("desktop-dark"), whole("mobile-dark")], [whole("desktop-light"), whole("mobile-light")]);
+    assert.notDeepEqual(parts("desktop-light")[0].png, parts("desktop-dark")[0].png, "light and dark differ");
     // The build page's screenshot is still the first screen.
     assert.deepEqual(size(r.screenshot!), { width: 1280, height: 800 });
     assert.equal(r.defects, undefined, "measured only when asked");
@@ -313,7 +324,7 @@ describe("the eyes: a candidate checked without promoting it, rendered whole on 
     // The button that throws is a failed click; the SVG control and the confirm() (dismissed) aren't.
     assert.ok(defects.some((d) => /^Clicking "Oops" broke the page: uncaught: TypeError/.test(d)), defects.join("\n"));
     assert.ok(!defects.some((d) => /"(Dot|Stop|\+1)"/.test(d)), defects.join("\n"));
-    assert.equal(r.shots?.length, 4, "the images too");
+    assert.deepEqual(r.shots?.filter((s) => !/-\d+$/.test(s.name)).map((s) => s.name), ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"], "the images too");
   });
 });
 
