@@ -35,7 +35,7 @@ Builds show in Activity and the Inbox while they run, with their milestones. A b
 
 When you next open the tool, a quiet strip at its foot asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
 
-The build page keeps what led to the build: **Spec agreed** opens the spec the builder works from, and **Conversation** what you and the intake said. Both stay with the version it made, along with the builder's log, for the tool's life.
+The build page keeps what led to the build: **Spec agreed** opens the spec the builder works from, and **Conversation** what you and the intake said. Both stay with the version it made, along with the builder's log, for the tool's life. A failed or cancelled build's page shows them too.
 
 ![Activity › Builds: a change to Reading List in progress (spec done, code being written, tests and you still to come), a failed change to Plant Care with Retry, and earlier builds with their versions](images/build-in-progress.png)
 
@@ -68,6 +68,10 @@ The build says why: a failing test, an invalid manifest, an error on its screen 
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
+
+A host's builder can also **pause** a build part-way, with its work kept: for example once the build has used its allowance. The build says so in the host's words, with **Continue** (it carries on from where it stopped) and **Stop**. It waits in the Inbox until you choose, and so do changes to that tool, also ones asked for after it paused (they queue behind it); Hewn doesn't carry on by itself, and an agent can't continue it for you. A new tool that's paused keeps its name: asking for it again (or installing one by that name) says it's paused.
+
+![A paused change to Plant Care: the host's note that it has used its allowance and its work is kept, with Continue and Stop](images/build-paused.png)
 
 If the builder itself can't work (signed out, out of usage), Hewn stops instead of retrying. Sign it in again (`claude`, `codex login` or `opencode auth login`), then try again.
 

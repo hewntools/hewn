@@ -222,16 +222,17 @@ function tile(c, { hidden = false, editHome, show } = {}) {
   const el = h("div", { class: "tile", role: "button", tabindex: 0, "data-id": c.building && !c.version ? undefined : c.id }, iconSlot, label);
   const render = (cap) => {
     Object.assign(c, cap);
-    const failed = c.lastBuild?.status === "failed";
+    const paused = c.lastBuild?.paused;
+    const failed = c.lastBuild?.status === "failed" && !paused;
     const needsYou = (!c.ready && !c.saidNo) || c.requests > 0;
     const more = c.building ? null : h("span", { class: "more", "aria-hidden": "true", onclick: (e) => (e.stopPropagation(), menuFrom(more, items())) }, "•••");
     // Lit cells follow real progress: none while code is written (the glyph pulses), then tests passed / total.
     const b = c.building;
     const lit = !b ? undefined : b.step === "tests" && b.tests?.total ? b.tests.passed / b.tests.total : b.step === "auth" ? 1 : 0;
-    put(iconSlot, appIcon(c, { size: 80, badge: b ? null : failed ? "danger" : needsYou ? "warn" : null, more, progress: lit, waiting: !!b && (b.step === "spec" || b.step === "code") }));
+    put(iconSlot, appIcon(c, { size: 80, badge: b ? null : failed ? "danger" : needsYou || paused ? "warn" : null, more, progress: lit, waiting: !!b && (b.step === "spec" || b.step === "code") }));
     label.textContent = c.building ? buildingLabel(c.building) : c.name;
     label.classList.toggle("muted", !!c.building);
-    el.setAttribute("aria-label", c.building ? `${c.name}, building` : `${c.name}${failed ? ", last build failed" : needsYou ? ", needs you" : ""}`);
+    el.setAttribute("aria-label", c.building ? `${c.name}, building` : `${c.name}${failed ? ", last build failed" : paused ? ", build paused" : needsYou ? ", needs you" : ""}`);
     el.title = c.purpose ?? "";
   };
   const items = () => (c.building && !c.version ? [["Show build", () => go(`#/b/${c.building.buildId}`)]] : capabilityMenu(c, { rename: () => inlineRename(c, label), editHome, hidden, show }));

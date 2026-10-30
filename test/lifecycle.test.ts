@@ -309,4 +309,37 @@ describe("creation lifecycle", () => {
     await assert.rejects(t.platform.retryBuild(USER, retried.buildId), /has been created since/);
     await assert.rejects(t.platform.create(USER, ask), /capability 'running-log' already exists/);
   });
+
+  test("a paused create keeps its name until the owner continues or stops it: a new create, an install and an older build's Retry are refused", async () => {
+    const ask = { name: "Running Log", purpose: "runs", requirements: "record runs" };
+    const overloaded = () => {
+      throw new Error("model overloaded");
+    };
+    const paused = () => {
+      throw Object.assign(new Error("used its allowance; its work is kept"), { paused: true });
+    };
+    const first = await t.build(() => t.platform.create(USER, ask), overloaded);
+    assert.equal(first.status, "failed");
+    // A new create of the name takes the id over, and the builder's host pauses it.
+    const second = await t.build(() => t.platform.create(t.claude, { ...ask, purpose: "runs, again" }), paused);
+    assert.equal(second.failure?.paused, true);
+    // Taking the id over again would strand its kept work (its Continue would then be refused).
+    const owners = { message: `'running-log' is paused (build ${second.buildId}): Continue or Stop it in Hewn first` };
+    await assert.rejects(t.platform.create(USER, ask), owners);
+    await assert.rejects(t.platform.install(USER, { name: ask.name, purpose: ask.purpose, builder: `copy:${SEED}` }), owners);
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), owners);
+    await assert.rejects(t.platform.create(t.claude, ask), { message: `'running-log' is paused (build ${second.buildId}): the owner continues or stops it in Hewn first` });
+    const narrow: Agent = { id: "narrow", kind: "agent", scopes: new Set(["create"]), capabilities: new Set(["something-else"]) };
+    await assert.rejects(t.platform.create(narrow, ask), { message: "'running-log' is paused: the owner continues or stops it in Hewn first" });
+    assert.equal(t.platform.registry.getCapability("running-log")!.purpose, "runs, again", "the id is still the paused build's");
+
+    // Stopped: the name builds again. A create that pauses holds off the stopped one's Retry too, and its own Continue goes on.
+    t.platform.cancelBuild(USER, second.buildId);
+    const third = await t.build(() => t.platform.create(USER, ask), paused);
+    assert.equal(third.failure?.paused, true);
+    await assert.rejects(t.platform.retryBuild(USER, second.buildId), { message: `'running-log' is paused (build ${third.buildId}): Continue or Stop it in Hewn first` });
+    const continued = await t.build(() => t.platform.retryBuild(USER, third.buildId), (ws) => cpSync(SEED, ws, { recursive: true }));
+    assert.equal(continued.status, "promoted", continued.log.join("\n"));
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), /has been created since/);
+  });
 });

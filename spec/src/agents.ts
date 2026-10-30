@@ -95,7 +95,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     scopes: ["create"],
     description:
       "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. " +
-      "Only connections hold credentials: if it needs a service with a key, token or login (GitHub, Spotify, a self-hosted server…), it must call a connection (kind 'connection') that wraps the service. " +
+      "Only connections hold credentials: if it needs a service with a key, token or login (GitHub, Notion, a self-hosted server…), it must call a connection (kind 'connection') that wraps the service. " +
       "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes. " +
       "If the connection lacks an operation you need, capabilities_modify the connection first and pass its buildId as after.",
     inputSchema: obj(
@@ -158,7 +158,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "builds_get",
     scopes: ["create", "modify"],
-    description: "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn. queued: true while it waits its turn behind an earlier change to the same capability.",
+    description:
+      "Get build status (waiting, building, validating, review, failed, promoted, cancelled), builder and validation log. review: it passed and waits for the owner's approval in Hewn. queued: true while it waits its turn behind an earlier change to the same capability. failed with failure.paused: the builder's host paused it part-way, its work kept; tell the owner, who continues or stops it in Hewn (continuedAs: the build that carries it on).",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
   },
   {
@@ -171,7 +172,8 @@ export const AGENT_TOOLS: AgentTool[] = [
   {
     name: "builds_retry",
     scopes: ["create", "modify"],
-    description: "Re-run a failed build with the same request (e.g. after a transient builder failure). Returns the new build; follow it with builds_wait.",
+    description:
+      "Re-run a failed build with the same request (e.g. after a transient builder failure). Returns the new build; follow it with builds_wait. Not a paused one (failure.paused): only the owner continues it, in Hewn.",
     inputSchema: obj({ buildId: str() }, ["buildId"]),
   },
   {

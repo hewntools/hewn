@@ -305,6 +305,120 @@ describe("a queued change released while every build slot is taken", () => {
   });
 });
 
+/** The builder's host pauses the build part-way, its work kept. */
+const pausedBy =
+  (note: string): Script =>
+  () => {
+    throw Object.assign(new Error(note), { paused: true });
+  };
+
+describe("a paused change and what waits for it", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(() => (t = setup()));
+  afterEach(async () => {
+    await t.platform.drain();
+    t.cleanup();
+  });
+
+  test("a change queued behind it keeps its turn; the owner's Continue takes the paused one's place, and the queue follows it", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws, job) => (await gate, pausedBy("used its allowance")(ws, job)));
+    const paused = await t.platform.modify(USER, { capabilityId: "site-connection", request: "a" });
+    const next = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    assert.equal(next.queued, true);
+    release();
+    assert.equal((await t.platform.settle(paused.buildId)).failure?.paused, true);
+    const waiting = t.platform.getBuild(USER, next.buildId);
+    assert.equal(waiting.status, "waiting", "a pause doesn't release it");
+    assert.equal(waiting.dependsOn, paused.buildId);
+    t.queue(() => {}, () => {});
+    const cont = await t.platform.retryBuild(USER, paused.buildId);
+    assert.equal(cont.dependsOn, undefined, "the Continue takes the paused one's place: it waits for nothing");
+    assert.equal(t.platform.getBuild(USER, next.buildId).dependsOn, cont.buildId, "the queue follows the Continue");
+    assert.equal((await t.platform.settle(cont.buildId)).status, "promoted");
+    const done = await t.platform.settle(next.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+
+  test("Stop releases the change queued behind it; a build that waited for it with after fails, saying to continue it first", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    t.queue(writeConsumer);
+    await t.platform.settle((await t.platform.create(USER, consumerReq)).buildId);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws, job) => (await gate, pausedBy("used its allowance")(ws, job)));
+    const paused = await t.platform.modify(USER, { capabilityId: "site-connection", request: "add pages@1" });
+    const queued = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    const dependent = await t.platform.modify(USER, { capabilityId: "site-report", request: "use pages@1", after: paused.buildId });
+    assert.equal(dependent.queued, undefined, "waits for the build it needs");
+    release();
+    await t.platform.settle(paused.buildId);
+    const failed = await t.platform.settle(dependent.buildId);
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.log.at(-1), `FAILED: build ${paused.buildId}, which it waited for, paused; continue that one, then retry this one`);
+    assert.equal(failed.failure?.paused, undefined, "it failed; it isn't paused itself");
+    // Its retry would wait for the paused one: refused until that one is continued.
+    await assert.rejects(t.platform.retryBuild(USER, dependent.buildId), { message: `build ${paused.buildId} (modify site-connection), which this would wait for, is paused; Continue it in Hewn first` });
+    await assert.rejects(t.platform.retryBuild(t.claude, dependent.buildId), /is paused; the owner continues it in Hewn first/);
+    assert.equal(t.platform.getBuild(USER, queued.buildId).status, "waiting");
+    t.queue(() => {});
+    assert.equal(t.platform.cancelBuild(USER, paused.buildId).status, "cancelled");
+    assert.equal((await t.platform.settle(queued.buildId)).status, "promoted", "Stop released it");
+  });
+
+  test("a change asked for once it's paused, or retried then, queues behind it too; the Continue takes its place, and the queue follows it", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    t.queue(broken);
+    const older = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-connection", request: "x" })).buildId);
+    assert.equal(older.status, "failed");
+    t.queue(pausedBy("used its allowance"));
+    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-connection", request: "a" })).buildId);
+    assert.equal(paused.failure?.paused, true);
+    // Started now, it would go live before the Continue, which carries on from work kept before it.
+    const retried = await t.platform.retryBuild(USER, older.buildId);
+    assert.deepEqual([retried.status, retried.queued, retried.dependsOn], ["waiting", true, paused.buildId]);
+    assert.match(retried.instructions!, /which the builder's host paused: it starts on its own once the owner continues that one in Hewn and it ends, or stops it/);
+    const later = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    assert.deepEqual([later.status, later.queued, later.dependsOn], ["waiting", true, retried.buildId]);
+    t.queue(() => {}, () => {}, () => {});
+    const cont = await t.platform.retryBuild(USER, paused.buildId);
+    assert.equal(cont.dependsOn, undefined, "the Continue waits for nothing");
+    assert.equal(t.platform.getBuild(USER, retried.buildId).dependsOn, cont.buildId, "the queue follows the Continue");
+    assert.equal((await t.platform.settle(cont.buildId)).status, "promoted");
+    assert.equal((await t.platform.settle(retried.buildId)).status, "promoted");
+    const done = await t.platform.settle(later.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+
+  test("a change whose after comes due while one is paused waits behind it; Stop releases it", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    t.queue(writeConsumer);
+    await t.platform.settle((await t.platform.create(USER, consumerReq)).buildId);
+    t.queue(pausedBy("used its allowance"));
+    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-report", request: "a" })).buildId);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async () => void (await gate));
+    const needed = await t.platform.modify(USER, { capabilityId: "site-connection", request: "add pages@1" });
+    const dependent = await t.platform.modify(USER, { capabilityId: "site-report", request: "use pages@1", after: needed.buildId });
+    assert.equal(dependent.dependsOn, needed.buildId, "waits for the build it needs first");
+    release();
+    assert.equal((await t.platform.settle(needed.buildId)).status, "promoted");
+    const waiting = t.platform.getBuild(USER, dependent.buildId);
+    assert.deepEqual([waiting.status, waiting.queued, waiting.dependsOn], ["waiting", true, paused.buildId]);
+    t.queue(() => {});
+    t.platform.cancelBuild(USER, paused.buildId);
+    const done = await t.platform.settle(dependent.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+});
+
 describe("dependent builds across a restart", () => {
   test("the interrupted dependency is retried, and the waiting build follows the retry", async () => {
     const t = setup();
