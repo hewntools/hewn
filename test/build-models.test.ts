@@ -183,6 +183,43 @@ describe("models for builds", () => {
     assert.deepEqual(explainFailure(["FAILED: refused: no"]).title, "Not built");
   });
 
+  test("paused by the host: no further attempts, shown as paused; only the owner continues it (a retry), Stop ends it", async () => {
+    const pause = () => {
+      throw Object.assign(new Error("This build has used 300 points and isn't finished. Its work is kept: Continue lets it go on for up to 300 more, or Stop it."), { paused: true });
+    };
+    use(recorder("fake", pause), { attempts: 3 });
+    const first = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    assert.equal(first.status, "failed", "final for agents and waits");
+    assert.equal(b.jobs.length, 1, "not retried by Hewn");
+    assert.equal(first.failure!.title, "Paused");
+    assert.equal(first.failure!.paused, true);
+    assert.match(first.failure!.detail, /300 points[^]*Continue/);
+    assert.match(first.instructions!, /Tell the owner; they Continue or Stop it in Hewn/);
+    // Going on spends more of the owner's allowance: the agent that asked for it can't.
+    await assert.rejects(platform.retryBuild(t.claude, first.buildId), /the owner continues a paused build in Hewn/);
+    await assert.rejects(platform.retryBuild(t.claude, first.buildId, { fix: true }), /the owner continues a paused build in Hewn/);
+    // Continue: a retry of it, which the host picks up from the kept work.
+    const second = await platform.settle((await platform.retryBuild(USER, first.buildId)).buildId);
+    assert.equal(b.jobs.at(-1)!.retryOf, first.buildId);
+    const continued = platform.getBuild(t.claude, first.buildId);
+    assert.equal(continued.continuedAs, second.buildId);
+    assert.match(continued.instructions!, new RegExp(`continued this build as build ${second.buildId}`));
+    assert.throws(() => platform.cancelBuild(t.claude, first.buildId), new RegExp(`was continued as ${second.buildId}`), "continued: no Stop for it");
+    // Stop: the paused one ends (cancelled), by the owner or whoever asked for it; a build that really failed can't be stopped.
+    assert.throws(() => platform.cancelBuild(t.claude, second.buildId), /only the owner or user can cancel/, "the owner continued it");
+    assert.equal(platform.cancelBuild(USER, second.buildId).status, "cancelled");
+    assert.match(platform.getBuild(USER, second.buildId).log.at(-1)!, /CANCELLED by user \(stopped while paused\)/);
+    const third = await platform.settle((await platform.create(t.claude, { ...ask, name: "Bike Log" })).buildId);
+    assert.equal(platform.cancelBuild(t.claude, third.buildId).status, "cancelled");
+    assert.match(platform.getBuild(t.claude, third.buildId).log.at(-1)!, /CANCELLED by claude-code \(stopped while paused\)/);
+    use(recorder("fake", () => {
+      throw Object.assign(new Error("You've used this month's 40 builds."), { refused: true });
+    }), { attempts: 1 });
+    const refused = await platform.settle((await platform.create(t.claude, { ...ask, name: "Other Log" })).buildId);
+    assert.throws(() => platform.cancelBuild(t.claude, refused.buildId), /already failed/);
+    assert.deepEqual(explainFailure(["attempt 1: …", "FAILED: 1 of 2 test cases failed", "PAUSED: kept"]), { title: "Paused", detail: "kept", attempt: 1, paused: true });
+  });
+
   test("at most N builds run at once; the rest wait their turn, and a waiting one can be cancelled", async () => {
     const gates: (() => void)[] = [];
     // The seed, as the capability this build creates.
@@ -366,6 +403,8 @@ describe("web: models for building", () => {
   let server: import("node:http").Server;
   let port: number;
   let cookie = "";
+  /** Set: the builder's host pauses the next builds, with this note. */
+  let pause: string | undefined;
   const api = (path: string, o: { method?: string; body?: unknown } = {}) =>
     new Promise<{ status: number; json: any }>((res, rej) => {
       const body = o.body !== undefined ? JSON.stringify(o.body) : undefined;
@@ -383,8 +422,10 @@ describe("web: models for building", () => {
 
   beforeEach(async () => {
     t = setup();
+    pause = undefined;
     // Named like Claude Code, so Settings' builder ("claude") is this one.
     const builder = recorder("claude", (job) => {
+      if (pause !== undefined) throw Object.assign(new Error(pause), { paused: true });
       cpSync(SEED, job.workspace, { recursive: true });
       const path = join(job.workspace, "capability.json");
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), id: job.capabilityId }));
@@ -415,6 +456,26 @@ describe("web: models for building", () => {
     assert.match(need.detail, /stopped running daily 12:30: it failed 3 times in a row/);
     platform.schedules.update(sch.id, { failures: 0, pausedReason: null });
     assert.ok(!(await api("/inbox")).json.needs.some((n: { id: string }) => n.id === sch.id), "paused by the owner: not news");
+  });
+
+  test("a paused build: the Inbox asks to continue it (not a failure), Home and Info know; once continued, it's dealt with", async () => {
+    const b = (await api("/capabilities", { method: "POST", body: { name: "Run Log", purpose: "p", requirements: "r" } })).json;
+    assert.equal((await platform.settle(b.buildId)).status, "promoted");
+    pause = "This build has used 300 points and isn't finished.";
+    const change = (await api(`/capabilities/${b.capabilityId}/modify`, { method: "POST", body: { request: "group by week" } })).json;
+    assert.equal((await platform.settle(change.buildId)).status, "failed");
+    const need = (await api("/inbox")).json.needs.find((n: { buildId?: string }) => n.buildId === change.buildId);
+    assert.deepEqual([need.detail, need.severity, need.action], ["Paused · This build has used 300 points and isn't finished.", "warn", "Continue…"]);
+    const tool = async () => (await api("/capabilities")).json.find((c: { id: string }) => c.id === b.capabilityId);
+    assert.deepEqual((await tool()).lastBuild, { buildId: change.buildId, status: "failed", builder: "claude", paused: true });
+    // Continued: the build that carries it on is the last one, and the Inbox has nothing more to ask.
+    pause = undefined;
+    const next = (await api(`/builds/${change.buildId}/retry`, { method: "POST" })).json;
+    await platform.settle(next.buildId);
+    assert.equal((await api(`/builds/${change.buildId}`)).json.continuedAs, next.buildId);
+    assert.ok(!(await api("/inbox")).json.needs.some((n: { buildId?: string }) => n.buildId === change.buildId));
+    assert.equal((await tool()).lastBuild.buildId, next.buildId);
+    assert.equal((await tool()).lastBuild.paused, undefined);
   });
 
   test("each agent's model list; the owner's model per job and agent, checked", async () => {

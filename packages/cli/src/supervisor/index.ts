@@ -263,7 +263,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }) });
         send({ done: true });
       } catch (e) {
-        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
+        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, paused: (e as { paused?: boolean }).paused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
       }
       res.end();
       return STREAMED;
