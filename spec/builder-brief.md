@@ -317,6 +317,8 @@ exposes its API as operations. It is the only kind of capability that may declar
   the owner's next call carries your `state` plus the new fields. Keep the first step's schema to what's
   needed up front. A connection with a sign-in step gets its secrets only through it, so describe them as
   "stored by signing in".
+  There is no OAuth: Hewn can't open a service's "Allow access" page or take its redirect, so a service that
+  only lets apps in that way (Google Calendar, Spotify…) can't be connected yet.
 - A connection has no UI; the owner sees it under Accounts.
 
 ### Deprecating and removing operations (ABI 2.1)

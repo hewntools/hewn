@@ -173,7 +173,9 @@ export interface Workbench {
   /**
    * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
    * help, `refused: true` that the builder's host declined it (e.g. over quota; the message says why),
-   * and `modelUnavailable: true` that the model asked for can't run (the owner picks another).
+   * `paused: true` that the builder's host paused it part-way with its work kept (the owner continues
+   * or stops it; the message says why), and `modelUnavailable: true` that the model asked for can't
+   * run (the owner picks another).
    */
   build(job: BuildJob, hooks: BuildHooks): Promise<void>;
   /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */

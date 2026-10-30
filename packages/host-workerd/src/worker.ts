@@ -252,7 +252,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
     build: async (job: BuildJob, hooks) => {
-      let failure: { error: string; unavailable?: boolean; refused?: boolean; modelUnavailable?: boolean } | undefined;
+      let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean } | undefined;
       // The builder's checks, run here (the core) and answered to the supervisor, where the builder waits.
       const answer = (id: string) =>
         hooks.onCheck!(id)
@@ -265,14 +265,15 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
           if (e.model) hooks.onModel?.(e.model);
           if (e.charge) hooks.onCharge?.(e.charge);
           if (e.check && typeof e.check.id === "string" && hooks.onCheck) void answer(e.check.id);
-          if (e.error) failure = e;
+          // An empty message is still a failure (a pause without a note).
+          if (e.error !== undefined) failure = e;
         }, hooks.signal);
       } catch (e) {
         // The supervisor (where the builder runs) went away mid-build: Hewn is likely restarting.
         if (!hooks.signal.aborted && !(e as { unavailable?: boolean }).unavailable && !/supervisor .*HTTP/.test((e as Error).message)) throw Object.assign(e as Error, { interrupted: true });
         throw e;
       }
-      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, modelUnavailable: failure.modelUnavailable });
+      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, paused: failure.paused, modelUnavailable: failure.modelUnavailable });
     },
     bundle: (buildId) => sv.json("/workbench/bundle", { buildId }),
     note: async (buildId, line) => void (await sv.json("/workbench/note", { buildId, line })),

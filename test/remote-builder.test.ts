@@ -81,6 +81,7 @@ describe("remote builder and intake", () => {
     assert.equal(sent.body.feedback, "1 test failed");
     assert.equal(sent.body.session, "b-1", "one session per build, for the service to resume on a later attempt");
     assert.equal(sent.body.retryOf, "b-0", "the first build of the chain it retries");
+    assert.equal(sent.body.pause, true, "this Hewn takes a paused outcome");
     assert.match(sent.body.prompt, /builder for Hewn/);
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);
@@ -145,6 +146,11 @@ describe("remote builder and intake", () => {
     const dir = workspace();
     handle = (_b, _r, res) => ndjson(res, [{ refused: "You've used this month's 40 builds." }]);
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { refused?: boolean }) => e.refused === true && /40 builds/.test(e.message));
+    handle = (_b, _r, res) => ndjson(res, [{ activity: "→ Edit src/index.ts" }, { paused: "This build has used 300 points and isn't finished." }]);
+    await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { paused?: boolean; refused?: boolean }) => e.paused === true && !e.refused && /300 points/.test(e.message));
+    // Paused without a note: still a pause, in Hewn's words.
+    handle = (_b, _r, res) => ndjson(res, [{ paused: "" }]);
+    await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { paused?: boolean }) => e.paused === true && e.message === "The builder's host paused it.");
     handle = (_b, _r, res) => void res.writeHead(429, { "content-type": "application/json" }).end(JSON.stringify({ refused: "Five builds are running already." }));
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { refused?: boolean }) => e.refused === true && /Five builds/.test(e.message));
     handle = (_b, _r, res) => void res.writeHead(401).end();

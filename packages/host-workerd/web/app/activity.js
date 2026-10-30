@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Activity: All · Builds · Calls · Access.
 import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, clock, empty, enc, fail, h, kindTag, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
+import { changeLine } from "./brief.js";
 import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill } from "./build.js";
 import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
@@ -84,6 +85,7 @@ function activityRow(g, all, showCap) {
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
     if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    else if (g.outcome === "failed" && g.failure?.paused) (dot = "warn"), (text = on("Build paused", ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
@@ -222,16 +224,21 @@ async function buildsView(head, only, all0) {
       if (b.status === "waiting") return h("span", { class: "sub row tight" }, "Starts once ", b.dependsOn ? h("a", { href: `#/b/${enc(b.dependsOn)}` }, b.queued ? "the change before it" : "the build it needs") : "the build it needs", " is done");
       if (b.status === "review") return h("span", { class: "sub" }, `${actorLabel(b.requestedBy, all)} changed it: it waits for you`);
       if (LIVE_BUILD.has(b.status)) return h("span", { class: "sub row tight" }, askedBy(b) && h("span", { class: "faint" }, `${askedBy(b)}on your ${builderLabel(b.builder)}`), milestones(b));
-      const first = String(b.request?.request || b.request?.purpose || "").split("\n")[0];
+      const first = changeLine(String(b.request?.request || b.request?.purpose || ""));
       return h("span", { class: "sub clip-1" }, (b.status === "failed" && b.failure?.title) || (first.length > 140 ? `${first.slice(0, 140)}…` : first) || (b.kind === "widgets" ? "Suggested by the builder" : " "));
     };
+    // A paused build's Continue spends more of the host's allowance: it's chosen on the build page, next to the host's note (as from the Inbox and Info).
     const right = (b) =>
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
           ? failed.has(b.buildId) && retryable(b)
-            ? h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
-            : kindTag("failed", "danger")
+            ? b.failure?.paused
+              ? h("a", { class: "btn sm", href: `#/b/${enc(b.buildId)}`, onclick: (e) => e.stopPropagation() }, "Continue…")
+              : h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
+            : b.failure?.paused
+              ? kindTag("paused", "warn")
+              : kindTag("failed", "danger")
           : b.status === "review"
             ? h("span", { class: "pill warn with-dot" }, "needs you")
             : b.status === "waiting"
@@ -245,7 +252,7 @@ async function buildsView(head, only, all0) {
       return h(
         "li",
         { class: "link build-row", tabindex: 0, onclick: () => go(`#/b/${enc(b.buildId)}`), onkeydown: (e) => e.key === "Enter" && go(`#/b/${enc(b.buildId)}`) },
-        appIcon(c, { size: 36, ...(LIVE_BUILD.has(b.status) ? { progress: lit, waiting: !lit } : {}), badge: failed.has(b.buildId) ? "danger" : null }),
+        appIcon(c, { size: 36, ...(LIVE_BUILD.has(b.status) ? { progress: lit, waiting: !lit } : {}), badge: failed.has(b.buildId) ? (b.failure?.paused ? "warn" : "danger") : null }),
         h("div", { class: "grow" }, h("span", {}, `${nameOf(b)} · ${kindWord(b)}`), sub(b)),
         h("span", { class: "small faint" }, LIVE_BUILD.has(b.status) ? "" : ago(b.updatedAt ?? b.createdAt)),
         right(b),

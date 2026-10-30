@@ -34,6 +34,7 @@ Request:
   "kind": "create",
   "attempt": 1,
   "retryOf": "b-…",
+  "pause": true,
   "feedback": "The previous candidate FAILED platform validation: …",
   "model": "fable",
   "effort": "high",
@@ -44,7 +45,8 @@ Request:
 ```
 
 - `kind`: `create`, `modify` or `widgets`. `feedback` is set from the second attempt on.
-- `retryOf` is set when this build retries a failed or cancelled one (Retry, Ask builder to fix, or Hewn's own retry after a restart): the first build of that chain, the same on every retry of it. A host can count the chain as one build. Unset: not a retry.
+- `retryOf` is set when this build retries a failed or cancelled one (Retry, Ask builder to fix, Continue, Start again, or Hewn's own retry after a restart): the first build of that chain, the same on every retry of it. A host can count the chain as one build. Unset: not a retry.
+- `pause` (since 0.4.10): this Hewn takes a `{ "paused": … }` outcome (below). Without it, send `refused` instead.
 - `session` is the same for every attempt of one build (the build id), so the service may resume its own model session on a later attempt instead of starting over; `prompt` and `files` are still whole each time, so a stateless service works.
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
 - `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract, and quotes the owner's conversation with the intake after the request when there is one, up to 40,000 characters). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
@@ -61,7 +63,14 @@ Events:
 | `{ "check": { "id": "c1", "files": { "<path>": "<base64>", … } } }` | Only when the request has `check: true`: the builder checks its work (its `check` tool, below). `files` is the workspace as it is now, the whole tree, with the same rules as `files`; Hewn writes it, checks it, and posts the result to `POST /v1/builds/:buildId/checks/:id`. `id`: letters, digits, `-` and `_`, up to 64. Keep the stream open while you wait. |
 | `{ "files": { "<path>": "<base64>", … } }` | The workspace as the builder left it: the whole tree. Paths it doesn't list are deleted. Paths must be relative, inside the workspace, and not artefacts (`node_modules` …); one that isn't fails the attempt before anything is written. |
 | `{ "done": true }` | Finished: the last event. Without a `files` event first, or a stream that ends without it, the attempt fails. |
+| `{ "paused": "<what happened and what's kept>" }` | Since 0.4.10, only when the request had `pause`: the build stopped part-way (e.g. at a build's allowance) with its work kept, and the owner decides. The last event (no `files`, no `done`). Hewn makes no further attempts and shows it as paused, with the text (an empty one gets Hewn's own words), **Continue** and **Stop**. See [A paused build](#a-paused-build). |
 | `{ "refused": … }`, `{ "error": … }` | As above. |
+
+### A paused build
+
+- **Continue** is the owner's alone (an agent's `builds_retry` of a paused build is refused). It is a retry: a new build, with a new `buildId` and `session`, whose `retryOf` is the first build of the chain, for the service to pick the kept work up. Its `files` is the tool as it is now (its live version and `BUILDER.md`), not the paused build's workspace: the kept work is the service's to bring back. The service may pause it again.
+- **Stop** only ends it in Hewn (cancelled); nothing is sent to the service. A service that keeps paused work learns of a Stop only in that no Continue comes, so it keeps the work as long as its own policy says.
+- Hewn doesn't tell a Continue apart from other retries of the same chain: a **Retry** of a later failure, or a **Start again** after Stop, carries the same `retryOf`. A service that keeps work per chain may pick it up then too.
 
 ### The builder's check: `POST /v1/builds/:buildId/checks/:id`
 
