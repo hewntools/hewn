@@ -13,6 +13,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CapabilityBuilder } from "../builders/types.ts";
 import { toBase64, fromBase64 } from "@hewntools/core/files.ts";
+import { checkFromJson } from "@hewntools/core/checks.ts";
+import type { CheckResult } from "@hewntools/core/ports.ts";
 import type { Home } from "../home.ts";
 import { localWorkbench } from "../workbench.ts";
 import type { Intake } from "../intake.ts";
@@ -242,6 +244,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     res.writeHead(200, { "content-type": "application/x-ndjson" });
     return (e: unknown) => res.write(JSON.stringify(e) + "\n");
   };
+  /** Builders' checks waiting for the core's answer (`${buildId}/${id}`). */
+  const checks = new Map<string, { resolve: (r: CheckResult) => void; reject: (e: Error) => void }>();
   const routes: Record<string, (body: any, req: IncomingMessage, res: ServerResponse) => Promise<unknown>> = {
     "/workbench/open": async (b) => workbench.open(b.buildId, Object.fromEntries(Object.entries(b.files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]))),
     "/workbench/read": async (b) => ({ files: Object.fromEntries(Object.entries(await workbench.read(b.buildId)).map(([p, x]) => [p, toBase64(x)])) }),
@@ -259,14 +263,39 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       const send = ndjson(res);
       const abort = new AbortController();
       res.on("close", () => abort.abort());
+      // `check`: the core answers the builder's checks. Each goes up as an event; its result comes back on /workbench/check-result.
+      const { check, ...job } = b;
+      const asked = new Set<string>();
+      const onCheck = (id: string) =>
+        new Promise<CheckResult>((resolve, reject) => {
+          const key = `${job.buildId}/${id}`;
+          asked.add(key);
+          checks.set(key, { resolve, reject });
+          send({ check: { id } });
+        });
       try {
-        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }) });
+        await workbench.build(job, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }), ...(check === true ? { onCheck } : {}) });
         send({ done: true });
       } catch (e) {
         send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
       }
+      for (const key of asked) checks.get(key)?.reject(new Error("the build ended")), checks.delete(key);
       res.end();
       return STREAMED;
+    },
+    "/workbench/check-result": async (b) => {
+      const key = `${b.buildId}/${b.id}`;
+      const waiting = checks.get(key);
+      checks.delete(key);
+      if (!waiting) return;
+      if (typeof b.error === "string") waiting.reject(new Error(b.error));
+      else {
+        try {
+          waiting.resolve(checkFromJson(b.result));
+        } catch (e) {
+          waiting.reject(e as Error);
+        }
+      }
     },
     // The Official shelf (seeds/, shipped with this release): every tool's listing and files, and a card image.
     "/shelf/tools": async () => {

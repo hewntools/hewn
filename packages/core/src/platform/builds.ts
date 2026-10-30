@@ -1084,6 +1084,8 @@ export class Builds extends Domain {
         this.logger(`${tag} ${builder} ${fmtDuration(p.elapsedSeconds)} · ${last}`);
       }, this.platform.heartbeatMs);
       (heartbeat as { unref?: () => void }).unref?.();
+      // The builder checking its work as it goes (its `check` tool): validation's steps, without promoting.
+      const checks = this.d.validation.checksFor(build, (line) => ((live.lastActivity = line), (live.lastActivityAt = Date.now()), this.events.emit(buildId, line)));
       try {
         const asked = this.registry.buildModel(buildId);
         await this.workbench.build(
@@ -1102,6 +1104,7 @@ export class Builds extends Domain {
               this.registry.addBuildCharge(buildId, c);
               this.registry.addHostCharge("build", c, build.capabilityId);
             },
+            onCheck: checks.run,
           },
         );
       } catch (e) {
@@ -1143,6 +1146,8 @@ export class Builds extends Domain {
         continue;
       } finally {
         clearInterval(heartbeat);
+        // A check still running (the builder stopped mid-call) finishes before anything else validates.
+        await checks.settled();
       }
       if (cancelled()) return;
       history.push(`attempt ${attempt}: builder ${builder} finished in ${Math.round((Date.now() - started) / 1000)}s`);

@@ -137,6 +137,23 @@ export interface BuildHooks {
   onModel?: (model: string) => void;
   /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. points). */
   onCharge?: (charge: BuildCharge) => void;
+  /**
+   * Check the work in progress as validation will, when the builder asks (its `check` tool): offered
+   * to the builder only when set. `id` is the builder's name for the call.
+   */
+  onCheck?: (id: string) => Promise<CheckResult>;
+}
+
+/** What a builder's check of its work in progress found. */
+export interface CheckResult {
+  passed: boolean;
+  /** What the builder reads: PASS or FAIL, every failure, what was measured on the UI, what passed. */
+  text: string;
+  failures: string[];
+  /** Measured on the UI: what sticks out or is cut short, page errors, controls that break the page. */
+  defects: string[];
+  /** The UI filled with its sample data: desktop-light, desktop-dark, mobile-light, mobile-dark (none when it didn't render). */
+  images: VisualShot[];
 }
 
 /** A host's charge for a build, as the owner sees it ("12 points"); Hewn shows it as given. */

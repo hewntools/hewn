@@ -15,6 +15,7 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
 import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
+import { checkToJson } from "@hewntools/core/checks.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
 import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, Sql, StateRef, Workbench } from "@hewntools/core/ports.ts";
@@ -252,11 +253,18 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
     build: async (job: BuildJob, hooks) => {
       let failure: { error: string; unavailable?: boolean; refused?: boolean; modelUnavailable?: boolean } | undefined;
+      // The builder's checks, run here (the core) and answered to the supervisor, where the builder waits.
+      const answer = (id: string) =>
+        hooks.onCheck!(id)
+          .then((r) => ({ result: checkToJson(r) }), (e: Error) => ({ error: e.message }))
+          .then((out) => sv.json("/workbench/check-result", { buildId: job.buildId, id, ...out }))
+          .catch(() => {});
       try {
-        await sv.stream("/workbench/build", job, (e) => {
+        await sv.stream("/workbench/build", { ...job, ...(hooks.onCheck ? { check: true } : {}) }, (e) => {
           if (e.activity) hooks.onActivity(e.activity);
           if (e.model) hooks.onModel?.(e.model);
           if (e.charge) hooks.onCharge?.(e.charge);
+          if (e.check && typeof e.check.id === "string" && hooks.onCheck) void answer(e.check.id);
           if (e.error) failure = e;
         }, hooks.signal);
       } catch (e) {

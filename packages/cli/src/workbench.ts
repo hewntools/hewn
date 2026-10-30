@@ -198,6 +198,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         ...(job.effort ? { effort: job.effort } : {}),
         onModel: hooks.onModel,
         onCharge: hooks.onCharge,
+        ...(hooks.onCheck ? { check: hooks.onCheck } : {}),
       });
     },
     async bundle(buildId) {

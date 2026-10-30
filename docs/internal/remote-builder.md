@@ -37,6 +37,7 @@ Request:
   "feedback": "The previous candidate FAILED platform validation: …",
   "model": "fable",
   "effort": "high",
+  "check": true,
   "prompt": "You are a builder for Hewn, … Read BUILDER.md …",
   "files": { "BUILDER.md": "<base64>", "ui.css": "<base64>", "src/index.ts": "<base64>" }
 }
@@ -57,9 +58,37 @@ Events:
 | `{ "charge": { "amount": 12, "unit": "points" } }` | What this attempt costs the owner, in the host's own unit. Hewn adds up a build's attempts and shows it as given ("12 points") on the build page and in Activity; it never converts or prices anything. Leave it out when nothing is charged. |
 | `{ "heartbeat": true }` (or any other key) | Ignored: keeps the connection open. |
 | `{ "file": { "path": "ui/icon.svg", "content": "<base64>" } }` | Optional: one file as the builder writes it, before the build ends. Hewn writes it into the workspace at once, so the icon (`ui/icon.svg`, and `hue` in `capability.json`) shows on Home and the build page while it builds. Same path rules as `files`; a path Hewn won't write is ignored. The `files` event still decides the candidate. |
+| `{ "check": { "id": "c1", "files": { "<path>": "<base64>", … } } }` | Only when the request has `check: true`: the builder checks its work (its `check` tool, below). `files` is the workspace as it is now, the whole tree, with the same rules as `files`; Hewn writes it, checks it, and posts the result to `POST /v1/builds/:buildId/checks/:id`. `id`: letters, digits, `-` and `_`, up to 64. Keep the stream open while you wait. |
 | `{ "files": { "<path>": "<base64>", … } }` | The workspace as the builder left it: the whole tree. Paths it doesn't list are deleted. Paths must be relative, inside the workspace, and not artefacts (`node_modules` …); one that isn't fails the attempt before anything is written. |
 | `{ "done": true }` | Finished: the last event. Without a `files` event first, or a stream that ends without it, the attempt fails. |
 | `{ "refused": … }`, `{ "error": … }` | As above. |
+
+### The builder's check: `POST /v1/builds/:buildId/checks/:id`
+
+With `check: true` in the request, Hewn offers the builder a `check` tool: what validation runs before
+promotion (the manifest, bundling, contracts, migrations, `tests/cases.json`, `sample/calls.json`,
+the widgets), going on after a failure, with the UI rendered filled with the sample data, 1280 and
+390 px wide, light and dark, and what to fix measured on it. Nothing is promoted. A service that
+ignores the offer builds as before.
+
+Give your builder a tool named `check` (an MCP server on your side, say) that sends the `check`
+event with the workspace and waits for Hewn's answer, which Hewn posts (the build's token, as for every call):
+
+```json
+{
+  "passed": false,
+  "text": "FAIL: 1 problem. Fix it, then check again.\n\nWhat failed:\n- 1 of 3 test cases failed: …",
+  "failures": ["1 of 3 test cases failed: …"],
+  "defects": ["Sticks out on the phone (390 px): div.row (\"…\"): 40px past the edge, 430px wide"],
+  "images": [{ "name": "desktop-light", "png": "<base64>" }, { "name": "desktop-dark", "png": "<base64>" }, { "name": "mobile-light", "png": "<base64>" }, { "name": "mobile-dark", "png": "<base64>" }]
+}
+```
+
+or `{ "error": "…" }` when the check couldn't run. Hand `text` and the images to the model as the
+tool's result: a check that ran is not a tool error, passed or not (some clients drop the images
+from an error). Hewn's builders on this machine also get the images in `screenshots/`. Answer with any
+2xx. Hewn runs one check at a time per build, ten per attempt; an eleventh answers "No checks left".
+A check takes up to about a minute.
 
 ## The intake: `POST /v1/intake`
 
