@@ -348,6 +348,10 @@ describe("the host's builder: a pass is an attempt marked `pass`", () => {
       const done = await platform.settle((await platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" })).buildId);
       assert.equal(done.status, "promoted", done.log.join("\n"));
       assert.deepEqual(sent.map((b) => [b.attempt, b.pass ?? null, b.session]), [[1, null, done.buildId], [2, "critique", done.buildId], [3, "craft", done.buildId]]);
+      // A service that resumes its session sends what a local builder says then: the pass's request, not the whole prompt again.
+      assert.equal(sent[0].resumePrompt, undefined);
+      assert.match(sent[1].resumePrompt, /^Design review pass\.[^]*Only change files inside this directory\. When it's complete, stop\.$/);
+      assert.match(sent[2].resumePrompt, /^Craft pass\./);
       assert.ok(!Object.keys(sent[0].files).some((p) => p.startsWith("screenshots/")));
       assert.deepEqual(Object.keys(sent[1].files).filter((p) => p.startsWith("screenshots/")).sort(), SHOTS.map((s) => `screenshots/${s}.png`).sort());
       // A stateless service gets the whole prompt, a fresh session can work from: the brief, that the
