@@ -121,10 +121,15 @@ request → build row ("waiting" while its `after` build hasn't promoted, or, fo
                      while an earlier change to the same capability is open or building: it starts when that
                      one ends, however it ends, or goes to review; `queued` in the build view)
   → workspace: a skeleton or the active version, plus BUILDER.md (the brief) and PLATFORM_UI.css
-  → up to maxBuildAttempts (default 3): run the builder, then validate;
+  → up to maxBuildAttempts (default 3): run the builder, then validate (without promoting);
     a failed validation goes back to the builder as feedback
+  → a new tool with a screen: its passes (buildPasses, default critique then craft), each a
+    resumed run of the builder with screenshots of the candidate before it, then validated;
+    one that doesn't leave a valid candidate (after PASS_TRIES, or paused, refused) keeps the one before it
   → promoted, review, failed or cancelled
 ```
+
+**Passes** (`passes.ts`, `runPasses` in `platform/builds.ts`). After a create's candidate validates, its passes run in order, if its UI was rendered: the critique (what `CRITIQUE_REQUEST` asks, pointing at the owner's words in `BUILDER.md` and the looks in `OTHER_TOOLS.md`) and the craft pass (`craftRequest` with what the visual check measured on the candidate before it: the validation before a craft pass runs with `measure`). Each writes the candidate's whole-page renders into the workspace's `screenshots/` (`Workbench.writeFolder`; a long page in parts, `mobile-light-2` …) and runs the builder with `pass` on the job: the same session (the attempt number goes on), so a local CLI resumes with the pass's request and the host's builder gets `pass` in the request. Its checks count against its own cap. Validation keeps the build page's screenshot of every candidate and `promote` writes the promoted one's again, so falling back shows the version that went live. Changes don't run them (cost); `runPasses` takes any validated candidate, for a change build later. The steps show them (`BuildStepState.passes`, steps `critique` and `craft`).
 
 **Instructions** are the owner's standing rules for building: lines in `platform_kv` (`instructions:global`, `instructions:<capabilityId>`), owner-only (`instructions`, `setInstructions`; the web client edits them under Settings › AI and a tool's Info). The intake gets them in its prompt and may add to or drop them (`remember`, `forget` in its reply, applied by `applyIntakeMemory` as the surface hands the reply back; the client shows what was saved, with Undo). A build snapshots them when it's opened (`build_context.instructions`, as the "Owner's instructions" section of `BUILDER.md`, after the request and before the contract, so the contract has the last word), so the host's builder gets them too. Purging a tool drops its rules with it.
 

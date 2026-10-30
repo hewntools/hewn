@@ -531,7 +531,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "settings") {
     platform.agents(owner); // owner only
     if (method === "PUT") {
-      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"]));
+      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
       return { ...next, ...(host.hosted ? { hosted: true } : {}) };
     }

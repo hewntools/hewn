@@ -4,6 +4,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SpecSource } from "./intake.ts";
+import type { Pass } from "@hewntools/core/passes.ts";
+
+// What the critique and craft passes ask for: Hewn's own, so a bench pass asks what a build's pass asks.
+export { craftRequest, CRITIQUE_REQUEST } from "@hewntools/core/passes.ts";
+export type { Pass };
 
 export interface Arm {
   name: string;
@@ -44,9 +49,9 @@ export interface Arm {
   spec?: SpecSource;
   /** The builder writes sample/calls.json, which the bench replays instead of the case's seed. */
   sample?: boolean;
+  /** Hewn's own passes in the build (its pipeline, Settings' buildPasses), not the bench's: on the builder's sample data, in the same build. */
+  pipeline?: Pass[];
 }
-
-export type Pass = "critique" | "craft";
 
 const ARMS_DIR = join(import.meta.dirname, "..", "arms");
 
@@ -156,6 +161,22 @@ export const ARMS: Arm[] = [
     sequential: true,
     passes: ["critique", "craft"],
   },
+  ...(
+    [
+      ["pipeline", ["critique", "craft"], "then Hewn's own critique and craft passes"],
+      ["pipeline-craft", ["craft"], "then Hewn's own craft pass only"],
+      ["pipeline-none", [], "with no passes"],
+    ] as const
+  ).map(
+    ([name, passes, how]): Arm => ({
+      name,
+      about: `Hewn as it builds today: a real conversation with the lean intake, today's brief (with the check tool) and its own sample data, ${how}.`,
+      spec: "lean",
+      sample: true,
+      sequential: true,
+      pipeline: [...passes],
+    }),
+  ),
   {
     name: "character+critique+craft",
     about: "character+critique, then a craft pass: fresh screenshots and the measured defects (cut off on the phone, text cut short), fixed without a redesign.",
@@ -173,16 +194,6 @@ export const ARMS: Arm[] = [
     sequential: true,
   },
 ];
-
-/** What the craft pass asks for: the screen made right, not redesigned. */
-export function craftRequest(defects: string[]): string {
-  return [
-    "Craft pass. The screenshots in screenshots/ show this tool's UI as it is now, filled with real data (desktop light, desktop dark, phone light, phone dark, the phone 390 px wide). Open every one of them.",
-    defects.length ? `Measured on this UI:\n${defects.map((d) => `- ${d}`).join("\n")}` : "Nothing was measured as broken, but look closely anyway.",
-    "Fix what's broken, cramped or cut off, on the phone first: anything that sticks out past the screen or gets clipped, elements that overlap or cover each other, labels cut short where the cut hides what they mean, text wrapping one word per line, collisions in charts and axes, low contrast, misalignment, and empty gaps that look like mistakes. Check the result against every screenshot's size, and keep it working from 375 px up.",
-    "Don't redesign: keep the concept, palette, type and layout direction, and every feature. Change only ui/ (keep ui/look.json true). The screenshots/ folder is removed after this pass; don't link to it.",
-  ].join("\n\n");
-}
 
 /** What a build is told about the owner's other tools (the arm's earlier results): name, hue, look. */
 export function othersNote(tools: { name: string; hue?: number; saturation?: number; look?: unknown }[]): string {
@@ -215,10 +226,3 @@ export function briefFor(arm: Arm, current: string, arms: Arm[] = ARMS): string 
   if (arm.from) return briefFor(armNamed(arm.from, arms), current, arms);
   return arm.brief ? arm.brief(current) : current;
 }
-
-/** What the critique pass asks for, as a modify request. */
-export const CRITIQUE_REQUEST = [
-  "Design review pass. The screenshots in screenshots/ show this tool's UI as the owner sees it today, filled with real data (desktop light, desktop dark, mobile light, mobile dark). Open every one of them and look at them critically, as a demanding senior product designer would.",
-  "First write down the five biggest problems you see (hierarchy, density, what the eye lands on first, how generic it looks, how well the data is visualised, the main action, small-screen layout, dark mode, delight). Then fix them in ui/, raising the bar: a screen the owner is delighted to open, with its own character and at least one custom data visual.",
-  "Change only ui/ (the operations, state and tests stay exactly as they are). The screenshots/ folder is removed after this pass; don't link to it.",
-].join("\n\n");

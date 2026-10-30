@@ -85,7 +85,7 @@ Everything that happened, newest first: builds, calls, and access changes (agent
 
 ![Activity: today's calls, builds and access changes, newest first, each with who did it and when](images/activity.png)
 
-Builds show their milestones (spec, code, tests) as they happen. Open one to see its log. A failed build keeps its log open under the reason.
+Builds show their milestones (spec, code, tests, and for a new tool the design review and fixing details) as they happen. Open one to see its log. A failed build keeps its log open under the reason.
 
 Call logs are kept for two weeks by default (Settings › Data).
 
