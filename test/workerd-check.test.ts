@@ -28,8 +28,8 @@ describe("the builder's check on the workerd host", () => {
     assert.equal(checks.length, 1);
     assert.equal(checks[0].passed, true, checks[0].text);
     assert.match(checks[0].text, /^PASS[^]*Your UI empty \(there.s no sample\/calls.json to fill it\)[^]*What passed:[^]*2 test cases passed/);
-    // The four renders when this machine has a browser (macOS here); without one the check says so.
-    if (process.platform === "darwin" && findBrowser()) {
+    // The four renders when the supervisor finds a browser (this Mac, the Linux CI); without one the check says so.
+    if (findBrowser()) {
       assert.deepEqual(checks[0].images.map((i) => i.name), ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]);
       assert.equal(Buffer.from(checks[0].images[0].png).subarray(1, 4).toString(), "PNG");
     } else assert.match(checks[0].text, /No screenshots/);
