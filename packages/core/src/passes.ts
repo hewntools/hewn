@@ -8,7 +8,7 @@
 export type Pass = "critique" | "craft";
 export const PASSES: readonly Pass[] = ["critique", "craft"];
 
-/** How many times a pass's builder may try to leave a valid candidate (at most the build's attempts) before its build keeps the one from before it. */
+/** How many times a pass's builder may try to leave a valid candidate (at most the build's attempts) before its build fails. */
 export const PASS_TRIES = 2;
 
 /** The passes new tools' builds run unless the owner says otherwise (a fresh list each time). */
@@ -54,7 +54,7 @@ export function passRequest(pass: Pass, o: { files: string[]; sampled: boolean; 
     `The screenshots: ${o.files.join(", ")}.${parts ? " A long page comes in parts, top to bottom: desktop-light-2.png carries on from desktop-light.png, and so on." : ""}${o.sampled ? "" : " The tool has no sample data (sample/calls.json), so they show it empty."}`,
     pass === "critique" && o.ownersWords ? "Also check the screen against what the owner asked for and how they wanted it to feel: THE OWNER'S OWN WORDS in BUILDER.md." : "",
     pass === "critique" && o.otherTools ? "It must still look clearly different from each of the owner's other tools in OTHER_TOOLS.md." : "",
-    "Keep everything working: Hewn validates the result again, and if it doesn't pass, the version from before this pass goes live instead.",
+    "Keep everything working: Hewn validates the result again, and the tool goes live only if it passes.",
   ]
     .filter(Boolean)
     .join("\n\n");
