@@ -1756,11 +1756,25 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
   const lines = tools.map((t) => `- **${t.name}** (\`${t.id}\`)${shade(t)}: ${t.look ?? "no look recorded"}`);
   const rule =
     kind === "create"
-      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual. Its colour comes from its subject when the subject has one; when it hasn't, its hue stays at least 40° from each of theirs."
+      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual. Its colour comes from its subject when the subject has one; when it hasn't, its hue stays at least 40° from each of theirs, or, when no hue is, takes the middle of the widest gap below."
       : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
-  // The hues taken, in order round the circle, so a free one is easy to see.
+  // The hues taken, in order round the circle, and the widest gap between them (a free hue on a crowded Home).
   const hues = [...new Set(tools.flatMap((t) => (t.hue === null ? [] : [t.hue])))].sort((a, b) => a - b);
-  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n${hues.length ? `\nHues on Home (0–359, round a circle): ${hues.join(", ")}.\n` : ""}`;
+  const gap = widestGap(hues);
+  const free = gap ? ` The widest gap: ${gap.from} to ${gap.to} (${gap.size}°), its middle ${gap.middle}.` : "";
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n${hues.length ? `\nHues on Home (0–359, round a circle): ${hues.join(", ")}.${free}\n` : ""}`;
+}
+
+/**
+ * The widest gap round the hue circle between `hues` (sorted, distinct): where it starts and ends,
+ * how wide, and its middle. When two are as wide: the one from the last hue round to the first, else
+ * the lower one.
+ */
+export function widestGap(hues: number[]): { from: number; to: number; size: number; middle: number } | undefined {
+  if (!hues.length) return undefined;
+  let best = { from: hues.at(-1)!, to: hues[0], size: hues[0] + 360 - hues.at(-1)! };
+  for (let i = 1; i < hues.length; i++) if (hues[i] - hues[i - 1] > best.size) best = { from: hues[i - 1], to: hues[i], size: hues[i] - hues[i - 1] };
+  return { ...best, middle: Math.round(best.from + best.size / 2) % 360 };
 }
 
 /** One of the owner's other capabilities as a build is told it: its active manifest, and the operations ("name@N") the tool being changed calls on it today. */
