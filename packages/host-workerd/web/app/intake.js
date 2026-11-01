@@ -303,6 +303,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     if (live) keep();
   };
 
+  // "Stopped." under a stopped turn: it goes once the next message is sent.
+  let stoppedNote = null;
   const ask = async (e) => {
     e?.preventDefault();
     const text = input.value.trim();
@@ -328,6 +330,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     failed = null;
     heading.hidden = embedded;
     offer.remove();
+    stoppedNote?.remove();
     say("me", text, attachments);
     input.value = "";
     input.placeholder = ""; // the example is for an empty conversation
@@ -409,7 +412,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       thread.lastElementChild?.classList.contains("me") && thread.lastElementChild.remove();
       input.value = text;
       keep();
-      thread.append(h("div", { class: "small faint" }, "Stopped."));
+      stoppedNote?.remove();
+      thread.append((stoppedNote = h("div", { class: "small faint" }, "Stopped.")));
       return;
     }
     failed = result.error.message || String(result.error);
