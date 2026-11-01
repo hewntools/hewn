@@ -96,4 +96,16 @@ describe("the owner's other tools' looks", () => {
     assert.equal(lookText("x".repeat(LOOK_CHARS + 1)), `${"x".repeat(LOOK_CHARS - 1)}…`);
     assert.equal(looksNote([]), "", "no other tools: no section");
   });
+
+  test("a new tool is told the hues taken, in order round the circle, and to keep clear of them when its subject has no colour", () => {
+    const note = looksNote([
+      { id: "a", name: "A", hue: 85, saturation: null },
+      { id: "b", name: "B", hue: 10, saturation: null },
+      { id: "c", name: "C", hue: 85, saturation: null },
+      { id: "d", name: "D", hue: null, saturation: null },
+    ]);
+    assert.match(note, /Its colour comes from its subject when the subject has one; when it hasn't, its hue stays at least 40° from each of theirs\./);
+    assert.match(note, /\nHues on Home \(0–359, round a circle\): 10, 85\.\n$/);
+    assert.doesNotMatch(looksNote([{ id: "d", name: "D", hue: null, saturation: null }]), /Hues on Home/, "none known: no line");
+  });
 });
