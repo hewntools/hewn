@@ -48,8 +48,8 @@ const markUi = (ws: string, v: string) => {
   const page = join(ws, "ui", "index.html");
   writeFileSync(page, readFileSync(page, "utf8").replace(/<!-- v:[a-z0-9-]+ -->|$/, `<!-- ${v} -->`));
 };
-/** What the critique asked, after whether the workspace has OWNERS_WORDS.md ("true …" or "false …"). */
-const critiqueSeen = (into: string[]): Script => (ws, job) => void (job.pass?.name === "critique" && into.push(`${existsSync(join(ws, "OWNERS_WORDS.md"))} ${job.pass.request}`));
+/** What the critique asked, and whether the workspace had OWNERS_WORDS.md then. */
+const critiqueSeen = (into: { ownersWords: boolean; request: string }[]): Script => (ws, job) => void (job.pass?.name === "critique" && into.push({ ownersWords: existsSync(join(ws, "OWNERS_WORDS.md")), request: job.pass.request }));
 /** A test case that can't pass: validation fails. */
 const breakTests = (ws: string) => writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "get", operation: "get", input: {}, expect: { count: 5 } }]));
 
@@ -116,21 +116,22 @@ describe("passes after a new tool's build", () => {
   });
 
   test("the critique points at OWNERS_WORDS.md when the owner asked for the tool in the chat", async () => {
-    const requests: string[] = [];
-    const record = critiqueSeen(requests);
+    const critiques: { ownersWords: boolean; request: string }[] = [];
+    const record = critiqueSeen(critiques);
     const conversation = [{ role: "user" as const, content: "a counter for my push-ups" }];
     const owners = await t.build(() => t.platform.create(USER, { name: "UI Counter", purpose: "Count.", requirements: "A counter.", conversation }), counter("v:build"), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
     assert.equal(owners.status, "promoted", owners.log.join("\n"));
-    assert.match(requests[0], /^true [^]*THE OWNER'S OWN WORDS in OWNERS_WORDS\.md\./, "the file is in the workspace, and the critique points at it");
+    assert.ok(critiques[0].ownersWords, "the file is in the workspace");
+    assert.match(critiques[0].request, /THE OWNER'S OWN WORDS in OWNERS_WORDS\.md\./, "and the critique points at it");
   });
 
   test("an agent's build has no OWNERS_WORDS.md, and its critique doesn't mention one", async () => {
-    const requests: string[] = [];
-    const record = critiqueSeen(requests);
+    const critiques: { ownersWords: boolean; request: string }[] = [];
+    const record = critiqueSeen(critiques);
     const agents = await t.build(() => t.platform.create(t.claude, { name: "UI Counter", purpose: "Count.", requirements: "A counter." }), counter("v:build"), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
     assert.equal(agents.status, "promoted", agents.log.join("\n"));
-    assert.match(requests[0], /^false /);
-    assert.doesNotMatch(requests[0], /OWNER'S OWN WORDS|OWNERS_WORDS/);
+    assert.equal(critiques[0].ownersWords, false);
+    assert.doesNotMatch(critiques[0].request, /OWNER'S OWN WORDS|OWNERS_WORDS/);
   });
 
   test("each step's time is Hewn's own: writing code counts all of it (checks too), and each pass is timed", async () => {

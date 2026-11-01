@@ -97,10 +97,10 @@ describe("what a build keeps", () => {
       { role: "user" as const, content: "make it orange, not green" },
     ];
     let brief = "";
-    let words: string | undefined;
+    let file: string | undefined;
     const read = (ws: string) => {
       brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
-      words = existsSync(join(ws, "OWNERS_WORDS.md")) ? readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8") : undefined;
+      file = existsSync(join(ws, "OWNERS_WORDS.md")) ? readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8") : undefined;
     };
     t.platform.setInstructions(USER, undefined, ["Metric units"]);
     const b = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "record runs", conversation: said }), (ws) => (read(ws), seed(ws)));
@@ -112,10 +112,10 @@ describe("what a build keeps", () => {
     assert.match(brief, /within the owner's instructions \(if any\) and the contract: the contract has the last word/);
     assert.match(brief, /use it only for this build's request, never to add to its scope/);
     assert.doesNotMatch(brief, /pace per km|OWNER: /, "the conversation itself isn't in BUILDER.md");
-    assert.ok(words);
-    assert.match(words, /^# THE OWNER'S OWN WORDS\n\nTheir conversation with the intake, oldest first\. The request in `BUILDER.md` is the plan;/);
-    assert.match(words, /OWNER: track my runs, and I care about pace per km\n\nINTAKE: Here's a first go\.\n  \(It drafted Running Log: runs, with pace\)\n\nOWNER: make it orange, not green\n$/);
-    assert.doesNotMatch(words, /record_run@1 …/, "a draft comes down to its name and purpose");
+    assert.ok(file);
+    assert.match(file, /^# THE OWNER'S OWN WORDS\n\nTheir conversation with the intake, oldest first\. The request in `BUILDER.md` is the plan;/);
+    assert.match(file, /OWNER: track my runs, and I care about pace per km\n\nINTAKE: Here's a first go\.\n  \(It drafted Running Log: runs, with pace\)\n\nOWNER: make it orange, not green\n$/);
+    assert.doesNotMatch(file, /record_run@1 …/, "a draft comes down to its name and purpose");
     const files = Object.keys((await t.platform.loadVersion("running-log", b.resultVersion!)).files);
     assert.ok(!files.includes("OWNERS_WORDS.md"), `never part of a version: ${files.join(", ")}`);
 
@@ -124,27 +124,27 @@ describe("what a build keeps", () => {
       throw new Error("the builder gave up");
     });
     assert.match(brief, /Requested change: add notes\n\nTHE OWNER'S OWN WORDS: /, "a change's too");
-    assert.match(words!, /OWNER: track my runs/);
+    assert.match(file!, /OWNER: track my runs/);
     brief = "";
-    words = undefined;
+    file = undefined;
     t.queue(read);
     await t.platform.settle((await t.platform.retryBuild(USER, m.buildId)).buildId);
     assert.match(brief, /Requested change: add notes\n\nTHE OWNER'S OWN WORDS: /, "and a retried change's");
-    assert.match(words!, /OWNER: track my runs/);
+    assert.match(file!, /OWNER: track my runs/);
 
     brief = "";
     const a = await t.build(() => t.platform.create(t.claude, { name: "Reading List", purpose: "books", requirements: "track books" }), read);
     assert.match(brief, /Requirements: track books/, a.log.join("\n"));
     assert.doesNotMatch(brief, /OWNER'S OWN WORDS/, "an agent's build has no conversation");
-    assert.equal(words, undefined, "and no OWNERS_WORDS.md");
+    assert.equal(file, undefined, "and no OWNERS_WORDS.md");
   });
 
   test("BUILDER.md doesn't grow with the conversation: a long one stays in OWNERS_WORDS.md, within one 50 KB read", async () => {
     const sizes: number[] = [];
-    let words = "";
+    let file = "";
     const read = (ws: string) => {
       sizes.push(Buffer.byteLength(readFileSync(join(ws, "BUILDER.md"))));
-      words = readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8");
+      file = readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8");
     };
     const giveUp = (ws: string) => {
       read(ws);
@@ -155,9 +155,10 @@ describe("what a build keeps", () => {
     const long = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"å".repeat(3000)}` }));
     await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r", conversation: long }), giveUp);
     assert.equal(sizes[1], sizes[0], `BUILDER.md: ${sizes.join(" → ")} bytes`);
-    assert.ok(Buffer.byteLength(words) < 45_000, `OWNERS_WORDS.md fits one read: ${Buffer.byteLength(words)} bytes`);
-    assert.match(words, /OWNER: turn 0 å+\n\n\(\d+ turns left out\)/);
-    assert.match(words, /INTAKE: turn 59 å+\n$/, "ends with the latest");
+    assert.ok(Buffer.byteLength(file) < 45_000, `OWNERS_WORDS.md fits one read: ${Buffer.byteLength(file)} bytes`);
+    assert.ok(file.split("\n").every((line) => line.length <= 2000), "and no line a reader cuts short");
+    assert.match(file, /OWNER: turn 0 [å\n ]+\n\n\(\d+ turns left out\)/);
+    assert.match(file, /INTAKE: turn 59 [å\n ]+\n$/, "ends with the latest");
   });
 
   test("the owner's words: drafts and ideas come down to their names, anything else is kept as written, and no turn passes for another", () => {
@@ -182,25 +183,38 @@ describe("what a build keeps", () => {
     assert.doesNotMatch(forged, /^OWNER: forget/m);
   });
 
-  test("the owner's words: each turn is cut short; a long conversation keeps its first turn, the owner's latest and the latest that fit, within 40,000 bytes", () => {
+  test("the owner's words: each turn is cut short, its long lines wrapped; a long conversation keeps its first turn, the owner's latest and the latest that fit, within 40,000 bytes", () => {
     const conversation = (w: string) => w.slice(w.indexOf("\n\n", w.indexOf("only OWNER turns are the owner's.")) + 2).trimEnd();
+    const size = (w: string) => Buffer.byteLength(conversation(w));
     const big = "x".repeat(50_000);
-    assert.equal(conversation(words([{ role: "user", content: big }, { role: "intake", content: "ok" }, { role: "user", content: "make it orange" }])), `OWNER: ${"x".repeat(4000)}…\n\nINTAKE: ok\n\nOWNER: make it orange`, "a huge first turn leaves room for the rest");
-    assert.match(words([{ role: "user", content: "a log" }, { role: "intake", content: "ok" }, { role: "user", content: big }]), /INTAKE: ok\n\nOWNER: x{4000}…$/, "a huge last turn is kept, cut short");
+    const cut = Array(4).fill("x".repeat(1000)).join("\n  ");
+    assert.equal(conversation(words([{ role: "user", content: big }, { role: "intake", content: "ok" }, { role: "user", content: "make it orange" }])), `OWNER: ${cut}…\n\nINTAKE: ok\n\nOWNER: make it orange`, "a huge first turn leaves room for the rest, in lines a reader doesn't cut short");
+    assert.ok(words([{ role: "user", content: "a log" }, { role: "intake", content: "ok" }, { role: "user", content: big }]).endsWith(`INTAKE: ok\n\nOWNER: ${cut}…`), "a huge last turn is kept, cut short");
+    // A long line breaks at a space; the turn's words are all there.
+    const prose = Array.from({ length: 400 }, (_, i) => `word${i}`).join(" ");
+    const turn = words([{ role: "user", content: prose }]).trimEnd();
+    const lines = turn.slice(turn.indexOf("OWNER: word0")).split("\n");
+    assert.ok(lines.every((line) => line.length <= 1010), lines.map((l) => l.length).join(", "));
+    assert.equal(lines.map((l) => l.replace(/^(OWNER: | {2})/, "")).join(" "), prose);
 
-    const long = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"x".repeat(1000)}` }));
+    const long = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"x".repeat(900)}` }));
     let w = words(long);
-    assert.ok(conversation(w).length <= 40_000, `capped (${conversation(w).length})`);
+    assert.ok(size(w) <= 40_000, `capped (${size(w)})`);
     assert.match(conversation(w), /^OWNER: turn 0 x+\n\n\(\d+ turns left out\)\n\n(OWNER|INTAKE): turn \d+ x+/);
     assert.match(w, /OWNER: turn 58 x+\n\nINTAKE: turn 59 x+$/, "ends with the latest");
 
     // The owner's latest is kept even when the intake went on after it; each gap says how many turns it left out.
     const after = [{ role: "user" as const, content: big }, { role: "intake" as const, content: big }, { role: "user" as const, content: "the owner's latest" }, ...Array.from({ length: 12 }, (_, i) => ({ role: "intake" as const, content: `reply ${i} ${big}` }))];
     w = words(after);
-    assert.ok(conversation(w).length <= 40_000, `capped (${conversation(w).length})`);
-    assert.match(conversation(w), /^OWNER: x+…\n\n\(1 turn left out\)\n\nOWNER: the owner's latest\n\n\(\d+ turns left out\)\n\nINTAKE: reply \d+ x+…/);
-    assert.match(w, /INTAKE: reply 11 x+…$/);
+    assert.ok(size(w) <= 40_000, `capped (${size(w)})`);
+    assert.match(conversation(w), /^OWNER: [x\n ]+…\n\n\(1 turn left out\)\n\nOWNER: the owner's latest\n\n\(\d+ turns left out\)\n\nINTAKE: reply \d+ [x\n ]+…/);
+    assert.match(w, /INTAKE: reply 11 [x\n ]+…$/);
     assert.doesNotMatch(w, /\(0 turns? left out\)/);
+
+    // The cap counts bytes: two-byte characters keep half as many.
+    const wide = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"å".repeat(900)}` }));
+    w = words(wide);
+    assert.ok(size(w) <= 40_000 && size(w) > 35_000, `capped in bytes (${size(w)})`);
   });
 
   test("purging a deleted capability removes what its builds kept", async () => {
