@@ -136,39 +136,40 @@ describe("passes after a new tool's build", () => {
     assert.equal(atCraft.seconds.code, last.seconds.code);
   });
 
-  test("a pass that doesn't validate after its tries: the candidate before it goes live, and the passes after it don't run", async () => {
+  test("a pass that doesn't validate after its tries fails the build like an attempt: it says which step and what, nothing goes live, and a retry builds it again", async () => {
     const { view } = await follow(counter("v:build"), (ws) => (markUi(ws, "v:critique"), breakTests(ws)), (ws, job) => {
       assert.match(job.feedback ?? "", /1 of 1 test cases failed/, "the second try gets the failure");
       assert.match(resumePrompt(job), /FAILED/);
       breakTests(ws);
     });
-    assert.equal(view.status, "promoted", view.log.join("\n"));
-    assert.match(await ui("ui-counter"), /v:build/, "the build's own screen went live");
-    assert.ok(view.log.includes("critique pass: no valid candidate after 2 tries"), view.log.join("\n"));
-    assert.ok(view.log.includes("critique pass: kept the candidate from before it (2 test cases passed)"), view.log.join("\n"));
+    assert.equal(view.status, "failed", view.log.join("\n"));
+    assert.equal(t.platform.registry.getCapability("ui-counter")?.activeVersion ?? null, null, "nothing went live");
+    assert.equal(view.log.at(-1), "FAILED: no valid candidate after 2 tries of the critique pass");
     assert.ok(!view.log.some((l) => l.startsWith("craft pass")), "the craft pass didn't run");
-    assert.ok(view.log.some((l) => /^attempt 1: promoted: implementation v1/.test(l)), view.log.join("\n"));
-    // What the build shows is the version that went live: its tests, its screenshot.
-    assert.deepEqual(view.tests, { passed: 2, total: 2 });
-    assert.equal(text((await t.platform.blobs.get(`screenshots/${view.buildId}.png`))!), "page v:build");
-    assert.equal(view.failure, undefined);
+    assert.equal(view.failure?.title, "Reviewing the design: 1 of 1 tests didn't pass");
+    assert.match(view.failure?.detail ?? "", /get didn't return what its test expected/);
+    // Retry: the whole build again, as for any failed build.
+    const again = await t.build(() => t.platform.retryBuild(USER, view.buildId), counter("v:retry"), (ws) => markUi(ws, "v:retry-critique"), (ws) => markUi(ws, "v:retry-craft"));
+    assert.equal(again.status, "promoted", again.log.join("\n"));
+    assert.match(await ui("ui-counter"), /v:retry-craft/);
   });
 
-  test("the craft pass breaking falls back to the critique's candidate", async () => {
+  test("the craft pass breaking fails the build too, and says so", async () => {
     const { view } = await follow(counter("v:build"), (ws) => markUi(ws, "v:critique"), (ws) => (markUi(ws, "v:craft"), breakTests(ws)), (ws) => breakTests(ws));
-    assert.equal(view.status, "promoted", view.log.join("\n"));
-    assert.match(await ui("ui-counter"), /v:critique/);
-    assert.ok(view.log.some((l) => /^critique pass: promoted: implementation v1/.test(l)), view.log.join("\n"));
+    assert.equal(view.status, "failed", view.log.join("\n"));
+    assert.equal(t.platform.registry.getCapability("ui-counter")?.activeVersion ?? null, null);
+    assert.equal(view.failure?.title, "Fixing details: 1 of 1 tests didn't pass");
   });
 
-  test("paused by the builder's host mid-pass: the candidate before it goes live (it isn't paused)", async () => {
+  test("paused by the builder's host mid-pass: the build is paused, as at any other point", async () => {
     const { view } = await follow(counter("v:build"), () => {
       throw Object.assign(new Error("This build has used its allowance."), { paused: true });
     });
-    assert.equal(view.status, "promoted", view.log.join("\n"));
-    assert.ok(view.log.includes("critique pass: stopped (paused: This build has used its allowance.)"), view.log.join("\n"));
-    assert.ok(view.log.includes("critique pass: kept the candidate from before it (2 test cases passed)"));
-    assert.ok(!view.log.some((l) => /^(PAUSED|FAILED): /.test(l)));
+    assert.equal(view.status, "failed");
+    assert.equal(view.failure?.paused, true);
+    assert.equal(view.failure?.detail, "This build has used its allowance.");
+    assert.equal(view.log.at(-1), "PAUSED: This build has used its allowance.");
+    assert.equal(t.platform.registry.getCapability("ui-counter")?.activeVersion ?? null, null);
   });
 
   test("a builder failing in a pass is tried again, like an attempt", async () => {

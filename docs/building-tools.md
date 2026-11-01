@@ -45,7 +45,7 @@ Then Hewn:
 - **Reviewing the design:** it writes down the five biggest problems it sees, as a demanding designer would (what the eye lands on first, how generic it looks, how the data is drawn, the phone, dark mode), and fixes them. It holds the screen against what you said and against your other tools' looks too.
 - **Fixing details:** fresh screenshots, with what Hewn measured on them (what sticks out past the phone's edge, text cut short, things drawn over each other, buttons that break the page): it fixes those without redesigning anything.
 
-Each goes through the same checks again. If one doesn't pass them, the version from before it goes live instead, and so does it if the build is paused part-way: a second look never makes a tool worse. Changes and installs don't get one. The build's steps show each as it runs.
+Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** or **Ask builder to fix** builds it again. A build the host pauses during one is paused as at any other point. Changes and installs don't get one. The build's steps show each as it runs.
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
 

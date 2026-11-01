@@ -1181,12 +1181,8 @@ export class Builds extends Domain {
       // Cancelled: cancelBuild already recorded it; just stop.
       if (r === "cancelled") return;
       if (r === "again") continue;
-      if (r !== "done") {
-        // Retrying can't help, or isn't Hewn's to decide (paused): the build ends here.
-        this.note(run, r.paused ? `PAUSED: ${r.end}` : `FAILED: ${r.end}`);
-        this.registry.updateBuild(buildId, { status: "failed", log: run.history });
-        return;
-      }
+      // Retrying can't help, or isn't Hewn's to decide (paused): the build ends here.
+      if (r !== "done") return this.endRun(run, r);
       this.assertSubmittable(build);
       const v = await this.validateCandidate(build, submitter, { measure: passes[0] === "craft" });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
@@ -1196,7 +1192,9 @@ export class Builds extends Domain {
       }
       const built: PassCandidate = { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
       const best = passes.length ? await this.runPasses(run, built, passes) : built;
-      if (!best) return;
+      if (best === "cancelled") return;
+      // A pass that doesn't end in a valid candidate ends the build as an attempt would (owner, 2026-11-01).
+      if ("end" in best) return this.endRun(run, best);
       const { version, review, log } = await this.promoteCandidate(build, submitter, best);
       run.history.push(...log.map((l) => `${best.label}: ${l}`));
       if (review) {
@@ -1214,6 +1212,12 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { status: "failed", log: run.history });
   }
 
+  /** The build ends here, failed (or paused by the builder's host, its work kept), saying why. */
+  private endRun(run: BuilderRun, r: RunEnd) {
+    this.note(run, r.paused ? `PAUSED: ${r.end}` : `FAILED: ${r.end}`);
+    this.registry.updateBuild(run.build.id, { status: "failed", log: run.history });
+  }
+
   /** A line in a run's history, and on the platform log and the build's transcript. */
   private note(run: BuilderRun, line: string) {
     run.history.push(line);
@@ -1227,7 +1231,7 @@ export class Builds extends Domain {
    * cancelled; or it can't go on (`end` says why: a model that can't run, the host declined or paused
    * it, the builder unavailable), which ends the build, or a pass. `paused`: the host paused it, its work kept.
    */
-  private async runOnce(run: BuilderRun, o: { label: string; n: number; max: number; feedback?: string; pass?: BuildPass }): Promise<"done" | "again" | "cancelled" | { end: string; paused?: true }> {
+  private async runOnce(run: BuilderRun, o: { label: string; n: number; max: number; feedback?: string; pass?: BuildPass }): Promise<"done" | "again" | "cancelled" | RunEnd> {
     const { build, builder, signal, tag } = run;
     const buildId = build.id;
     if (signal.aborted) return "cancelled";
@@ -1320,13 +1324,12 @@ export class Builds extends Domain {
   /**
    * The passes on a validated candidate, in order. Each shows the builder screenshots of the candidate
    * before it (the whole page, in parts a model can read) and, for the craft pass, what was measured on
-   * it; resumes the builder's session with what the pass asks; and validates what it leaves. A pass that
-   * ends without a valid candidate (after its tries, or paused, declined, its builder gone) leaves the
-   * candidate before it, and the passes after it don't run: never worse than without them. Nothing to
-   * look at (the UI wasn't rendered): no passes. Undefined: cancelled. Not tied to a new tool: a change
-   * build can run them too.
+   * it; resumes the builder's session with what the pass asks; and validates what it leaves. The last
+   * pass's candidate is the one promoted. A pass that ends without a valid one (after its tries, or
+   * paused, declined, its builder gone) ends the build as an attempt would, saying why. Nothing
+   * to look at (the UI wasn't rendered): no passes.
    */
-  private async runPasses(run: BuilderRun, first: PassCandidate, passes: Pass[]): Promise<PassCandidate | undefined> {
+  private async runPasses(run: BuilderRun, first: PassCandidate, passes: Pass[]): Promise<PassCandidate | "cancelled" | RunEnd> {
     if (!first.candidate.shots?.length) {
       this.planPasses(run.build.id, []);
       return first;
@@ -1339,18 +1342,14 @@ export class Builds extends Domain {
       await this.workbench.writeFolder(run.build.id, "screenshots", shots);
       const request = passRequest(pass, { files: Object.keys(shots), sampled: !!current.candidate.sampled, defects: current.candidate.defects ?? [], ownersWords, otherTools });
       const next = await this.runPass(run, pass, request, passes[i + 1] === "craft");
-      if (next === "cancelled") return undefined;
-      if (!next) {
-        this.note(run, `${pass} pass: kept the candidate from before it${current.tests ? ` (${current.tests.passed} test cases passed)` : ""}`);
-        break;
-      }
+      if (next === "cancelled" || "end" in next) return next;
       current = next;
     }
     return current;
   }
 
-  /** One pass: up to PASS_TRIES runs of the builder until what it leaves validates. Undefined: it didn't (the log says why). */
-  private async runPass(run: BuilderRun, pass: Pass, request: string, measure: boolean): Promise<PassCandidate | "cancelled" | undefined> {
+  /** One pass: up to PASS_TRIES runs of the builder until what it leaves validates; else why it couldn't. */
+  private async runPass(run: BuilderRun, pass: Pass, request: string, measure: boolean): Promise<PassCandidate | "cancelled" | RunEnd> {
     const max = Math.min(PASS_TRIES, Math.max(1, this.platform.maxBuildAttempts()));
     let feedback: string | undefined;
     for (let n = 1; n <= max; n++) {
@@ -1358,18 +1357,14 @@ export class Builds extends Domain {
       const r = await this.runOnce(run, { label, n, max, feedback, pass: { name: pass, request } });
       if (r === "cancelled") return "cancelled";
       if (r === "again") continue;
-      if (r !== "done") {
-        this.note(run, `${label}: stopped (${r.paused ? `paused: ${r.end}` : r.end})`);
-        return undefined;
-      }
+      if (r !== "done") return r;
       this.assertSubmittable(run.build);
       const v = await this.validateCandidate(run.build, `builder ${run.builder}`, { pass, measure });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (v.candidate) return { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
       feedback = v.log.join("\n");
     }
-    this.note(run, `${pass} pass: no valid candidate after ${max} ${max === 1 ? "try" : "tries"}`);
-    return undefined;
+    return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
   }
 
   /** Builds waiting for the owner's review (owner only). */
@@ -1614,6 +1609,9 @@ interface BuilderRun {
   started: number;
   runs: number;
 }
+
+/** Why a run of the builder ends its build: `end`, the reason; `paused`, the builder's host paused it with its work kept. */
+type RunEnd = { end: string; paused?: true };
 
 /** How a candidate's tests went. */
 type TestTally = { passed: number; total: number };
