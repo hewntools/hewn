@@ -403,6 +403,27 @@ export const operations = {
     await page.getByText("Installed from a file · v1").waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-activity.png", fullPage: true });
   });
+
+  await step("New: Stop puts the message back with Stopped., which goes once the next one is sent", async () => {
+    // The intake never answers here (no CLI runs): each turn waits until it's stopped.
+    await page.route("**/api/intake", () => {});
+    await page.goto(`${web}/#/new`);
+    const box = page.getByRole("textbox", { name: "Message" });
+    await box.fill("A tool to recall facts about me");
+    await box.press("Enter");
+    await page.getByRole("button", { name: "Stop" }).click();
+    await page.getByText("Stopped.").waitFor();
+    if ((await box.inputValue()) !== "A tool to recall facts about me") throw new Error(`box: ${await box.inputValue()}`);
+    await box.press("Enter");
+    await page.locator(".bubble.typing").waitFor();
+    if (await page.getByText("Stopped.").count()) throw new Error("Stopped. still shown after sending again");
+    // Stopped again: one note, not two.
+    await page.getByRole("button", { name: "Stop" }).click();
+    await page.getByText("Stopped.").waitFor();
+    const notes = await page.getByText("Stopped.").count();
+    if (notes !== 1) throw new Error(`${notes} Stopped. notes`);
+    await page.unroute("**/api/intake");
+  });
 } finally {
   await browser.close();
   await sv.stop();
