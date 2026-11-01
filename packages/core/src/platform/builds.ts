@@ -11,13 +11,15 @@ import type { BundleSummary } from "../bundle.ts";
 import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
-import type { Files } from "../ports.ts";
+import type { BuildPass, Files } from "../ports.ts";
+import { type Pass, PASS_TRIES, passRequest } from "../passes.ts";
 import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReview, BuildRow, BuildTurn } from "../registry.ts";
 import { sha256 } from "../sha256.ts";
 import { MAX_SATURATION } from "./presentation.ts";
 import { attachmentRefs } from "./attachments.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
+import type { Candidate } from "./validation.ts";
 import type { PlatformOptions } from "../platform.ts";
 import spec from "@hewntools/spec/package.json" with { type: "json" };
 
@@ -70,14 +72,26 @@ export interface BuildProgress {
   secondsSinceActivity: number | null;
 }
 
-/** Pipeline steps as the owner sees them: (waiting for another build →) spec agreed → writing code → running tests → your authorization. */
-export type BuildStep = "waiting" | "spec" | "code" | "tests" | "auth" | "done";
+/**
+ * Pipeline steps as the owner sees them: (waiting for another build →) spec agreed → writing code →
+ * running tests → (a new tool's passes: reviewing the design → fixing details →) your authorization.
+ */
+export type BuildStep = "waiting" | "spec" | "code" | "tests" | Pass | "auth" | "done";
 
 export interface BuildStepState {
   step: BuildStep;
+  /** Of the latest validation: a pass's step has its own. */
   tests?: { passed: number; total: number };
-  /** 0–1, from real milestones only: spec 0.1, code 0.1 (no measure), tests 0.5→0.9 by cases run, auth 0.95. */
+  /** 0–1, from real milestones only: spec 0.1, code 0.1 (no measure), tests 0.5→0.9 by cases run, the passes 0.9, auth 0.95. */
   progress: number;
+  /** The passes this build runs after its tests, in order (steps of their own). Absent: none. */
+  passes?: Pass[];
+  /**
+   * How long the build has spent in each step it reached, in seconds (to a tenth), the current one so
+   * far; a step it came back to (a retry's code and tests) adds up. Hewn's own clock, so a page opened
+   * part-way shows the same.
+   */
+  seconds: Partial<Record<BuildStep, number>>;
 }
 
 type CreateRequest = {
@@ -164,7 +178,7 @@ export class Builds extends Domain {
     { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number }
   >();
   /** Pipeline step of each in-flight build (see BuildStep). */
-  private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number }>();
+  private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number; spent: Partial<Record<BuildStep, number>>; passes?: Pass[] }>();
 
   constructor(s: Shared, opts: Pick<PlatformOptions, "brief" | "designSystem" | "buildModel" | "agentBuildModels" | "modelEfforts">) {
     super(s);
@@ -272,7 +286,12 @@ export class Builds extends Domain {
   }
 
   private setStep(buildId: string, capabilityId: string, step: BuildStep, tests?: { passed: number; total: number }) {
-    this.steps.set(buildId, { capabilityId, step, tests, since: Date.now() });
+    const prev = this.steps.get(buildId);
+    const now = Date.now();
+    // The time in the step it leaves goes on that step's count; staying in a step (tests counting up) keeps its start.
+    const spent = { ...prev?.spent };
+    if (prev && prev.step !== step) spent[prev.step] = (spent[prev.step] ?? 0) + (now - prev.since);
+    this.steps.set(buildId, { capabilityId, step, tests, since: prev?.step === step ? prev.since : now, spent, ...(prev?.passes ? { passes: prev.passes } : {}) });
     this.events.emit(`${buildId}:step`, this.stepState(buildId));
   }
 
@@ -285,10 +304,15 @@ export class Builds extends Domain {
       // No honest measure of how far the code is: it stays at the spec mark until tests start.
       code: 0.1,
       tests: 0.5 + 0.4 * (s.tests && s.tests.total ? s.tests.passed / s.tests.total : 0),
+      // Tested already; no honest measure of how far a pass is.
+      critique: 0.9,
+      craft: 0.9,
       auth: 0.95,
       done: 1,
     }[s.step];
-    return { step: s.step, ...(s.tests ? { tests: s.tests } : {}), progress: Math.round(progress * 100) / 100 };
+    const ms: Partial<Record<BuildStep, number>> = { ...s.spent, [s.step]: (s.spent[s.step] ?? 0) + (Date.now() - s.since) };
+    const seconds = Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v / 100) / 10]));
+    return { step: s.step, ...(s.tests ? { tests: s.tests } : {}), progress: Math.round(progress * 100) / 100, ...(s.passes ? { passes: s.passes } : {}), seconds };
   }
 
   /**
@@ -606,7 +630,7 @@ export class Builds extends Domain {
    * a name it may not use is an error listing the ones it may, never a quiet default.
    */
   private modelFor(agent: Agent, builder: string, ask: ModelAsk): { model?: string; effort?: string } {
-    if (builder === "keep" || builder === "bundle" || builder.startsWith("copy:")) return {};
+    if (noBuilderRuns(builder)) return {};
     const { model, effort } = ask;
     if (model === undefined && effort === undefined) return this.buildModelFor(builder);
     if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) throw new PlatformError("invalid_request", "model must be a model name, like fable or claude-fable-5-1, or default");
@@ -1018,27 +1042,54 @@ export class Builds extends Domain {
     }
   }
 
-  /** Validate the workspace candidate and promote it if everything passes. Never throws. */
-  private async validate(build: BuildRow, submitter: string): Promise<{ version?: number; review?: BuildReview; log: string[] }> {
-    this.registry.updateBuild(build.id, { status: "validating" });
-    const log: string[] = [];
-    const step = (message: string) => {
+  /** A build's log, line by line: kept in `log`, and on the platform log and the build's transcript. */
+  private stepLog(build: BuildRow, submitter: string, log: string[]) {
+    return (message: string) => {
       log.push(message);
       this.buildEvent(build.id, message, `build ${build.id} [${build.kind} ${build.capabilityId}, submitted by ${submitter}]`);
     };
+  }
+
+  /**
+   * Check the workspace's candidate as validation does, without promoting it (`promoteCandidate`
+   * does). `measure`: also measure what a craft pass should fix; `pass`: the pass it comes from (its
+   * step shows the tests). Never throws: no candidate, and the log says why; `tests`: how its tests went.
+   */
+  private async validateCandidate(build: BuildRow, submitter: string, opts: { measure?: boolean; pass?: Pass } = {}): Promise<{ candidate?: Candidate; tests?: TestTally; log: string[] }> {
+    this.registry.updateBuild(build.id, { status: "validating" });
+    const log: string[] = [];
+    const step = this.stepLog(build, submitter, log);
     step("validating candidate");
+    let tests: TestTally | undefined;
     try {
-      const r = await this.d.validation.validateAndPromote(build, step, (passed, total) => this.setStep(build.id, build.capabilityId, "tests", { passed, total }));
+      const candidate = await this.d.validation.validate(build, step, {
+        ...(opts.measure ? { measure: true } : {}),
+        onTests: (passed, total) => ((tests = { passed, total }), this.setStep(build.id, build.capabilityId, opts.pass ?? "tests", tests)),
+      });
+      return { candidate, ...(tests !== undefined ? { tests } : {}), log };
+    } catch (e) {
+      step(`FAILED: ${(e as Error).message}`);
+      return { log };
+    }
+  }
+
+  /** Promote a validated candidate (its `tests`, as they went), or hold it for the owner's review. Never throws: the log says what failed. */
+  private async promoteCandidate(build: BuildRow, submitter: string, { candidate, tests }: PassCandidate): Promise<{ version?: number; review?: BuildReview; log: string[] }> {
+    this.registry.updateBuild(build.id, { status: "validating" });
+    const log: string[] = [];
+    const step = this.stepLog(build, submitter, log);
+    try {
+      const r = await this.d.validation.promote(build, candidate, step);
       if ("review" in r) {
         step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review)})`);
         return { review: r.review, log };
       }
-      const version = r.version;
-      step(`promoted: implementation v${version} is now active`);
+      step(`promoted: implementation v${r.version} is now active`);
       this.d.schedules.applyApprovedSchedules(build, step);
       await this.d.sharing.afterInstall(build, step);
-      this.setStep(build.id, build.capabilityId, this.platform.readiness(build.capabilityId).ready ? "done" : "auth", this.steps.get(build.id)?.tests);
-      return { version, log };
+      // The tests of the version that went live (not those of a pass that fell back).
+      this.setStep(build.id, build.capabilityId, this.platform.readiness(build.capabilityId).ready ? "done" : "auth", tests ?? this.steps.get(build.id)?.tests);
+      return { version: r.version, log };
     } catch (e) {
       step(`FAILED: ${(e as Error).message}`);
       return { log };
@@ -1109,129 +1160,212 @@ export class Builds extends Domain {
     });
   }
 
-  /** Builder writes, platform validates; retry with feedback. */
+  /**
+   * Builder writes, platform validates; retry with feedback. A new tool's candidate then goes through
+   * its passes (`runPasses`) before it's promoted.
+   */
   private async runBuilder(buildId: string, builder: string, signal: AbortSignal) {
     const build = this.mustBuild(buildId);
     const max = Math.max(1, this.platform.maxBuildAttempts());
-    const history: string[] = [];
-    let feedback: string | undefined;
-    const tag = `build ${buildId} [${build.kind} ${build.capabilityId}, requested by ${build.requestedBy}]`;
     // The first build of the chain this one retries, so a host can count the chain as one build.
     let retryOf: string | undefined;
     for (let id = build.request.retryOf; typeof id === "string"; id = this.registry.getBuild(id)?.request.retryOf) retryOf = id;
-
-    // Cancelled: cancelBuild already recorded it; just stop.
-    const cancelled = () => signal.aborted;
     // The clock runs from the first attempt: a retry after a failed validation doesn't start it over.
-    const buildStarted = Date.now();
+    const run: BuilderRun = { build, builder, signal, history: [], tag: `build ${buildId} [${build.kind} ${build.capabilityId}, requested by ${build.requestedBy}]`, ...(retryOf ? { retryOf } : {}), started: Date.now(), runs: 0 };
+    const passes = this.passesFor(build, builder);
+    this.planPasses(buildId, passes);
+    const submitter = `builder ${builder}`;
+    let feedback: string | undefined;
     for (let attempt = 1; attempt <= max; attempt++) {
-      if (cancelled()) return;
-      this.registry.updateBuild(buildId, { status: "building", log: history });
-      const started = Date.now();
-      const live: { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number } = { attempt, maxAttempts: max, startedAt: buildStarted };
-      this.progress.set(buildId, live);
-      this.setStep(buildId, build.capabilityId, "code");
-      this.buildEvent(buildId, `builder ${builder} working (attempt ${attempt}/${max})`, tag);
-      const heartbeat = setInterval(() => {
-        const p = this.progressOf(buildId);
-        if (!p) return;
-        const last = p.lastActivity ? `last: ${p.lastActivity} (${p.secondsSinceActivity}s ago)` : "no activity yet";
-        this.logger(`${tag} ${builder} ${fmtDuration(p.elapsedSeconds)} · ${last}`);
-      }, this.platform.heartbeatMs);
-      (heartbeat as { unref?: () => void }).unref?.();
-      // The builder checking its work as it goes (its `check` tool): validation's steps, without promoting.
-      const checks = this.d.validation.checksFor(build, signal, (line) => ((live.lastActivity = line), (live.lastActivityAt = Date.now()), this.events.emit(buildId, line)));
-      try {
-        const asked = this.registry.buildModel(buildId);
-        await this.workbench.build(
-          { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(retryOf ? { retryOf } : {}), feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}) },
-          {
-            signal,
-            onActivity: (line) => {
-              live.lastActivity = line;
-              live.lastActivityAt = Date.now();
-              this.events.emit(buildId, line);
-            },
-            onModel: (ran) => this.registry.setRanModel(buildId, ran),
-            onCharge: (c) => {
-              // The only check on a value from the builder's host: a sane amount and a short unit, else ignored.
-              if (!saneCharge(c)) return;
-              this.registry.addBuildCharge(buildId, c);
-              this.registry.addHostCharge("build", c, build.capabilityId);
-            },
-            onCheck: checks.run,
-          },
-        );
-      } catch (e) {
-        if (cancelled()) return;
-        if ((e as { interrupted?: boolean }).interrupted) {
-          // Lost the builder's machine side (Hewn restarting?). Don't burn the next attempts on it at
-          // once: if this process goes away meanwhile, the build is still "building" and the restart
-          // retries it; if it's still here after a while, it counts as one failed attempt.
-          this.buildEvent(buildId, `attempt ${attempt}: lost the connection to the builder (${(e as Error).message}); waiting before going on`, tag);
-          await new Promise((ok) => setTimeout(ok, this.platform.interruptWaitMs));
-          if (cancelled()) return;
-        }
-        if ((e as { modelUnavailable?: boolean }).modelUnavailable) {
-          // The model asked for can't run (retired, misspelled, not on this account): nothing is built.
-          const line = `FAILED: model unavailable: ${(e as Error).message}`;
-          history.push(line);
-          this.buildEvent(buildId, line, tag);
-          this.registry.updateBuild(buildId, { status: "failed", log: history });
-          return;
-        }
-        if ((e as { paused?: boolean }).paused) {
-          // The builder's host paused it part-way (e.g. it has used a build's allowance), its work kept:
-          // not for Hewn to retry, the owner's to Continue (a retry picks the work up) or Stop.
-          const line = `PAUSED: ${(e as Error).message}`;
-          history.push(line);
-          this.buildEvent(buildId, line, tag);
-          this.registry.updateBuild(buildId, { status: "failed", log: history });
-          return;
-        }
-        if ((e as { refused?: boolean }).refused) {
-          // The builder's host declined it (e.g. over the month's builds): say why, don't retry.
-          const line = `FAILED: refused: ${(e as Error).message}`;
-          history.push(line);
-          this.buildEvent(buildId, line, tag);
-          this.registry.updateBuild(buildId, { status: "failed", log: history });
-          return;
-        }
-        const msg = `attempt ${attempt}: builder ${builder} failed: ${(e as Error).message}`;
-        history.push(msg);
-        this.buildEvent(buildId, msg, tag);
-        if ((e as { unavailable?: boolean }).unavailable) {
-          // Retrying can't help (e.g. not logged in); fail now with a clear next step.
-          history.push(`FAILED: builder ${builder} is unavailable. Fix it, then retry this build.`);
-          this.buildEvent(buildId, `FAILED: builder ${builder} is unavailable. Fix it, then retry this build.`, tag);
-          this.registry.updateBuild(buildId, { status: "failed", log: history });
-          return;
-        }
-        continue;
-      } finally {
-        clearInterval(heartbeat);
-        // A check still running (the builder stopped mid-call) finishes before anything else validates.
-        await checks.settled();
-      }
-      if (cancelled()) return;
-      history.push(`attempt ${attempt}: builder ${builder} finished in ${Math.round((Date.now() - started) / 1000)}s`);
+      const label = `attempt ${attempt}`;
+      const r = await this.runOnce(run, { label, n: attempt, max, feedback });
+      // Cancelled: cancelBuild already recorded it; just stop.
+      if (r === "cancelled") return;
+      if (r === "again") continue;
+      // Retrying can't help, or isn't Hewn's to decide (paused): the build ends here.
+      if (r !== "done") return this.endRun(run, r);
       this.assertSubmittable(build);
-      const { version, review, log } = await this.validate(build, `builder ${builder}`);
-      history.push(...log.map((l) => `attempt ${attempt}: ${l}`));
+      const v = await this.validateCandidate(build, submitter, { measure: passes[0] === "craft" });
+      run.history.push(...v.log.map((l) => `${label}: ${l}`));
+      if (!v.candidate) {
+        feedback = v.log.join("\n");
+        continue;
+      }
+      const built: PassCandidate = { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
+      const best = passes.length ? await this.runPasses(run, built, passes) : built;
+      if (best === "cancelled") return;
+      // A pass that doesn't end in a valid candidate ends the build as an attempt would (owner, 2026-11-01).
+      if ("end" in best) return this.endRun(run, best);
+      const { version, review, log } = await this.promoteCandidate(build, submitter, best);
+      run.history.push(...log.map((l) => `${best.label}: ${l}`));
       if (review) {
-        this.registry.updateBuild(buildId, { status: "review", review, log: history });
-        this.logger(`${tag} waits for the owner's review (${reviewReason(review)})`);
+        this.registry.updateBuild(buildId, { status: "review", review, log: run.history });
+        this.logger(`${run.tag} waits for the owner's review (${reviewReason(review)})`);
         return;
       }
       if (version) {
-        this.registry.updateBuild(buildId, { status: "promoted", resultVersion: version, log: history });
+        this.registry.updateBuild(buildId, { status: "promoted", resultVersion: version, log: run.history });
         return;
       }
       feedback = log.join("\n");
     }
-    history.push(`FAILED: no valid candidate after ${max} attempts`);
-    this.buildEvent(buildId, `FAILED: no valid candidate after ${max} attempts`, tag);
-    this.registry.updateBuild(buildId, { status: "failed", log: history });
+    this.note(run, `FAILED: no valid candidate after ${max} attempts`);
+    this.registry.updateBuild(buildId, { status: "failed", log: run.history });
+  }
+
+  /** The build ends here, failed (or paused by the builder's host, its work kept), saying why. */
+  private endRun(run: BuilderRun, r: RunEnd) {
+    this.note(run, r.paused ? `PAUSED: ${r.end}` : `FAILED: ${r.end}`);
+    this.registry.updateBuild(run.build.id, { status: "failed", log: run.history });
+  }
+
+  /** A line in a run's history, and on the platform log and the build's transcript. */
+  private note(run: BuilderRun, line: string) {
+    run.history.push(line);
+    this.buildEvent(run.build.id, line, run.tag);
+  }
+
+  /**
+   * Run the builder once: one of the build's attempts, or a pass's (`pass`). `label` starts its lines
+   * in the log ("attempt 2", "critique pass"); `n` of `max` is its place among its kind's tries. The
+   * outcome: it finished ("done"); it failed and another try may help ("again"); the build was
+   * cancelled; or it can't go on (`end` says why: a model that can't run, the host declined or paused
+   * it, the builder unavailable), which ends the build, or a pass. `paused`: the host paused it, its work kept.
+   */
+  private async runOnce(run: BuilderRun, o: { label: string; n: number; max: number; feedback?: string; pass?: BuildPass }): Promise<"done" | "again" | "cancelled" | RunEnd> {
+    const { build, builder, signal, tag } = run;
+    const buildId = build.id;
+    if (signal.aborted) return "cancelled";
+    // Every run of the builder is a new attempt for it, a pass's too: the session it resumes is the build's.
+    const attempt = ++run.runs;
+    this.registry.updateBuild(buildId, { status: "building", log: run.history });
+    const started = Date.now();
+    const live: { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number } = { attempt: o.n, maxAttempts: o.max, startedAt: run.started };
+    this.progress.set(buildId, live);
+    this.setStep(buildId, build.capabilityId, o.pass?.name ?? "code");
+    this.buildEvent(buildId, `builder ${builder} working${o.pass ? ` on the ${o.pass.name} pass` : ""} (${o.pass ? "try" : "attempt"} ${o.n}/${o.max})`, tag);
+    const heartbeat = setInterval(() => {
+      const p = this.progressOf(buildId);
+      if (!p) return;
+      const last = p.lastActivity ? `last: ${p.lastActivity} (${p.secondsSinceActivity}s ago)` : "no activity yet";
+      this.logger(`${tag} ${builder} ${fmtDuration(p.elapsedSeconds)} · ${last}`);
+    }, this.platform.heartbeatMs);
+    (heartbeat as { unref?: () => void }).unref?.();
+    // The builder checking its work as it goes (its `check` tool): validation's steps, without promoting.
+    const checks = this.d.validation.checksFor(build, signal, (line) => ((live.lastActivity = line), (live.lastActivityAt = Date.now()), this.events.emit(buildId, line)));
+    try {
+      const asked = this.registry.buildModel(buildId);
+      await this.workbench.build(
+        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}) },
+        {
+          signal,
+          onActivity: (line) => {
+            live.lastActivity = line;
+            live.lastActivityAt = Date.now();
+            this.events.emit(buildId, line);
+          },
+          onModel: (ran) => this.registry.setRanModel(buildId, ran),
+          onCharge: (c) => {
+            // The only check on a value from the builder's host: a sane amount and a short unit, else ignored.
+            if (!saneCharge(c)) return;
+            this.registry.addBuildCharge(buildId, c);
+            this.registry.addHostCharge("build", c, build.capabilityId);
+          },
+          onCheck: checks.run,
+        },
+      );
+    } catch (e) {
+      if (signal.aborted) return "cancelled";
+      if ((e as { interrupted?: boolean }).interrupted) {
+        // Lost the builder's machine side (Hewn restarting?). Don't burn the next attempts on it at
+        // once: if this process goes away meanwhile, the build is still "building" and the restart
+        // retries it; if it's still here after a while, it counts as one failed attempt.
+        this.buildEvent(buildId, `${o.label}: lost the connection to the builder (${(e as Error).message}); waiting before going on`, tag);
+        await new Promise((ok) => setTimeout(ok, this.platform.interruptWaitMs));
+        if (signal.aborted) return "cancelled";
+      }
+      // The model asked for can't run (retired, misspelled, not on this account): nothing is built.
+      if ((e as { modelUnavailable?: boolean }).modelUnavailable) return { end: `model unavailable: ${(e as Error).message}` };
+      // The builder's host paused it part-way (e.g. it has used a build's allowance), its work kept:
+      // not for Hewn to retry, the owner's to Continue (a retry picks the work up) or Stop.
+      if ((e as { paused?: boolean }).paused) return { end: (e as Error).message, paused: true };
+      // The builder's host declined it (e.g. over the month's builds): say why, don't retry.
+      if ((e as { refused?: boolean }).refused) return { end: `refused: ${(e as Error).message}` };
+      const msg = `${o.label}: builder ${builder} failed: ${(e as Error).message}`;
+      run.history.push(msg);
+      this.buildEvent(buildId, msg, tag);
+      // Retrying can't help (e.g. not logged in); stop now with a clear next step.
+      if ((e as { unavailable?: boolean }).unavailable) return { end: `builder ${builder} is unavailable. Fix it, then retry this build.` };
+      return "again";
+    } finally {
+      clearInterval(heartbeat);
+      // A check still running (the builder stopped mid-call) finishes before anything else validates.
+      await checks.settled();
+    }
+    if (signal.aborted) return "cancelled";
+    run.history.push(`${o.label}: builder ${builder} finished in ${Math.round((Date.now() - started) / 1000)}s`);
+    return "done";
+  }
+
+  /** The passes a build runs once its candidate validates: a new tool's (not a connection's or an install's), as the owner set them. */
+  private passesFor(build: BuildRow, builder: string): Pass[] {
+    if (build.kind !== "create" || (build.request as CreateRequest).kind === "connection") return [];
+    if (noBuilderRuns(builder)) return [];
+    return this.platform.buildPasses();
+  }
+
+  /** The passes a build will run, which its steps show (none: not shown). */
+  private planPasses(buildId: string, passes: Pass[]) {
+    const s = this.steps.get(buildId);
+    if (!s) return;
+    s.passes = passes.length ? passes : undefined;
+    this.events.emit(`${buildId}:step`, this.stepState(buildId));
+  }
+
+  /**
+   * The passes on a validated candidate, in order. Each shows the builder screenshots of the candidate
+   * before it (the whole page, in parts a model can read) and, for the craft pass, what was measured on
+   * it; resumes the builder's session with what the pass asks; and validates what it leaves. The last
+   * pass's candidate is the one promoted. A pass that ends without a valid one (after its tries, or
+   * paused, declined, its builder gone) ends the build as an attempt would, saying why. Nothing
+   * to look at (the UI wasn't rendered): no passes.
+   */
+  private async runPasses(run: BuilderRun, first: PassCandidate, passes: Pass[]): Promise<PassCandidate | "cancelled" | RunEnd> {
+    if (!first.candidate.shots?.length) {
+      this.planPasses(run.build.id, []);
+      return first;
+    }
+    const ownersWords = !!(await this.workbench.file(run.build.id, OWNERS_WORDS_FILE));
+    const otherTools = !!(await this.workbench.file(run.build.id, "OTHER_TOOLS.md"));
+    let current = first;
+    for (const [i, pass] of passes.entries()) {
+      const shots = Object.fromEntries((current.candidate.shots ?? []).map((s) => [`screenshots/${s.name}.png`, s.png]));
+      await this.workbench.writeFolder(run.build.id, "screenshots", shots);
+      const request = passRequest(pass, { files: Object.keys(shots), sampled: !!current.candidate.sampled, defects: current.candidate.defects ?? [], ownersWords, otherTools });
+      const next = await this.runPass(run, pass, request, passes[i + 1] === "craft");
+      if (next === "cancelled" || "end" in next) return next;
+      current = next;
+    }
+    return current;
+  }
+
+  /** One pass: up to PASS_TRIES runs of the builder until what it leaves validates; else why it couldn't. */
+  private async runPass(run: BuilderRun, pass: Pass, request: string, measure: boolean): Promise<PassCandidate | "cancelled" | RunEnd> {
+    const max = Math.min(PASS_TRIES, Math.max(1, this.platform.maxBuildAttempts()));
+    let feedback: string | undefined;
+    for (let n = 1; n <= max; n++) {
+      const label = n === 1 ? `${pass} pass` : `${pass} pass, try ${n}`;
+      const r = await this.runOnce(run, { label, n, max, feedback, pass: { name: pass, request } });
+      if (r === "cancelled") return "cancelled";
+      if (r === "again") continue;
+      if (r !== "done") return r;
+      this.assertSubmittable(run.build);
+      const v = await this.validateCandidate(run.build, `builder ${run.builder}`, { pass, measure });
+      run.history.push(...v.log.map((l) => `${label}: ${l}`));
+      if (v.candidate) return { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
+      feedback = v.log.join("\n");
+    }
+    return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
   }
 
   /** Builds waiting for the owner's review (owner only). */
@@ -1475,10 +1609,38 @@ export const slugify = (s: string) =>
 
 const newBuildId = () => `b-${crypto.randomUUID().slice(0, 8)}`;
 
+/** One build's run of its builder: what its attempts and passes share. `runs`: the builder runs so far (each one its attempt number). */
+interface BuilderRun {
+  build: BuildRow;
+  builder: string;
+  signal: AbortSignal;
+  history: string[];
+  tag: string;
+  retryOf?: string;
+  started: number;
+  runs: number;
+}
+
+/** Why a run of the builder ends its build: `end`, the reason; `paused`, the builder's host paused it with its work kept. */
+type RunEnd = { end: string; paused?: true };
+
+/** How a candidate's tests went. */
+type TestTally = { passed: number; total: number };
+
+/** A validated candidate on its way through the passes (and to promotion): what made it ("attempt 1", "critique pass") and how its tests went. */
+interface PassCandidate {
+  candidate: Candidate;
+  label: string;
+  tests?: TestTally;
+}
+
 const fmtDuration = (s: number) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`);
 
 /** Ids that would collide with platform origins (e.g. http://hewn.localhost). */
 export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
+
+/** No builder runs: the workspace is the candidate as given (an owner's edit), or it's installed from a file or a directory. */
+const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bundle" || builder.startsWith("copy:");
 
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
@@ -1620,7 +1782,8 @@ const oneLine = (s: string, max: number) => {
 
 /**
  * The other tools' looks, OTHER_TOOLS.md: on the owner's Home already, so a new tool must look
- * clearly different from each; a change keeps its own. Empty when there are none.
+ * clearly different from each (and keep its hue clear of theirs when its subject has no colour of its
+ * own), with the hues taken listed in order; a change keeps its own look. Empty when there are none.
  */
 export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string {
   if (!tools.length) return "";
@@ -1628,9 +1791,25 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
   const lines = tools.map((t) => `- **${t.name}** (\`${t.id}\`)${shade(t)}: ${t.look ?? "no look recorded"}`);
   const rule =
     kind === "create"
-      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual (its colour still comes from its subject)."
+      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual. Its colour comes from its subject when the subject has one; when it hasn't, its hue stays at least 40° from each of theirs, or, when no hue is, takes the middle of the widest gap below."
       : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
-  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n`;
+  // The hues taken, in order round the circle, and the widest gap between them (a free hue on a crowded Home).
+  const hues = [...new Set(tools.flatMap((t) => (t.hue === null ? [] : [t.hue])))].sort((a, b) => a - b);
+  const gap = widestGap(hues);
+  const free = gap ? ` The widest gap: ${gap.from} to ${gap.to} (${gap.size}°), its middle ${gap.middle}.` : "";
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n${hues.length ? `\nHues on Home (0–359, round a circle): ${hues.join(", ")}.${free}\n` : ""}`;
+}
+
+/**
+ * The widest gap round the hue circle between `hues` (sorted, distinct): where it starts and ends,
+ * how wide, and its middle. When two are as wide: the one from the last hue round to the first, else
+ * the lower one.
+ */
+export function widestGap(hues: number[]): { from: number; to: number; size: number; middle: number } | undefined {
+  if (!hues.length) return undefined;
+  let best = { from: hues.at(-1)!, to: hues[0], size: hues[0] + 360 - hues.at(-1)! };
+  for (let i = 1; i < hues.length; i++) if (hues[i] - hues[i - 1] > best.size) best = { from: hues[i - 1], to: hues[i], size: hues[i] - hues[i - 1] };
+  return { ...best, middle: Math.round(best.from + best.size / 2) % 360 };
 }
 
 /** One of the owner's other capabilities as a build is told it: its active manifest, and the operations ("name@N") the tool being changed calls on it today. */

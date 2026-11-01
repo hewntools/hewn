@@ -38,9 +38,12 @@ Each operation has: `name` (snake_case), `description`, `version` (contract majo
 `sideEffect` (`read` | `write` | `destructive`).
 
 Set `"hue"` (integer 0–359, OKLCH) to the subject's colour: the one it's known for (e.g. 145 for
-plants or money, 295 for sleep, 240 for water, 25 for workouts). It colours the app icon's tile, and
-it leads the UI's palette too. The design system derives the tile and glyph shades from it in light
-and dark mode.
+plants or money, 295 for sleep, 240 for water, 25 for workouts). A subject with no colour of its own
+(people, plans, words, time) gets a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues go
+round a circle: 350 and 10 are 20° apart), or, when no hue is that far from all of them, the middle
+of the widest gap between them, which `OTHER_TOOLS.md` names; so its tile stands apart on Home. It
+colours the app icon's tile, and it leads the UI's palette too. The design system derives the tile
+and glyph shades from it in light and dark mode.
 
 `"saturation"` (ABI 2.4; integer 0–150, default 100) says how colourful the tile is. Leave it out
 unless the tool stands for a brand: a connection to a black-and-white service (Ghost, Notion, the
@@ -374,10 +377,13 @@ before you write the files):
    of them looks in `OTHER_TOOLS.md` (in your workspace when there are any). It needs an identity
    of its own: someone glancing at two of the owner's tools
    should never mistake one for the other. Tell it apart by its concept, layout, type and signature
-   visual. **Colour comes from the subject:** use the colours the subject is known for when it has
-   them (green for money and plants, purple or deep blue for sleep, blue for water, red for
-   workouts, warm paper and cloth for books), even if another tool is in similar shades. The icon's
-   hue is the tool's lead colour; pick it the same way.
+   visual. **Colour comes from the subject when it has one:** use the colours the subject is known
+   for (green for money and plants, purple or deep blue for sleep, blue for water, red for workouts,
+   warm paper and cloth for books), even if another tool is in similar shades. A subject without a
+   colour of its own (people, plans, words, time) takes a lead hue at least 40° from every hue in
+   `OTHER_TOOLS.md` (or, on a crowded Home, the middle of the widest gap it names), rather than the
+   warm yellow such tools tend to get. The icon's hue is the
+   tool's lead colour; pick it the same way.
 4. **Three directions, then the best one:** sketch three visual directions that really differ: in
    palette, type pairing, layout structure and signature visual, not three shades of one idea. Each
    takes its character from the tool's own world (a running log could feel like a race-day bib; a
@@ -562,8 +568,9 @@ An ordered list. All cases share one fresh state DB with all migrations applied:
 ### sample/calls.json (ABI 2.5)
 
 Sample data: what the tool looks like in use. The owner can install or start over with it, and
-a tool needs it to be shared (its screenshots show it). When you create a tool, write one; when a
-change renames or reshapes the operations it calls, update it.
+a tool needs it to be shared (its screenshots show it). When you create a tool, write one (a new
+tool with a screen fails validation without it); when a change renames or reshapes the operations it
+calls, update it.
 
 ```json
 [

@@ -90,6 +90,7 @@ Your votes are the ground truth. The judge is there to scale beyond what you hav
 - `passes`: `critique` and/or `craft` after the build, in the same result.
   - **critique:** screenshots of its own UI with the data, "five biggest problems, then fix".
   - **craft:** fresh screenshots plus measured defects, fix without a redesign.
+  - What each asks is Hewn's own (`packages/core/src/passes.ts`), as Hewn's passes ask it.
 - `from` with `critique` or `craft`: start from another arm's result instead (the older arms do this).
 - `sequential`: build the cases in order, each told how the earlier tools look (their hue and
   `ui/look.json`), as a Home fills up.
@@ -101,6 +102,11 @@ Your votes are the ground truth. The judge is there to scale beyond what you hav
     builder also gets the owner's own words;
   - `thin`: an agent's one-liner.
 - `sample`: the builder writes `sample/calls.json`, which the bench replays instead of the case's seed.
+- `pipeline`: Hewn's own passes, in the build itself (its `buildPasses` setting), not the bench's: they
+  run on the builder's sample data and fall back as Hewn does. The `pipeline`, `pipeline-craft` and
+  `pipeline-none` arms are Hewn as it builds today (the lean intake with a conversation, today's brief,
+  its own sample data) with both passes, the craft pass only, or none: the release's cost question.
+  Without it, a bench build runs none (the arms' own `passes` are the bench's).
 
 The test suite checks that every arm still applies to the current brief and intake, so an edit there
 can't quietly turn an arm into the baseline. `npm run bench -- list` shows them all.
