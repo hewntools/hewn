@@ -164,7 +164,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     // Elapsed time of the current attempt (the honest number while code is being written).
     let startedAt = Date.now() - (b0.progress?.elapsedSeconds ?? 0) * 1000;
     const clockEl = h("div", { class: "mono muted small" });
-    const seen = new Map(); // step → first seen (ms), for durations
     let step = b.step;
     // "Spec agreed" opens to the spec the builder works from (kept open across redraws).
     const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
@@ -176,13 +175,12 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const live = () => {
       const steps = stepsOf(b, step?.passes);
       const at = steps.findIndex(([k]) => k === (step?.step ?? "code"));
-      if (step && !seen.has(step.step)) seen.set(step.step, Date.now());
       const meta = (k, i) => {
         // A pass's own tests show on its step while they run.
         if (step?.tests && (k === step.step ? PASS_STEPS[k] : k === "tests" && !PASS_STEPS[step.step])) return `${step.tests.passed} / ${step.tests.total}`;
-        const start = seen.get(k);
-        const next = steps[i + 1] && seen.get(steps[i + 1][0]);
-        return i < at && start && next ? mmss(next - start) : "";
+        // How long a step took, by Hewn's clock (all its turns, a retry's too): the same whenever the page was opened.
+        const s = step?.seconds?.[k];
+        return i < at && s !== undefined ? mmss(s * 1000) : "";
       };
       const waitingAgent = b.builder === "agent";
       const base = cap().version;

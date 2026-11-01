@@ -111,6 +111,29 @@ describe("passes after a new tool's build", () => {
     assert.ok(steps.some((s) => s.step === "craft" && s.tests?.total === 2), "a pass's own tests show on its step");
   });
 
+  test("each step's time is Hewn's own: writing code counts all of it (checks too), and each pass is timed", async () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const { view, steps } = await follow(
+      async (ws, job) => {
+        counter("v:build")(ws, job);
+        await sleep(300);
+        await job.check!("c1");
+        await sleep(300);
+      },
+      async (ws) => void (markUi(ws, "v:critique"), await sleep(400)),
+      async (ws) => void (markUi(ws, "v:craft"), await sleep(200)),
+    );
+    assert.equal(view.status, "promoted", view.log.join("\n"));
+    const last = steps.at(-1)!;
+    assert.ok(last.seconds.code! >= 0.6, `writing code, across its check: ${last.seconds.code}`);
+    assert.ok(last.seconds.critique! >= 0.4, `the critique: ${last.seconds.critique}`);
+    assert.ok(last.seconds.craft! >= 0.2, `the craft pass: ${last.seconds.craft}`);
+    assert.ok(last.seconds.tests! < 0.6, `the tests are timed apart: ${last.seconds.tests}`);
+    // Each step state carries them, so a page opened at any point shows the same.
+    const atCraft = steps.find((s) => s.step === "craft")!;
+    assert.equal(atCraft.seconds.code, last.seconds.code);
+  });
+
   test("a pass that doesn't validate after its tries: the candidate before it goes live, and the passes after it don't run", async () => {
     const { view } = await follow(counter("v:build"), (ws) => (markUi(ws, "v:critique"), breakTests(ws)), (ws, job) => {
       assert.match(job.feedback ?? "", /1 of 1 test cases failed/, "the second try gets the failure");
