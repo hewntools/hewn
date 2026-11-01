@@ -172,15 +172,20 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation, { mode: b.kind === "create" ? "create" : "modify", cap: cap(), all, version: b.resultVersion })) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
+    // The running step's time, counting up between the step states Hewn sends (its seconds as of `received`).
+    let running = null;
     const live = () => {
       const steps = stepsOf(b, step?.passes);
       const at = steps.findIndex(([k]) => k === (step?.step ?? "code"));
+      running = null;
       const meta = (k, i) => {
         // A pass's own tests show on its step while they run.
         if (step?.tests && (k === step.step ? PASS_STEPS[k] : k === "tests" && !PASS_STEPS[step.step])) return `${step.tests.passed} / ${step.tests.total}`;
         // How long a step took, by Hewn's clock (all its turns, a retry's too): the same whenever the page was opened.
         const s = step?.seconds?.[k];
-        return i < at && s !== undefined ? mmss(s * 1000) : "";
+        if (s === undefined || i > at) return "";
+        if (i === at) running = { seconds: s, received: Date.now() };
+        return mmss(s * 1000);
       };
       const waitingAgent = b.builder === "agent";
       const base = cap().version;
@@ -205,7 +210,11 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         ),
         !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? `Installed ${installedFrom(b)}: no builder runs. Its own tests run as for any build.` : "No builder runs.") : buildMeta(b)),
         convoView,
-        h("ol", { class: "steps" }, steps.map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        h("ol", { class: "steps" }, steps.map(([k, label], i) => {
+          const row = stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i));
+          if (i === at && running) running.el = row.querySelector(".meta");
+          return row;
+        })),
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
@@ -213,7 +222,10 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       keepScroll();
       tickClock();
     };
-    const tickClock = () => (clockEl.textContent = mmss(Date.now() - startedAt));
+    const tickClock = () => {
+      clockEl.textContent = mmss(Date.now() - startedAt);
+      if (running?.el) running.el.textContent = mmss(running.seconds * 1000 + Date.now() - running.received);
+    };
     const clockTimer = setInterval(tickClock, 1000);
     onLeave(() => clearInterval(clockTimer));
 
