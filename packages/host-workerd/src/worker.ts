@@ -22,7 +22,7 @@ import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, S
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
-import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
+import { agentModels, DEFAULT_BUILD_PASSES, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
@@ -252,6 +252,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
     snapshot: async (buildId, to) => void (await sv.json("/workbench/snapshot", { buildId, to })),
+    writeFolder: async (buildId, folder, files) => void (await sv.json("/workbench/write-folder", { buildId, folder, files: encodeFiles(files) })),
     build: async (job: BuildJob, hooks) => {
       let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean } | undefined;
       // The builder's checks, run here (the core) and answered to the supervisor, where the builder waits.
@@ -343,7 +344,7 @@ type CapabilityHostApi = {
 
 // ---------- HewnDO: the owner's platform ----------
 
-const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14 };
+const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: DEFAULT_BUILD_PASSES };
 
 export class HewnDO extends DurableObject<Env> {
   private platform!: Platform;
@@ -378,6 +379,7 @@ export class HewnDO extends DurableObject<Env> {
         // From the builder's model list (the supervisor reads it and keeps it a while).
         modelEfforts: async (builder, model) => (await supervisor(env).json<ModelCatalog>("/models/catalog", { agent: builder })).models.find((m) => m.id === model)?.efforts,
         maxBuildAttempts: () => this.settings().maxBuildAttempts,
+        buildPasses: () => this.settings().buildPasses,
         logRetentionDays: () => this.settings().logRetentionDays,
         timezone: () => this.settings().timeZone || env.TIMEZONE || "UTC",
         onSchedulesChanged: () => void this.armAlarm(),
@@ -429,7 +431,7 @@ export class HewnDO extends DurableObject<Env> {
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"] as const)
+    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"] as const)
       if (k in change && next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
   }

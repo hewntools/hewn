@@ -255,6 +255,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     },
     "/workbench/remove": async (b) => workbench.remove(b.buildId),
     "/workbench/snapshot": async (b) => workbench.snapshot(String(b.buildId), String(b.to)),
+    "/workbench/write-folder": async (b) => workbench.writeFolder(String(b.buildId), String(b.folder), Object.fromEntries(Object.entries(b.files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]))),
     "/workbench/bundle": async (b) => workbench.bundle(b.buildId),
     "/workbench/note": async (b) => workbench.note(b.buildId, b.line),
     "/workbench/transcript": async (b) => ({ text: (await workbench.transcript(b.buildId)) ?? null }),

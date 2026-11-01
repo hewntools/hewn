@@ -3,6 +3,7 @@
 // Node implements these in-process; the workerd host forwards the machine-bound ones
 // (intake, connecting local agents, backups) to the supervisor.
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
+import { type Pass, PASSES } from "@hewntools/core/passes.ts";
 import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
 
@@ -27,7 +28,12 @@ export interface Settings {
   jobModels?: { builder?: Record<string, JobModel>; intake?: Record<string, JobModel> };
   /** Model names agents may ask a build to use, per builder agent. Unset: DEFAULT_AGENT_MODELS (the web client shows what the server resolves). */
   agentModels?: Record<string, string[]>;
+  /** The passes a new tool's build runs once its candidate validates ("critique", "craft"); [] for none. */
+  buildPasses: Pass[];
 }
+
+/** The passes new tools' builds run unless the owner says otherwise. */
+export const DEFAULT_BUILD_PASSES: Pass[] = ["critique", "craft"];
 
 /** What one job runs on with one agent: a model name the agent's CLI takes, and an effort. */
 export interface JobModel {
@@ -175,6 +181,7 @@ export function settingsProblems(next: Record<string, unknown>, opts: { remote?:
   const n = next.maxBuildAttempts as number;
   if (!Number.isInteger(n) || n < 1 || n > 5) bad.push("maxBuildAttempts must be 1–5");
   if (typeof next.sandbox !== "boolean") bad.push("sandbox must be true or false");
+  if (next.buildPasses !== undefined && (!Array.isArray(next.buildPasses) || next.buildPasses.some((p) => !(PASSES as readonly unknown[]).includes(p)))) bad.push(`buildPasses must be a list of ${PASSES.map((p) => `"${p}"`).join(" and ")}, or [] for none`);
   if (next.firstRunDone !== undefined && typeof next.firstRunDone !== "boolean") bad.push("firstRunDone must be true or false");
   const days = next.logRetentionDays as number;
   if (!Number.isInteger(days) || days < 0 || days > 3650) bad.push("logRetentionDays must be 0 (forever) to 3650");

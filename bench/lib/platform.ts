@@ -14,6 +14,7 @@ import { dirBlobs } from "@hewntools/test-host/blobs.ts";
 import { inProcessRuntime } from "@hewntools/test-host/runtime.ts";
 import { nodeSql } from "@hewntools/test-host/sql.ts";
 import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
+import type { Pass } from "@hewntools/core/passes.ts";
 import type { Served } from "./ui-server.ts";
 
 export interface BenchPlatformOptions {
@@ -28,6 +29,8 @@ export interface BenchPlatformOptions {
   log?: (line: string) => void;
   /** Who builds (default: Claude Code, as Hewn runs it). Tests pass a scripted one. */
   builder?: CapabilityBuilder;
+  /** Hewn's own passes on a new tool's build (its pipeline), in order. Default: none (the bench runs its arms' passes itself). */
+  passes?: Pass[];
 }
 
 export interface BenchPlatform {
@@ -73,6 +76,7 @@ export function benchPlatform(root: string, o: BenchPlatformOptions = {}): Bench
     logger: o.log,
     builder: () => "claude",
     maxBuildAttempts: () => 3,
+    buildPasses: () => o.passes ?? [],
     buildModel: () => ({ ...(o.model ? { model: o.model } : {}), ...(o.effort ? { effort: o.effort } : {}) }),
     agentBuildModels: () => ["default", ...(o.model ? [o.model] : [])],
     modelEfforts: async () => (o.effort ? [o.effort] : undefined),

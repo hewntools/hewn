@@ -68,9 +68,16 @@ export interface BuilderUsage {
   thinkingTokens: number;
 }
 
-/** Sum what the builder's runs reported (Claude Code's result events in each attempt's .jsonl). */
+/**
+ * Sum what the builder's runs reported (Claude Code's result events in each attempt's .jsonl). Each
+ * run counts once: an attempt's copy of a build's transcript holds the attempts before it too (the
+ * builder appends to one file per build). Time, turns and tokens are per run; the cost of a resumed
+ * session (a later attempt, Hewn's own passes) is the session's so far, so a session counts its last.
+ */
 export function builderUsage(jsonlFiles: string[]): BuilderUsage {
   const u: BuilderUsage = { attempts: jsonlFiles.length, minutes: 0, turns: 0, usd: 0, outputTokens: 0, thinkingTokens: 0 };
+  const seen = new Set<string>();
+  const sessions = new Map<string, number>();
   for (const f of jsonlFiles) {
     for (const line of readFileSync(f, "utf8").split("\n")) {
       if (!line.trim()) continue;
@@ -82,14 +89,19 @@ export function builderUsage(jsonlFiles: string[]): BuilderUsage {
       }
       if (e.type === "system" && e.subtype === "init" && typeof e.model === "string") u.model = e.model;
       if (e.type === "result") {
+        const key = typeof e.uuid === "string" ? e.uuid : line;
+        if (seen.has(key)) continue;
+        seen.add(key);
         u.minutes += (e.duration_ms ?? 0) / 60_000;
         u.turns += e.num_turns ?? 0;
-        u.usd += e.total_cost_usd ?? 0;
+        if (typeof e.session_id === "string") sessions.set(e.session_id, Math.max(sessions.get(e.session_id) ?? 0, e.total_cost_usd ?? 0));
+        else u.usd += e.total_cost_usd ?? 0;
         u.outputTokens += e.usage?.output_tokens ?? 0;
         u.thinkingTokens += e.usage?.output_tokens_details?.thinking_tokens ?? 0;
       }
     }
   }
+  for (const usd of sessions.values()) u.usd += usd;
   u.minutes = Math.round(u.minutes * 10) / 10;
   u.usd = Math.round(u.usd * 100) / 100;
   return u;

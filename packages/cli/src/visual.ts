@@ -79,7 +79,10 @@ export interface VisualResult {
   /** The desktop screen as it first shows, with prefers-color-scheme: light, then dark: the build page's. */
   screenshot?: Buffer;
   screenshotDark?: Buffer;
-  /** The UI (not the widget sheet) whole, down to 5,000 px, 1280 and 390 px wide, light and dark: four images. */
+  /**
+   * The UI (not the widget sheet) whole, down to 5,000 px, 1280 and 390 px wide, light and dark: four
+   * images, a long page in parts ("mobile-light", then "mobile-light-2" …; see `wholePageParts`).
+   */
   shots?: VisualShot[];
   /** With `measure`: what to fix, one line each (defectLines). */
   defects?: string[];
@@ -219,6 +222,10 @@ async function devtoolsUrl(profile: string, timeoutMs: number, exited: () => boo
   throw new Error("the browser didn't start");
 }
 
+/** The tallest part of a whole-page render, in image px, and the most pixels in one (see `wholePageParts`). */
+const MAX_PART_PX = 2000;
+const MAX_PART_PIXELS = 1_600_000;
+
 type Msg = { id?: number; method?: string; params?: any; result?: any; error?: { message: string }; sessionId?: string };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -229,6 +236,11 @@ export interface Page extends MeasuredPage {
   shot(): Promise<Buffer>;
   /** The whole page, down to `maxHeight` CSS px, as PNG. */
   wholePage(maxHeight?: number): Promise<Buffer>;
+  /**
+   * The whole page, down to `maxHeight` CSS px, in parts a model reads as they are, top to bottom: each
+   * at most 2,000 px tall and 1.6 megapixels (a model's client shrinks a taller image until it can't be read).
+   */
+  wholePageParts(maxHeight?: number): Promise<Buffer[]>;
   close(): Promise<void>;
 }
 
@@ -364,6 +376,20 @@ export async function launchBrowser(binary: string, opts: { flags?: string[]; lo
           const { data } = await s("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width: screen.width, height, scale: 1 } });
           return Buffer.from(data, "base64");
         },
+        async wholePageParts(maxHeight = 5000) {
+          const { cssContentSize } = await s("Page.getLayoutMetrics");
+          const height = Math.min(Math.max(Math.ceil(cssContentSize.height), screen.height), maxHeight);
+          const most = Math.floor(Math.min(MAX_PART_PX / screen.scale, MAX_PART_PIXELS / (screen.width * screen.scale ** 2)));
+          // Even parts: no sliver left over at the end.
+          const n = Math.ceil(height / most);
+          const part = Math.ceil(height / n);
+          const out: Buffer[] = [];
+          for (let y = 0; y < height; y += part) {
+            const { data } = await s("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y, width: screen.width, height: Math.min(part, height - y), scale: 1 } });
+            out.push(Buffer.from(data, "base64"));
+          }
+          return out;
+        },
         async close() {
           listeners.delete(onMsg);
           await send("Target.closeTarget", { targetId }).catch(() => {});
@@ -412,11 +438,12 @@ export function chromiumCheck(browser: string | undefined = findBrowser()): Visu
         await page.goto(site.url);
         await page.scheme("light");
         const layout = req.measure ? await layoutDefects(page, screen.width) : undefined;
+        const whole = async (scheme: string) => (await page.wholePageParts()).forEach((png, i) => shots.push({ name: `${screen.name}-${scheme}${i ? `-${i + 1}` : ""}`, png }));
         const light = await page.shot();
-        shots.push({ name: `${screen.name}-light`, png: await page.wholePage() });
+        await whole("light");
         await page.scheme("dark");
         const dark = await page.shot();
-        shots.push({ name: `${screen.name}-dark`, png: await page.wholePage() });
+        await whole("dark");
         const errors = [...page.errors];
         // The phone's first, as a builder should fix them.
         if (layout) screens.unshift({ where: onScreen(screen.width, screen.mobile), layout, errors });

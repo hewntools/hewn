@@ -40,6 +40,8 @@ export interface Candidate {
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
+/** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
+export const MAX_PARTS_BYTES = 10_000_000;
 
 export class Validation extends Domain {
   /** Validate a build's candidate and promote it (or hold it for the owner's review). Throws with what failed. */
@@ -347,10 +349,16 @@ export class Validation extends Domain {
       await this.workbench.remove(copy.id).catch(() => {});
     }
     const defects = candidate?.defects ?? [];
-    const images = candidate?.shots ?? [];
+    // The top of a long page shown, four images a call whatever its length (a session keeps every image
+    // it was shown); the rest in files beside them, to open when needed.
+    const shots = candidate?.shots ?? [];
+    const images = shots.filter((s) => !/-\d+$/.test(s.name));
+    // Within MAX_PARTS_BYTES (an answer crosses to the host's builder whole): what doesn't fit is left out, the phone's dark first.
+    let room = MAX_PARTS_BYTES;
+    const parts = shots.filter((s) => /-\d+$/.test(s.name) && (room -= s.png.length) >= 0);
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
-    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images };
+    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };
   }
 
   /**
@@ -607,19 +615,19 @@ const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`
 /**
  * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
  * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
- * `sampled`: whether the renders show the sample data.
+ * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page, in files only.
  */
-function checkText(c: { failures: string[]; defects: string[]; images: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
-  const { failures, defects, images, passed, ui, sampled } = c;
+function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
+  const { failures, defects, images, parts, passed, ui, sampled } = c;
   const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
-  const shots = images.map((n) => `screenshots/${n}.png`);
+  const files = images.map((n) => `screenshots/${n}.png`);
   const skipped = passed.find((l) => /visual check skipped/.test(l));
   return [
     failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || images.length ? " Look at what follows before you stop." : ""}`,
     failures.length ? `What failed:\n${list(failures)}` : "",
     defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
     images.length
-      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${shots.join(", ")}. Open every one and fix what looks broken, cramped, cut off or unreadable.`
+      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${files.join(", ")}.${parts.length ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.` : ""} Open every one and fix what looks broken, cramped, cut off or unreadable.`
       : ui === false
         ? ""
         : `No screenshots: the UI wasn't rendered${skipped ? ` (${skipped})` : ui === undefined ? " (fix the failures first)" : ""}.`,

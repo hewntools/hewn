@@ -39,6 +39,8 @@ export interface Job {
   passes?: Pass[];
   spec?: SpecSource;
   sample?: boolean;
+  /** Hewn's own passes in the build (Arm.pipeline). */
+  pipeline?: Pass[];
   sandbox: boolean;
 }
 
@@ -125,7 +127,7 @@ export async function runBench(o: RunOptions): Promise<string> {
     dirty: !!sh("git", ["status", "--porcelain", "--", "spec", "packages", "bench"]),
     briefSha: createHash("sha256").update(current).digest("hex").slice(0, 12),
     claude: sh("claude", ["--version"]),
-    arms: arms.map((a) => ({ name: a.name, about: a.about, model: a.model, effort: a.effort, from: a.from, critique: a.critique })),
+    arms: arms.map((a) => ({ name: a.name, about: a.about, model: a.model, effort: a.effort, from: a.from, critique: a.critique, ...(a.pipeline ? { pipeline: a.pipeline } : {}) })),
     cases: cases.map((c) => c.id),
     reps: o.reps,
     sandbox: o.sandbox,
@@ -149,7 +151,7 @@ export async function runBench(o: RunOptions): Promise<string> {
         const from = arm.from ? resultDir(arm.from, c.id, rep) : undefined;
         const others = arm.sequential ? cases.slice(0, i).map((e) => resultDir(arm.name, e.id, rep)) : undefined;
         const after = [...(from ? [from] : []), ...(others?.length ? [others.at(-1)!] : [])];
-        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, ...(arm.craft ? { craft: true } : {}), ...(arm.passes ? { passes: arm.passes } : {}), ...(arm.spec ? { spec: arm.spec } : {}), ...(arm.sample ? { sample: true } : {}), from, ...(others ? { others } : {}), sandbox: o.sandbox } });
+        planned.push({ dir, after, job: { arm: arm.name, case: c.id, rep, brief: briefs[arm.name], model: arm.model, effort: arm.effort, critique: arm.critique, ...(arm.craft ? { craft: true } : {}), ...(arm.passes ? { passes: arm.passes } : {}), ...(arm.spec ? { spec: arm.spec } : {}), ...(arm.sample ? { sample: true } : {}), ...(arm.pipeline ? { pipeline: arm.pipeline } : {}), from, ...(others ? { others } : {}), sandbox: o.sandbox } });
       });
   const todo = planned.filter((p) => readResult(p.dir)?.status !== "done");
   log(`${planned.length} results, ${planned.length - todo.length} already done; running ${todo.length}, ${o.concurrency} at a time → ${runDir}`);
@@ -254,7 +256,7 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
   const home = join(dir, "home");
   const versionDir = join(dir, "version");
   if (job.from) cpSync(join(job.from, "home"), home, { recursive: true });
-  const bp = benchPlatform(home, { brief: readFileSync(job.brief, "utf8"), model: job.model, effort: job.effort, sandbox: job.sandbox, transcripts: join(dir, "transcripts"), log: (l) => log(`[platform] ${l}`), ...(o.builder ? { builder: o.builder } : {}) });
+  const bp = benchPlatform(home, { brief: readFileSync(job.brief, "utf8"), model: job.model, effort: job.effort, sandbox: job.sandbox, transcripts: join(dir, "transcripts"), log: (l) => log(`[platform] ${l}`), ...(o.builder ? { builder: o.builder } : {}), ...(job.pipeline ? { passes: job.pipeline } : {}) });
   try {
     let build: BuildView;
     if (job.from) {

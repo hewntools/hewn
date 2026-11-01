@@ -118,7 +118,7 @@ function folderInside(workspace: string, rel: string): string {
  * link) inside it, and the file itself isn't followed if it's a link. Hewn runs unconfined; a builder
  * with a shell could otherwise point a folder at one of the owner's and have Hewn write into it.
  */
-function writeInside(workspace: string, rel: string, data: Uint8Array | string) {
+export function writeInside(workspace: string, rel: string, data: Uint8Array | string) {
   const target = join(folderInside(workspace, dirname(rel)), rel.split(sep).at(-1)!);
   if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(target);
   const fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644);
@@ -147,13 +147,15 @@ export function openCheck(workspace: string, run: (id: string) => Promise<CheckR
     try {
       const r = await run(id);
       const images: string[] = [];
+      const fileName = (n: string) => `${n.replace(/[^a-z0-9-]/gi, "")}.png`;
       for (const img of r.images) {
-        const name = img.name.replace(/[^a-z0-9-]/gi, "");
-        writeInside(workspace, join(CHECK_DIR, "results", `${id}-${name}.png`), img.png);
-        // Also where file tools find them, for a builder whose MCP client drops images.
-        writeInside(workspace, join("screenshots", `${name}.png`), img.png);
-        images.push(`${id}-${name}.png`);
+        writeInside(workspace, join(CHECK_DIR, "results", `${id}-${fileName(img.name)}`), img.png);
+        images.push(`${id}-${fileName(img.name)}`);
       }
+      // Also where file tools find them, for a builder whose MCP client drops images, with the rest of a
+      // long page: this check's renders only, none left from an earlier one (or a pass) to mistake for them.
+      rmSync(join(workspace, "screenshots"), { recursive: true, force: true });
+      for (const img of [...r.images, ...(r.parts ?? [])]) writeInside(workspace, join("screenshots", fileName(img.name)), img.png);
       out = { passed: r.passed, text: r.text, images };
     } catch (e) {
       out = { error: (e as Error).message };

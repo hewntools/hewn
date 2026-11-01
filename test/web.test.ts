@@ -667,7 +667,11 @@ describe("web client (owner surface)", () => {
 
     test("settings: read and write platform.json, validated; no discovery option", async () => {
       const s = (await api("/settings")).json;
-      assert.deepEqual(Object.keys(s).sort(), ["builder", "intake", "logRetentionDays", "maxBuildAttempts", "sandbox"]);
+      assert.deepEqual(Object.keys(s).sort(), ["buildPasses", "builder", "intake", "logRetentionDays", "maxBuildAttempts", "sandbox"]);
+      assert.deepEqual(s.buildPasses, ["critique", "craft"]);
+      assert.equal((await api("/settings", { method: "PUT", body: { buildPasses: ["polish"] } })).status, 400);
+      assert.deepEqual((await api("/settings", { method: "PUT", body: { buildPasses: ["craft"] } })).json.buildPasses, ["craft"]);
+      assert.deepEqual(JSON.parse(readFileSync(`${t.home.root}/platform.json`, "utf8")).buildPasses, ["craft"]);
       assert.equal(s.logRetentionDays, 14);
       assert.equal((await api("/settings", { method: "PUT", body: { logRetentionDays: -1 } })).status, 400);
       assert.equal((await api("/settings", { method: "PUT", body: { logRetentionDays: 0 } })).json.logRetentionDays, 0);
