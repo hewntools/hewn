@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
-import { LOOK_CHARS, lookText, looksNote } from "@hewntools/core/platform/builds.ts";
+import { LOOK_CHARS, lookText, looksNote, widestGap } from "@hewntools/core/platform/builds.ts";
 import { editJson, FIXTURES, SEED, setup } from "./helpers.ts";
 
 /** A recorded look, long enough to be cut short (a palette of 40 named colours). */
@@ -104,8 +104,18 @@ describe("the owner's other tools' looks", () => {
       { id: "c", name: "C", hue: 85, saturation: null },
       { id: "d", name: "D", hue: null, saturation: null },
     ]);
-    assert.match(note, /Its colour comes from its subject when the subject has one; when it hasn't, its hue stays at least 40° from each of theirs\./);
-    assert.match(note, /\nHues on Home \(0–359, round a circle\): 10, 85\.\n$/);
+    assert.match(note, /when it hasn't, its hue stays at least 40° from each of theirs, or, when no hue is, takes the middle of the widest gap below\./);
+    assert.match(note, /\nHues on Home \(0–359, round a circle\): 10, 85\. The widest gap: 85 to 10 \(285°\), its middle 228\.\n$/);
     assert.doesNotMatch(looksNote([{ id: "d", name: "D", hue: null, saturation: null }]), /Hues on Home/, "none known: no line");
+  });
+
+  test("on a crowded Home no hue is 40° from all the others: the widest gap's middle is named, and it's always there", () => {
+    // Twelve tools 30° apart: every gap is 30°.
+    const crowded = Array.from({ length: 12 }, (_, i) => ({ id: `t${i}`, name: `T${i}`, hue: i * 30, saturation: null }));
+    assert.match(looksNote(crowded), /Hues on Home \(0–359, round a circle\): 0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330\. The widest gap: 330 to 0 \(30°\), its middle 345\./);
+    assert.deepEqual(widestGap([20, 30, 200, 250]), { from: 30, to: 200, size: 170, middle: 115 });
+    assert.deepEqual(widestGap([350, 359]), { from: 359, to: 350, size: 351, middle: 175 }, "round the circle");
+    assert.deepEqual(widestGap([90]), { from: 90, to: 90, size: 360, middle: 270 }, "one hue: its opposite");
+    assert.equal(widestGap([]), undefined);
   });
 });
