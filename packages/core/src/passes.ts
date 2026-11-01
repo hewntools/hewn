@@ -11,6 +11,16 @@ export const PASSES: readonly Pass[] = ["critique", "craft"];
 /** How many times a pass's builder may try to leave a valid candidate (at most the build's attempts) before its build keeps the one from before it. */
 export const PASS_TRIES = 2;
 
+/** The passes new tools' builds run unless the owner says otherwise (a fresh list each time). */
+export const defaultPasses = (): Pass[] => [...PASSES];
+
+/**
+ * A long page renders in parts, top to bottom: "mobile-light", then "mobile-light-2" and on. The
+ * name of part `i` (0 the first) of a render, and whether a render's name is a further part.
+ */
+export const partName = (name: string, i: number) => (i ? `${name}-${i + 1}` : name);
+export const isPart = (name: string) => /-\d+$/.test(name);
+
 /** The passes in `list` that Hewn knows, once each, in the order they run. */
 export const passesIn = (list: unknown): Pass[] => (Array.isArray(list) ? PASSES.filter((p) => list.includes(p)) : []);
 
@@ -18,7 +28,7 @@ export const passesIn = (list: unknown): Pass[] => (Array.isArray(list) ? PASSES
 export const CRITIQUE_REQUEST = [
   "Design review pass. The screenshots in screenshots/ show this tool's UI as the owner sees it today, filled with real data (desktop light, desktop dark, mobile light, mobile dark). Open every one of them and look at them critically, as a demanding senior product designer would.",
   "First write down the five biggest problems you see (hierarchy, density, what the eye lands on first, how generic it looks, how well the data is visualised, the main action, small-screen layout, dark mode, delight). Then fix them in ui/, raising the bar: a screen the owner is delighted to open, with its own character and at least one custom data visual.",
-  "Change only ui/ (the operations, state and tests stay exactly as they are). The screenshots/ folder is removed after this pass; don't link to it.",
+  "Change only ui/ (the operations, state and tests stay exactly as they are). The screenshots/ folder is never part of the tool; don't link to it.",
 ].join("\n\n");
 
 /** What the craft pass asks for: the screen made right, not redesigned (the bench's words). */
@@ -27,7 +37,7 @@ export function craftRequest(defects: string[]): string {
     "Craft pass. The screenshots in screenshots/ show this tool's UI as it is now, filled with real data (desktop light, desktop dark, phone light, phone dark, the phone 390 px wide). Open every one of them.",
     defects.length ? `Measured on this UI:\n${defects.map((d) => `- ${d}`).join("\n")}` : "Nothing was measured as broken, but look closely anyway.",
     "Fix what's broken, cramped or cut off, on the phone first: anything that sticks out past the screen or gets clipped, elements that overlap or cover each other, labels cut short where the cut hides what they mean, text wrapping one word per line, collisions in charts and axes, low contrast, misalignment, and empty gaps that look like mistakes. Check the result against every screenshot's size, and keep it working from 375 px up.",
-    "Don't redesign: keep the concept, palette, type and layout direction, and every feature. Change only ui/ (keep ui/look.json true). The screenshots/ folder is removed after this pass; don't link to it.",
+    "Don't redesign: keep the concept, palette, type and layout direction, and every feature. Change only ui/ (keep ui/look.json true). The screenshots/ folder is never part of the tool; don't link to it.",
   ].join("\n\n");
 }
 
@@ -38,7 +48,7 @@ export function craftRequest(defects: string[]): string {
  * pointed to rather than repeated (the builder has read them, and both can be long).
  */
 export function passRequest(pass: Pass, o: { files: string[]; sampled: boolean; defects?: string[]; ownersWords?: boolean; otherTools?: boolean }): string {
-  const parts = o.files.some((f) => /-\d+\.png$/.test(f));
+  const parts = o.files.some((f) => isPart(f.replace(/\.png$/, "")));
   return [
     pass === "critique" ? CRITIQUE_REQUEST : craftRequest(o.defects ?? []),
     `The screenshots: ${o.files.join(", ")}.${parts ? " A long page comes in parts, top to bottom: desktop-light-2.png carries on from desktop-light.png, and so on." : ""}${o.sampled ? "" : " The tool has no sample data (sample/calls.json), so they show it empty."}`,

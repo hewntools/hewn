@@ -27,7 +27,7 @@ describe("the builder's check on the workerd host", () => {
     assert.equal(done.status, "promoted", JSON.stringify(done.log));
     assert.equal(checks.length, 1);
     assert.equal(checks[0].passed, true, checks[0].text);
-    assert.match(checks[0].text, /^PASS[^]*Your UI empty \(there.s no sample\/calls.json to fill it\)[^]*What passed:[^]*2 test cases passed/);
+    assert.match(checks[0].text, /^PASS[^]*Your UI filled with your sample data[^]*What passed:[^]*2 test cases passed[^]*sample data replays \(3 calls\)/);
     // The four renders when the supervisor finds a browser (this Mac, the Linux CI); without one the check says so.
     if (findBrowser()) {
       assert.deepEqual(checks[0].images.map((i) => i.name), ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]);

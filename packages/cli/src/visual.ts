@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import type { VisualShot, VisualWidget } from "@hewntools/core/ports.ts";
+import { partName } from "@hewntools/core/passes.ts";
 import { sourceAsset } from "./assets.ts";
 import { clickThrough, defectLines, layoutDefects, type MeasuredPage, onScreen, type ScreenDefects } from "./defects.ts";
 import { uiCsp, withShim } from "@hewntools/host-workerd/surface/ui.ts";
@@ -438,7 +439,7 @@ export function chromiumCheck(browser: string | undefined = findBrowser()): Visu
         await page.goto(site.url);
         await page.scheme("light");
         const layout = req.measure ? await layoutDefects(page, screen.width) : undefined;
-        const whole = async (scheme: string) => (await page.wholePageParts()).forEach((png, i) => shots.push({ name: `${screen.name}-${scheme}${i ? `-${i + 1}` : ""}`, png }));
+        const whole = async (scheme: string) => (await page.wholePageParts()).forEach((png, i) => shots.push({ name: partName(`${screen.name}-${scheme}`, i), png }));
         const light = await page.shot();
         await whole("light");
         await page.scheme("dark");

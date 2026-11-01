@@ -2,8 +2,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { DEFAULT_BUILD_PASSES, type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
-import { type Pass, passesIn } from "@hewntools/core/passes.ts";
+import { type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
+import { defaultPasses, type Pass, passesIn } from "@hewntools/core/passes.ts";
 import type { Home } from "./home.ts";
 
 /** User-owned platform settings. Agents have no API to change them. */
@@ -38,7 +38,7 @@ export interface PlatformConfig {
   buildPasses: Pass[];
 }
 
-export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: DEFAULT_BUILD_PASSES };
+export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses() };
 
 /** The defaults here: a host that runs the builder and intake (HEWN_BUILD_URL) makes them the default. */
 const defaults = (): PlatformConfig => ({ ...DEFAULT_CONFIG, ...(process.env.HEWN_BUILD_URL ? { builder: "remote", intake: "remote" } : {}) });
@@ -73,7 +73,7 @@ export function readConfig(home: Home): PlatformConfig {
     sandbox,
     intake,
     logRetentionDays,
-    buildPasses: Array.isArray(buildPasses) ? passesIn(buildPasses) : DEFAULT_BUILD_PASSES,
+    buildPasses: Array.isArray(buildPasses) ? passesIn(buildPasses) : defaultPasses(),
     ...(typeof backupDir === "string" && backupDir ? { backupDir } : {}),
     ...(firstRunDone === true ? { firstRunDone } : {}),
     ...(typeof publicListen === "string" && IPV4.test(publicListen) ? { publicListen } : {}),
