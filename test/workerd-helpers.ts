@@ -9,6 +9,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { RemoteJobs } from "@hewntools/cli/builders/remote.ts";
 import type { Intake } from "@hewntools/cli/intake.ts";
 import type { Hosted } from "@hewntools/cli/supervisor/index.ts";
+import type { Pass } from "@hewntools/core/passes.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
 import { openHome } from "@hewntools/cli/home.ts";
@@ -78,7 +79,7 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[] } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
   const scripts: Script[] = [];
   const scripted: CapabilityBuilder = {
@@ -94,7 +95,8 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
     rmSync(root, { recursive: true, force: true });
     throw e;
   });
-  await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1 }).catch(async (e) => {
+  // A new tool's passes only when a test asks for them (each is a builder run of its own to script).
+  await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1, buildPasses: opts.passes ?? [] }).catch(async (e) => {
     await sv.stop();
     rmSync(root, { recursive: true, force: true });
     throw e;
