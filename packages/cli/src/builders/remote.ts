@@ -6,7 +6,7 @@ import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fromBase64, isArtefact, toBase64 } from "@hewntools/core/files.ts";
 import { type CheckJson, checkToJson } from "@hewntools/core/checks.ts";
-import { builderPrompt } from "./cli.ts";
+import { builderPrompt, resumePrompt } from "./cli.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 import { readTree, writeTree } from "../workbench.ts";
 import { intakeImages, parseIntake, partialReply, promptFor, schemaFor } from "../intake.ts";
@@ -130,7 +130,7 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
     name: "remote",
     build: async (job: BuildJob) => {
       const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
-      write(`===== attempt ${job.attempt}: ${r.label} =====`);
+      write(`===== attempt ${job.attempt}${job.pass ? `, the ${job.pass.name} pass` : ""}: ${r.label} =====`);
       const files = Object.fromEntries(Object.entries(readTree(job.workspace)).map(([p, b]) => [p, toBase64(b)]));
       let result: Record<string, string> | undefined;
       let error: Record<string, any> | undefined;
@@ -163,7 +163,9 @@ export function remoteBuilder(r: RemoteJobs): CapabilityBuilder {
           // `session`: one per build, so the service may resume its own session on a later attempt (the prompt stays whole).
           // `pause`: this Hewn shows a `{ paused }` outcome as paused, with Continue and Stop (an older one gets `refused`).
           // `check`: Hewn answers `check` events (a service that doesn't know it builds without).
-          { buildId: job.buildId, session: job.buildId, pause: true, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), ...(job.check ? { check: true } : {}), prompt: builderPrompt(job), files },
+          // `pass`: this attempt is a pass on a candidate that validated (the prompt says what it asks), for the service to label or price.
+          // `resumePrompt` (a later attempt): what a local builder says when it resumes its session, for a service that keeps one.
+          { buildId: job.buildId, session: job.buildId, pause: true, capabilityId: job.capabilityId, kind: job.kind, attempt: job.attempt, ...(job.retryOf ? { retryOf: job.retryOf } : {}), ...(job.feedback ? { feedback: job.feedback } : {}), ...(job.model ? { model: job.model } : {}), ...(job.effort ? { effort: job.effort } : {}), ...(job.check ? { check: true } : {}), ...(job.pass ? { pass: job.pass.name } : {}), prompt: builderPrompt(job), ...(job.attempt > 1 ? { resumePrompt: resumePrompt(job) } : {}), files },
           (e) => {
             if (typeof e.activity === "string") {
               write(e.activity);

@@ -23,6 +23,8 @@ const STEPS = [
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
+/** A new tool's passes after its tests (when it runs them): the step, and its pill in Activity. */
+const PASS_STEPS = { critique: ["Reviewing the design", "reviewing design"], craft: ["Fixing details", "fixing details"] };
 /** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hub", "from <host>" or "from a file". */
 const installedFrom = (b) => {
   const s = b.request?.source;
@@ -39,7 +41,13 @@ const installSteps = (b) => [
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
-const stepsOf = (b) => (b.builder === "bundle" ? installSteps(b) : STEPS);
+/** The steps, with the passes the build runs (`passes`, from its step) right after its tests. */
+const stepsOf = (b, passes) => {
+  const steps = b.builder === "bundle" ? installSteps(b) : STEPS;
+  const after = steps.findIndex(([k]) => k === "tests") + 1;
+  const extra = (passes ?? []).filter((p) => PASS_STEPS[p]).map((p) => [p, PASS_STEPS[p][0]]);
+  return [...steps.slice(0, after), ...extra, ...steps.slice(after)];
+};
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
 const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
@@ -56,10 +64,12 @@ const unresolvedFailures = (builds) =>
 /** V6 A build that waits its turn says for what, the same in the drawer, the Inbox and Activity. */
 const waitingPill = (b) => kindTag(b.queued ? "waiting for the change before it" : "waiting", "warn");
 
-/** Real milestones only (no progress bars): spec ✓ code ✓ tests 4/6 you, or waiting. */
+/** Real milestones only (no progress bars): spec ✓ code ✓ tests 4/6 (reviewing design) you, or waiting. */
 function milestones(b) {
   if (b.status === "waiting") return h("span", { class: "milestones" }, waitingPill(b));
-  const at = STEPS.findIndex(([k]) => k === (b.step?.step ?? "code"));
+  const pass = PASS_STEPS[b.step?.step];
+  // A pass comes after the tests (and before you): between their places.
+  const at = STEPS.findIndex(([k]) => k === (pass ? "tests" : (b.step?.step ?? "code"))) + (pass ? 0.5 : 0);
   const tests = b.tests ?? b.step?.tests;
   return h(
     "span",
@@ -67,6 +77,7 @@ function milestones(b) {
     kindTag("spec ✓", "ok"),
     at > 1 ? kindTag("code ✓", "ok") : h("span", { class: "pill accent with-dot" }, "code"),
     at === 2 ? h("span", { class: "pill accent with-dot" }, tests ? `tests ${tests.passed}/${tests.total}` : "tests") : at > 2 ? kindTag("tests ✓", "ok") : kindTag("tests"),
+    pass && h("span", { class: "pill accent with-dot" }, pass[1]),
     at === 3 ? h("span", { class: "pill warn with-dot" }, "you") : kindTag("you"),
   );
 }
@@ -154,7 +165,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     // Elapsed time of the current attempt (the honest number while code is being written).
     let startedAt = Date.now() - (b0.progress?.elapsedSeconds ?? 0) * 1000;
     const clockEl = h("div", { class: "mono muted small" });
-    const seen = new Map(); // step → first seen (ms), for durations
     let step = b.step;
     // "Spec agreed" opens to the spec the builder works from (kept open across redraws).
     const specText = String(b.request?.requirements ?? b.request?.request ?? "").trim();
@@ -163,14 +173,20 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     const convoView = context.conversation?.length ? h("details", { class: "spec-step" }, h("summary", {}, "Conversation"), conversationThread(context.conversation, { mode: b.kind === "create" ? "create" : "modify", cap: cap(), all, version: b.resultVersion })) : null;
     const head = (icon, title, sub, right) => h("div", { class: "row build-head" }, icon, h("div", { class: "grow col" }, h("div", { class: "build-title" }, title), sub && h("div", { class: "small muted" }, sub)), right);
 
+    // The running step's time, counting up between the step states Hewn sends (its seconds as of `received`).
+    let running = null;
     const live = () => {
-      const at = STEPS.findIndex(([k]) => k === (step?.step ?? "code"));
-      if (step && !seen.has(step.step)) seen.set(step.step, Date.now());
+      const steps = stepsOf(b, step?.passes);
+      const at = steps.findIndex(([k]) => k === (step?.step ?? "code"));
+      running = null;
       const meta = (k, i) => {
-        if (k === "tests" && step?.tests) return `${step.tests.passed} / ${step.tests.total}`;
-        const start = seen.get(k);
-        const next = STEPS[i + 1] && seen.get(STEPS[i + 1][0]);
-        return i < at && start && next ? mmss(next - start) : "";
+        // A pass's own tests show on its step while they run.
+        if (step?.tests && (k === step.step ? PASS_STEPS[k] : k === "tests" && !PASS_STEPS[step.step])) return `${step.tests.passed} / ${step.tests.total}`;
+        // How long a step took, by Hewn's clock (all its turns, a retry's too): the same whenever the page was opened.
+        const s = step?.seconds?.[k];
+        if (s === undefined || i > at) return "";
+        if (i === at) running = { seconds: s, received: Date.now() };
+        return mmss(s * 1000);
       };
       const waitingAgent = b.builder === "agent";
       const base = cap().version;
@@ -195,7 +211,11 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         ),
         !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? `Installed ${installedFrom(b)}: no builder runs. Its own tests run as for any build.` : "No builder runs.") : buildMeta(b)),
         convoView,
-        h("ol", { class: "steps" }, stepsOf(b).map(([k, label], i) => stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i)))),
+        h("ol", { class: "steps" }, steps.map(([k, label], i) => {
+          const row = stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i));
+          if (i === at && running) running.el = row.querySelector(".meta");
+          return row;
+        })),
         logPre,
         h("div", { class: "row between" }, h("span", { class: "small faint" }, compact && base ? `v${base} keeps working meanwhile` : "You can leave; it keeps building."), cancelBtn),
       );
@@ -203,7 +223,10 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       keepScroll();
       tickClock();
     };
-    const tickClock = () => (clockEl.textContent = mmss(Date.now() - startedAt));
+    const tickClock = () => {
+      clockEl.textContent = mmss(Date.now() - startedAt);
+      if (running?.el) running.el.textContent = mmss(running.seconds * 1000 + Date.now() - running.received);
+    };
     const clockTimer = setInterval(tickClock, 1000);
     onLeave(() => clearInterval(clockTimer));
 
@@ -217,7 +240,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const connection = detail?.kind === "connection";
       const signIn = connection && detail.operations.some((o) => o.name === "connect");
       if (detail && !detail.status.ready && !connection) {
-        step = { step: "auth" };
+        // Its steps as Hewn last sent them (the passes it ran, each one's time), now at yours.
+        step = { ...step, step: "auth" };
         live();
         if (!(await grantsSheet(b.capabilityId)))
           return put(card, head(appIcon(c, { size: compact ? 36 : 64, badge: "warn" }), `${c.name} needs you`, "Built. Authorize it to use it.", h("button", { class: "primary", onclick: () => grantsSheet(b.capabilityId).then((ok) => ok && ready()) }, "Authorize…")), logBlock(false));

@@ -41,7 +41,23 @@ export function testCounts(log: string[]): { passed: number; total: number } | u
   return undefined;
 }
 
+/** The steps a new tool's passes show as (the build page's words), for a failure in one of them. */
+const PASS_STEPS: Record<string, string> = { critique: "Reviewing the design", craft: "Fixing details" };
+
+/**
+ * Why a build failed, from its log. A failure in one of a new tool's passes after its tests says which
+ * ("Reviewing the design: 1 of 6 tests didn't pass").
+ */
 export function explainFailure(log: string[]): BuildFailure {
+  const f = explainLog(log);
+  if (f.paused) return f;
+  const last = [...log].reverse().find((l) => /^(FAILED|PAUSED): /.test(l)) ?? "";
+  const cause = [...log].reverse().find((l) => /FAILED: /.test(l) && !/no valid candidate after/.test(l)) ?? "";
+  const pass = / of the (critique|craft) pass$/.exec(last)?.[1] ?? /^(critique|craft) pass\b/.exec(cause)?.[1];
+  return pass ? { ...f, title: `${PASS_STEPS[pass]}: ${f.title}` } : f;
+}
+
+function explainLog(log: string[]): BuildFailure {
   // The cause is the last FAILED line that isn't the attempts summary.
   const failures = log.map((l, i) => ({ i, m: /FAILED: ([\s\S]*)$/.exec(l)?.[1] })).filter((x) => x.m);
   const summary = failures.map((f) => /no valid candidate after (\d+) attempts/.exec(f.m!)).find(Boolean);

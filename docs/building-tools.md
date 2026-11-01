@@ -26,22 +26,30 @@ The agent [builds it](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCod
 
 The screen gets the most care. Before writing it, the builder works out when you'll open the tool and what you want to see first, and draws that big at the top. Then it gives the tool a look of its own, so it isn't mistaken for your other tools: a palette from its subject (green for plants or money, purple for sleep) for light and dark, its own type, and your data drawn as a picture (a timeline, a ring, a calendar) rather than a form. It records the look in `ui/look.json`. A change keeps a tool's look unless you ask for a new one.
 
-To tell a new tool apart, Hewn gives the builder each of your other tools, in a file next to its brief (`OTHER_TOOLS.md`): its colour on Home and the look its builder recorded in `ui/look.json`, up to 700 characters of it. The new one must look clearly different from them, by its concept, layout, type and signature visual; its colour still comes from its subject. A tool built before 0.4.10 has no recorded look, so it's listed with its colour only, until a change records its look. Connections have no screen, so they aren't listed.
+To tell a new tool apart, Hewn gives the builder each of your other tools, in a file next to its brief (`OTHER_TOOLS.md`): its colour on Home and the look its builder recorded in `ui/look.json`, up to 700 characters of it. The new one must look clearly different from them, by its concept, layout, type and signature visual. Its colour comes from its subject when the subject has one (green for plants, purple for sleep), even if another tool shares it; a tool whose subject has none (people, plans, words, time) gets a hue at least 40° from every other tool's (on a crowded Home, the middle of the widest gap between them), so its tile stands apart on Home. A tool built before 0.4.10 has no recorded look, so it's listed with its colour only, until a change records its look. Connections have no screen, so they aren't listed.
 
 So it can build on your other tools (a Weekly Review reading Running Log's runs, say) instead of keeping copies, the builder also gets what each of them offers. Its brief names them; `CONTRACTS.md` next to it lists each one's operations (the newest version of each), and `.hewn-contracts/<id>.md` has each one's full contract, read when the builder calls that tool. A change also sees the older versions its tool calls today.
 
-As it works, the builder checks its own work: its `check` tool runs what Hewn runs below, without making anything live, and shows it its screen filled with its sample data on a desktop and a phone, light and dark, with what to fix measured on it (what sticks out past the phone's edge, text cut short, buttons that break the page). It fixes what it finds before it stops, so fewer builds need another attempt. The build's activity shows each check ("Checking its work (1 of 10)", "Check: 2 problems to fix"), up to 10 an attempt. The tool runs in the builder's sandbox and reaches Hewn only through files in the build's folder: no port, no key.
+As it works, the builder checks its own work: its `check` tool runs what Hewn runs below, without making anything live, and shows it its screen filled with its sample data on a desktop and a phone, light and dark (the top of a long page), with what to fix measured on it (what sticks out past the phone's edge, text cut short, things drawn over each other, buttons that break the page). It fixes what it finds before it stops, so fewer builds need another attempt. The build's activity shows each check ("Checking its work (1 of 10)", "Check: 2 problems to fix"), up to 10 an attempt. The tool runs in the builder's sandbox and reaches Hewn only through files in the build's folder: no port, no key.
 
 Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen, empty and filled with its sample data, on a desktop and a phone screen, and checks it loads without errors
-4. makes it live if all of that passes
+3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
+4. for a new tool, has the builder look at its screen again, twice (below)
+5. makes it live if all of that passes
+
+**A second look, for a new tool.** Once a new tool passes its checks, the builder carries on with screenshots of it filled with its sample data, on a desktop and a phone, light and dark, the whole page (a long one in parts it can read):
+
+- **Reviewing the design:** it writes down the five biggest problems it sees, as a demanding designer would (what the eye lands on first, how generic it looks, how the data is drawn, the phone, dark mode), and fixes them. It holds the screen against what you said and against your other tools' looks too.
+- **Fixing details:** fresh screenshots, with what Hewn measured on them (what sticks out past the phone's edge, text cut short, things drawn over each other, buttons that break the page): it fixes those without redesigning anything.
+
+Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** or **Ask builder to fix** builds it again. A build the host pauses during one is paused as at any other point. Changes and installs don't get one. The build's steps show each as it runs.
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
 
-Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes.
+Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes; a new tool's second look takes about as long again.
 
 When you next open the tool, a quiet strip at its foot asks once per version, within a week of the build: **Got what you asked for?** Yes, Not quite (which opens the change panel, so what's off becomes the next change), or skip. Your answer stays in your Hewn; nothing is sent anywhere. `hewn feedback` lists recent builds with your answers and what the record shows (a failed build whose retry went live; another change within a day of going live, which is what **Ask builder to fix this** makes; a restore within a week; the tool deleted within a day), so you can see which builds work out and which don't.
 
