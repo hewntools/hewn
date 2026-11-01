@@ -1747,7 +1747,8 @@ const oneLine = (s: string, max: number) => {
 
 /**
  * The other tools' looks, OTHER_TOOLS.md: on the owner's Home already, so a new tool must look
- * clearly different from each; a change keeps its own. Empty when there are none.
+ * clearly different from each (and keep its hue clear of theirs when its subject has no colour of its
+ * own), with the hues taken listed in order; a change keeps its own look. Empty when there are none.
  */
 export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string {
   if (!tools.length) return "";
@@ -1755,9 +1756,11 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
   const lines = tools.map((t) => `- **${t.name}** (\`${t.id}\`)${shade(t)}: ${t.look ?? "no look recorded"}`);
   const rule =
     kind === "create"
-      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual (its colour still comes from its subject)."
+      ? "This one must look clearly different from each of them: tell it apart by its concept, layout, type and signature visual. Its colour comes from its subject when the subject has one; when it hasn't, its hue stays at least 40° from each of theirs."
       : "This tool keeps its own look; whatever is new in it, and a new look when the request asks for one, must still look clearly different from each of them.";
-  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n`;
+  // The hues taken, in order round the circle, so a free one is easy to see.
+  const hues = [...new Set(tools.flatMap((t) => (t.hue === null ? [] : [t.hue])))].sort((a, b) => a - b);
+  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n${hues.length ? `\nHues on Home (0–359, round a circle): ${hues.join(", ")}.\n` : ""}`;
 }
 
 /** One of the owner's other capabilities as a build is told it: its active manifest, and the operations ("name@N") the tool being changed calls on it today. */
