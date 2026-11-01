@@ -86,6 +86,12 @@ export interface BuildStepState {
   progress: number;
   /** The passes this build runs after its tests, in order (steps of their own). Absent: none. */
   passes?: Pass[];
+  /**
+   * How long the build has spent in each step it reached, in seconds (to a tenth), the current one so
+   * far; a step it came back to (a retry's code and tests) adds up. Hewn's own clock, so a page opened
+   * part-way shows the same.
+   */
+  seconds: Partial<Record<BuildStep, number>>;
 }
 
 type CreateRequest = {
@@ -172,7 +178,7 @@ export class Builds extends Domain {
     { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number }
   >();
   /** Pipeline step of each in-flight build (see BuildStep). */
-  private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number; passes?: Pass[] }>();
+  private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number; spent: Partial<Record<BuildStep, number>>; passes?: Pass[] }>();
 
   constructor(s: Shared, opts: Pick<PlatformOptions, "brief" | "designSystem" | "buildModel" | "agentBuildModels" | "modelEfforts">) {
     super(s);
@@ -280,8 +286,12 @@ export class Builds extends Domain {
   }
 
   private setStep(buildId: string, capabilityId: string, step: BuildStep, tests?: { passed: number; total: number }) {
-    const passes = this.steps.get(buildId)?.passes;
-    this.steps.set(buildId, { capabilityId, step, tests, since: Date.now(), ...(passes ? { passes } : {}) });
+    const prev = this.steps.get(buildId);
+    const now = Date.now();
+    // The time in the step it leaves goes on that step's count; staying in a step (tests counting up) keeps its start.
+    const spent = { ...prev?.spent };
+    if (prev && prev.step !== step) spent[prev.step] = (spent[prev.step] ?? 0) + (now - prev.since);
+    this.steps.set(buildId, { capabilityId, step, tests, since: prev?.step === step ? prev.since : now, spent, ...(prev?.passes ? { passes: prev.passes } : {}) });
     this.events.emit(`${buildId}:step`, this.stepState(buildId));
   }
 
@@ -300,7 +310,9 @@ export class Builds extends Domain {
       auth: 0.95,
       done: 1,
     }[s.step];
-    return { step: s.step, ...(s.tests ? { tests: s.tests } : {}), progress: Math.round(progress * 100) / 100, ...(s.passes ? { passes: s.passes } : {}) };
+    const ms: Partial<Record<BuildStep, number>> = { ...s.spent, [s.step]: (s.spent[s.step] ?? 0) + (Date.now() - s.since) };
+    const seconds = Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, Math.round(v / 100) / 10]));
+    return { step: s.step, ...(s.tests ? { tests: s.tests } : {}), progress: Math.round(progress * 100) / 100, ...(s.passes ? { passes: s.passes } : {}), seconds };
   }
 
   /**
