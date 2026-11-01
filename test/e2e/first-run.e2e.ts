@@ -207,6 +207,24 @@ try {
     await page.locator(".palette-item", { hasText: "Plant Log" }).waitFor();
     const groups = await page.locator(".palette-group").allTextContents();
     if (groups.at(-1) !== "Hub" || groups.indexOf("Hub") !== groups.length - 1 || groups.length < 2) throw new Error(`groups: ${groups.join(", ")}`);
+    // The arrows wrap: Up on the first item goes to the last, Down on the last back to the first.
+    const active = () => page.locator(".palette-item").evaluateAll((els: Element[]) => els.findIndex((e) => e.classList.contains("active")));
+    const last = (await page.locator(".palette-item").count()) - 1;
+    if ((await active()) !== 0) throw new Error(`starts at ${await active()}`);
+    await page.keyboard.press("ArrowUp");
+    if ((await active()) !== last) throw new Error(`Up from the first: ${await active()}, not ${last}`);
+    await page.keyboard.press("ArrowDown");
+    if ((await active()) !== 0) throw new Error(`Down from the last: ${await active()}`);
+    // Nothing shown: the arrows do nothing, and Enter still runs nothing.
+    await page.getByPlaceholder("Search tools, pages and actions").fill("zzqx");
+    await page.getByText("Nothing matches.").waitFor();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await page.getByText("Nothing matches.").waitFor();
+    await page.getByPlaceholder("Search tools, pages and actions").fill("log");
+    await page.keyboard.press("ArrowDown");
+    if ((await active()) !== 1) throw new Error(`after nothing shown, Down: ${await active()}`);
     await page.keyboard.press("Escape");
   });
 
