@@ -8,7 +8,7 @@ import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, typ
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, contentHash, text } from "../files.ts";
-import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, type OperationManifest, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
+import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, newestByName, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import type { Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
 import { randomToken } from "../sha256.ts";
@@ -548,7 +548,5 @@ function shelfTool(shelf: ShelfTool[], id: string): ShelfTool {
 
 /** Its operations as a person reads them: the newest version of each (deprecated ones left out), in the manifest's order. */
 function newestOperations(m: CapabilityManifest): { name: string; description: string; sideEffect: string }[] {
-  const newest = new Map<string, OperationManifest>();
-  for (const o of m.operations) if (!o.deprecated && (newest.get(o.name)?.version ?? 0) < o.version) newest.set(o.name, o);
-  return [...newest.values()].map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect }));
+  return [...newestByName(m.operations.filter((o) => !o.deprecated)).values()].map((o) => ({ name: o.name, description: o.description ?? "", sideEffect: o.sideEffect }));
 }

@@ -11,7 +11,8 @@ export const RUNTIME_PROFILES = ["isolate"] as const;
 export type RuntimeProfile = "isolate";
 
 export type JSONSchema = Record<string, any>;
-export type SideEffect = "read" | "write" | "destructive";
+export const SIDE_EFFECTS = ["read", "write", "destructive"] as const;
+export type SideEffect = (typeof SIDE_EFFECTS)[number];
 
 export interface OperationManifest {
   name: string;

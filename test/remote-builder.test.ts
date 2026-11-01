@@ -46,6 +46,8 @@ describe("remote builder and intake", () => {
     writeFileSync(join(dir, "old.txt"), "gone after the build");
     mkdirSync(join(dir, "src"));
     writeFileSync(join(dir, "src", "index.ts"), "// old");
+    mkdirSync(join(dir, ".hewn-contracts"));
+    writeFileSync(join(dir, ".hewn-contracts", "running-log.md"), "# Running Log");
     return dir;
   };
   const job = (dir: string, extra: Partial<BuildJob> = {}): BuildJob & { activity: string[]; models: string[] } => {
@@ -86,6 +88,7 @@ describe("remote builder and intake", () => {
     // A later attempt: what a builder that resumes its session is told, for a service that keeps one.
     assert.match(sent.body.resumePrompt, /^Attempt 2\. The platform validated your candidate and it FAILED:\n\n1 test failed\n\nFix the candidate in place/);
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
+    assert.equal(Buffer.from(sent.body.files[".hewn-contracts/running-log.md"], "base64").toString(), "# Running Log", "the other tools' contracts go too (a dot-folder)");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);
     assert.deepEqual(j.models, ["claude-fable-5-5"]);
     assert.deepEqual(charges, [{ amount: 12, unit: "points" }]);
