@@ -112,9 +112,11 @@ describe("attachments: images and files the owner attaches in the intake's box",
     );
     assert.equal(failed.status, "failed");
     let brief = "";
+    let words = "";
     let shot = false;
     t.queue((ws) => {
       brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+      words = readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8");
       shot = existsSync(join(ws, "attachments/1-screen.png"));
       seed(ws);
     });
@@ -122,7 +124,7 @@ describe("attachments: images and files the owner attaches in the intake's box",
     assert.equal(retried.status, "promoted", retried.log.join("\n"));
     assert.ok(shot, "the screenshot is in the retry's workspace");
     assert.match(brief, /`attachments\/1-screen\.png`: an image/);
-    assert.match(brief, /THE OWNER'S OWN WORDS[^]*OWNER: like this screenshot\n  \(attached: screen\.png\)/);
+    assert.match(words, /OWNER: like this screenshot\n  \(attached: screen\.png\)/);
   });
 
   test("several tools from one conversation share its attachments; purging one leaves them for the other", async () => {
