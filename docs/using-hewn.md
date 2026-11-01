@@ -34,7 +34,7 @@ New also offers it under the box: **Or start from** a tool in Hub, or a file som
 
 ## Search and commands
 
-Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). Enter opens it. Tools on the Hub you don't have yet come last.
+Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). `↑` and `↓` move through the list, going round at either end (`↑` on the first goes to the last); Enter opens it. Tools on the Hub you don't have yet come last.
 
 ![The command palette with "run" typed: Running Log, Weekend Weather, Change Running Log… and Running Log · Info](images/command-palette.png)
 
