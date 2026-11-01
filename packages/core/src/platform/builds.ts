@@ -630,7 +630,7 @@ export class Builds extends Domain {
    * a name it may not use is an error listing the ones it may, never a quiet default.
    */
   private modelFor(agent: Agent, builder: string, ask: ModelAsk): { model?: string; effort?: string } {
-    if (builder === "keep" || builder === "bundle" || builder.startsWith("copy:")) return {};
+    if (noBuilderRuns(builder)) return {};
     const { model, effort } = ask;
     if (model === undefined && effort === undefined) return this.buildModelFor(builder);
     if (model !== undefined && (typeof model !== "string" || !MODEL_NAME.test(model))) throw new PlatformError("invalid_request", "model must be a model name, like fable or claude-fable-5-1, or default");
@@ -1052,18 +1052,18 @@ export class Builds extends Domain {
   /**
    * Check the workspace's candidate as validation does, without promoting it (`promoteCandidate`
    * does). `measure`: also measure what a craft pass should fix; `pass`: the pass it comes from (its
-   * step shows the tests). Never throws: no candidate, and the log says why; `tests`: how many passed.
+   * step shows the tests). Never throws: no candidate, and the log says why; `tests`: how its tests went.
    */
-  private async validateCandidate(build: BuildRow, submitter: string, opts: { measure?: boolean; pass?: Pass } = {}): Promise<{ candidate?: Candidate; tests?: number; log: string[] }> {
+  private async validateCandidate(build: BuildRow, submitter: string, opts: { measure?: boolean; pass?: Pass } = {}): Promise<{ candidate?: Candidate; tests?: TestTally; log: string[] }> {
     this.registry.updateBuild(build.id, { status: "validating" });
     const log: string[] = [];
     const step = this.stepLog(build, submitter, log);
     step("validating candidate");
-    let tests: number | undefined;
+    let tests: TestTally | undefined;
     try {
       const candidate = await this.d.validation.validate(build, step, {
         ...(opts.measure ? { measure: true } : {}),
-        onTests: (passed, total) => ((tests = passed), this.setStep(build.id, build.capabilityId, opts.pass ?? "tests", { passed, total })),
+        onTests: (passed, total) => ((tests = { passed, total }), this.setStep(build.id, build.capabilityId, opts.pass ?? "tests", tests)),
       });
       return { candidate, ...(tests !== undefined ? { tests } : {}), log };
     } catch (e) {
@@ -1072,8 +1072,8 @@ export class Builds extends Domain {
     }
   }
 
-  /** Promote a validated candidate, or hold it for the owner's review. Never throws: the log says what failed. */
-  private async promoteCandidate(build: BuildRow, submitter: string, candidate: Candidate): Promise<{ version?: number; review?: BuildReview; log: string[] }> {
+  /** Promote a validated candidate (its `tests`, as they went), or hold it for the owner's review. Never throws: the log says what failed. */
+  private async promoteCandidate(build: BuildRow, submitter: string, { candidate, tests }: PassCandidate): Promise<{ version?: number; review?: BuildReview; log: string[] }> {
     this.registry.updateBuild(build.id, { status: "validating" });
     const log: string[] = [];
     const step = this.stepLog(build, submitter, log);
@@ -1086,7 +1086,8 @@ export class Builds extends Domain {
       step(`promoted: implementation v${r.version} is now active`);
       this.d.schedules.applyApprovedSchedules(build, step);
       await this.d.sharing.afterInstall(build, step);
-      this.setStep(build.id, build.capabilityId, this.platform.readiness(build.capabilityId).ready ? "done" : "auth", this.steps.get(build.id)?.tests);
+      // The tests of the version that went live (not those of a pass that fell back).
+      this.setStep(build.id, build.capabilityId, this.platform.readiness(build.capabilityId).ready ? "done" : "auth", tests ?? this.steps.get(build.id)?.tests);
       return { version: r.version, log };
     } catch (e) {
       step(`FAILED: ${(e as Error).message}`);
@@ -1182,9 +1183,7 @@ export class Builds extends Domain {
       if (r === "again") continue;
       if (r !== "done") {
         // Retrying can't help, or isn't Hewn's to decide (paused): the build ends here.
-        const line = r.why === "paused" ? `PAUSED: ${r.end}` : `FAILED: ${r.end}`;
-        run.history.push(line);
-        this.buildEvent(buildId, line, run.tag);
+        this.note(run, r.paused ? `PAUSED: ${r.end}` : `FAILED: ${r.end}`);
         this.registry.updateBuild(buildId, { status: "failed", log: run.history });
         return;
       }
@@ -1195,9 +1194,10 @@ export class Builds extends Domain {
         feedback = v.log.join("\n");
         continue;
       }
-      const best = passes.length ? await this.runPasses(run, { candidate: v.candidate, label, tests: v.tests }, passes) : { candidate: v.candidate, label };
+      const built: PassCandidate = { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
+      const best = passes.length ? await this.runPasses(run, built, passes) : built;
       if (!best) return;
-      const { version, review, log } = await this.promoteCandidate(build, submitter, best.candidate);
+      const { version, review, log } = await this.promoteCandidate(build, submitter, best);
       run.history.push(...log.map((l) => `${best.label}: ${l}`));
       if (review) {
         this.registry.updateBuild(buildId, { status: "review", review, log: run.history });
@@ -1210,9 +1210,14 @@ export class Builds extends Domain {
       }
       feedback = log.join("\n");
     }
-    run.history.push(`FAILED: no valid candidate after ${max} attempts`);
-    this.buildEvent(buildId, `FAILED: no valid candidate after ${max} attempts`, run.tag);
+    this.note(run, `FAILED: no valid candidate after ${max} attempts`);
     this.registry.updateBuild(buildId, { status: "failed", log: run.history });
+  }
+
+  /** A line in a run's history, and on the platform log and the build's transcript. */
+  private note(run: BuilderRun, line: string) {
+    run.history.push(line);
+    this.buildEvent(run.build.id, line, run.tag);
   }
 
   /**
@@ -1220,9 +1225,9 @@ export class Builds extends Domain {
    * in the log ("attempt 2", "critique pass"); `n` of `max` is its place among its kind's tries. The
    * outcome: it finished ("done"); it failed and another try may help ("again"); the build was
    * cancelled; or it can't go on (`end` says why: a model that can't run, the host declined or paused
-   * it, the builder unavailable), which ends the build, or a pass.
+   * it, the builder unavailable), which ends the build, or a pass. `paused`: the host paused it, its work kept.
    */
-  private async runOnce(run: BuilderRun, o: { label: string; n: number; max: number; feedback?: string; pass?: BuildPass }): Promise<"done" | "again" | "cancelled" | { end: string; why: "model" | "paused" | "refused" | "unavailable" }> {
+  private async runOnce(run: BuilderRun, o: { label: string; n: number; max: number; feedback?: string; pass?: BuildPass }): Promise<"done" | "again" | "cancelled" | { end: string; paused?: true }> {
     const { build, builder, signal, tag } = run;
     const buildId = build.id;
     if (signal.aborted) return "cancelled";
@@ -1275,17 +1280,17 @@ export class Builds extends Domain {
         if (signal.aborted) return "cancelled";
       }
       // The model asked for can't run (retired, misspelled, not on this account): nothing is built.
-      if ((e as { modelUnavailable?: boolean }).modelUnavailable) return { end: `model unavailable: ${(e as Error).message}`, why: "model" };
+      if ((e as { modelUnavailable?: boolean }).modelUnavailable) return { end: `model unavailable: ${(e as Error).message}` };
       // The builder's host paused it part-way (e.g. it has used a build's allowance), its work kept:
       // not for Hewn to retry, the owner's to Continue (a retry picks the work up) or Stop.
-      if ((e as { paused?: boolean }).paused) return { end: (e as Error).message, why: "paused" };
+      if ((e as { paused?: boolean }).paused) return { end: (e as Error).message, paused: true };
       // The builder's host declined it (e.g. over the month's builds): say why, don't retry.
-      if ((e as { refused?: boolean }).refused) return { end: `refused: ${(e as Error).message}`, why: "refused" };
+      if ((e as { refused?: boolean }).refused) return { end: `refused: ${(e as Error).message}` };
       const msg = `${o.label}: builder ${builder} failed: ${(e as Error).message}`;
       run.history.push(msg);
       this.buildEvent(buildId, msg, tag);
       // Retrying can't help (e.g. not logged in); stop now with a clear next step.
-      if ((e as { unavailable?: boolean }).unavailable) return { end: `builder ${builder} is unavailable. Fix it, then retry this build.`, why: "unavailable" };
+      if ((e as { unavailable?: boolean }).unavailable) return { end: `builder ${builder} is unavailable. Fix it, then retry this build.` };
       return "again";
     } finally {
       clearInterval(heartbeat);
@@ -1300,7 +1305,7 @@ export class Builds extends Domain {
   /** The passes a build runs once its candidate validates: a new tool's (not a connection's or an install's), as the owner set them. */
   private passesFor(build: BuildRow, builder: string): Pass[] {
     if (build.kind !== "create" || (build.request as CreateRequest).kind === "connection") return [];
-    if (builder === "keep" || builder === "bundle" || builder.startsWith("copy:")) return [];
+    if (noBuilderRuns(builder)) return [];
     return this.platform.buildPasses();
   }
 
@@ -1336,9 +1341,7 @@ export class Builds extends Domain {
       const next = await this.runPass(run, pass, request, passes[i + 1] === "craft");
       if (next === "cancelled") return undefined;
       if (!next) {
-        const line = `${pass} pass: kept the candidate from before it${current.tests !== undefined ? ` (${current.tests} test cases passed)` : ""}`;
-        run.history.push(line);
-        this.buildEvent(run.build.id, line, run.tag);
+        this.note(run, `${pass} pass: kept the candidate from before it${current.tests ? ` (${current.tests.passed} test cases passed)` : ""}`);
         break;
       }
       current = next;
@@ -1356,20 +1359,16 @@ export class Builds extends Domain {
       if (r === "cancelled") return "cancelled";
       if (r === "again") continue;
       if (r !== "done") {
-        const line = `${label}: stopped (${r.why === "paused" ? `paused: ${r.end}` : r.end})`;
-        run.history.push(line);
-        this.buildEvent(run.build.id, line, run.tag);
+        this.note(run, `${label}: stopped (${r.paused ? `paused: ${r.end}` : r.end})`);
         return undefined;
       }
       this.assertSubmittable(run.build);
       const v = await this.validateCandidate(run.build, `builder ${run.builder}`, { pass, measure });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
-      if (v.candidate) return { candidate: v.candidate, label, ...(v.tests !== undefined ? { tests: v.tests } : {}) };
+      if (v.candidate) return { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
       feedback = v.log.join("\n");
     }
-    const line = `${pass} pass: no valid candidate after ${max} ${max === 1 ? "try" : "tries"}`;
-    run.history.push(line);
-    this.buildEvent(run.build.id, line, run.tag);
+    this.note(run, `${pass} pass: no valid candidate after ${max} ${max === 1 ? "try" : "tries"}`);
     return undefined;
   }
 
@@ -1616,17 +1615,23 @@ interface BuilderRun {
   runs: number;
 }
 
-/** A validated candidate on its way through the passes: what made it ("attempt 1", "critique pass") and how many tests it passed. */
+/** How a candidate's tests went. */
+type TestTally = { passed: number; total: number };
+
+/** A validated candidate on its way through the passes (and to promotion): what made it ("attempt 1", "critique pass") and how its tests went. */
 interface PassCandidate {
   candidate: Candidate;
   label: string;
-  tests?: number;
+  tests?: TestTally;
 }
 
 const fmtDuration = (s: number) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`);
 
 /** Ids that would collide with platform origins (e.g. http://hewn.localhost). */
 export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
+
+/** No builder runs: the workspace is the candidate as given (an owner's edit), or it's installed from a file or a directory. */
+const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bundle" || builder.startsWith("copy:");
 
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");

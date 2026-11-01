@@ -41,11 +41,12 @@ const installSteps = (b) => [
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
-/** The steps, with the passes the build runs (`passes`, from its step) after its tests. */
+/** The steps, with the passes the build runs (`passes`, from its step) right after its tests. */
 const stepsOf = (b, passes) => {
   const steps = b.builder === "bundle" ? installSteps(b) : STEPS;
+  const after = steps.findIndex(([k]) => k === "tests") + 1;
   const extra = (passes ?? []).filter((p) => PASS_STEPS[p]).map((p) => [p, PASS_STEPS[p][0]]);
-  return [...steps.slice(0, 3), ...extra, ...steps.slice(3)];
+  return [...steps.slice(0, after), ...extra, ...steps.slice(after)];
 };
 const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
@@ -67,8 +68,8 @@ const waitingPill = (b) => kindTag(b.queued ? "waiting for the change before it"
 function milestones(b) {
   if (b.status === "waiting") return h("span", { class: "milestones" }, waitingPill(b));
   const pass = PASS_STEPS[b.step?.step];
-  // A pass comes after the tests.
-  const at = pass ? 2.5 : STEPS.findIndex(([k]) => k === (b.step?.step ?? "code"));
+  // A pass comes after the tests (and before you): between their places.
+  const at = STEPS.findIndex(([k]) => k === (pass ? "tests" : (b.step?.step ?? "code"))) + (pass ? 0.5 : 0);
   const tests = b.tests ?? b.step?.tests;
   return h(
     "span",
@@ -239,7 +240,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const connection = detail?.kind === "connection";
       const signIn = connection && detail.operations.some((o) => o.name === "connect");
       if (detail && !detail.status.ready && !connection) {
-        step = { step: "auth" };
+        // Its steps as Hewn last sent them (the passes it ran, each one's time), now at yours.
+        step = { ...step, step: "auth" };
         live();
         if (!(await grantsSheet(b.capabilityId)))
           return put(card, head(appIcon(c, { size: compact ? 36 : 64, badge: "warn" }), `${c.name} needs you`, "Built. Authorize it to use it.", h("button", { class: "primary", onclick: () => grantsSheet(b.capabilityId).then((ok) => ok && ready()) }, "Authorize…")), logBlock(false));

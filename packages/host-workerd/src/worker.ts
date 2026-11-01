@@ -22,7 +22,8 @@ import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, S
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
-import { agentModels, DEFAULT_BUILD_PASSES, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
+import { defaultPasses } from "@hewntools/core/passes.ts";
+import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
@@ -344,7 +345,7 @@ type CapabilityHostApi = {
 
 // ---------- HewnDO: the owner's platform ----------
 
-const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: DEFAULT_BUILD_PASSES };
+const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses() };
 
 export class HewnDO extends DurableObject<Env> {
   private platform!: Platform;

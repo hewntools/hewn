@@ -18,11 +18,13 @@ import type { CheckResult } from "@hewntools/core/ports.ts";
 import { builderPrompt, claudeArgs, resumePrompt } from "@hewntools/cli/builders/cli.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
 import { CHECK_DIR, openCheck } from "@hewntools/cli/builders/check.ts";
+import { MAX_CHECKS } from "@hewntools/core/platform/validation.ts";
+import { findBrowser, launchBrowser } from "@hewntools/cli/visual.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { readConfig, writeConfig } from "@hewntools/cli/config.ts";
 import type { VisualCheck } from "@hewntools/cli/visual.ts";
 import { settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
-import { FIXTURES, installFrom, platformWith, type Script, setup } from "./helpers.ts";
+import { FIXTURES, installFrom, platformWith, type Script, serve, setup } from "./helpers.ts";
 
 /** The renders a fake visual check returns: each screen and scheme, the phone's light page in two parts. */
 const SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-light-2", "mobile-dark"];
@@ -89,12 +91,12 @@ describe("passes after a new tool's build", () => {
     const files = SHOTS.map((s) => `${s}.png`).sort();
     assert.deepEqual(jobs[1].shots, files);
     assert.deepEqual(jobs[2].shots, files);
-    assert.equal(jobs[1].request, passRequest("critique", { files: SHOTS.map((s) => `screenshots/${s}.png`), sampled: false, defects: [], ownersWords: false, otherTools: false }));
+    assert.equal(jobs[1].request, passRequest("critique", { files: SHOTS.map((s) => `screenshots/${s}.png`), sampled: true, defects: [], ownersWords: false, otherTools: false }));
     assert.ok(jobs[1].request!.startsWith(CRITIQUE_REQUEST));
     assert.match(jobs[1].request!, /screenshots\/mobile-light-2\.png[^]*A long page comes in parts, top to bottom/);
-    // The craft pass is told what was measured on the critique's screen: measured only for it, not on the build's.
+    // The craft pass is told what was measured on the critique's screen (filled with its sample data): measured only for it, not on the build's.
     assert.match(jobs[2].request!, /^Craft pass\.[^]*covers "Repot" \(span\.chip\) in v:critique/);
-    assert.deepEqual(seen.map((s) => [s.ui, !!s.measure]), [["v:build", false], ["v:critique", true], ["v:craft", false]]);
+    assert.deepEqual(seen.map((s) => [s.ui, !!s.measure]), [["v:build", false], ["v:build", false], ["v:critique", false], ["v:critique", true], ["v:craft", false], ["v:craft", false]], "each validation renders it empty, then filled");
     // What the screenshots showed stays out of the version; the build page shows the screen that went live.
     const cap = t.platform.registry.getCapability("ui-counter")!;
     assert.ok(!Object.keys((await t.platform.loadVersion("ui-counter", cap.activeVersion!)).files).some((p) => p.startsWith("screenshots/")));
@@ -236,6 +238,34 @@ describe("passes after a new tool's build", () => {
     }
   });
 
+  test("a new tool with a screen needs sample data that fills it; an install brings what it has", async () => {
+    const plain = (ws: string, job: BuildJob) => (counter("v:build")(ws, job), rmSync(join(ws, "sample"), { recursive: true }));
+    const b = await t.build(create, plain, plain, plain);
+    assert.equal(b.status, "failed");
+    assert.match(b.log.join("\n"), /sample\/calls\.json is missing: a new tool with a screen needs sample data that fills it/);
+    // Installed from a directory without it: as it is.
+    const dir = mkdtempSync(join(tmpdir(), "hewn-nosample-"));
+    cpSync(join(FIXTURES, "ui-counter"), dir, { recursive: true });
+    rmSync(join(dir, "sample"), { recursive: true });
+    try {
+      const installed = await installFrom(t.platform, dir, "UI Counter");
+      assert.equal(installed.status, "promoted");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a pass's run has its own ten checks, as every run of the builder: an eleventh is refused", async () => {
+    const results: CheckResult[] = [];
+    const { view } = await follow(counter("v:build"), async (ws, job) => {
+      markUi(ws, "v:critique");
+      for (let i = 1; i <= MAX_CHECKS + 1; i++) results.push(await job.check!(`c${i}`));
+    }, (ws) => markUi(ws, "v:craft"));
+    assert.equal(view.status, "promoted", view.log.join("\n"));
+    assert.deepEqual(results.slice(0, MAX_CHECKS).map((r) => r.passed), Array(MAX_CHECKS).fill(true));
+    assert.match(results[MAX_CHECKS].text, /No checks left: this attempt has had its 10/);
+  });
+
   test("only new tools run them: not a change, not an install, not a connection, not a tool without a screen", async () => {
     // A tool with a screen, built: the passes run.
     const made = await t.build(create, counter("v:build"), (ws) => markUi(ws, "v:critique"), (ws) => markUi(ws, "v:craft"));
@@ -268,6 +298,54 @@ describe("passes after a new tool's build", () => {
     await t.platform.settle(conn.buildId);
   });
 
+  // The build page (build.js) in a real browser: the visual check on Linux is P2 (#4), as in visual.test.ts.
+  const browser = process.platform === "darwin" ? findBrowser() : undefined;
+  test("the build page names the passes as steps, times each one by Hewn's clock (the running one counting up), and keeps them at your authorization", { skip: !browser && "no Chromium-based browser on this machine", timeout: 120_000 }, async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(
+      (ws, job) => {
+        counter("v:build")(ws, job);
+        // A host to approve: the tool needs you once it's built.
+        const manifest = join(ws, "capability.json");
+        writeFileSync(manifest, JSON.stringify({ ...JSON.parse(readFileSync(manifest, "utf8")), requires: { hosts: ["api.example.com"] } }));
+      },
+      async (ws) => (markUi(ws, "v:critique"), await gate),
+      (ws) => markUi(ws, "v:craft"),
+    );
+    const server = await serve(t.platform, t.home);
+    const web = `http://hewn.localhost:${(server.address() as AddressInfo).port}`;
+    const b = await launchBrowser(browser!);
+    try {
+      const started = await create();
+      for (let i = 0; t.platform.getBuild(USER, started.buildId).step?.step !== "critique"; i++) {
+        assert.ok(i < 200, "the critique starts");
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      const page = await b.page({ name: "desktop", width: 1280, height: 900, mobile: false, scale: 1 });
+      await page.goto(`${web}/auth?ticket=${t.platform.createWebTicket(USER)}`);
+      await page.goto(`${web}/#/b/${started.buildId}`);
+      const rows = () => page.eval<[string, string, string][]>(`[...document.querySelectorAll("ol.steps li")].map((li) => [li.className.replace("step ", ""), (li.children[0].querySelector("summary") ?? li.children[0]).textContent.trim(), li.querySelector(".meta").textContent])`);
+      const during = await rows();
+      assert.deepEqual(during.map(([state, label]) => [state, label]), [["done", "Spec agreed"], ["done", "Writing code"], ["done", "Running tests"], ["live", "Reviewing the design"], ["todo", "Fixing details"], ["todo", "Your authorization"]]);
+      for (const [, label, meta] of during.slice(0, 4)) assert.match(meta, /^\d+:\d\d$/, `${label} is timed`);
+      // The running step counts up between the states Hewn sends.
+      const secs = (m: string) => Number(m.split(":")[0]) * 60 + Number(m.split(":")[1]);
+      await new Promise((r) => setTimeout(r, 2200));
+      assert.ok(secs((await rows())[3][2]) >= secs(during[3][2]) + 2, "the running step's time counts up");
+      release();
+      await t.platform.settle(started.buildId);
+      // Built; it needs a host approved: the page shows your step, the passes and their times still there.
+      for (let i = 0; i < 100 && !(await rows()).some(([state, label]) => state === "live" && label === "Your authorization"); i++) await new Promise((r) => setTimeout(r, 100));
+      const after = await rows();
+      assert.deepEqual(after.map(([state, label]) => [state, label]), [["done", "Spec agreed"], ["done", "Writing code"], ["done", "Running tests"], ["done", "Reviewing the design"], ["done", "Fixing details"], ["live", "Your authorization"]]);
+      for (const [, label, meta] of after.slice(1, 5)) assert.ok(meta, `${label} keeps its time`);
+    } finally {
+      await b.close();
+      server.close();
+    }
+  });
+
   test("turned off, a create runs none; craft alone measures the build's own screen", async () => {
     const off = setup({ visualCheck: fakeVisual(), attempts: 1, buildPasses: () => [] });
     try {
@@ -283,7 +361,7 @@ describe("passes after a new tool's build", () => {
       let asked = "";
       const b = await craft.build(() => craft.platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" }), counter("v:build"), (ws, job) => ((asked = job.pass!.request), markUi(ws, "v:craft")));
       assert.equal(b.status, "promoted", b.log.join("\n"));
-      assert.deepEqual(measured.map((s) => [s.ui, !!s.measure]), [["v:build", true], ["v:craft", false]]);
+      assert.deepEqual(measured.map((s) => [s.ui, !!s.measure]), [["v:build", false], ["v:build", true], ["v:craft", false], ["v:craft", false]]);
       assert.match(asked, /covers "Repot" \(span\.chip\) in v:build/);
     } finally {
       craft.cleanup();

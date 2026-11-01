@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What a builder should fix on its UI, measured in the browser: what sticks out past the screen's
 // edge, text cut short, things drawn over each other, page errors, and controls that break the page
-// when clicked. Hewn's visual
-// check (visual.ts) and the build-quality bench (bench/) both measure with these, so they agree.
+// when clicked. Hewn's visual check (visual.ts) and the build-quality bench (bench/) both measure
+// with these, so they agree.
 
 /** A page in a headless browser, as the measures drive it. */
 export interface MeasuredPage {

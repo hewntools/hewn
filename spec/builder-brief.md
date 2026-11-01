@@ -39,11 +39,11 @@ Each operation has: `name` (snake_case), `description`, `version` (contract majo
 
 Set `"hue"` (integer 0–359, OKLCH) to the subject's colour: the one it's known for (e.g. 145 for
 plants or money, 295 for sleep, 240 for water, 25 for workouts). A subject with no colour of its own
-(people, plans, words, time) gets a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues go round
-a circle: 350 and 10 are 20° apart), or, when no hue is that far from all of them, the middle of the
-widest gap between them, which `OTHER_TOOLS.md` names; so its tile stands apart on Home. It colours the app icon's tile,
-and it leads the UI's palette too. The design system derives the tile and glyph shades from it in light
-and dark mode.
+(people, plans, words, time) gets a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues go
+round a circle: 350 and 10 are 20° apart), or, when no hue is that far from all of them, the middle
+of the widest gap between them, which `OTHER_TOOLS.md` names; so its tile stands apart on Home. It
+colours the app icon's tile, and it leads the UI's palette too. The design system derives the tile
+and glyph shades from it in light and dark mode.
 
 `"saturation"` (ABI 2.4; integer 0–150, default 100) says how colourful the tile is. Leave it out
 unless the tool stands for a brand: a connection to a black-and-white service (Ghost, Notion, the
@@ -568,8 +568,9 @@ An ordered list. All cases share one fresh state DB with all migrations applied:
 ### sample/calls.json (ABI 2.5)
 
 Sample data: what the tool looks like in use. The owner can install or start over with it, and
-a tool needs it to be shared (its screenshots show it). When you create a tool, write one; when a
-change renames or reshapes the operations it calls, update it.
+a tool needs it to be shared (its screenshots show it). When you create a tool, write one (a new
+tool with a screen fails validation without it); when a change renames or reshapes the operations it
+calls, update it.
 
 ```json
 [

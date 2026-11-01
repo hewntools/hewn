@@ -32,8 +32,6 @@ export interface Settings {
   buildPasses: Pass[];
 }
 
-/** The passes new tools' builds run unless the owner says otherwise. */
-export const DEFAULT_BUILD_PASSES: Pass[] = ["critique", "craft"];
 
 /** What one job runs on with one agent: a model name the agent's CLI takes, and an effort. */
 export interface JobModel {

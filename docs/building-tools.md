@@ -36,7 +36,7 @@ Then Hewn:
 
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen, empty and filled with its sample data, on a desktop and a phone screen, and checks it loads without errors
+3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
 4. for a new tool, has the builder look at its screen again, twice (below)
 5. makes it live if all of that passes
 

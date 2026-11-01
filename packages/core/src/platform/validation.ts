@@ -14,6 +14,7 @@ import type { CallHandler, CheckResult, CodeRef, ExecutionTarget, Files, StateRe
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
+import { isPart } from "../passes.ts";
 import { Domain } from "./context.ts";
 
 /** A candidate that passed validation, held in memory: nothing about the tool has changed yet. */
@@ -195,6 +196,10 @@ export class Validation extends Domain {
       } catch (e) {
         softFail((e as Error).message);
       }
+      // A new tool with a screen is seen in use (its screenshots, the passes after its build, sharing):
+      // its builder writes sample data. An install brings what it has.
+      const installing = build.builder === "bundle" || !!build.builder?.startsWith("copy:");
+      if (sample === null && build.kind === "create" && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: a new tool with a screen needs sample data that fills it (see "sample/calls.json" in BUILDER.md)`);
       if (sample) {
         await this.runtime.dropState(sampleState);
         await this.runtime.migrate(sampleState, migrations, code);
@@ -352,10 +357,10 @@ export class Validation extends Domain {
     // The top of a long page shown, four images a call whatever its length (a session keeps every image
     // it was shown); the rest in files beside them, to open when needed.
     const shots = candidate?.shots ?? [];
-    const images = shots.filter((s) => !/-\d+$/.test(s.name));
+    const images = shots.filter((s) => !isPart(s.name));
     // Within MAX_PARTS_BYTES (an answer crosses to the host's builder whole): what doesn't fit is left out, the phone's dark first.
     let room = MAX_PARTS_BYTES;
-    const parts = shots.filter((s) => /-\d+$/.test(s.name) && (room -= s.png.length) >= 0);
+    const parts = shots.filter((s) => isPart(s.name) && (room -= s.png.length) >= 0);
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
     return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };

@@ -222,6 +222,8 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
       writeTree(ws(to), files);
     },
     async writeFolder(buildId, folder, files) {
+      // One folder at the workspace's top, by its plain name: nothing else is ever removed.
+      if (!/^[A-Za-z0-9_-]+$/.test(folder)) throw new Error(`bad folder ${JSON.stringify(folder)}`);
       // The builder may have made the folder (or put a link there): gone first, then written only inside the workspace.
       rmSync(join(ws(buildId), folder), { recursive: true, force: true });
       for (const [p, b] of Object.entries(files)) {
