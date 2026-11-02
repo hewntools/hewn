@@ -72,7 +72,7 @@ Events:
 
 ### A paused build
 
-- **Continue** is the owner's alone (an agent's `builds_retry` of a paused build is refused). It is a retry: a new build, with a new `buildId` and `session`, whose `retryOf` is the first build of the chain, for the service to pick the kept work up. Its `files` is the tool as it is now (its live version, with `BUILDER.md`, `OWNERS_WORDS.md`, `OTHER_TOOLS.md`, `CONTRACTS.md` and `.hewn-contracts/` written afresh), not the paused build's workspace: the kept work is the service's to bring back. The service may pause it again.
+- **Continue** is the owner's alone (an agent's `builds_retry` of a paused build is refused). It is a retry: a new build, with a new `buildId` and `session`, whose `retryOf` is the first build of the chain, for the service to pick the kept work up. Its `files` is the tool as it is now (its live version, with `BUILDER.md`, `BRIEF.md`, `OWNERS_WORDS.md`, `OTHER_TOOLS.md`, `CONTRACTS.md` and `.hewn-contracts/` written afresh), not the paused build's workspace: the kept work is the service's to bring back. The service may pause it again.
 - **Stop** only ends it in Hewn (cancelled); nothing is sent to the service. A service that keeps paused work learns of a Stop only in that no Continue comes, so it keeps the work as long as its own policy says.
 - Hewn doesn't tell a Continue apart from other retries of the same chain: a **Retry** of a later failure, or a **Start again** after Stop, carries the same `retryOf`. A service that keeps work per chain may pick it up then too.
 

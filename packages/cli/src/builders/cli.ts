@@ -30,15 +30,18 @@ export function builderPrompt(job: BuildJob): string {
   return lines.join("\n");
 }
 
+/** For a resumed session that may not have read the brief: read it now. */
+const BRIEF_IF_NOT_READ = "If you haven't read all of BRIEF.md, read it before you change anything.";
+
 /**
  * A later attempt in the resumed session: the builder has read the brief and written the candidate;
  * only the failure is new. Or a pass on the candidate that validated: what the pass asks.
  */
 export function resumePrompt(job: BuildJob): string {
-  if (job.pass && !job.feedback) return `${job.pass.request}\n\nOnly change files inside this directory. When it's complete, stop.`;
+  if (job.pass && !job.feedback) return `${job.pass.request}\n\n${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
   // The previous run stopped (crashed, timed out) before the platform could validate anything.
-  if (!job.feedback) return `Attempt ${job.attempt}. Your previous run stopped before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. Only change files inside this directory. When it's complete, stop.`;
-  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. Only change files inside this directory. When it's complete, stop.`;
+  if (!job.feedback) return `Attempt ${job.attempt}. Your previous run stopped before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
+  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
 }
 
 /**

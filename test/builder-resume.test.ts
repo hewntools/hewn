@@ -37,7 +37,7 @@ describe("a later attempt resumes the builder's session", () => {
     assert.equal(again[1], resumePrompt(job({ attempt: 2, feedback: "test 'x' failed" })));
     assert.match(again[1], /Attempt 2\. The platform validated your candidate and it FAILED:\n\ntest 'x' failed\n\nFix the candidate in place/);
     assert.doesNotMatch(again[1], /Read BUILDER\.md, the request/);
-    assert.match(again[1], /with the request in BUILDER\.md and the contract in BRIEF\.md/, "where they still are");
+    assert.match(again[1], /with the request in BUILDER\.md and the contract in BRIEF\.md\. If you haven't read all of BRIEF\.md, read it before you change anything\./, "where they still are, and to read the brief now if it skipped it");
     assert.match(resumePrompt(job({ attempt: 2 })), /^Attempt 2\. Your previous run stopped before it finished\.[^]*with the request in BUILDER\.md and the contract in BRIEF\.md/);
     assert.ok(!again.includes("--session-id"));
   });

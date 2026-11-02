@@ -714,8 +714,8 @@ export class Builds extends Domain {
         "src/index.ts": bytes("// See BRIEF.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.builderFile("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
-      "BRIEF.md": bytes(briefText(this.brief)),
+      "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      ...this.briefFile(),
       ...this.ownersWordsFile(buildId),
       ...this.contractFiles(id),
       ...(connection ? {} : await this.looksFile(id, "create")),
@@ -821,7 +821,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.builderFile(b.kind, cap.id, ask, this.registry.buildContext(buildId))), "BRIEF.md": bytes(briefText(this.brief)), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.builderText(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.briefFile(), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1532,14 +1532,19 @@ export class Builds extends Domain {
     return words ? { "OWNERS_WORDS.md": bytes(words) } : {};
   }
 
+  /** BRIEF.md for a workspace: the brief (`briefText`). Never part of a version (`isWorkspaceOnly`). */
+  private briefFile(): Files {
+    return { "BRIEF.md": bytes(briefText(this.brief)) };
+  }
+
   /**
    * BUILDER.md: the request, first saying to read BRIEF.md whole before writing anything; where the
    * owner's own words are and how they count, the owner's instructions (as the build recorded them,
    * `build_context`), the other capabilities' names, and the order to read the brief again.
    */
-  private builderFile(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
+  private builderText(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const instructions = context?.instructions;
-    const parts = [`# Build: ${kind} \`${id}\``, READ_BRIEF, `${request}${ownersWordsNote(context?.conversation)}`, instructions, this.catalogForBuilder(id), "Now read `BRIEF.md`, all of it, before you write anything."];
+    const parts = [`# Build: ${kind} \`${id}\``, READ_BRIEF, `${request}${ownersWordsNote(context?.conversation)}`, instructions, this.catalogForBuilder(id), READ_BRIEF_NOW];
     return shortLines(`${parts.flatMap((p) => p?.trim() || []).join("\n\n")}\n`);
   }
 
@@ -1934,9 +1939,10 @@ export function cssWithoutComments(css: string): string {
 }
 
 
-/** What BUILDER.md says first and last: the brief is in BRIEF.md, to read whole before writing anything. */
+/** What BUILDER.md says first, and last: the brief is in BRIEF.md, to read whole before writing anything. */
 const READ_BRIEF =
   "**Read `BRIEF.md` in your workspace, all of it, before you write anything** (in parts, if your reader cuts it short): it is the implementation contract, how to build for Hewn. This file is the request.";
+const READ_BRIEF_NOW = "Now read `BRIEF.md`, all of it, before you write anything.";
 
 /**
  * BRIEF.md: the brief (spec/builder-brief.md, or a bench arm's), how to build for Hewn, in a file of

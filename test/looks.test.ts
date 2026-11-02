@@ -38,30 +38,30 @@ describe("the owner's other tools' looks", () => {
 
   test("OTHER_TOOLS.md lists each other tool with its hue and recorded look, cut short; one without a look is listed without one", async () => {
     // What the builder finds in its workspace: BUILDER.md, BRIEF.md, and OTHER_TOOLS.md when there is one.
+    let request = "";
     let brief = "";
-    let contract = "";
     let seen: string | undefined;
     const read = (ws: string) => {
-      brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
-      contract = readFileSync(join(ws, "BRIEF.md"), "utf8");
+      request = readFileSync(join(ws, "BUILDER.md"), "utf8");
+      brief = readFileSync(join(ws, "BRIEF.md"), "utf8");
       seen = existsSync(join(ws, "OTHER_TOOLS.md")) ? readFileSync(join(ws, "OTHER_TOOLS.md"), "utf8") : undefined;
     };
     const otherTools = () => seen;
     const first = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }), (ws) => (read(ws), seedAs("running-log", "Running Log", { hue: 25, recorded: JSON.stringify(look, null, 2) })(ws)));
     assert.equal(first.status, "promoted", first.log.join("\n"));
     assert.equal(otherTools(), undefined, "the first tool has no others");
-    assert.match(contract, /read how each\s+of them looks in `OTHER_TOOLS.md`/, "the brief sends the builder there");
+    assert.match(brief, /read how each\s+of them looks in `OTHER_TOOLS.md`/, "the brief sends the builder there");
     await t.build(() => t.platform.create(USER, { name: "Reading List", purpose: "books", requirements: "r" }), seedAs("reading-list", "Reading List"));
     // A connection has no UI: not among the looks, and its own build gets none.
     const conn = await t.build(() => t.platform.create(USER, { name: "Site Connection", purpose: "the site", requirements: "r", kind: "connection" }), (ws) => (read(ws), cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true })));
     assert.equal(conn.status, "promoted", conn.log.join("\n"));
-    assert.match(brief, /## The owner's other capabilities/, "a connection's build still gets the contracts");
+    assert.match(request, /## The owner's other capabilities/, "a connection's build still gets the contracts");
     assert.equal(otherTools(), undefined);
 
     const sleep = await t.build(() => t.platform.create(USER, { name: "Sleep Log", purpose: "sleep", requirements: "r" }), (ws) => (read(ws), seedAs("sleep-log", "Sleep Log")(ws)));
     let others = otherTools();
     assert.ok(others, "the third tool has others");
-    assert.doesNotMatch(brief, /other tools' looks/, "in a file of its own, not at the end of BUILDER.md, which a builder may not read that far");
+    assert.doesNotMatch(request, /other tools' looks/, "in a file of its own, not at the end of BUILDER.md, which a builder may not read that far");
     assert.match(others, /^# The owner's other tools' looks\n/);
     assert.match(others, /This one must look clearly different from each of them/);
     const recorded = others.match(/^- \*\*Running Log\*\* \(`running-log`\), hue 25: (.*)$/m)?.[1];

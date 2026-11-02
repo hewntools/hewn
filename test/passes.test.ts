@@ -395,7 +395,7 @@ describe("a pass, as the builder is asked", () => {
   const job = (o: Partial<BuildJob> = {}): BuildJob => ({ buildId: "b-1", capabilityId: "plants", kind: "create", workspace: "/tmp/ws", attempt: 2, logPath: "/tmp/b-1.log", pass: { name: "critique", request: "Design review pass. Look." }, ...o });
 
   test("resumed: the pass's request; a later try of it: the failure", () => {
-    assert.equal(resumePrompt(job()), "Design review pass. Look.\n\nOnly change files inside this directory. When it's complete, stop.");
+    assert.equal(resumePrompt(job()), "Design review pass. Look.\n\nIf you haven't read all of BRIEF.md, read it before you change anything. Only change files inside this directory. When it's complete, stop.");
     assert.match(resumePrompt(job({ attempt: 3, feedback: "1 of 2 test cases failed" })), /^Attempt 3\. The platform validated your candidate and it FAILED:\n\n1 of 2 test cases failed/);
     const args = claudeArgs(job(), { id: "s-1", resume: true });
     assert.equal(args[args.indexOf("-p") + 1], resumePrompt(job()));
