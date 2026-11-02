@@ -395,7 +395,7 @@ describe("a pass, as the builder is asked", () => {
   const job = (o: Partial<BuildJob> = {}): BuildJob => ({ buildId: "b-1", capabilityId: "plants", kind: "create", workspace: "/tmp/ws", attempt: 2, logPath: "/tmp/b-1.log", pass: { name: "critique", request: "Design review pass. Look." }, ...o });
 
   test("resumed: the pass's request; a later try of it: the failure", () => {
-    assert.equal(resumePrompt(job()), "Design review pass. Look.\n\nOnly change files inside this directory. When it's complete, stop.");
+    assert.equal(resumePrompt(job()), "Design review pass. Look.\n\nIf you haven't read all of BRIEF.md, read it before you change anything. Only change files inside this directory. When it's complete, stop.");
     assert.match(resumePrompt(job({ attempt: 3, feedback: "1 of 2 test cases failed" })), /^Attempt 3\. The platform validated your candidate and it FAILED:\n\n1 of 2 test cases failed/);
     const args = claudeArgs(job(), { id: "s-1", resume: true });
     assert.equal(args[args.indexOf("-p") + 1], resumePrompt(job()));
@@ -404,7 +404,8 @@ describe("a pass, as the builder is asked", () => {
 
   test("in a fresh session: the brief first, then the pass on the candidate as it is (not the icon again)", () => {
     const p = builderPrompt(job());
-    assert.match(p, /Read BUILDER\.md/);
+    assert.match(p, /Read BUILDER\.md, the request, then BRIEF\.md, all of it/);
+    assert.match(p, /Read BUILDER\.md for the request and BRIEF\.md for the contract, then do this critique pass on it/);
     assert.match(p, /The candidate in this workspace is built and passed validation: don't start over\.[^]*critique pass on it:\n\nDesign review pass\. Look\./);
     assert.doesNotMatch(p, /write ui\/icon\.svg/);
     assert.match(builderPrompt(job({ pass: undefined, attempt: 1 })), /write ui\/icon\.svg/);

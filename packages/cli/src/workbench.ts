@@ -102,8 +102,8 @@ export const copyBuilder = (from: string): CapabilityBuilder => ({
   name: `copy:${from}`,
   build: async (job) => {
     if (!existsSync(join(from, "capability.json"))) throw Object.assign(new Error(`${from} has no capability.json`), { unavailable: true });
-    // Keep BUILDER.md; replace everything else with the source.
-    for (const e of readdirSync(job.workspace)) if (e !== "BUILDER.md") rmSync(join(job.workspace, e), { recursive: true, force: true });
+    // Keep BUILDER.md and BRIEF.md; replace everything else with the source.
+    for (const e of readdirSync(job.workspace)) if (e !== "BUILDER.md" && e !== "BRIEF.md") rmSync(join(job.workspace, e), { recursive: true, force: true });
     cpSync(from, job.workspace, { recursive: true, filter: (src) => !isArtefact(relative(from, src)) });
   },
 });

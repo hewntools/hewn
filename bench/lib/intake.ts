@@ -48,7 +48,7 @@ export function promptFor(messages: IntakeMessage[], source: "intake" | "intent"
 export function ownersWords(conversation: IntakeMessage[] | undefined): string {
   if (!conversation?.length) return "";
   const turns = conversation.map((m) => `${m.role === "user" ? "OWNER" : "INTAKE"}: ${m.content.trim()}`).join("\n\n");
-  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The brief above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously.\n\n${turns}`;
+  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously.\n\n${turns}`;
 }
 
 /** What an agent might send capabilities_create: the owner's words and little else. */

@@ -204,7 +204,7 @@ export class Validation extends Domain {
       // its builder writes sample data, as a Polish's does before its passes. An install brings what it has.
       const installing = build.builder === "bundle" || !!build.builder?.startsWith("copy:");
       const polish = isPolish(build.request);
-      if (sample === null && (build.kind === "create" || polish) && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: ${polish ? "a Polish shows the builder the tool filled with sample data" : "a new tool with a screen needs sample data that fills it"} (see "sample/calls.json" in BUILDER.md)`);
+      if (sample === null && (build.kind === "create" || polish) && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: ${polish ? "a Polish shows the builder the tool filled with sample data" : "a new tool with a screen needs sample data that fills it"} (see "sample/calls.json" in BRIEF.md)`);
       if (sample) {
         await this.runtime.dropState(sampleState);
         await this.runtime.migrate(sampleState, migrations, code);

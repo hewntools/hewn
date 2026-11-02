@@ -42,7 +42,8 @@ describe("remote builder and intake", () => {
 
   const workspace = () => {
     const dir = mkdtempSync(join(tmpdir(), "hewn-remote-"));
-    writeFileSync(join(dir, "BUILDER.md"), "brief");
+    writeFileSync(join(dir, "BUILDER.md"), "request");
+    writeFileSync(join(dir, "BRIEF.md"), "brief");
     writeFileSync(join(dir, "old.txt"), "gone after the build");
     mkdirSync(join(dir, "src"));
     writeFileSync(join(dir, "src", "index.ts"), "// old");
@@ -84,9 +85,10 @@ describe("remote builder and intake", () => {
     assert.equal(sent.body.session, "b-1", "one session per build, for the service to resume on a later attempt");
     assert.equal(sent.body.retryOf, "b-0", "the first build of the chain it retries");
     assert.equal(sent.body.pause, true, "this Hewn takes a paused outcome");
-    assert.match(sent.body.prompt, /builder for Hewn/);
+    assert.match(sent.body.prompt, /builder for Hewn[^]*Read BUILDER\.md, the request, then BRIEF\.md, all of it/, "the service's builder is told to read the brief whole too");
     // A later attempt: what a builder that resumes its session is told, for a service that keeps one.
-    assert.match(sent.body.resumePrompt, /^Attempt 2\. The platform validated your candidate and it FAILED:\n\n1 test failed\n\nFix the candidate in place/);
+    assert.match(sent.body.resumePrompt, /^Attempt 2\. The platform validated your candidate and it FAILED:\n\n1 test failed\n\nFix the candidate in place[^]*the contract in BRIEF\.md/);
+    assert.equal(Buffer.from(sent.body.files["BRIEF.md"], "base64").toString(), "brief", "the brief goes in a file of its own");
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
     assert.equal(Buffer.from(sent.body.files[".hewn-contracts/running-log.md"], "base64").toString(), "# Running Log", "the other tools' contracts go too (a dot-folder)");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);

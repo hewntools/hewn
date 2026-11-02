@@ -41,13 +41,14 @@ const countingVisual = (): VisualCheck => async (req) => {
 const breakTests = (ws: string) => writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "get", operation: "get", input: {}, expect: { count: 5 } }]));
 
 /** What a run of the builder was given. */
-type Seen = { attempt: number; pass?: string; request?: string; feedback?: string; brief: string; shot?: string; words?: string };
+type Seen = { attempt: number; pass?: string; request?: string; feedback?: string; brief: string; contract?: string; shot?: string; words?: string };
 const recorder = (jobs: Seen[]) => (ws: string, job: BuildJob) =>
   void jobs.push({
     attempt: job.attempt,
     ...(job.pass ? { pass: job.pass.name, request: job.pass.request } : {}),
     ...(job.feedback ? { feedback: job.feedback } : {}),
     brief: readFileSync(join(ws, "BUILDER.md"), "utf8"),
+    ...(existsSync(join(ws, "BRIEF.md")) ? { contract: readFileSync(join(ws, "BRIEF.md"), "utf8") } : {}),
     ...(existsSync(join(ws, "screenshots", "desktop-light.png")) ? { shot: readFileSync(join(ws, "screenshots", "desktop-light.png"), "utf8") } : {}),
     ...(existsSync(join(ws, "OWNERS_WORDS.md")) ? { words: readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8") } : {}),
   });
@@ -95,7 +96,8 @@ describe("Polish", () => {
     assert.equal(jobs[0].shot, "desktop-light v:none count 3");
     assert.equal(jobs[1].shot, "desktop-light v:critique count 3");
     // BUILDER.md says what a Polish is and keeps; nothing to write first. The critique says what it keeps too.
-    assert.match(jobs[0].brief, /^# Build: modify `ui-counter`\n\nThis is a \*\*Polish\*\*: the tool works and is live; this build lifts its design, not what it does\. Hewn shows you screenshots of it filled with its sample data/);
+    assert.match(jobs[0].brief, /^# Build: modify `ui-counter`\n\n\*\*Read `BRIEF\.md` in your workspace, all of it, before you write anything\*\*[^\n]*\n\nThis is a \*\*Polish\*\*: the tool works and is live; this build lifts its design, not what it does\. Hewn shows you screenshots of it filled with its sample data/);
+    assert.match(jobs[0].contract ?? "", /^# How to build for Hewn\n[^]*## Implementation contract/, "a Polish's workspace has the brief too");
     assert.ok(jobs[0].brief.includes(POLISH_KEEPS), jobs[0].brief.slice(0, 1200));
     assert.doesNotMatch(jobs[0].brief, /First, before the passes|What the owner asks of this Polish/);
     assert.ok(jobs[0].request!.includes(POLISH_KEEPS));
@@ -126,7 +128,7 @@ describe("Polish", () => {
     );
     assert.equal(view.status, "promoted", view.log.join("\n"));
     assert.deepEqual(jobs.map((j) => [j.attempt, j.pass ?? "attempt"]), [[1, "attempt"], [2, "attempt"], [3, "critique"], [4, "craft"]]);
-    assert.match(jobs[0].brief, /First, before the passes: the tool has no sample data\. Write sample\/calls\.json \(see "sample\/calls\.json" below\) with made-up entries that show what it does, change nothing else, and stop\./);
+    assert.match(jobs[0].brief, /First, before the passes: the tool has no sample data\. Write sample\/calls\.json \(see "sample\/calls\.json" in `BRIEF\.md`\) with made-up entries that show what it does, change nothing else, and stop\./);
     assert.match(jobs[0].brief, /\n\nWhat the owner asks of this Polish: Make the number the main thing/);
     assert.match(jobs[1].feedback!, /sample\/calls\.json is missing: a Polish shows the builder the tool filled with sample data/);
     // The passes see what it wrote.

@@ -106,7 +106,7 @@ describe("what a build keeps", () => {
     const b = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "record runs", conversation: said }), (ws) => (read(ws), seed(ws)));
     const note = brief.indexOf("THE OWNER'S OWN WORDS");
     assert.ok(brief.indexOf("Requirements: record runs") < note && note < brief.indexOf("## Owner's instructions"), "after the request, before the instructions");
-    assert.ok(brief.indexOf("## Owner's instructions") < brief.indexOf("## Implementation contract"), "and the contract");
+    assert.ok(brief.indexOf("## Owner's instructions") < brief.lastIndexOf("Now read `BRIEF.md`"), "and the order to read the brief");
     assert.match(brief, /THE OWNER'S OWN WORDS: their conversation with the intake is in `OWNERS_WORDS.md` in your workspace, oldest first\. Read all of it before you plan/);
     assert.match(brief, /The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word/);
     assert.match(brief, /within the owner's instructions \(if any\) and the contract: the contract has the last word/);

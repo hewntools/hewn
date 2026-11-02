@@ -10,12 +10,16 @@ import { editJson, editText, FIXTURES, OPENCODE_READ, SEED, setup } from "./help
 
 /** What the builder finds in its workspace about the owner's other capabilities. */
 interface Seen {
+  /** BUILDER.md. */
+  request: string;
+  /** BRIEF.md. */
   brief: string;
   index?: string;
   contracts: Record<string, string>;
 }
 const inWorkspace = (ws: string): Seen => ({
-  brief: readFileSync(join(ws, "BUILDER.md"), "utf8"),
+  request: readFileSync(join(ws, "BUILDER.md"), "utf8"),
+  brief: readFileSync(join(ws, "BRIEF.md"), "utf8"),
   index: existsSync(join(ws, "CONTRACTS.md")) ? readFileSync(join(ws, "CONTRACTS.md"), "utf8") : undefined,
   contracts: existsSync(join(ws, CONTRACTS_DIR)) ? Object.fromEntries(readdirSync(join(ws, CONTRACTS_DIR)).map((f) => [f, readFileSync(join(ws, CONTRACTS_DIR, f), "utf8")])) : {},
 });
@@ -60,13 +64,13 @@ describe("the owner's other capabilities' contracts", () => {
   afterEach(() => t.cleanup());
 
   test("BUILDER.md names them; CONTRACTS.md lists their newest operations; contracts/<id>.md has each in full; none of it reaches a version", async () => {
-    let seen: Seen = { brief: "", contracts: {} };
+    let seen: Seen = { request: "", brief: "", contracts: {} };
     const first = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }), (ws) => ((seen = inWorkspace(ws)), runningLog()(ws)));
     assert.equal(first.status, "promoted", first.log.join("\n"));
     assert.equal(seen.index, undefined, "no other capabilities: no CONTRACTS.md");
     assert.deepEqual(seen.contracts, {}, "and no contracts folder");
-    assert.doesNotMatch(seen.brief, /## The owner's other capabilities/);
-    assert.match(seen.brief, /`CONTRACTS.md` in your workspace lists their operations,\nand `\.hewn-contracts\/<id>.md` has each one's full contract/, "the brief says where they are");
+    assert.doesNotMatch(seen.request, /## The owner's other capabilities/);
+    assert.match(seen.brief, /named at the end of `BUILDER.md`; `CONTRACTS.md` in your workspace lists their operations,\nand `\.hewn-contracts\/<id>.md` has each one's full contract/, "the brief says where they are");
 
     // A connection's build gets them too: nothing stops a connection calling another capability.
     const conn = await t.build(() => t.platform.create(USER, { name: "Site Connection", purpose: "the site", requirements: "r", kind: "connection" }), (ws) => ((seen = inWorkspace(ws)), cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true })));
@@ -75,8 +79,8 @@ describe("the owner's other capabilities' contracts", () => {
 
     const report = await t.build(() => t.platform.create(USER, { name: "Run Report", purpose: "reports", requirements: "r" }), (ws) => ((seen = inWorkspace(ws)), runReport(ws)));
     assert.equal(report.status, "promoted", report.log.join("\n"));
-    assert.match(seen.brief, /## The owner's other capabilities\n\nYou can compose with these via ctx.call \(see "Calling other capabilities"\): Running Log \(`running-log`\), Site Connection \(`site-connection`\)\. `CONTRACTS.md` in your workspace lists the operations each one offers/);
-    const catalog = seen.brief.slice(seen.brief.indexOf("## The owner's other capabilities"));
+    assert.match(seen.request, /## The owner's other capabilities\n\nYou can compose with these via ctx.call \(see "Calling other capabilities" in `BRIEF\.md`\): Running Log \(`running-log`\), Site Connection \(`site-connection`\)\. `CONTRACTS.md` in your workspace lists the operations each one offers/);
+    const catalog = seen.request.slice(seen.request.indexOf("## The owner's other capabilities"), seen.request.lastIndexOf("Now read `BRIEF.md`"));
     assert.equal(catalog.split("\n").filter(Boolean).length, 2, `a heading and a line: ${catalog}`);
     assert.doesNotMatch(catalog, /"type":"object"|list_runs|record_run/, "no operations or schemas in BUILDER.md");
     assert.match(seen.index!, /^- \*\*Running Log\*\* \(`running-log`\): .*\n {2}read: `get_summary@1`, `list_runs@2` · write: `record_run@1`$/m, "the newest version of each, by side effect, in the manifest's order");
@@ -103,8 +107,8 @@ describe("the owner's other capabilities' contracts", () => {
 
   test("BUILDER.md doesn't grow with the others' schemas: a huge contract stays in its own file", async () => {
     const sizes: number[] = [];
-    let seen: Seen = { brief: "", contracts: {} };
-    const read = (ws: string) => ((seen = inWorkspace(ws)), sizes.push(Buffer.byteLength(seen.brief)));
+    let seen: Seen = { request: "", brief: "", contracts: {} };
+    const read = (ws: string) => ((seen = inWorkspace(ws)), sizes.push(Buffer.byteLength(seen.request)));
     await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }), runningLog());
     await t.build(() => t.platform.create(USER, { name: "Run Report", purpose: "reports", requirements: "r" }), (ws) => (read(ws), runReport(ws)));
     // Running Log gets a 400 KB schema; a build that sees it reads a BUILDER.md of the same size.
@@ -120,7 +124,7 @@ describe("the owner's other capabilities' contracts", () => {
       throw new Error("the builder gave up");
     });
     assert.ok(seen.contracts["running-log.md"].includes("HUGE") && seen.contracts["running-log.md"].length > 400_000, "the contract is whole in its file");
-    assert.doesNotMatch(seen.brief, /HUGE/);
+    assert.doesNotMatch(seen.request, /HUGE/);
     assert.ok(seen.index!.length < 2_000, `CONTRACTS.md stays small too: ${seen.index!.length}`);
     // The two briefs differ only in their requests.
     assert.ok(Math.abs(sizes[1] - sizes[0]) < 200, `BUILDER.md: ${sizes.join(" → ")} bytes`);
@@ -162,23 +166,28 @@ describe("the owner's other capabilities' contracts", () => {
     assert.match(files["OWNERS_WORDS.md"], /word499/);
   });
 
-  test("BUILDER.md leaves room in OpenCode's 50 KB read: with the longest request so far, a conversation, instructions and 60 other tools, 2.5 KB to spare", async () => {
-    const SPARE = 2_560;
+  test("BUILDER.md and BRIEF.md each leave room in OpenCode's 50 KB read: the request (the longest so far, a conversation, instructions, 60 other tools) 2.5 KB, the brief 5 KB", async () => {
     // The longest request on the owner's Hewn so far: 6,521 characters.
-    const request = Array.from({ length: 900 }, (_, i) => `word${i}`).join(" ").slice(0, 6_521);
+    const longest = Array.from({ length: 900 }, (_, i) => `word${i}`).join(" ").slice(0, 6_521);
     t.platform.setInstructions(USER, undefined, ["Metric units, and dates as 1 Nov 2026.", "Keep screens calm: no confetti."]);
+    let request = "";
     let brief = "";
-    await t.build(() => t.platform.create(USER, { name: "Run Report", purpose: "reports", requirements: request, conversation: [{ role: "user", content: "a report on my runs" }] }), (ws) => {
-      brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+    await t.build(() => t.platform.create(USER, { name: "Run Report", purpose: "reports", requirements: longest, conversation: [{ role: "user", content: "a report on my runs" }] }), (ws) => {
+      request = readFileSync(join(ws, "BUILDER.md"), "utf8");
+      brief = readFileSync(join(ws, "BRIEF.md"), "utf8");
       throw new Error("the builder gave up");
     });
     // 60 others, named about as long as the owner's tools are on average (32 bytes each in the list): "Habit Logs 12 (`habit-logs-12`)".
     const others = Array.from({ length: 60 }, (_, i) => ({ id: `habit-logs-${i}`, manifest: { name: `Habit Logs ${i}` } as CapabilityManifest, calls: [] }));
-    const size = Buffer.byteLength(brief) + Buffer.byteLength(catalogNote(others));
+    const size = Buffer.byteLength(request) + Buffer.byteLength(catalogNote(others));
     assert.ok(
-      size <= OPENCODE_READ - SPARE,
-      `BUILDER.md comes to ${size} bytes with the longest request so far (6,521 characters) and 60 other tools: ${OPENCODE_READ - size} to spare of OpenCode's ${OPENCODE_READ}, under the ${SPARE} this test keeps. ` +
-        "The brief (spec/builder-brief.md, " + Buffer.byteLength(readFileSync(join(import.meta.dirname, "..", "spec", "builder-brief.md"))) + " bytes) has grown: cut it, or move it out of BUILDER.md into a file of its own.",
+      size <= OPENCODE_READ - 2_560,
+      `BUILDER.md comes to ${size} bytes with the longest request so far (6,521 characters) and 60 other tools: ${OPENCODE_READ - size} to spare of OpenCode's ${OPENCODE_READ}, under the 2,560 this test keeps. What Hewn adds to the request has grown (the notes, the instructions, the names): cut it, or move a part into a file of its own.`,
+    );
+    const briefSize = Buffer.byteLength(brief);
+    assert.ok(
+      briefSize <= OPENCODE_READ - 5_120,
+      `BRIEF.md (spec/builder-brief.md) comes to ${briefSize} bytes: ${OPENCODE_READ - briefSize} to spare of OpenCode's ${OPENCODE_READ}, under the 5,120 this test keeps. The brief has grown: cut it, or split it.`,
     );
   });
 

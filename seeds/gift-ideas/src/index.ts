@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Gift Ideas: people, gift ideas per occasion, upcoming birthdays/Christmas Eve and model suggestions.
-// See BUILDER.md for the implementation contract.
+// See BRIEF.md for the implementation contract.
 
 type Db = {
   exec(sql: string): void;

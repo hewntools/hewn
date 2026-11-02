@@ -178,7 +178,7 @@ export interface BuildCharge {
 }
 
 export interface Workbench {
-  /** Create the build's workspace with these seed files (skeleton, or a copy of the active version + BUILDER.md). */
+  /** Create the build's workspace with these seed files (skeleton, or a copy of the active version, + BUILDER.md, BRIEF.md and the rest a builder reads). */
   open(buildId: string, files: Files): Promise<void>;
   /** The candidate as it stands (build artefacts such as node_modules excluded). */
   read(buildId: string): Promise<Files>;
