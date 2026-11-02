@@ -44,7 +44,7 @@ export function craftRequest(defects: string[]): string {
 /**
  * What a pass asks of a build's builder: the bench's request, then the screenshots by name (a long
  * page comes in parts), whether they're filled with sample data, and (the critique) what else to hold
- * the screen against: the owner's words in BUILDER.md and the other tools' looks in OTHER_TOOLS.md,
+ * the screen against: the owner's words in OWNERS_WORDS.md and the other tools' looks in OTHER_TOOLS.md,
  * pointed to rather than repeated (the builder has read them, and both can be long).
  */
 export function passRequest(pass: Pass, o: { files: string[]; sampled: boolean; defects?: string[]; ownersWords?: boolean; otherTools?: boolean }): string {
@@ -52,7 +52,7 @@ export function passRequest(pass: Pass, o: { files: string[]; sampled: boolean; 
   return [
     pass === "critique" ? CRITIQUE_REQUEST : craftRequest(o.defects ?? []),
     `The screenshots: ${o.files.join(", ")}.${parts ? " A long page comes in parts, top to bottom: desktop-light-2.png carries on from desktop-light.png, and so on." : ""}${o.sampled ? "" : " The tool has no sample data (sample/calls.json), so they show it empty."}`,
-    pass === "critique" && o.ownersWords ? "Also check the screen against what the owner asked for and how they wanted it to feel: THE OWNER'S OWN WORDS in BUILDER.md." : "",
+    pass === "critique" && o.ownersWords ? "Also check the screen against what the owner asked for and how they wanted it to feel: THE OWNER'S OWN WORDS in OWNERS_WORDS.md." : "",
     pass === "critique" && o.otherTools ? "It must still look clearly different from each of the owner's other tools in OTHER_TOOLS.md." : "",
     "Keep everything working: Hewn validates the result again, and the tool goes live only if it passes.",
   ]

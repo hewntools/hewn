@@ -715,6 +715,7 @@ export class Builds extends Domain {
         "tests/cases.json": bytes("[]\n"),
       }),
       "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      ...this.ownersWordsFile(buildId),
       ...this.contractFiles(id),
       ...(connection ? {} : await this.looksFile(id, "create")),
       ...attached.files,
@@ -819,7 +820,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1334,7 +1335,7 @@ export class Builds extends Domain {
       this.planPasses(run.build.id, []);
       return first;
     }
-    const ownersWords = !!this.registry.buildContext(run.build.id)?.conversation?.length;
+    const ownersWords = !!(await this.workbench.file(run.build.id, "OWNERS_WORDS.md"));
     const otherTools = !!(await this.workbench.file(run.build.id, "OTHER_TOOLS.md"));
     let current = first;
     for (const [i, pass] of passes.entries()) {
@@ -1516,11 +1517,21 @@ export class Builds extends Domain {
     return css ? { "PLATFORM_UI.css": bytes(css) } : {};
   }
 
-  /** BUILDER.md: the request, the owner's own words and instructions as the build recorded them (`build_context`), the brief, the catalog. */
+  /**
+   * OWNERS_WORDS.md for a workspace: the owner's conversation (`ownersWords`), in a file of its own, as
+   * a long one would push the brief past what a builder reads of BUILDER.md (OpenCode reads 50 KB of a
+   * file). None for a build without one (an agent's). Never part of a version (`isWorkspaceOnly`).
+   */
+  private ownersWordsFile(buildId: string): Files {
+    const words = ownersWords(this.registry.buildContext(buildId)?.conversation);
+    return words ? { "OWNERS_WORDS.md": bytes(words) } : {};
+  }
+
+  /** BUILDER.md: the request, where the owner's own words are and how they count, the owner's instructions (as the build recorded them, `build_context`), the brief, the catalog. */
   private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
     const instructions = context?.instructions;
-    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWords(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
+    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWordsNote(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {
@@ -1638,35 +1649,52 @@ const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "mod
 const isPaused = (b: BuildRow) => b.status === "failed" && !!explainFailure(b.log).paused;
 
 /**
- * The most of the owner's conversation BUILDER.md carries (the turns, the blank lines between them and
- * what says turns were left out), and of each turn and a drafted change's first line.
+ * The most of the owner's conversation OWNERS_WORDS.md carries, in UTF-8 bytes (the turns, the blank
+ * lines between them and what says turns were left out), so the file stays within one 50 KB read;
+ * and, in characters, of each turn and a drafted change's first line.
  */
 const MAX_OWNERS_WORDS = 40_000;
 const OWNERS_TURN_CHARS = 4000;
+/** The longest line in OWNERS_WORDS.md: a reader cuts longer ones short (OpenCode at 2,000 characters). */
+const OWNERS_LINE_CHARS = 1000;
 const DRAFTED_CHANGE_CHARS = 200;
 /** The heading a change's brief starts with ("CHANGES", "**Changes:**", "## Changes"), and a list marker after it. */
 const CHANGES_HEADING = /^[#*\s]*changes[*\s]*?(?::[* \t]*|(?=\n))\s*(?:(?:[-*•]|\d+[.)])\s+)?/i;
 
+/** How the owner's words count, as BUILDER.md and OWNERS_WORDS.md say it; `request`: where the request is. */
+const ownersRule = (request: string) =>
+  `${request} is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously. Their words apply within the owner's instructions (if any) and the contract: the contract has the last word. The conversation may also cover other builds (a connection, other ideas) and choices the owner made on the proposal: use it only for this build's request, never to add to its scope.`;
+
 /**
- * BUILDER.md's "THE OWNER'S OWN WORDS": the conversation that led to the build (the owner's builds
- * only), oldest first, after the request. The request is the plan; the owner's words win where it's
- * silent, vague or differs, within the owner's instructions and the contract. A long one keeps its
- * first turn, the owner's latest and the latest that fit, and says where turns were left out. An
- * empty string when there's none (an agent's build).
+ * BUILDER.md's "THE OWNER'S OWN WORDS", after the request: that the conversation that led to the build
+ * is in OWNERS_WORDS.md, to read before planning, and how it counts. Empty when there's none (an
+ * agent's build).
+ */
+function ownersWordsNote(conversation: BuildTurn[] | undefined): string {
+  if (!conversation?.length) return "";
+  return `\n\nTHE OWNER'S OWN WORDS: their conversation with the intake is in \`OWNERS_WORDS.md\` in your workspace, oldest first. Read all of it before you plan (in parts, if your reader cuts it short). ${ownersRule("The request above")}`;
+}
+
+/**
+ * OWNERS_WORDS.md: the conversation that led to the build (the owner's builds only), oldest first,
+ * with how it counts (`ownersRule`). A long one keeps its first turn, the owner's latest and the
+ * latest that fit in `MAX_OWNERS_WORDS` bytes, and says where turns were left out. An empty string
+ * when there's none (an agent's build).
  */
 export function ownersWords(conversation: BuildTurn[] | undefined): string {
   if (!conversation?.length) return "";
   const turns = conversation.map((t) => `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`);
+  const size = turns.map((turn) => bytes(turn).length);
   let keep = new Set(turns.keys());
-  if (turns.join("\n\n").length > MAX_OWNERS_WORDS) {
-    // Each kept turn and mark costs its length and a blank line; a gap may open on either side of the owner's latest.
+  if (bytes(turns.join("\n\n")).length > MAX_OWNERS_WORDS) {
+    // Each kept turn and mark costs its size and a blank line; a gap may open on either side of the owner's latest.
     keep = new Set([0, conversation.findLastIndex((t) => t.role === "user")].filter((i) => i >= 0));
-    let room = MAX_OWNERS_WORDS - 2 * (leftOut(turns.length).length + 2) - [...keep].reduce((n, i) => n + turns[i].length + 2, 0);
+    let room = MAX_OWNERS_WORDS - 2 * (bytes(leftOut(turns.length)).length + 2) - [...keep].reduce((n, i) => n + size[i] + 2, 0);
     for (let i = turns.length - 1; i > 0; i--) {
       if (keep.has(i)) continue;
-      if (turns[i].length + 2 > room) break;
+      if (size[i] + 2 > room) break;
       keep.add(i);
-      room -= turns[i].length + 2;
+      room -= size[i] + 2;
     }
   }
   const kept: string[] = [];
@@ -1678,16 +1706,17 @@ export function ownersWords(conversation: BuildTurn[] | undefined): string {
     gap = 0;
   });
   if (gap) kept.push(leftOut(gap));
-  return `\n\nTHE OWNER'S OWN WORDS (their conversation with the intake, oldest first). The request above is the plan; where it is silent, vague, or differs from what the owner said, follow the owner's words, and their latest word where they changed their mind. Take their details and taste seriously. Their words apply within the owner's instructions (if any) and the contract below: the contract has the last word. The conversation may also cover other builds (a connection, other ideas) and choices the owner made on the proposal: use it only for this build's request, never to add to its scope. Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}`;
+  return `# THE OWNER'S OWN WORDS\n\nTheir conversation with the intake, oldest first. ${ownersRule("The request in \`BUILDER.md\`")} Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}\n`;
 }
 
-/** Where BUILDER.md leaves turns of the owner's conversation out. */
+/** Where OWNERS_WORDS.md leaves turns of the owner's conversation out. */
 const leftOut = (n: number) => `(${n} turn${n === 1 ? "" : "s"} left out)`;
 
 /**
- * A turn as the builder reads it, cut short, its further lines indented so nothing in it passes for a
- * turn of its own. A draft or ideas the intake offered come down to their name and purpose, a drafted
- * change (it has no name) to the first line of what it changes: the request above is the one agreed.
+ * A turn as the builder reads it, cut short, its long lines wrapped and its further lines indented so
+ * nothing in it passes for a turn of its own. A draft or ideas the intake offered come down to their
+ * name and purpose, a drafted change (it has no name) to the first line of what it changes: the
+ * request above is the one agreed.
  */
 function turnText(t: BuildTurn): string {
   const attached = t.attachments?.length ? `\n(attached: ${t.attachments.map((a) => a.name).join(", ")})` : "";
@@ -1708,8 +1737,21 @@ function turnText(t: BuildTurn): string {
   if (r?.kind === "draft" && named(r.draft)) text = [message, `(It drafted ${named(r.draft)})`].filter(Boolean).join("\n");
   else if (r?.kind === "draft" && change(r.draft)) text = [message, `(It drafted a change: ${change(r.draft)})`].filter(Boolean).join("\n");
   else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
-  if (text.length > OWNERS_TURN_CHARS) text = `${text.slice(0, OWNERS_TURN_CHARS)}…`;
-  return (text + attached).replaceAll("\n", "\n  ");
+  const cut = text.length > OWNERS_TURN_CHARS;
+  text = text.slice(0, OWNERS_TURN_CHARS).split("\n").flatMap((line) => wrapped(line, OWNERS_LINE_CHARS)).join("\n");
+  return `${text}${cut ? "…" : ""}${attached}`.replaceAll("\n", "\n  ");
+}
+
+/** A line as lines of at most `max` characters, split at a space (or, with none in the second half, anywhere). */
+function wrapped(line: string, max: number): string[] {
+  const lines: string[] = [];
+  while (line.length > max) {
+    const space = line.lastIndexOf(" ", max);
+    const at = space > max / 2 ? space : max;
+    lines.push(line.slice(0, at));
+    line = line.slice(at === space ? at + 1 : at);
+  }
+  return [...lines, line];
 }
 
 /** One of the owner's other tools as a build is told it (`othersLooks`). */

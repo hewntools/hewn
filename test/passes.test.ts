@@ -48,6 +48,8 @@ const markUi = (ws: string, v: string) => {
   const page = join(ws, "ui", "index.html");
   writeFileSync(page, readFileSync(page, "utf8").replace(/<!-- v:[a-z0-9-]+ -->|$/, `<!-- ${v} -->`));
 };
+/** What the critique asked, and whether the workspace had OWNERS_WORDS.md then. */
+const critiqueSeen = (into: { ownersWords: boolean; request: string }[]): Script => (ws, job) => void (job.pass?.name === "critique" && into.push({ ownersWords: existsSync(join(ws, "OWNERS_WORDS.md")), request: job.pass.request }));
 /** A test case that can't pass: validation fails. */
 const breakTests = (ws: string) => writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "get", operation: "get", input: {}, expect: { count: 5 } }]));
 
@@ -111,6 +113,25 @@ describe("passes after a new tool's build", () => {
     const order = steps.map((s) => s.step).filter((s, i, all) => s !== all[i - 1]);
     assert.deepEqual(order, ["code", "tests", "critique", "craft", "done"]);
     assert.ok(steps.some((s) => s.step === "craft" && s.tests?.total === 2), "a pass's own tests show on its step");
+  });
+
+  test("the critique points at OWNERS_WORDS.md when the owner asked for the tool in the chat", async () => {
+    const critiques: { ownersWords: boolean; request: string }[] = [];
+    const record = critiqueSeen(critiques);
+    const conversation = [{ role: "user" as const, content: "a counter for my push-ups" }];
+    const owners = await t.build(() => t.platform.create(USER, { name: "UI Counter", purpose: "Count.", requirements: "A counter.", conversation }), counter("v:build"), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    assert.equal(owners.status, "promoted", owners.log.join("\n"));
+    assert.ok(critiques[0].ownersWords, "the file is in the workspace");
+    assert.match(critiques[0].request, /THE OWNER'S OWN WORDS in OWNERS_WORDS\.md\./, "and the critique points at it");
+  });
+
+  test("an agent's build has no OWNERS_WORDS.md, and its critique doesn't mention one", async () => {
+    const critiques: { ownersWords: boolean; request: string }[] = [];
+    const record = critiqueSeen(critiques);
+    const agents = await t.build(() => t.platform.create(t.claude, { name: "UI Counter", purpose: "Count.", requirements: "A counter." }), counter("v:build"), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    assert.equal(agents.status, "promoted", agents.log.join("\n"));
+    assert.equal(critiques[0].ownersWords, false);
+    assert.doesNotMatch(critiques[0].request, /OWNER'S OWN WORDS|OWNERS_WORDS/);
   });
 
   test("each step's time is Hewn's own: writing code counts all of it (checks too), and each pass is timed", async () => {
@@ -392,7 +413,7 @@ describe("a pass, as the builder is asked", () => {
   test("the critique points at the owner's words and the other tools' looks when there are some; the craft pass gets what was measured", () => {
     const files = ["screenshots/desktop-light.png", "screenshots/mobile-light.png"];
     const critique = passRequest("critique", { files, sampled: true, ownersWords: true, otherTools: true });
-    assert.match(critique, /THE OWNER'S OWN WORDS in BUILDER\.md/);
+    assert.match(critique, /THE OWNER'S OWN WORDS in OWNERS_WORDS\.md/);
     assert.match(critique, /OTHER_TOOLS\.md/);
     assert.doesNotMatch(critique, /no sample data|in parts/);
     assert.doesNotMatch(passRequest("critique", { files, sampled: false }), /OWNER'S OWN WORDS|OTHER_TOOLS/);
