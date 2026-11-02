@@ -40,9 +40,9 @@ Request:
   "effort": "high",
   "check": true,
   "pass": "critique",
-  "prompt": "You are a builder for Hewn, … Read BUILDER.md …",
+  "prompt": "You are a builder for Hewn, … Read BUILDER.md, the request, then BRIEF.md, all of it …",
   "resumePrompt": "Design review pass. …",
-  "files": { "BUILDER.md": "<base64>", "ui.css": "<base64>", "src/index.ts": "<base64>" }
+  "files": { "BUILDER.md": "<base64>", "BRIEF.md": "<base64>", "ui.css": "<base64>", "src/index.ts": "<base64>" }
 }
 ```
 
@@ -53,7 +53,7 @@ Request:
 - `model` and `effort` are set only when the owner or the requesting agent chose them; otherwise the service's default. Names come from `GET /v1/models`. A model the service can't run is refused before anything starts (`{ "refused": "<model> isn't available. Pick another model." }`); never build on another model instead.
 - `pass` (since 0.4.10): this attempt is a pass on a candidate that already validated, `critique` or `craft`, so you can label or price it. A new tool's build (only a create, and only one with a screen) runs them after its attempts, as the owner set (by default `critique`, then `craft`): `attempt` goes on counting and `session` stays the same, so it's a resumed attempt like any later one. `prompt` is whole as ever (what the builder is told, then what the pass asks), and `files` is the candidate with screenshots of it in `screenshots/` (`desktop-light.png`, `desktop-dark.png`, `mobile-light.png`, `mobile-dark.png`, a long page in parts: `mobile-light-2.png` carries on from `mobile-light.png`). A service that ignores `pass` builds it as any attempt. A pass's outcome counts as any attempt's: one that's refused or paused ends the build so, and one whose result fails Hewn's checks gets a second try (with `feedback`), then fails the build. Without a pass, unset.
 - `resumePrompt` (since 0.4.10, from the second attempt on): what Hewn's own builders send when they resume the build's session instead of starting over: the failure to fix after a failed validation, or what a pass asks. A service that resumes its own session (`session`) sends this instead of `prompt`; one that doesn't, ignores it (`prompt` stays whole).
-- `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request and the contract; `OWNERS_WORDS.md`, when the owner asked for the build in the chat, quotes their conversation with the intake, up to 40,000 bytes, and `BUILDER.md` says so after the request). `OTHER_TOOLS.md`, when the owner has other tools, says how each looks, and `CONTRACTS.md` and `.hewn-contracts/<id>.md` what each offers to call (the brief sends the builder to them). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
+- `prompt` is what a local builder would be told; `files` is the workspace (`BUILDER.md` holds the request, `BRIEF.md` the contract, which the prompt and `BUILDER.md` say to read whole before writing anything; `OWNERS_WORDS.md`, when the owner asked for the build in the chat, quotes their conversation with the intake, up to 40,000 bytes, and `BUILDER.md` says so after the request). `OTHER_TOOLS.md`, when the owner has other tools, says how each looks, and `CONTRACTS.md` and `.hewn-contracts/<id>.md` what each offers to call (the brief sends the builder to them). What the owner attached is in it under `attachments/` (images and text files, listed in `BUILDER.md`'s request), for the builder to read; Hewn never makes them part of a version.
 
 Events:
 

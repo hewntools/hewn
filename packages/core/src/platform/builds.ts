@@ -711,10 +711,11 @@ export class Builds extends Domain {
     await this.workbench.open(buildId, {
       ...(seed ? versionFiles(seed) : {
         "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
-        "src/index.ts": bytes("// See BUILDER.md for the implementation contract.\nexport const operations = {};\n"),
+        "src/index.ts": bytes("// See BRIEF.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.brief_("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" below).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      "BUILDER.md": bytes(this.builderFile("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+      "BRIEF.md": bytes(briefText(this.brief)),
       ...this.ownersWordsFile(buildId),
       ...this.contractFiles(id),
       ...(connection ? {} : await this.looksFile(id, "create")),
@@ -820,7 +821,7 @@ export class Builds extends Domain {
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
     const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.builderFile(b.kind, cap.id, ask, this.registry.buildContext(buildId))), "BRIEF.md": bytes(briefText(this.brief)), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1502,12 +1503,12 @@ export class Builds extends Domain {
 
   /**
    * AGENTS.md for a workspace, for builders that read it on their own (Codex, OpenCode): where the
-   * brief is, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
+   * request and the brief are, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
    */
   private agentsFile(buildId: string): Files {
     const instructions = this.registry.buildContext(buildId)?.instructions;
     return {
-      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first: the request, the implementation contract and the owner's other tools. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}` : ""}`),
+      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first (the request and the owner's other tools), then \`BRIEF.md\`, all of it, before you write anything: it is the implementation contract, how to build for Hewn. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}` : ""}`),
     };
   }
 
@@ -1523,7 +1524,7 @@ export class Builds extends Domain {
 
   /**
    * OWNERS_WORDS.md for a workspace: the owner's conversation (`ownersWords`), in a file of its own, as
-   * a long one would push the brief past what a builder reads of BUILDER.md (OpenCode reads 50 KB of a
+   * a long one would push the rest past what a builder reads of BUILDER.md (OpenCode reads 50 KB of a
    * file). None for a build without one (an agent's). Never part of a version (`isWorkspaceOnly`).
    */
   private ownersWordsFile(buildId: string): Files {
@@ -1531,11 +1532,15 @@ export class Builds extends Domain {
     return words ? { "OWNERS_WORDS.md": bytes(words) } : {};
   }
 
-  /** BUILDER.md: the request, where the owner's own words are and how they count, the owner's instructions (as the build recorded them, `build_context`), the brief, the catalog. */
-  private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
-    const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
+  /**
+   * BUILDER.md: the request, first saying to read BRIEF.md whole before writing anything; where the
+   * owner's own words are and how they count, the owner's instructions (as the build recorded them,
+   * `build_context`), the other capabilities' names, and the order to read the brief again.
+   */
+  private builderFile(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const instructions = context?.instructions;
-    return shortLines(`# Build: ${kind} \`${id}\`\n\n${request}${ownersWordsNote(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`);
+    const parts = [`# Build: ${kind} \`${id}\``, READ_BRIEF, `${request}${ownersWordsNote(context?.conversation)}`, instructions, this.catalogForBuilder(id), "Now read `BRIEF.md`, all of it, before you write anything."];
+    return shortLines(`${parts.flatMap((p) => p?.trim() || []).join("\n\n")}\n`);
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {
@@ -1872,7 +1877,7 @@ export const CONTRACTS_DIR = ".hewn-contracts";
  */
 export function catalogNote(callees: Callee[]): string {
   if (!callees.length) return "";
-  return `\n## The owner's other capabilities\n\nYou can compose with these via ctx.call (see "Calling other capabilities"): ${callees.map((c) => `${c.manifest.name} (\`${c.id}\`)`).join(", ")}. \`CONTRACTS.md\` in your workspace lists the operations each one offers, and \`${CONTRACTS_DIR}/<id>.md\` has each one's full contract. You see only their public contracts and recorded looks, never their data or code.\n`;
+  return `\n## The owner's other capabilities\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BRIEF.md\`): ${callees.map((c) => `${c.manifest.name} (\`${c.id}\`)`).join(", ")}. \`CONTRACTS.md\` in your workspace lists the operations each one offers, and \`${CONTRACTS_DIR}/<id>.md\` has each one's full contract. You see only their public contracts and recorded looks, never their data or code.\n`;
 }
 
 /**
@@ -1888,7 +1893,7 @@ export function contractsIndex(callees: Callee[]): string {
     });
     return `- **${m.name}** (\`${id}\`): ${oneLine(m.purpose, INDEX_PURPOSE_CHARS)}\n  ${bySideEffect.join(" · ") || "nothing to call"}`;
   };
-  return shortLines(`# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BUILDER.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`${CONTRACTS_DIR}/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`);
+  return shortLines(`# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BRIEF.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`${CONTRACTS_DIR}/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`);
 }
 
 /** .hewn-contracts/<id>.md: one capability's contract in full, the operations `callableOperations` gives. */
@@ -1906,7 +1911,7 @@ export function contractText({ id, manifest: m, calls }: Callee): string {
     return `## \`${key}\` (${notes.join("; ")})\n\n${o.description}\n\ninput: ${schemaText(o.inputSchema)}\noutput: ${schemaText(o.outputSchema)}`;
   };
   const ops = callableOperations(m, calls);
-  return shortLines(`# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BUILDER.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`);
+  return shortLines(`# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BRIEF.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`);
 }
 
 /** A schema as a contract file shows it: on one line when it fits after "output: " (the longer label), else over several. */
@@ -1929,9 +1934,23 @@ export function cssWithoutComments(css: string): string {
 }
 
 
+/** What BUILDER.md says first and last: the brief is in BRIEF.md, to read whole before writing anything. */
+const READ_BRIEF =
+  "**Read `BRIEF.md` in your workspace, all of it, before you write anything** (in parts, if your reader cuts it short): it is the implementation contract, how to build for Hewn. This file is the request.";
+
+/**
+ * BRIEF.md: the brief (spec/builder-brief.md, or a bench arm's), how to build for Hewn, in a file of
+ * its own, so BUILDER.md stays the request and a builder reads each whole (OpenCode reads 51,200 bytes
+ * of a file; a test keeps the brief well under that).
+ */
+export function briefText(brief: string): string {
+  const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
+  return shortLines(`# How to build for Hewn\n\nThe request is in \`BUILDER.md\`; this is how to build it. Read all of it before you write anything.\n\n${brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}`);
+}
+
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>
-  `This is a **widgets build**: the capability works; add widgets to it (see "Widgets (ABI 2.3)" below).
+  `This is a **widgets build**: the capability works; add widgets to it (see "Widgets (ABI 2.3)" in \`BRIEF.md\`).
 
 ${request ? `What the owner wants to see: ${request}` : "Propose 1–3 widgets from the capability's data: what the owner would want to see at a glance on Home (a count due, today's numbers, the top few items, a week's trend). Fewer, better widgets beat many."}
 

@@ -165,7 +165,7 @@ Ordinary capabilities can't declare `secrets`; they call the connection's operat
 
 Use another capability's public operations instead of duplicating its data. Example: record runs
 in Running Log rather than keeping your own runs table. The owner's other capabilities, when there
-are any, are named at the end of this file; `CONTRACTS.md` in your workspace lists their operations,
+are any, are named at the end of `BUILDER.md`; `CONTRACTS.md` in your workspace lists their operations,
 and `.hewn-contracts/<id>.md` has each one's full contract (input and output schemas). Read it
 before you call one.
 

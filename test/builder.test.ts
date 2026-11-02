@@ -208,17 +208,28 @@ describe("platform-assigned builder", () => {
     assert.deepEqual(done.tests, { passed: 1, total: 3 });
   });
 
-  test("brief tells a platform builder not to submit", async () => {
-    let briefText = "";
+  test("BUILDER.md is the request and says first and last to read BRIEF.md, the brief, whole; neither is part of a version", async () => {
+    let request = "";
+    let brief = "";
+    let agents = "";
     useBuilder(
       fakeBuilder("fake", (job) => {
-        briefText = readFileSync(join(job.workspace, "BUILDER.md"), "utf8");
+        request = readFileSync(join(job.workspace, "BUILDER.md"), "utf8");
+        brief = readFileSync(join(job.workspace, "BRIEF.md"), "utf8");
+        agents = readFileSync(join(job.workspace, "AGENTS.md"), "utf8");
         cpSync(SEED, job.workspace, { recursive: true });
       }),
     );
-    await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
-    assert.match(briefText, /platform validates it automatically/);
-    assert.doesNotMatch(briefText, /call `builds_submit`/);
+    const done = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
+    assert.match(request, /^# Build: create `running-log`\n\n\*\*Read `BRIEF\.md` in your workspace, all of it, before you write anything\*\*[^\n]*This file is the request\.\n\nRequirements: record runs\n/);
+    assert.match(request, /\n\nNow read `BRIEF\.md`, all of it, before you write anything\.\n$/);
+    assert.doesNotMatch(request, /## Implementation contract/, "the brief isn't in BUILDER.md");
+    assert.match(brief, /^# How to build for Hewn\n\nThe request is in `BUILDER\.md`; this is how to build it\. Read all of it before you write anything\.\n\n## Implementation contract\n/);
+    assert.match(brief, /platform validates it automatically/, "{{SUBMIT}} filled in: the platform validates, the builder doesn't submit");
+    assert.doesNotMatch(brief, /call `builds_submit`|\{\{SUBMIT\}\}|\{\{ABI\}\}/);
+    assert.match(agents, /Read `BUILDER\.md` first \(the request and the owner's other tools\), then `BRIEF\.md`, all of it, before you write anything/);
+    const files = Object.keys((await platform.loadVersion("running-log", done.resultVersion!)).files);
+    assert.ok(!files.includes("BUILDER.md") && !files.includes("BRIEF.md"), files.join(", "));
   });
 
   test("failed validation is fed back to the builder on the next attempt", async () => {

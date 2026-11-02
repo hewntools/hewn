@@ -211,14 +211,16 @@ describe("bench runs", () => {
   test("an arm that critiques in the same result: built, captured, reviewed with its screenshots, captured again", { skip: !browser && "no Chromium-based browser on this machine", timeout: 240_000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), "bench-one-"));
     const fixture = resolve(import.meta.dirname, "fixtures", "ui-counter");
-    writeFileSync(join(dir, "brief.md"), "");
+    writeFileSync(join(dir, "brief.md"), "The arm's brief.");
     writeFileSync(join(dir, "job.json"), JSON.stringify({ arm: "x+critique", case: "plant-log", rep: 1, brief: join(dir, "brief.md"), critique: true, sandbox: false }));
     const seen: { kind: string; shots: string[] }[] = [];
+    const briefs: { request: string; brief: string }[] = [];
     await runOne(dir, {
       builder: {
         name: "claude",
         build: async (job) => {
           seen.push({ kind: job.kind, shots: existsSync(join(job.workspace, "screenshots")) ? readdirSync(join(job.workspace, "screenshots")).sort() : [] });
+          briefs.push({ request: readFileSync(join(job.workspace, "BUILDER.md"), "utf8"), brief: readFileSync(join(job.workspace, "BRIEF.md"), "utf8") });
           cpSync(fixture, join(job.workspace), { recursive: true, filter: (f) => !f.endsWith("capability.json") || job.kind === "create" });
           const manifest = join(job.workspace, "capability.json");
           writeFileSync(manifest, JSON.stringify({ ...JSON.parse(readFileSync(manifest, "utf8")), id: job.capabilityId, name: "Plant Log" }));
@@ -228,6 +230,8 @@ describe("bench runs", () => {
     const r = JSON.parse(readFileSync(join(dir, "result.json"), "utf8"));
     assert.equal(r.status, "done", r.error);
     assert.deepEqual(r.builds.map((b: { kind: string; status: string }) => `${b.kind} ${b.status}`), ["create promoted", "modify promoted"]);
+    // The arm's brief is the build's BRIEF.md; BUILDER.md is the request.
+    assert.ok(briefs.every((b) => b.brief.endsWith("The arm's brief.") && !b.request.includes("The arm's brief.")), JSON.stringify(briefs.map((b) => b.brief.slice(-40))));
     // The review saw the first version's screenshots, and they don't stay in the tool.
     assert.deepEqual(seen, [{ kind: "create", shots: [] }, { kind: "modify", shots: ["desktop-dark.png", "desktop-light.png", "mobile-dark.png", "mobile-light.png"] }]);
     assert.ok(!existsSync(join(dir, "version", "screenshots")));

@@ -17,13 +17,13 @@ import type { BuildJob, CapabilityBuilder } from "./types.ts";
 export function builderPrompt(job: BuildJob): string {
   const lines = [
     `You are a builder for Hewn, a personal capability platform. Build ${job.buildId} (${job.kind} of capability '${job.capabilityId}').`,
-    `Your current directory is the build workspace. Read BUILDER.md: it holds the request and the implementation contract. Implement the request in place.`,
+    `Your current directory is the build workspace. Read BUILDER.md, the request, then BRIEF.md, all of it (in parts, if your reader cuts it short), before you write anything: it is the implementation contract, how to build for Hewn. Implement the request in place.`,
     `Only change files inside this directory. Do not try to start, call or promote anything on the platform. When the candidate is complete, stop. The platform validates it automatically.`,
   ];
   // The owner watches Home while it builds: the glyph first, not after reading everything.
-  if (job.kind === "create" && !job.pass) lines.push(`Right after reading BUILDER.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BUILDER.md): the owner's Home shows the icon while you build.`);
+  if (job.kind === "create" && !job.pass) lines.push(`Right after reading BUILDER.md and BRIEF.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
   // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
-  if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
+  if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and BRIEF.md for the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }
@@ -37,8 +37,8 @@ export function builderPrompt(job: BuildJob): string {
 export function resumePrompt(job: BuildJob): string {
   if (job.pass && !job.feedback) return `${job.pass.request}\n\nOnly change files inside this directory. When it's complete, stop.`;
   // The previous run stopped (crashed, timed out) before the platform could validate anything.
-  if (!job.feedback) return `Attempt ${job.attempt}. Your previous run stopped before it finished. Carry on in place: the workspace is as you left it, and BUILDER.md still holds the request and the contract. Only change files inside this directory. When it's complete, stop.`;
-  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, and BUILDER.md still holds the request and the contract. Only change files inside this directory. When it's complete, stop.`;
+  if (!job.feedback) return `Attempt ${job.attempt}. Your previous run stopped before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. Only change files inside this directory. When it's complete, stop.`;
+  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. Only change files inside this directory. When it's complete, stop.`;
 }
 
 /**

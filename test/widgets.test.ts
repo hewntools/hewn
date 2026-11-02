@@ -389,7 +389,7 @@ describe("widgets builds (kind widgets)", () => {
     assert.equal(b.kind, "widgets");
     assert.match(brief, /# Build: widgets `ui-counter`/);
     assert.match(brief, /Propose 1–3 widgets/);
-    assert.match(brief, /### Widgets \(ABI 2\.3\)/);
+    assert.match(brief, /see "Widgets \(ABI 2\.3\)" in `BRIEF\.md`/);
     assert.match(b.log.join("\n"), /widgets only: count/);
     assert.equal(((await t.platform.widget(USER, "ui-counter", "count")).view as any).template, "stat");
   });

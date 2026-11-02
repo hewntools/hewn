@@ -63,7 +63,7 @@ describe("instructions: the owner's standing rules for building", () => {
       },
     );
     assert.equal(b.status, "promoted", b.log.join("\n"));
-    assert.match(brief, /Requirements: r\n\n## Owner's instructions\n\n[^]*For every tool:\n- Swedish copy in every screen\n\n## Implementation contract/);
+    assert.match(brief, /Requirements: r\n\n## Owner's instructions\n\n[^]*For every tool:\n- Swedish copy in every screen\n\nNow read `BRIEF\.md`/);
     assert.doesNotMatch(brief, /For this tool/);
     assert.match(t.platform.buildContext(USER, b.buildId).instructions!, /Swedish copy/);
 

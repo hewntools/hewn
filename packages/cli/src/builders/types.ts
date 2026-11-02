@@ -6,7 +6,7 @@ export interface BuildJob {
   buildId: string;
   capabilityId: string;
   kind: BuildKind;
-  /** The only directory the builder may change. Contains BUILDER.md. */
+  /** The only directory the builder may change. Contains BUILDER.md (the request) and BRIEF.md (the brief). */
   workspace: string;
   attempt: number;
   /** The first build of the chain this one retries. Unset: not a retry. */

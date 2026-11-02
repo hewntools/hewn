@@ -404,7 +404,8 @@ describe("a pass, as the builder is asked", () => {
 
   test("in a fresh session: the brief first, then the pass on the candidate as it is (not the icon again)", () => {
     const p = builderPrompt(job());
-    assert.match(p, /Read BUILDER\.md/);
+    assert.match(p, /Read BUILDER\.md, the request, then BRIEF\.md, all of it/);
+    assert.match(p, /Read BUILDER\.md for the request and BRIEF\.md for the contract, then do this critique pass on it/);
     assert.match(p, /The candidate in this workspace is built and passed validation: don't start over\.[^]*critique pass on it:\n\nDesign review pass\. Look\./);
     assert.doesNotMatch(p, /write ui\/icon\.svg/);
     assert.match(builderPrompt(job({ pass: undefined, attempt: 1 })), /write ui\/icon\.svg/);

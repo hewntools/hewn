@@ -199,7 +199,7 @@ export class Validation extends Domain {
       // A new tool with a screen is seen in use (its screenshots, the passes after its build, sharing):
       // its builder writes sample data. An install brings what it has.
       const installing = build.builder === "bundle" || !!build.builder?.startsWith("copy:");
-      if (sample === null && build.kind === "create" && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: a new tool with a screen needs sample data that fills it (see "sample/calls.json" in BUILDER.md)`);
+      if (sample === null && build.kind === "create" && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: a new tool with a screen needs sample data that fills it (see "sample/calls.json" in BRIEF.md)`);
       if (sample) {
         await this.runtime.dropState(sampleState);
         await this.runtime.migrate(sampleState, migrations, code);
