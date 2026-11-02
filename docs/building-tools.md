@@ -67,6 +67,8 @@ The proposal for a change is a short brief too: what changes, what must keep wor
 
 Changes to one tool take turns: ask for another while one builds (or an agent does) and it waits, then starts from the version the first one leaves, whether that one goes live or fails. An agent's change waiting for your approval doesn't hold the next one up. The box and your agents see the changes on their way, so the next one builds on them instead of asking for the same thing again.
 
+Text Hewn puts in the box for you (**+ Ask for one** under Widgets puts "Suggest some widgets.", **Polish…** "Polish it.", **Ask builder to fix this** what failed) waits there for you to add to and send; nothing goes to the intake until you do.
+
 A tool without a screen of its own shows its operations as forms. **Give it a proper screen** asks for one.
 
 Some changes need no builder: picking another model tier, for example, is a new version right away.
@@ -77,7 +79,7 @@ Some changes need no builder: picking another model tier, for example, is a new 
 
 **Polish…** in a tool's menu gives a tool you already have the second look a new tool gets ([above](#the-build)): **Reviewing the design**, then **Fixing details**, on screenshots of its screen filled with its sample data. It's for tools built before 0.4.10, which never had one. The tool keeps what it does and its character (its concept, its colour and the palette in `ui/look.json`); the builder lifts what the eye lands on first, the details and how your data is drawn.
 
-It opens the tool with the [change panel](#changing-a-tool), "Polish it." in the box: add what you'd like ("the count should lead", "try a bolder, darker look") and send it. The intake answers with a **Polish** proposal: what it will look at, and a note for the builder with what you asked; a new look only when you ask for one. **Build polish** on the proposal starts it, and the panel follows the build as for any change. Ask for something that changes what the tool does and the intake drafts a change instead. A tool without a screen of its own has nothing to polish: the intake says so and offers to give it one.
+It opens the tool with the [change panel](#changing-a-tool), "Polish it." in the box: add what you'd like ("the count should lead", "try a bolder, darker look") and send it. The intake answers with a **Polish** proposal: what it will look at, and a note for the builder with what you asked; a new look only when you ask for one. **Build polish** on the proposal starts it, and the panel follows the build as for any change. Ask for something that changes what the tool does and the intake drafts a change instead. A tool without a screen of its own has nothing to polish: the intake says so and offers to give it one (a connection never has one).
 
 The design review holds the screen against what you asked for: the builder gets your conversations with the intake that led to the tool as it is (the one that asked for it, then each change you talked through), oldest first, in `OWNERS_WORDS.md` as for a new tool, with the conversation that asked for the Polish last, as your latest word. A change you undid with **Restore** isn't in it. Hewn has kept conversations since 0.4.6 (late October 2026), so an older tool, or one an agent asked for, has none to give.
 

@@ -12,13 +12,13 @@ import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { fromBase64, text, toBase64 } from "@hewntools/core/files.ts";
-import { POLISH_KEEPS, REAL_DATA_RULE } from "@hewntools/core/passes.ts";
+import { passRequest, POLISH_KEEPS, REAL_DATA_RULE } from "@hewntools/core/passes.ts";
 import { type BuildStepState, LINE_CHARS, polishWords } from "@hewntools/core/platform/builds.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { findBrowser, launchBrowser, type VisualCheck } from "@hewntools/cli/visual.ts";
-import { intakePrompt, NO_SCREEN_TO_POLISH, parseIntake, SCHEMA, type Intake } from "@hewntools/cli/intake.ts";
+import { CONNECTION_HAS_NO_SCREEN, intakePrompt, NO_SCREEN_TO_POLISH, parseIntake, SCHEMA, type Intake } from "@hewntools/cli/intake.ts";
 import type { IntakeRequest } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { FIXTURES, installFrom, platformWith, type Script, serve, setup } from "./helpers.ts";
 
@@ -190,8 +190,26 @@ describe("Polish", () => {
     for (const j of jobs) assert.ok(j.request!.includes(REAL_DATA_RULE), String(j.request));
     assert.match(jobs[0].brief, /filled with a copy of the owner's own data \(they allowed it\)/);
     assert.equal(checked, "desktop-light v:b count 3", "a check shows the sample data");
-    assert.ok(on.view.log.some((l) => /with a copy of your own data \(screenshot attached, with your own data\)/.test(l)), on.view.log.join("\n"));
+    assert.ok(on.view.log.some((l) => /with a copy of the owner.s own data \(screenshot attached, with the owner.s own data\)/.test(l)), on.view.log.join("\n"));
     assert.equal(((await t.platform.invoke(USER, { capabilityId: "ui-counter", operation: "get" })) as { result: { count: number } }).result.count, 7, "its data is as it was");
+  });
+
+  test("the owner's own data asked for on a tool with none of its own (empty tables): the screenshots show its sample data, and nothing says otherwise", async () => {
+    // A counter whose table starts empty: a row per click.
+    const dir = join(mkdtempSync(join(tmpdir(), "hewn-polish-")), "ui-counter");
+    cpSync(join(FIXTURES, "ui-counter"), dir, { recursive: true });
+    writeFileSync(join(dir, "migrations", "001_init.sql"), "CREATE TABLE counter (id INTEGER PRIMARY KEY, n INTEGER NOT NULL);");
+    writeFileSync(join(dir, "src", "index.ts"), readFileSync(join(dir, "src", "index.ts"), "utf8").replace('"SELECT n FROM counter WHERE id = 1"', '"SELECT COUNT(*) AS n FROM counter"').replace('"UPDATE counter SET n = n + 1 WHERE id = 1"', '"INSERT INTO counter (n) VALUES (1)"'));
+    await installFrom(t.platform, dir);
+    const jobs: Seen[] = [];
+    const record = recorder(jobs);
+    const { view } = await polish({ realData: true }, (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    assert.equal(view.status, "promoted", view.log.join("\n"));
+    assert.equal(view.request.realData, true, "as asked");
+    assert.equal(jobs[0].shot, "desktop-light v:none count 3", "the sample data");
+    assert.ok(!jobs[0].request!.includes(REAL_DATA_RULE));
+    assert.match(jobs[0].brief, /filled with its sample data for two passes/);
+    assert.doesNotMatch(jobs[0].brief, /a copy of the owner.s own data/);
   });
 
   /** UI Counter as the owner asked for it in the chat, then changed once in the chat and once by an agent. */
@@ -236,6 +254,15 @@ describe("Polish", () => {
     assert.equal(jobs[0].words, undefined);
     assert.doesNotMatch(jobs[0].brief + jobs[0].request!, /OWNERS_WORDS|OWNER'S OWN WORDS/);
     assert.match(jobs[0].brief, /What the owner asks of this Polish: Bolder/, "the note is in BUILDER.md");
+    // Asked for in the Change drawer: that conversation is the owner's own words, and the only ones.
+    jobs.length = 0;
+    const conversation = [{ role: "user" as const, content: "Polish it. Calmer colours." }, { role: "intake" as const, content: "Calmer it is." }];
+    const asked = await t.build(() => t.platform.polish(USER, { capabilityId: "ui-counter", note: "Calmer colours", conversation }), (ws, job) => (record(ws, job), markUi(ws, "v:c2")), (ws) => markUi(ws, "v:d2"));
+    assert.equal(asked.status, "promoted", asked.log.join("\n"));
+    assert.match(jobs[0].words!, /^# THE OWNER'S OWN WORDS\n\nTheir conversation with the intake that asked for this Polish \(none led to the tool itself\)\./);
+    assert.match(jobs[0].words!, /\n## This Polish: the conversation that asked for it\n\nOWNER: Polish it\. Calmer colours\.\n\nINTAKE: Calmer it is\.\n$/);
+    assert.match(jobs[0].brief, /THE OWNER'S OWN WORDS: their conversation with the intake that asked for this Polish is in `OWNERS_WORDS\.md` in your workspace\./);
+    assert.doesNotMatch(jobs[0].brief, /led to this tool as it is/);
   });
 
   test("a change undone by a restore isn't in it, and neither is what Ask builder to fix adds to the note", async () => {
@@ -293,6 +320,10 @@ describe("Polish", () => {
     assert.match(words, /OWNER: Bolder\n$/, "the note last");
     assert.doesNotMatch(words, /v1-turn-5 /, "an old turn left out");
     assert.match(words, /\(\d+ turns left out\)/);
+    // A Polish's critique keeps the tool's hue while it stays clearly different from the others; a create's doesn't say so.
+    const files = ["screenshots/desktop-light.png"];
+    assert.match(passRequest("critique", { files, sampled: true, otherTools: true, polish: true }), /Whatever you change must still look clearly different from each of the owner's other tools in OTHER_TOOLS\.md; this tool keeps its own hue\./);
+    assert.match(passRequest("critique", { files, sampled: true, otherTools: true }), /It must still look clearly different from each of the owner's other tools in OTHER_TOOLS\.md\.$/m);
     // Nothing kept: empty, note or not.
     assert.equal(polishWords([], { note: "Bolder" }), "");
     assert.equal(polishWords([{ heading: "x", turns: [] }], {}), "");
@@ -312,10 +343,17 @@ describe("Polish", () => {
     assert.doesNotMatch(intakePrompt(req), /opened this as a Polish/);
     // A tool without a screen: nothing to polish; the intake says so and offers a screen, and a Polish reply becomes that answer.
     const { ui: _ui, ...noScreen } = withScreen;
-    assert.match(intakePrompt({ ...req, polish: true, current: noScreen }), /This tool has no screen of its own [^\n]*nothing to polish: if they ask for one, reply kind "answer"[^\n]*offer to give it a screen of its own; if they say yes, reply kind "draft"/);
+    assert.match(intakePrompt({ ...req, polish: true, current: noScreen }), /This tool has no screen of its own [^\n]*nothing to polish: if they ask for one, reply kind "answer" saying so[^\n]*Want me to give it a screen of its own\?"\); if they say yes, reply kind "draft"/);
     assert.doesNotMatch(intakePrompt({ ...req, polish: true, current: noScreen }), /Reply kind "polish"/);
     assert.deepEqual(parseIntake(JSON.stringify({ kind: "polish", message: "", request: "" }), "modify", noScreen), { kind: "answer", message: NO_SCREEN_TO_POLISH });
-    assert.deepEqual(parseIntake(JSON.stringify({ kind: "polish", message: "Aurora Watch has no screen to polish. Want one?", request: "" }), "modify", noScreen), { kind: "answer", message: "Aurora Watch has no screen to polish. Want one?" });
+    // Whatever its message said ("I'll look at the chart"): it can't be a Polish.
+    assert.deepEqual(parseIntake(JSON.stringify({ kind: "polish", message: "I'll look at the chart.", request: "" }), "modify", noScreen), { kind: "answer", message: NO_SCREEN_TO_POLISH });
+    // A connection can't have a screen: no offer of one.
+    const connection = { ...noScreen, kind: "connection" };
+    const connPrompt = intakePrompt({ ...req, current: connection });
+    assert.match(connPrompt, /This is a connection: it has no screen and can't have one, so there's nothing to polish/);
+    assert.doesNotMatch(connPrompt, /offer to give it|give it a screen/i);
+    assert.deepEqual(parseIntake(JSON.stringify({ kind: "polish", message: "", request: "" }), "modify", connection), { kind: "answer", message: CONNECTION_HAS_NO_SCREEN });
   });
 
   test("only for a tool with a screen, by the owner", async () => {

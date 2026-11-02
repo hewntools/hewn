@@ -65,7 +65,7 @@ export function passRequest(pass: Pass, o: { files: string[]; sampled: boolean; 
     `The screenshots: ${o.files.join(", ")}.${parts ? " A long page comes in parts, top to bottom: desktop-light-2.png carries on from desktop-light.png, and so on." : ""}${o.real ? ` ${REAL_DATA_RULE}` : o.sampled ? "" : " The tool has no sample data (sample/calls.json), so they show it empty."}`,
     pass === "critique" && o.polish ? POLISH_KEEPS : "",
     pass === "critique" && o.ownersWords ? "Also check the screen against what the owner asked for and how they wanted it to feel: THE OWNER'S OWN WORDS in OWNERS_WORDS.md." : "",
-    pass === "critique" && o.otherTools ? "It must still look clearly different from each of the owner's other tools in OTHER_TOOLS.md." : "",
+    pass === "critique" && o.otherTools ? (o.polish ? "Whatever you change must still look clearly different from each of the owner's other tools in OTHER_TOOLS.md; this tool keeps its own hue." : "It must still look clearly different from each of the owner's other tools in OTHER_TOOLS.md.") : "",
     "Keep everything working: Hewn validates the result again, and the tool goes live only if it passes.",
   ]
     .filter(Boolean)

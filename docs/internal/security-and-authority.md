@@ -173,6 +173,12 @@ This does not imply authority to:
 
 A Builder should receive only the information needed for its build job.
 
+One exception, the owner's to make per build: a Polish with **Show the builder my own data** ticked
+(`realData`, off by default, only offered when the tool has rows of its own, never by an agent: Polish is
+owner only) gives the builder screenshots of the tool rendered on a copy of its live state, in its
+workspace's `screenshots/`. Not the state itself, no file of it, and not in its own `check` renders (those
+show sample data); the pass request says the data is private and to keep it out of the tool's files.
+
 Conceptually:
 
 ```text

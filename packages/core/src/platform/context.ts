@@ -147,6 +147,16 @@ export class Domain {
     return { row, files: v.files, code: { hash: row.contentHash, js: v.bundle } };
   }
 
+  /**
+   * Whether a tool's live state holds rows of its own (not only empty tables: every promoted tool has
+   * those), read with `code` (its active version's). What a Polish may show the builder, if the owner lets it.
+   */
+  protected async hasOwnData(capabilityId: string, code: CodeRef): Promise<boolean> {
+    if (!(await this.runtime.hasState({ capabilityId }))) return false;
+    const tables = await this.runtime.countState({ capabilityId }, code).catch(() => ({}) as Record<string, number>);
+    return Object.values(tables).some((n) => n > 0);
+  }
+
   protected visibleActive(agent: Agent, capabilityId: string) {
     const cap = this.registry.getCapability(capabilityId);
     if (!cap || cap.activeVersion === null || cap.archivedAt || !canSee(agent, cap.id)) {

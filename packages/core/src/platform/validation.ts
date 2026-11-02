@@ -261,8 +261,9 @@ export class Validation extends Domain {
               return { result };
             },
           });
-        // A Polish the owner let see their data: rendered once more, filled with a copy of it, and that's what the builder is shown.
-        const real = polish && build.request.realData === true && !opts.check && (await this.runtime.hasState({ capabilityId: id }));
+        // A Polish the owner let see their data: rendered once more, filled with a copy of it, and that's what the
+        // builder is shown. A tool with none of its own (empty tables) shows its sample data instead.
+        const real = polish && build.request.realData === true && !opts.check && (await this.hasOwnData(id, base?.code ?? code));
         const measure = !!opts.measure;
         const empty = await check(visualState, measure && !sample && !real);
         if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
@@ -287,11 +288,11 @@ export class Validation extends Domain {
             softFail("UI didn't render cleanly with its sample data", filled.errors);
           }
           if (own?.errors.length) {
-            if (own.screenshot) step("UI renders with errors filled with a copy of your own data (screenshot attached, with your own data)");
-            softFail("UI didn't render cleanly with your own data", own.errors);
+            if (own.screenshot) step("UI renders with errors filled with a copy of the owner's own data (screenshot attached, with the owner's own data)");
+            softFail("UI didn't render cleanly with the owner's own data", own.errors);
           }
           if (!empty.errors.length && !filled?.errors.length && !own?.errors.length)
-            step(v === own ? `UI renders without errors, empty${filled ? ", with its sample data" : ""} and with a copy of your own data (screenshot attached, with your own data)` : v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
+            step(v === own ? `UI renders without errors, empty${filled ? ", with its sample data" : ""} and with a copy of the owner's own data (screenshot attached, with the owner's own data)` : v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
       }

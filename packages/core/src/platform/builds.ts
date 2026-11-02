@@ -862,10 +862,21 @@ export class Builds extends Domain {
     const polish = isPolish(b.request);
     const context = this.registry.buildContext(buildId);
     // A Polish's OWNERS_WORDS.md: the conversations that led to the tool as it is, then its own (or its note, without what "Ask builder to fix" added).
-    const asked = { note: String(b.request.note ?? "").split(FIX_MARK)[0].trim(), ...(context?.conversation?.length ? { conversation: context.conversation } : {}) };
-    const words = polish ? polishWords(this.historyOf(cap.id), asked) : "";
-    const what = polish ? polishRequest(String(b.request.note ?? ""), !base.files[SAMPLE_FILE], b.request.realData === true, words ? (asked.conversation ? "conversation" : asked.note ? "note" : "history") : undefined) : b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`;
-    const ask = `${what}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
+    const history = polish ? this.historyOf(cap.id) : [];
+    const polishAsk = { note: String(b.request.note ?? "").split(FIX_MARK)[0].trim(), ...(context?.conversation?.length ? { conversation: context.conversation } : {}) };
+    const words = polish ? polishWords(history, polishAsk) : "";
+    const requestText = polish
+      ? polishRequest({
+          note: String(b.request.note ?? ""),
+          needsSample: !base.files[SAMPLE_FILE],
+          // What validation will fill the screenshots with: the owner's own data only when they allowed it and there is some.
+          real: b.request.realData === true && (await this.hasOwnData(cap.id, base.code)),
+          ...(words ? { ownersWords: { history: history.length > 0, last: polishAsk.conversation ? ("conversation" as const) : polishAsk.note ? ("note" as const) : undefined } } : {}),
+        })
+      : b.kind === "widgets"
+        ? widgetsRequest(request)
+        : `Requested change: ${request}`;
+    const ask = `${requestText}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it. A Polish's
     // request says where its owner's words are (BUILDER.md's own note on them is for a single conversation).
     await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, polish && context ? { ...context, conversation: undefined } : context)), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
@@ -1235,9 +1246,9 @@ export class Builds extends Domain {
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (!v.candidate) feedback = v.log.join("\n");
       else {
-        const left = await this.complete(run, { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) }, passes);
-        if (left === undefined) return;
-        feedback = left.join("\n");
+        const failure = await this.passesThenPromote(run, { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) }, passes);
+        if (failure === undefined) return;
+        feedback = failure.join("\n");
       }
     }
     for (let attempt = 1; attempt <= max; attempt++) {
@@ -1255,9 +1266,9 @@ export class Builds extends Domain {
         feedback = v.log.join("\n");
         continue;
       }
-      const left = await this.complete(run, { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) }, passes);
-      if (left === undefined) return;
-      feedback = left.join("\n");
+      const failure = await this.passesThenPromote(run, { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) }, passes);
+      if (failure === undefined) return;
+      feedback = failure.join("\n");
     }
     this.note(run, `FAILED: no valid candidate after ${max} attempts`);
     this.registry.updateBuild(buildId, { status: "failed", log: run.history });
@@ -1268,7 +1279,7 @@ export class Builds extends Domain {
    * Undefined once the build has ended (promoted, in review, cancelled, or ended by a pass); else the
    * promotion's log, for another attempt to fix.
    */
-  private async complete(run: BuilderRun, built: PassCandidate, passes: Pass[]): Promise<string[] | undefined> {
+  private async passesThenPromote(run: BuilderRun, built: PassCandidate, passes: Pass[]): Promise<string[] | undefined> {
     const { build } = run;
     const best = passes.length ? await this.runPasses(run, built, passes) : built;
     if (best === "cancelled") return undefined;
@@ -1627,6 +1638,8 @@ export class Builds extends Domain {
       if (!b) break;
       const turns = this.registry.buildContext(b.id)?.conversation;
       const what = b.kind === "create" ? "The tool as first asked for" : b.kind === "widgets" ? "Its widgets" : isPolish(b.request) ? "A Polish" : "A change";
+      // The same conversation on two builds in a row (a create's widgets build carries the create's): once, under the earlier.
+      if (turns?.length && JSON.stringify(turns) === JSON.stringify(history[0]?.turns)) history.shift();
       if (turns?.length) history.unshift({ heading: `${what} (v${v}, ${b.createdAt.slice(0, 10)})`, turns });
       v = b.baseVersion;
     }
@@ -1848,10 +1861,10 @@ export function polishWords(history: OwnersConversation[], asked: { note?: strin
     : asked.note
       ? [{ heading: "This Polish: what the owner asked of it", turns: [{ role: "user" as const, content: asked.note }] }]
       : [];
-  return ownersFile(
-    `Their conversations with the intake that led to this tool as it is, oldest first, each under a heading (a line starting "## ") naming the build it led to${last.length ? ", and last what they asked of this Polish" : ""}. ${ownersRule("The request in \`BUILDER.md\` (this Polish)")}`,
-    [...parts, ...last],
-  );
+  const intro = parts.length
+    ? `Their conversations with the intake that led to this tool as it is, oldest first, each under a heading (a line starting "## ") naming the build it led to${last.length ? ", and last what they asked of this Polish" : ""}.`
+    : `Their conversation with the intake that asked for this Polish (none led to the tool itself).`;
+  return ownersFile(`${intro} ${ownersRule("The request in \`BUILDER.md\` (this Polish)")}`, [...parts, ...last]);
 }
 
 /**
@@ -2052,14 +2065,15 @@ export function contractText({ id, manifest: m, calls }: Callee): string {
 }
 
 /**
- * BUILDER.md's request for a Polish: what it's for, the sample data to write first when the tool has
- * none, what it keeps, what the owner asked of it (`note`), if anything, and where the conversations
- * that led to the tool are (`ownersWords`: OWNERS_WORDS.md, when it has any).
+ * BUILDER.md's request for a Polish: what it's for, what its screenshots show (`real`: a copy of the
+ * owner's own data), the sample data to write first when the tool has none, what it keeps, what the
+ * owner asked of it (`note`), if anything, and what OWNERS_WORDS.md holds (`ownersWords`, when there is
+ * one: the conversations that led to the tool, if any, and last this Polish's conversation or note).
  */
-const polishRequest = (note: string, needsSample: boolean, real: boolean, ownersWords?: "conversation" | "note" | "history") =>
+const polishRequest = ({ note, needsSample, real, ownersWords }: { note: string; needsSample: boolean; real: boolean; ownersWords?: { history: boolean; last?: "conversation" | "note" } }) =>
   `This is a **Polish**: the tool works and is live; this build lifts its design, not what it does. Hewn shows you screenshots of it filled with ${real ? "a copy of the owner's own data (they allowed it)" : "its sample data"} for two passes: a design review (the five biggest problems, fixed), then a craft pass (what's broken, cramped or cut off, fixed).
 
-${needsSample ? `First, before the passes: the tool has no sample data. Write ${SAMPLE_FILE} (see "${SAMPLE_FILE}" below) with made-up entries that show what it does, change nothing else, and stop. Hewn validates it, then shows you the screenshots.\n\n` : ""}${POLISH_KEEPS} In the passes, change only ui/: the operations, state and tests stay as they are.${note ? `\n\nWhat the owner asks of this Polish: ${note}` : ""}${ownersWords ? `\n\nTHE OWNER'S OWN WORDS: their conversations with the intake that led to this tool as it is are in \`OWNERS_WORDS.md\` in your workspace, oldest first${ownersWords === "conversation" ? ", with the one that asked for this Polish last" : ownersWords === "note" ? ", with this Polish's note last" : ""}. Read all of it before the passes (in parts, if your reader cuts it short): the screen should still be what they asked for, and feel the way they wanted. It says how their words count.` : ""}`;
+${needsSample ? `First, before the passes: the tool has no sample data. Write ${SAMPLE_FILE} (see "${SAMPLE_FILE}" below) with made-up entries that show what it does, change nothing else, and stop. Hewn validates it, then shows you the screenshots.\n\n` : ""}${POLISH_KEEPS} In the passes, change only ui/: the operations, state and tests stay as they are.${note ? `\n\nWhat the owner asks of this Polish: ${note}` : ""}${ownersWords ? `\n\nTHE OWNER'S OWN WORDS: ${ownersWords.history ? `their conversations with the intake that led to this tool as it is are in \`OWNERS_WORDS.md\` in your workspace, oldest first${ownersWords.last === "conversation" ? ", with the one that asked for this Polish last" : ownersWords.last === "note" ? ", with this Polish's note last" : ""}` : "their conversation with the intake that asked for this Polish is in `OWNERS_WORDS.md` in your workspace"}. Read all of it before the passes (in parts, if your reader cuts it short): the screen should still be what they asked for, and feel the way they wanted. It says how their words count.` : ""}`;
 
 /** A schema as a contract file shows it: on one line when it fits after "output: " (the longer label), else over several. */
 const schemaText = (schema: unknown) => {

@@ -1004,7 +1004,7 @@ function proposalCard(kind, list, ctx) {
     const p = preview(d);
     // What it builds on, needs and runs: always in view (the raw spec or brief stays behind "Show spec" or "Show brief").
     const block = h("div", { class: "inset-block stack-sm" }, details(r));
-    const name = kind === "widgets" ? d.title : kind === "schedules" ? d.operation : kind === "polish" ? `${cap.name} · v${ctx.nextVersion ?? (cap.version ?? 0) + 1}` : mode === "modify" ? `${cap.name} · v${ctx.nextVersion ?? (cap.version ?? 0) + 1}` : d.name;
+    const name = kind === "widgets" ? d.title : kind === "schedules" ? d.operation : mode === "modify" ? `${cap.name} · v${ctx.nextVersion ?? (cap.version ?? 0) + 1}` : d.name;
     // A change's brief says what it changes in the block below, not raw here.
     const purpose = kind === "widgets" ? d.shows : kind === "schedules" ? cadenceText(d.cadence) : kind === "polish" ? "A second look at its design" : mode === "modify" ? !briefOf(d).CHANGES && d.request : d.purpose;
     const pills = kind === "widgets" ? [kindTag(TEMPLATE_LABEL[d.template] ?? d.template), kindTag(d.sizes.map((s) => SIZE_LETTER[s]).join(" "))] : kind === "schedules" ? [kindTag("schedule", "accent")] : kind === "polish" ? [kindTag("polish", "accent")] : toolPills(d);
