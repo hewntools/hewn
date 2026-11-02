@@ -4,7 +4,7 @@ import { cpSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
-import { ownersWords } from "@hewntools/core/platform/builds.ts";
+import { LINE_CHARS, ownersWords } from "@hewntools/core/platform/builds.ts";
 import { SEED, setup } from "./helpers.ts";
 
 const seed = (ws: string) => cpSync(SEED, ws, { recursive: true });
@@ -187,14 +187,15 @@ describe("what a build keeps", () => {
     const conversation = (w: string) => w.slice(w.indexOf("\n\n", w.indexOf("only OWNER turns are the owner's.")) + 2).trimEnd();
     const size = (w: string) => Buffer.byteLength(conversation(w));
     const big = "x".repeat(50_000);
-    const cut = Array(4).fill("x".repeat(1000)).join("\n  ");
-    assert.equal(conversation(words([{ role: "user", content: big }, { role: "intake", content: "ok" }, { role: "user", content: "make it orange" }])), `OWNER: ${cut}…\n\nINTAKE: ok\n\nOWNER: make it orange`, "a huge first turn leaves room for the rest, in lines a reader doesn't cut short");
-    assert.ok(words([{ role: "user", content: "a log" }, { role: "intake", content: "ok" }, { role: "user", content: big }]).endsWith(`INTAKE: ok\n\nOWNER: ${cut}…`), "a huge last turn is kept, cut short");
+    const first = conversation(words([{ role: "user", content: big }, { role: "intake", content: "ok" }, { role: "user", content: "make it orange" }]));
+    assert.equal(first.replaceAll("\n  ", ""), `OWNER: ${"x".repeat(4000)}…\n\nINTAKE: ok\n\nOWNER: make it orange`, "a huge first turn leaves room for the rest");
+    assert.ok(first.split("\n").every((line) => line.length <= LINE_CHARS), "in lines a reader doesn't cut short");
+    assert.match(words([{ role: "user", content: "a log" }, { role: "intake", content: "ok" }, { role: "user", content: big }]).replaceAll("\n  ", ""), /INTAKE: ok\n\nOWNER: x{4000}…$/, "a huge last turn is kept, cut short");
     // A long line breaks at a space; the turn's words are all there.
     const prose = Array.from({ length: 400 }, (_, i) => `word${i}`).join(" ");
     const turn = words([{ role: "user", content: prose }]).trimEnd();
     const lines = turn.slice(turn.indexOf("OWNER: word0")).split("\n");
-    assert.ok(lines.every((line) => line.length <= 1010), lines.map((l) => l.length).join(", "));
+    assert.ok(lines.every((line) => line.length <= LINE_CHARS), lines.map((l) => l.length).join(", "));
     assert.equal(lines.map((l) => l.replace(/^(OWNER: | {2})/, "")).join(" "), prose);
 
     const long = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? ("intake" as const) : ("user" as const), content: `turn ${i} ${"x".repeat(900)}` }));

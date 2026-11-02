@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { callableOperations, type CapabilityManifest } from "@hewntools/core/manifest.ts";
-import { CONTRACTS_DIR, contractsIndex, contractText, INDEX_PURPOSE_CHARS } from "@hewntools/core/platform/builds.ts";
+import { CONTRACTS_DIR, contractsIndex, contractText, INDEX_PURPOSE_CHARS, LINE_CHARS, shortLines } from "@hewntools/core/platform/builds.ts";
 import { editJson, editText, FIXTURES, SEED, setup } from "./helpers.ts";
 
 /** What the builder finds in its workspace about the owner's other capabilities. */
@@ -125,6 +125,51 @@ describe("the owner's other capabilities' contracts", () => {
     // The two briefs differ only in their requests.
     assert.ok(Math.abs(sizes[1] - sizes[0]) < 200, `BUILDER.md: ${sizes.join(" → ")} bytes`);
     assert.ok(sizes[1] < 50_000, `under OpenCode's 50 KB read: ${sizes[1]}`);
+  });
+
+  test("every line a builder reads is short: a huge schema goes over several lines, a long list or request is wrapped, nothing is lost", async () => {
+    const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(" ");
+    // Running Log with a long description in a schema and 150 more operations, each with a big schema.
+    const fields = Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`field_${i}`, { type: "string", description: `the field number ${i}` }]));
+    const log = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }), (ws) => {
+      runningLog()(ws);
+      editJson(join(ws, "capability.json"), (m) => {
+        m.operations[0].inputSchema.description = words(800);
+        for (let i = 0; i < 150; i++) m.operations.push({ name: `extra_${i}`, version: 1, description: `Extra ${i}.`, sideEffect: "read", inputSchema: { type: "object", properties: fields }, outputSchema: { type: "object" } });
+      });
+      editText(join(ws, "src", "index.ts"), (s) => s.replace("export const operations = {", `export const operations = {\n${Array.from({ length: 150 }, (_, i) => `  "extra_${i}@1"() { return {}; },`).join("\n")}`));
+    });
+    assert.equal(log.status, "promoted", log.log.join("\n"));
+    let files: Record<string, string> = {};
+    const read = (ws: string) => {
+      const all = (dir: string): string[] => readdirSync(join(ws, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? all(join(dir, e.name)) : [join(dir, e.name)]));
+      files = Object.fromEntries(all(".").map((f) => [f, readFileSync(join(ws, f), "utf8")]));
+      throw new Error("the builder gave up");
+    };
+    await t.build(() => t.platform.create(USER, { name: "Run Report", purpose: "reports", requirements: `Report on runs. ${words(1000)}`, conversation: [{ role: "user", content: words(500) }] }), read);
+    for (const [f, text] of Object.entries(files)) {
+      const longest = Math.max(...text.split("\n").map((l) => l.length));
+      assert.ok(longest <= LINE_CHARS, `${f}: a line of ${longest} characters`);
+    }
+    const contract = files[join(CONTRACTS_DIR, "running-log.md")];
+    assert.match(contract, /^## `record_run@1` \(write\)\n\n[^\n]*\n\ninput: \{\n "type": "object",\n/m, "a schema too long for a line goes over several");
+    assert.match(contract, /^ "description": "word0 word1 /m);
+    assert.match(contract, /^## `extra_0@1` \(read\)\n\nExtra 0\.\n\ninput: \{\n "type": "object",\n "properties": \{\n {2}"field_0": \{/m);
+    assert.match(contract, /^output: \{"type":"object"\}$/m, "a short one stays on one");
+    assert.match(contract, /word799"/, "nothing is lost");
+    assert.match(files["CONTRACTS.md"], /`extra_149@1`/);
+    assert.match(files["BUILDER.md"], /word999/);
+    assert.match(files["OWNERS_WORDS.md"], /word499/);
+  });
+
+  test("shortLines: a long line is wrapped at a space, a list item's further lines under its text; anything else as it is", () => {
+    const long = Array.from({ length: 300 }, (_, i) => `w${i}`).join(" ");
+    assert.equal(shortLines(`# Title\n\n- short\n${"y".repeat(LINE_CHARS)}\n`), `# Title\n\n- short\n${"y".repeat(LINE_CHARS)}\n`);
+    const item = shortLines(`  - ${long}`).split("\n");
+    assert.ok(item.length > 1 && item.every((l) => l.length <= LINE_CHARS), item.map((l) => l.length).join(", "));
+    assert.ok(item.slice(1).every((l) => /^ {4}w\d/.test(l)), "under the item's text");
+    assert.equal(item.map((l) => l.trim()).join(" "), `- ${long}`);
+    assert.deepEqual(shortLines("z".repeat(2500)).split("\n").map((l) => l.length), [LINE_CHARS, LINE_CHARS, 500], "no space: cut anywhere");
   });
 
   test("what another capability may call: the newest of each, not deprecated, not a widget's or a sign-in; and what the tool calls today", () => {

@@ -1531,7 +1531,7 @@ export class Builds extends Domain {
   private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
     const instructions = context?.instructions;
-    return `# Build: ${kind} \`${id}\`\n\n${request}${ownersWordsNote(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`;
+    return shortLines(`# Build: ${kind} \`${id}\`\n\n${request}${ownersWordsNote(context?.conversation)}\n\n${instructions ? `${instructions}\n` : ""}${this.brief.replace("{{SUBMIT}}", submit).replaceAll("{{ABI}}", ABI)}${this.catalogForBuilder(id)}`);
   }
 
   private progressOf(buildId: string): BuildProgress | undefined {
@@ -1655,8 +1655,6 @@ const isPaused = (b: BuildRow) => b.status === "failed" && !!explainFailure(b.lo
  */
 const MAX_OWNERS_WORDS = 40_000;
 const OWNERS_TURN_CHARS = 4000;
-/** The longest line in OWNERS_WORDS.md: a reader cuts longer ones short (OpenCode at 2,000 characters). */
-const OWNERS_LINE_CHARS = 1000;
 const DRAFTED_CHANGE_CHARS = 200;
 /** The heading a change's brief starts with ("CHANGES", "**Changes:**", "## Changes"), and a list marker after it. */
 const CHANGES_HEADING = /^[#*\s]*changes[*\s]*?(?::[* \t]*|(?=\n))\s*(?:(?:[-*•]|\d+[.)])\s+)?/i;
@@ -1738,20 +1736,37 @@ function turnText(t: BuildTurn): string {
   else if (r?.kind === "draft" && change(r.draft)) text = [message, `(It drafted a change: ${change(r.draft)})`].filter(Boolean).join("\n");
   else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
   const cut = text.length > OWNERS_TURN_CHARS;
-  text = text.slice(0, OWNERS_TURN_CHARS).split("\n").flatMap((line) => wrapped(line, OWNERS_LINE_CHARS)).join("\n");
+  // Room for who said it ("INTAKE: ") or the indent, and the "…".
+  text = text.slice(0, OWNERS_TURN_CHARS).split("\n").flatMap((line) => wrapped(line, LINE_CHARS - "INTAKE: ".length - 1)).join("\n");
   return `${text}${cut ? "…" : ""}${attached}`.replaceAll("\n", "\n  ");
 }
 
-/** A line as lines of at most `max` characters, split at a space (or, with none in the second half, anywhere). */
-function wrapped(line: string, max: number): string[] {
+/** The longest line Hewn writes in a builder's workspace: a reader cuts longer ones short (OpenCode at 2,000 characters). */
+export const LINE_CHARS = 1000;
+
+/**
+ * A line as lines of at most `max` characters, split at a space (or, with none in the second half,
+ * anywhere), the further ones after `indent`.
+ */
+function wrapped(line: string, max: number, indent = ""): string[] {
   const lines: string[] = [];
-  while (line.length > max) {
-    const space = line.lastIndexOf(" ", max);
-    const at = space > max / 2 ? space : max;
+  let width = max;
+  while (line.length > width) {
+    const space = line.lastIndexOf(" ", width);
+    const at = space > width / 2 ? space : width;
     lines.push(line.slice(0, at));
     line = line.slice(at === space ? at + 1 : at);
+    width = max - indent.length;
   }
-  return [...lines, line];
+  return [...lines, line].map((l, i) => (i ? indent + l : l));
+}
+
+/** `text` with each line longer than `LINE_CHARS` wrapped, its further lines indented as its text is (a list item's under its text). */
+export function shortLines(text: string): string {
+  return text
+    .split("\n")
+    .flatMap((line) => (line.length > LINE_CHARS ? wrapped(line, LINE_CHARS, " ".repeat(/^\s*(?:[-*] )?/.exec(line)![0].length)) : [line]))
+    .join("\n");
 }
 
 /** One of the owner's other tools as a build is told it (`othersLooks`). */
@@ -1807,7 +1822,7 @@ export function looksNote(tools: ToolLook[], kind: BuildKind = "create"): string
   const hues = [...new Set(tools.flatMap((t) => (t.hue === null ? [] : [t.hue])))].sort((a, b) => a - b);
   const gap = widestGap(hues);
   const free = gap ? ` The widest gap: ${gap.from} to ${gap.to} (${gap.size}°), its middle ${gap.middle}.` : "";
-  return `# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n${hues.length ? `\nHues on Home (0–359, round a circle): ${hues.join(", ")}.${free}\n` : ""}`;
+  return shortLines(`# The owner's other tools' looks\n\nOn the owner's Home already, each with its icon's hue and the look its builder recorded in \`ui/look.json\` (cut short when long). ${rule}\n\n${lines.join("\n")}\n${hues.length ? `\nHues on Home (0–359, round a circle): ${hues.join(", ")}.${free}\n` : ""}`);
 }
 
 /**
@@ -1858,7 +1873,7 @@ export function contractsIndex(callees: Callee[]): string {
     });
     return `- **${m.name}** (\`${id}\`): ${oneLine(m.purpose, INDEX_PURPOSE_CHARS)}\n  ${bySideEffect.join(" · ") || "nothing to call"}`;
   };
-  return `# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BUILDER.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`${CONTRACTS_DIR}/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`;
+  return shortLines(`# The owner's other capabilities (public contracts you may call)\n\nYou can compose with these via ctx.call (see "Calling other capabilities" in \`BUILDER.md\`). Each is listed with the operations you may call (the newest version of each), by side effect. Its full contract, with each operation's description and its input and output schemas, is in \`${CONTRACTS_DIR}/<id>.md\`: read it before you call one.\n\n${callees.map(entry).join("\n")}\n`);
 }
 
 /** .hewn-contracts/<id>.md: one capability's contract in full, the operations `callableOperations` gives. */
@@ -1873,11 +1888,17 @@ export function contractText({ id, manifest: m, calls }: Callee): string {
       ...(o.deprecated ? [`deprecated${o.deprecated.replacement ? `: use ${o.deprecated.replacement}` : ""}`] : []),
       ...(top && top !== o ? [`the newest is ${opKey(top.name, top.version)}`] : []),
     ];
-    return `## \`${key}\` (${notes.join("; ")})\n\n${o.description}\n\ninput: ${JSON.stringify(o.inputSchema)}\noutput: ${JSON.stringify(o.outputSchema)}`;
+    return `## \`${key}\` (${notes.join("; ")})\n\n${o.description}\n\ninput: ${schemaText(o.inputSchema)}\noutput: ${schemaText(o.outputSchema)}`;
   };
   const ops = callableOperations(m, calls);
-  return `# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BUILDER.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`;
+  return shortLines(`# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BUILDER.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`);
 }
+
+/** A schema as a contract file shows it: on one line when it fits, else over several. */
+const schemaText = (schema: unknown) => {
+  const line = JSON.stringify(schema);
+  return line.length <= LINE_CHARS - "output: ".length ? line : JSON.stringify(schema, null, 1);
+};
 
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>
