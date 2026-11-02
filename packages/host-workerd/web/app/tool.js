@@ -125,7 +125,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const setUrl = (open) => {
     const p = new URLSearchParams(q);
     if (open) p.set("change", "1");
-    else for (const k of ["change", "m", "send", "widget", "from", "fix"]) p.delete(k);
+    else for (const k of ["change", "m", "send", "widget", "from", "fix", "polish"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
   // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
@@ -143,7 +143,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else if (!want && shown()) {
       drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
-      for (const k of ["m", "send", "widget", "from", "fix"]) q.delete(k);
+      for (const k of ["m", "send", "widget", "from", "fix", "polish"]) q.delete(k);
       setUrl(false);
     } else drawer?.focus();
   };

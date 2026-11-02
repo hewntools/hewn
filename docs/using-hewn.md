@@ -67,7 +67,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 
 Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
-The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)). **Polish…** in the tool's menu, under **Change…**, gives it a second look at its design: the builder reviews it on screenshots and fixes what it finds, keeping what the tool does and its character. Your own data is shown to the builder only if you tick it ([Polishing a tool](building-tools.md#polishing-a-tool)).
+The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)). **Polish…** in the tool's menu, under **Change…**, opens the change panel for a second look at its design: the intake proposes a Polish (say what you'd like it to lead with), and the builder reviews the tool on screenshots and fixes what it finds, keeping what the tool does and its character. Your own data is shown to the builder only if you tick it on the proposal ([Polishing a tool](building-tools.md#polishing-a-tool)).
 
 **When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed in the box (the operation, the error, its input and the last log lines) and "Fix it so this works." Add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 

@@ -42,8 +42,8 @@ async function openCapability(c) {
  * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once; `from`: the
  * build whose conversation the intake continues from.
  */
-function changeHref(c, { m, send, widget, from, fix } = {}) {
-  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}) });
+function changeHref(c, { m, send, widget, from, fix, polish } = {}) {
+  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}), ...(polish ? { polish: "1" } : {}) });
   return `#/${c.ui ? "app" : "run"}/${enc(c.id)}?${q}`;
 }
 const openChange = (c, o) => go(changeHref(c, o));
@@ -82,8 +82,8 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
   return [
     ["Open", () => openCapability(c).catch(fail)],
     ["Change…", () => openChange(c)],
-    // A tool with a screen: a second look at its design (the owner's, 2026-11-02: in this menu, under Change…).
-    c.ui && !connection && ["Polish…", () => polishSheet(c).catch(fail)],
+    // A tool with a screen: a second look at its design, in the Change drawer (the owner's, 2026-11-02: in this menu, under Change…).
+    c.ui && !connection && ["Polish…", () => openChange(c, { polish: true })],
     ["Info", () => go(`#/c/${id}`)],
     "-",
     !connection && ["Widgets…", () => toolWidgetsSheet(c).catch(fail)],
@@ -99,54 +99,6 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
     "-",
     ["Delete…", () => deleteDialog(c), { danger: true }],
   ];
-}
-
-/**
- * Polish: the critique and craft passes on a tool already live, as a new tool's build runs them. It
- * keeps the tool's look unless the note asks for a new one. The real data is off unless ticked, and
- * says what the builder's model would see. Opens the build once it's started.
- */
-async function polishSheet(c) {
-  const data = await api(`/capabilities/${enc(c.id)}/data`).catch(() => null);
-  return modal(
-    (close) => {
-      // Nothing of its own to show (or not known): the real data can't be asked for.
-      const hasData = !!data?.rows;
-      const note = h("textarea", { rows: 3, maxLength: 2000, "aria-label": "Anything in particular", placeholder: "e.g. Make the chart the main thing · Try a bolder look" });
-      const real = h("input", { type: "checkbox", disabled: !hasData });
-      const start = h("button", { type: "button", class: "primary" }, "Polish");
-      start.addEventListener("click", async () => {
-        start.disabled = true;
-        try {
-          const b = await api(`/capabilities/${enc(c.id)}/polish`, { method: "POST", body: { note: note.value.trim(), realData: real.checked } });
-          close(true);
-          go(`#/b/${enc(b.buildId)}`);
-        } catch (e) {
-          start.disabled = false;
-          fail(e);
-        }
-      });
-      setTimeout(() => note.focus());
-      return [
-        sheetHead(appIcon(c, { size: 44 }), `Polish ${c.name}`),
-        h(
-          "div",
-          { class: "stack-md" },
-          h("p", { class: "muted" }, `A second look at its design. The builder sees screenshots of ${c.name}, fixes the biggest problems it finds, then the details. It keeps what the tool does, its colours and its character.`),
-          h("label", { class: "field flush" }, h("span", { class: "label" }, "Anything in particular? (optional)"), note),
-          h(
-            "label",
-            { class: "check" },
-            real,
-            h("span", {}, " Show the builder my own data", h("span", { class: "faint" }, hasData ? ` · its screenshots then show ${c.name} with your own entries instead of made-up sample data, and the builder's AI model sees them` : ` · ${c.name} has no data of its own yet`)),
-          ),
-          h("div", { class: "small faint" }, `A longer build than a change: ${data && !data.sample ? "sample data first (it has none), then " : ""}two design passes. If one fails, nothing changes.`),
-        ),
-        sheetActions(h("button", { type: "button", onclick: () => close(false) }, "Cancel"), start),
-      ];
-    },
-    { width: 520 },
-  );
 }
 
 /** Download a file from the API (the session cookie goes along; nothing is opened). */

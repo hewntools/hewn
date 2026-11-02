@@ -18,6 +18,8 @@ import type { BuildView } from "@hewntools/core/platform.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { findBrowser, launchBrowser, type VisualCheck } from "@hewntools/cli/visual.ts";
+import { intakePrompt, parseIntake, SCHEMA, type Intake } from "@hewntools/cli/intake.ts";
+import type { IntakeRequest } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { FIXTURES, installFrom, platformWith, type Script, serve, setup } from "./helpers.ts";
 
 /** The renders a fake visual check returns: each screen and scheme, the phone's light page in two parts. */
@@ -283,7 +285,7 @@ describe("Polish", () => {
   test("a history past 40,000 bytes keeps every heading, the first ask, the newest turns and the note", () => {
     const long = (who: "user" | "intake", tag: string) => ({ role: who, content: `${tag} ${"word ".repeat(180)}` });
     const history = ["v1", "v2", "v3"].map((v) => ({ heading: `A change (${v}, 2026-10-20)`, turns: Array.from({ length: 20 }, (_, i) => long(i % 2 ? "intake" : "user", `${v}-turn-${i}`)) }));
-    const words = polishWords(history, "Bolder");
+    const words = polishWords(history, { note: "Bolder" });
     assert.ok(new TextEncoder().encode(words).length <= 40_000 + 1000, `within the cap (the intro aside): ${words.length}`);
     for (const v of ["v1", "v2", "v3"]) assert.ok(words.includes(`## A change (${v}, 2026-10-20)`), v);
     assert.match(words, /OWNER: v1-turn-0 /, "the first ask");
@@ -292,8 +294,19 @@ describe("Polish", () => {
     assert.doesNotMatch(words, /v1-turn-5 /, "an old turn left out");
     assert.match(words, /\(\d+ turns left out\)/);
     // Nothing kept: empty, note or not.
-    assert.equal(polishWords([], "Bolder"), "");
-    assert.equal(polishWords([{ heading: "x", turns: [] }], ""), "");
+    assert.equal(polishWords([], { note: "Bolder" }), "");
+    assert.equal(polishWords([{ heading: "x", turns: [] }], {}), "");
+    // This Polish's own conversation is enough for a file: it's the owner's words, last.
+    assert.match(polishWords([], { note: "Bolder", conversation: [{ role: "user", content: "Polish it." }, { role: "intake", content: "Bolder it is." }] }), /\n## This Polish: the conversation that asked for it\n\nOWNER: Polish it\.\n\nINTAKE: Bolder it is\.\n$/);
+  });
+
+  test("the intake, asked for a Polish, replies with one: its note in the owner's terms; asked for a change, it isn't told of it", () => {
+    assert.ok((SCHEMA.properties.kind.enum as string[]).includes("polish"));
+    const reply = parseIntake(JSON.stringify({ kind: "polish", message: "A second look, then.", request: " Bolder " }), "modify");
+    assert.deepEqual(reply, { kind: "polish", message: "A second look, then.", polish: { note: "Bolder" } });
+    const req: IntakeRequest = { mode: "modify", capabilityId: "ui-counter", messages: [{ role: "user", content: "Polish it." }] };
+    assert.match(intakePrompt({ ...req, polish: true }), /The owner opened this as a Polish: [^\n]*Reply kind "polish": [^\n]*never reply kind "questions"\./);
+    assert.doesNotMatch(intakePrompt(req), /opened this as a Polish|kind "polish"/);
   });
 
   test("only for a tool with a screen, by the owner", async () => {
@@ -321,15 +334,25 @@ describe("Polish", () => {
 
   // The menu and the sheet (tool-actions.js) in a real browser, as passes.test.ts does the build page.
   const browser = process.platform === "darwin" ? findBrowser() : undefined;
-  test("the tool's menu has Polish… under Change…; its sheet leaves the own data unticked, and the build page shows a Polish's steps", { skip: !browser && "no Chromium-based browser on this machine", timeout: 120_000 }, async () => {
+  test("Polish… opens the Change drawer: the intake proposes a Polish card (own data unticked), Build polish starts it with the conversation, and the drawer shows its steps", { skip: !browser && "no Chromium-based browser on this machine", timeout: 120_000 }, async () => {
     await installFrom(t.platform, join(FIXTURES, "ui-counter"));
     await t.platform.invoke(USER, { capabilityId: "ui-counter", operation: "increment" });
     let release = () => {};
     const gate = new Promise<void>((r) => (release = r));
     t.queue(async (ws) => (markUi(ws, "v:critique"), await gate), (ws) => markUi(ws, "v:craft"));
-    const server = await serve(t.platform, t.home);
+    const asked: IntakeRequest[] = [];
+    const intake: Intake = async (req) => (asked.push(req), { kind: "polish", message: "I'll give it a second look.", polish: { note: "Bolder, the count first" } });
+    const server = await serve(t.platform, t.home, { intake });
     const web = `http://hewn.localhost:${(server.address() as AddressInfo).port}`;
     const b = await launchBrowser(browser!);
+    const until = async <T>(what: string, f: () => Promise<T | null | undefined | false>): Promise<T> => {
+      for (let i = 0; i < 100; i++) {
+        const v = await f();
+        if (v) return v;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error(`timed out waiting for ${what}`);
+    };
     try {
       const page = await b.page({ name: "desktop", width: 1280, height: 900, mobile: false, scale: 1 });
       await page.goto(`${web}/auth?ticket=${t.platform.createWebTicket(USER)}`);
@@ -338,27 +361,34 @@ describe("Polish", () => {
       const items = await page.eval<string[]>(`[...document.querySelectorAll('.menu [role="menuitem"]')].map((b) => b.textContent)`);
       assert.deepEqual(items.slice(0, 4), ["Open", "Change…", "Polish…", "Info"]);
       await page.eval(`[...document.querySelectorAll('.menu [role="menuitem"]')].find((b) => b.textContent === "Polish…").click()`);
-      let sheet: { box: { checked: boolean; disabled: boolean }; text: string } | null = null;
-      for (let i = 0; i < 50 && !sheet; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        sheet = await page.eval(`(() => { const d = document.querySelector("dialog[open]"); const box = d?.querySelector('input[type="checkbox"]'); return box ? { box: { checked: box.checked, disabled: box.disabled }, text: d.textContent } : null })()`);
-      }
-      assert.ok(sheet, "the sheet opens");
-      assert.deepEqual(sheet.box, { checked: false, disabled: false });
-      assert.match(sheet.text, /Show the builder my own data · its screenshots then show UI Counter with your own entries instead of made-up sample data, and the builder's AI model sees them/);
-      assert.match(sheet.text, /A longer build than a change: two design passes\. If one fails, nothing changes\./);
-      await page.eval(`[...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent === "Polish").click()`);
-      let started: BuildView | undefined;
-      for (let i = 0; i < 100 && !(started = t.platform.registry.recentBuilds(5).map((id) => t.platform.getBuild(USER, id)).find((x) => x.request.polish && x.step?.step === "critique")); i++) await new Promise((r) => setTimeout(r, 50));
-      assert.ok(started, "the Polish started");
-      assert.equal(started.request.realData, undefined, "unticked: not the owner's data");
-      for (let i = 0; i < 50 && !(await page.eval<string>("location.hash")).startsWith("#/b/"); i++) await new Promise((r) => setTimeout(r, 100));
-      assert.equal(await page.eval<string>("location.hash"), `#/b/${started.buildId}`);
-      let rows: [string, string][] = [];
-      for (let i = 0; i < 50 && rows.length < 6; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        rows = await page.eval(`[...document.querySelectorAll("ol.steps li")].map((li) => [li.className.replace("step ", ""), (li.children[0].querySelector("summary") ?? li.children[0]).textContent.trim()])`);
-      }
+      // The tool with its Change drawer, in Polish mode: it asks the intake at once.
+      const hash = await until("the drawer", async () => ((await page.eval<string>("location.hash")).includes("change=1") ? page.eval<string>("location.hash") : null));
+      assert.match(hash, /^#\/app\/ui-counter\?change=1&polish=1$/);
+      const card = await until("the Polish card", () =>
+        page.eval<{ title: string; text: string; build: boolean; box: { checked: boolean; disabled: boolean } } | null>(`(() => { const c = document.querySelector(".drawer-intake .proposal"); const box = c?.querySelector('input[type="checkbox"][aria-label="Show the builder my own data"]'); return c && box && !box.disabled ? { title: document.querySelector(".drawer-title")?.textContent, text: c.textContent, build: [...c.querySelectorAll("button")].some((b) => b.textContent === "Build polish"), box: { checked: box.checked, disabled: box.disabled } } : null })()`),
+      );
+      assert.equal(card.title, "Polish UI Counter");
+      assert.ok(card.build, card.text);
+      assert.deepEqual(card.box, { checked: false, disabled: false });
+      assert.match(card.text, /Proposal · polish/);
+      assert.match(card.text, /Note Bolder, the count first/);
+      assert.match(card.text, /Show the builder my own data · its screenshots then show UI Counter with your own entries instead of made-up sample data, and the builder's AI model sees them/);
+      assert.match(card.text, /A longer build than a change: two design passes\. If one fails, nothing changes\./);
+      assert.ok(await page.eval<boolean>(`[...document.querySelectorAll(".drawer-intake button")].some((b) => b.textContent === "Polish now ›")`), "Polish now skips the intake");
+      // The intake was asked for a Polish.
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].polish, true);
+      assert.equal(asked[0].messages[0].content, "Polish it.");
+      await page.eval(`[...document.querySelectorAll(".drawer-intake .proposal button")].find((b) => b.textContent === "Build polish").click()`);
+      const started = await until("the Polish to start", async () => t.platform.registry.recentBuilds(5).map((id) => t.platform.getBuild(USER, id)).find((x) => x.request.polish && x.step?.step === "critique"));
+      assert.deepEqual(started.request, { capabilityId: "ui-counter", request: "Polish: Bolder, the count first", note: "Bolder, the count first", polish: true });
+      const context = t.platform.buildContext(USER, started.buildId);
+      assert.deepEqual(context.conversation?.map((m) => [m.role, m.content.split("\n")[0]]), [["user", "Polish it."], ["intake", "I'll give it a second look."]]);
+      // The drawer follows the build: a Polish's steps.
+      const rows = await until("the build's steps", async () => {
+        const r = await page.eval<[string, string][]>(`[...document.querySelectorAll(".drawer ol.steps li")].map((li) => [li.className.replace("step ", ""), (li.children[0].querySelector("summary") ?? li.children[0]).textContent.trim()])`);
+        return r.length >= 6 && r.some(([state]) => state === "live") ? r : null;
+      });
       assert.deepEqual(rows, [["done", "Spec agreed"], ["done", "Sample data"], ["done", "Running tests"], ["live", "Reviewing the design"], ["todo", "Fixing details"], ["todo", "Your authorization"]]);
       release();
       assert.equal((await t.platform.settle(started.buildId)).status, "promoted");
