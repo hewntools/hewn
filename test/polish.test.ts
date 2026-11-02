@@ -4,7 +4,7 @@
 // it first. The owner's own data only when they tick it. A failed pass fails the build, so the tool
 // stays at its version. Owner only; the host's builder gets it over today's protocol.
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -13,7 +13,7 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 import { USER } from "@hewntools/core/auth.ts";
 import { fromBase64, text, toBase64 } from "@hewntools/core/files.ts";
 import { POLISH_KEEPS, REAL_DATA_RULE } from "@hewntools/core/passes.ts";
-import { type BuildStepState, polishWords } from "@hewntools/core/platform/builds.ts";
+import { type BuildStepState, LINE_CHARS, polishWords } from "@hewntools/core/platform/builds.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
@@ -250,6 +250,34 @@ describe("Polish", () => {
     assert.match(jobs[0].words!, /OWNER: Bolder\n$/);
     assert.doesNotMatch(jobs[0].words!, /Fix request/);
     assert.match(jobs[0].brief, /What the owner asks of this Polish: Bolder\n\n--- Fix request ---/);
+  });
+
+  test("every line a Polish's builder reads is short, a long note and long conversations wrapped, nothing lost", async () => {
+    const words = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ");
+    const asked = await t.build(() => t.platform.create(USER, { name: "UI Counter", purpose: "Count.", requirements: "A counter.", conversation: [{ role: "user", content: words("ask", 400) }, { role: "intake", content: "x".repeat(3000) }] }), (ws) => void cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true }));
+    assert.equal(asked.status, "promoted", asked.log.join("\n"));
+    let files: Record<string, string> = {};
+    const read: Script = (ws) => {
+      const all = (dir: string): string[] => readdirSync(join(ws, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? all(join(dir, e.name)) : [join(dir, e.name)]));
+      // The screenshots are images (here, short text standing in for them).
+      files = Object.fromEntries(all(".").filter((f) => !f.endsWith(".png")).map((f) => [f, readFileSync(join(ws, f), "utf8")]));
+      markUi(ws, "v:critique");
+    };
+    // Long, and part of it a run with no space to wrap at: within the 2,000 characters a note may have.
+    const note = `${words("note", 100)} ${"Z".repeat(1200)}`;
+    assert.ok(note.length <= 2000);
+    const { view } = await polish({ note }, read, (ws) => markUi(ws, "v:craft"));
+    assert.equal(view.status, "promoted", view.log.join("\n"));
+    assert.ok(files["BUILDER.md"] && files["OWNERS_WORDS.md"], Object.keys(files).join(", "));
+    for (const [f, text] of Object.entries(files)) {
+      const longest = Math.max(...text.split("\n").map((l) => l.length));
+      assert.ok(longest <= LINE_CHARS, `${f}: a line of ${longest} characters`);
+    }
+    for (const f of ["BUILDER.md", "OWNERS_WORDS.md"]) {
+      assert.match(files[f], /note99/);
+      assert.ok(files[f].replace(/\n */g, "").includes("Z".repeat(1200)), `${f}: the run is cut, not lost`);
+    }
+    assert.match(files["OWNERS_WORDS.md"], /ask399/);
   });
 
   test("a history past 40,000 bytes keeps every heading, the first ask, the newest turns and the note", () => {
