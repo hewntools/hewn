@@ -3,6 +3,10 @@
 import { type Agent, requireOwner, USER } from "../auth.ts";
 import { Domain } from "./context.ts";
 
+/** Who calls a tool directly, by kind: the labels of the tools-used metric. */
+export const TOOLS_USED_CALLERS = ["user", "agent", "ui", "widget", "schedule", "capability"] as const;
+export type ToolsUsedCaller = (typeof TOOLS_USED_CALLERS)[number];
+
 /** Capability call logs older than this are pruned (owner setting; 0 keeps them forever). */
 export const LOG_RETENTION_DAYS = 14;
 
@@ -16,19 +20,38 @@ export class Housekeeping extends Domain {
     const now = Date.now();
     const iso = (ms: number) => new Date(now - ms).toISOString();
     const snap = this.registry.metricsSnapshot(iso(86_400_000), iso(7 * 86_400_000), new Date(now).toISOString().slice(0, 7));
-    // A call-log entry: "<iso> <caller[ → caller…]> <operation> <ok | ERROR …> <n>ms". The first caller is the origin.
+    // A call-log entry: "<iso> <caller[ → caller…]> <operation> <ok | ERROR …> <n>ms". The first caller is the origin;
+    // one followed by "→" called through another tool.
     const parse = (e: string) => {
       const rest = e.slice(e.indexOf(" ") + 1);
-      return { agent: rest.split(" ")[0] || "unknown", ok: !/ ERROR /.test(` ${rest} `) };
+      const words = rest.split(" ");
+      return { agent: words[0] || "unknown", viaTool: words[1] === "→", ok: !/ ERROR /.test(` ${rest} `) };
     };
-    const tally = (entries: string[]) => {
+    const tally = (rows: { entry: string }[]) => {
       const byAgent: Record<string, { ok: number; error: number }> = {};
-      for (const e of entries) {
-        const { agent, ok } = parse(e);
+      for (const { entry } of rows) {
+        const { agent, ok } = parse(entry);
         const t = (byAgent[agent] ??= { ok: 0, error: 0 });
         ok ? t.ok++ : t.error++;
       }
       return byAgent;
+    };
+    // The kind of whoever called a tool directly: the owner ("user", or "web" from the web client), a connected
+    // agent (by its name), a tool's own page ("ui:<tool>"), a widget, a schedule, or another tool.
+    const callerKind = (agent: string, viaTool: boolean): ToolsUsedCaller => {
+      if (viaTool) return "capability";
+      if (agent === "user" || agent === "web") return "user";
+      const prefix = agent.split(":")[0];
+      return prefix === "ui" || prefix === "widget" || prefix === "schedule" ? prefix : "agent";
+    };
+    // How many different tools each kind of caller called: counts only, never which tools.
+    const toolsUsed = (rows: { capability_id: string; entry: string }[]) => {
+      const seen = Object.fromEntries(TOOLS_USED_CALLERS.map((k) => [k, new Set<string>()])) as Record<ToolsUsedCaller, Set<string>>;
+      for (const { capability_id, entry } of rows) {
+        const { agent, viaTool } = parse(entry);
+        seen[callerKind(agent, viaTool)].add(capability_id);
+      }
+      return Object.fromEntries(TOOLS_USED_CALLERS.map((k) => [k, seen[k].size])) as Record<ToolsUsedCaller, number>;
     };
     const agents = this.agentStore.list();
     const weekAgo = iso(7 * 86_400_000);
@@ -39,6 +62,7 @@ export class Housekeeping extends Domain {
       buildSeconds7d: { count: snap.buildTime.n, sum: Math.round(snap.buildTime.seconds ?? 0) },
       calls24h: tally(snap.calls24h),
       calls7d: tally(snap.calls7d),
+      toolsUsed24h: toolsUsed(snap.calls24h),
       model: { month: new Date(now).toISOString().slice(0, 7), usd: snap.model.usd ?? 0, inputTokens: snap.model.input ?? 0, outputTokens: snap.model.output ?? 0, calls: snap.model.calls },
       agents: { connected: agents.length, active7d: agents.filter((a) => a.lastUsedAt && a.lastUsedAt >= weekAgo).length },
       schedules: schedules.reduce<Record<string, number>>((m, x) => ((m[x.status] = (m[x.status] ?? 0) + 1), m), {}),

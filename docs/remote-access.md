@@ -83,6 +83,17 @@ If you run Hewn for its owner and they have no terminal on the machine (a hostin
 
 Then the web client and its pages never send the owner to a command: signed out, they get a **Sign in** button to `HEWN_HOST_SIGNIN_URL` (or passkey sign-in, once they've added one); an agent's sign-in page links to Hewn to approve it; the first run has no "who builds" step; and Settings hides what you manage (the address, the sandbox, the backup folder, upgrades, and which agent builds). Connecting agents is through the public address only. Tools that think (`ctx.model`) run on your models, through your builder's service (`/v1/generate`), so the owner needs no API key; Settings › AI › Models shows what each tier runs on and what you charged this month. Unset (the default): nothing changes.
 
+### Metrics (`HEWN_METRICS_PORT`)
+
+Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text at `GET /metrics` on that port, for whoever runs Hewn to scrape. It listens on all interfaces, so let only your scraper reach it. Off unless set, and pulled only: Hewn sends it nowhere. It has counts and sums, never what's in your tools:
+
+- `hewn_info` (the version), `hewn_tools` by state, `hewn_builds` by status, and the time of builds promoted in the last 7 days.
+- `hewn_calls`: tool calls in the last 24 hours and 7 days, by who started them (`agent`: you, a connected agent by its name, or a tool's page, widget or schedule) and how they went (`outcome`).
+- `hewn_tools_used`: how many different tools were called in the last 24 hours, by the kind of caller that called them directly (`caller`): `user` (you), `agent`, `ui` (a tool's own page), `widget`, `schedule`, or `capability` (another tool). A tool called many times counts once; never which tools.
+- Model spend, tokens and calls this month; connected agents (and those active in the last 7 days); schedules by status, and those failing.
+
+Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)).
+
 ### Other reverse proxies
 
 Anything that serves `hewn.example.com` over HTTPS and forwards to the public listener with the original `Host` works (nginx: `proxy_set_header Host $host;`, and turn off buffering for `text/event-stream`).
