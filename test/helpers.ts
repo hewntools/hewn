@@ -15,6 +15,8 @@ import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
 
 export const SEED = resolve(import.meta.dirname, "../seeds/running-log");
 export const FIXTURES = resolve(import.meta.dirname, "fixtures");
+/** How much of a file OpenCode reads: the bytes of its lines and their newlines (not the line numbers it shows). */
+export const OPENCODE_READ = 51_200;
 /** Access tokens of the test agents, minted by each setup() (as an approved OAuth flow would). */
 export const TOKENS = { claude: "", codex: "", outsider: "" };
 

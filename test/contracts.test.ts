@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { callableOperations, type CapabilityManifest } from "@hewntools/core/manifest.ts";
 import { catalogNote, CONTRACTS_DIR, contractsIndex, contractText, INDEX_PURPOSE_CHARS, LINE_CHARS, shortLines } from "@hewntools/core/platform/builds.ts";
-import { editJson, editText, FIXTURES, SEED, setup } from "./helpers.ts";
+import { editJson, editText, FIXTURES, OPENCODE_READ, SEED, setup } from "./helpers.ts";
 
 /** What the builder finds in its workspace about the owner's other capabilities. */
 interface Seen {
@@ -124,7 +124,7 @@ describe("the owner's other capabilities' contracts", () => {
     assert.ok(seen.index!.length < 2_000, `CONTRACTS.md stays small too: ${seen.index!.length}`);
     // The two briefs differ only in their requests.
     assert.ok(Math.abs(sizes[1] - sizes[0]) < 200, `BUILDER.md: ${sizes.join(" → ")} bytes`);
-    assert.ok(sizes[1] < 50_000, `under OpenCode's 50 KB read: ${sizes[1]}`);
+    assert.ok(sizes[1] < OPENCODE_READ, `within OpenCode's read: ${sizes[1]}`);
   });
 
   test("every line a builder reads is short: a huge schema goes over several lines, a long list or request is wrapped, nothing is lost", async () => {
@@ -163,8 +163,6 @@ describe("the owner's other capabilities' contracts", () => {
   });
 
   test("BUILDER.md leaves room in OpenCode's 50 KB read: with the longest request so far, a conversation, instructions and 60 other tools, 2.5 KB to spare", async () => {
-    // OpenCode reads 51,200 bytes of a file's lines (the line numbers it shows don't count).
-    const READ = 51_200;
     const SPARE = 2_560;
     // The longest request on the owner's Hewn so far: 6,521 characters.
     const request = Array.from({ length: 900 }, (_, i) => `word${i}`).join(" ").slice(0, 6_521);
@@ -174,12 +172,12 @@ describe("the owner's other capabilities' contracts", () => {
       brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
       throw new Error("the builder gave up");
     });
-    // 60 others, their names as long as the owner's tools' are on average ("Habit Log 12 (`habit-log-12`)").
-    const others = Array.from({ length: 60 }, (_, i) => ({ id: `habit-log-${i}`, manifest: { name: `Habit Log ${i}` } as CapabilityManifest, calls: [] }));
+    // 60 others, named about as long as the owner's tools are on average (32 bytes each in the list): "Habit Logs 12 (`habit-logs-12`)".
+    const others = Array.from({ length: 60 }, (_, i) => ({ id: `habit-logs-${i}`, manifest: { name: `Habit Logs ${i}` } as CapabilityManifest, calls: [] }));
     const size = Buffer.byteLength(brief) + Buffer.byteLength(catalogNote(others));
     assert.ok(
-      size <= READ - SPARE,
-      `BUILDER.md comes to ${size} bytes with the longest request so far (6,521 characters) and 60 other tools: ${READ - size} to spare of OpenCode's ${READ}, under the ${SPARE} this test keeps. ` +
+      size <= OPENCODE_READ - SPARE,
+      `BUILDER.md comes to ${size} bytes with the longest request so far (6,521 characters) and 60 other tools: ${OPENCODE_READ - size} to spare of OpenCode's ${OPENCODE_READ}, under the ${SPARE} this test keeps. ` +
         "The brief (spec/builder-brief.md, " + Buffer.byteLength(readFileSync(join(import.meta.dirname, "..", "spec", "builder-brief.md"))) + " bytes) has grown: cut it, or move it out of BUILDER.md into a file of its own.",
     );
   });
@@ -191,7 +189,13 @@ describe("the owner's other capabilities' contracts", () => {
     assert.ok(item.length > 1 && item.every((l) => l.length <= LINE_CHARS), item.map((l) => l.length).join(", "));
     assert.ok(item.slice(1).every((l) => /^ {4}w\d/.test(l)), "under the item's text");
     assert.equal(item.map((l) => l.trim()).join(" "), `- ${long}`);
-    assert.deepEqual(shortLines("z".repeat(2500)).split("\n").map((l) => l.length), [LINE_CHARS, LINE_CHARS, 500], "no space: cut anywhere");
+    assert.equal(shortLines("z".repeat(2500)), "z".repeat(2500).match(/z{1,1000}/g)!.join("\n"), "no space: cut anywhere, nothing added");
+    assert.equal(shortLines(`${"a".repeat(999)}😀b`), `${"a".repeat(999)}\n😀b`, "never inside a character");
+    // However deep its indent, a line is wrapped (one past half a line isn't kept).
+    for (const line of [" ".repeat(1500), `${"\t".repeat(1200)}${long}`, `${" ".repeat(600)}${long}`]) {
+      const lines = shortLines(line).split("\n");
+      assert.ok(lines.every((l) => l.length <= LINE_CHARS), lines.map((l) => l.length).join(", "));
+    }
   });
 
   test("what another capability may call: the newest of each, not deprecated, not a widget's or a sign-in; and what the tool calls today", () => {

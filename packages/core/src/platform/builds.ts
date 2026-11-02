@@ -1659,6 +1659,43 @@ const isPaused = (b: BuildRow) => b.status === "failed" && !!explainFailure(b.lo
 const MAX_OWNERS_WORDS = 40_000;
 const OWNERS_TURN_CHARS = 4000;
 const DRAFTED_CHANGE_CHARS = 200;
+/** The longest line Hewn writes in a builder's workspace: a reader cuts longer ones short (OpenCode at 2,000 characters). */
+export const LINE_CHARS = 1000;
+
+/** `s` cut to at most `n` characters, never between the two halves of one (an emoji, say). */
+const cutAt = (s: string, n: number) => s.slice(0, /[\uD800-\uDBFF]/.test(s.charAt(n - 1)) ? n - 1 : n);
+
+/**
+ * A line as lines of at most `max` characters: split at a space, the further ones after `indent`;
+ * with no space in the second half, cut anywhere, the rest carrying on with nothing added.
+ */
+function wrapped(line: string, max: number, indent = ""): string[] {
+  const lines: string[] = [];
+  let rest = line;
+  let next = "";
+  while (next.length + rest.length > max) {
+    const width = max - next.length;
+    const space = rest.lastIndexOf(" ", width);
+    const at = space > width / 2 ? space : cutAt(rest, width).length;
+    lines.push(next + rest.slice(0, at));
+    rest = rest.slice(at === space ? at + 1 : at);
+    next = at === space ? indent : "";
+  }
+  return [...lines, next + rest];
+}
+
+/**
+ * `text` with each line longer than `LINE_CHARS` wrapped, its further lines indented as its text is (a
+ * list item's under its text; none past half a line).
+ */
+export function shortLines(text: string): string {
+  const indent = (line: string) => " ".repeat(/^\s*(?:[-*] )?/.exec(line)![0].length);
+  return text
+    .split("\n")
+    .flatMap((line) => (line.length > LINE_CHARS ? wrapped(line, LINE_CHARS, indent(line).length < LINE_CHARS / 2 ? indent(line) : "") : [line]))
+    .join("\n");
+}
+
 /** The heading a change's brief starts with ("CHANGES", "**Changes:**", "## Changes"), and a list marker after it. */
 const CHANGES_HEADING = /^[#*\s]*changes[*\s]*?(?::[* \t]*|(?=\n))\s*(?:(?:[-*•]|\d+[.)])\s+)?/i;
 
@@ -1738,47 +1775,12 @@ function turnText(t: BuildTurn): string {
   if (r?.kind === "draft" && named(r.draft)) text = [message, `(It drafted ${named(r.draft)})`].filter(Boolean).join("\n");
   else if (r?.kind === "draft" && change(r.draft)) text = [message, `(It drafted a change: ${change(r.draft)})`].filter(Boolean).join("\n");
   else if (r?.kind === "ideas" && Array.isArray(r.ideas) && r.ideas.length && r.ideas.every(named)) text = [message, `(It offered:\n${r.ideas.map((d) => `- ${named(d)}`).join("\n")})`].filter(Boolean).join("\n");
-  const cut = text.length > OWNERS_TURN_CHARS;
-  // Room for who said it ("INTAKE: ") or the indent, and the "…".
-  text = text.slice(0, OWNERS_TURN_CHARS).split("\n").flatMap((line) => wrapped(line, LINE_CHARS - "INTAKE: ".length - 1)).join("\n");
-  return `${text}${cut ? "…" : ""}${attached}`.replaceAll("\n", "\n  ");
-}
-
-/** CSS without its comments and the blank lines they leave; every rule as it is (no string in ui.css holds a comment's marks). */
-export function cssWithoutComments(css: string): string {
-  return css
-    .replace(/\/\*[^]*?\*\//g, "")
-    .replace(/[ \t]+$/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/^\n+/, "");
-}
-
-/** The longest line Hewn writes in a builder's workspace: a reader cuts longer ones short (OpenCode at 2,000 characters). */
-export const LINE_CHARS = 1000;
-
-/**
- * A line as lines of at most `max` characters, split at a space (or, with none in the second half,
- * anywhere), the further ones after `indent`.
- */
-function wrapped(line: string, max: number, indent = ""): string[] {
-  const lines: string[] = [];
-  let width = max;
-  while (line.length > width) {
-    const space = line.lastIndexOf(" ", width);
-    const at = space > width / 2 ? space : width;
-    lines.push(line.slice(0, at));
-    line = line.slice(at === space ? at + 1 : at);
-    width = max - indent.length;
-  }
-  return [...lines, line].map((l, i) => (i ? indent + l : l));
-}
-
-/** `text` with each line longer than `LINE_CHARS` wrapped, its further lines indented as its text is (a list item's under its text). */
-export function shortLines(text: string): string {
-  return text
+  if (text.length > OWNERS_TURN_CHARS) text = `${cutAt(text, OWNERS_TURN_CHARS)}…`;
+  // Room for who said it ("INTAKE: ", the longer) or the indent.
+  return `${text}${attached}`
     .split("\n")
-    .flatMap((line) => (line.length > LINE_CHARS ? wrapped(line, LINE_CHARS, " ".repeat(/^\s*(?:[-*] )?/.exec(line)![0].length)) : [line]))
-    .join("\n");
+    .flatMap((line) => wrapped(line, LINE_CHARS - "INTAKE: ".length))
+    .join("\n  ");
 }
 
 /** One of the owner's other tools as a build is told it (`othersLooks`). */
@@ -1814,7 +1816,7 @@ export function lookText(raw: string): string | undefined {
 /** `s` on one line, its whitespace collapsed, cut at `max` characters with "…". */
 const oneLine = (s: string, max: number) => {
   const line = s.replace(/\s+/g, " ").trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  return line.length > max ? `${cutAt(line, max - 1)}…` : line;
 };
 
 /**
@@ -1906,11 +1908,24 @@ export function contractText({ id, manifest: m, calls }: Callee): string {
   return shortLines(`# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BUILDER.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`);
 }
 
-/** A schema as a contract file shows it: on one line when it fits, else over several. */
+/** A schema as a contract file shows it: on one line when it fits after "output: " (the longer label), else over several. */
 const schemaText = (schema: unknown) => {
   const line = JSON.stringify(schema);
   return line.length <= LINE_CHARS - "output: ".length ? line : JSON.stringify(schema, null, 1);
 };
+
+/**
+ * CSS without its comments and the blank lines they leave; every rule as it is. A comment becomes a
+ * space, as it parts what's either side of it. No string in ui.css holds a comment's marks.
+ */
+export function cssWithoutComments(css: string): string {
+  return css
+    .replace(/\/\*[^]*?\*\//g, " ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\n+/, "");
+}
+
 
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>

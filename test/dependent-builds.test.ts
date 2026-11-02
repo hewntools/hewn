@@ -8,7 +8,8 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
-import { FIXTURES, type Script, setup } from "./helpers.ts";
+import { cssWithoutComments } from "@hewntools/core/platform/builds.ts";
+import { FIXTURES, OPENCODE_READ, type Script, setup } from "./helpers.ts";
 
 /** The builder writes the site-connection fixture (a connection). */
 const writeConnection: Script = (ws) => cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true });
@@ -88,12 +89,16 @@ describe("dependent builds", () => {
     // Without its comments, so a builder reads all of it; every rule kept.
     const ui = readFileSync(join(import.meta.dirname, "..", "packages", "ui", "src", "ui.css"), "utf8");
     assert.doesNotMatch(ui, /"[^"\n]*\/\*|'[^'\n]*\/\*/, "no string in ui.css holds a comment's marks");
-    const rules = (s: string) => s.replace(/\/\*[^]*?\*\//g, "").replace(/\s+/g, " ").trim();
+    const rules = (s: string) => s.replace(/\/\*[^]*?\*\//g, " ").replace(/\s+/g, " ").trim();
     assert.equal(rules(css), rules(ui), "the same rules as ui.css");
     assert.ok(!css.includes("/*"), "no comments");
-    assert.ok(Buffer.byteLength(css) < 51_200, `within OpenCode's 51,200-byte read: ${Buffer.byteLength(css)} bytes (ui.css ${Buffer.byteLength(ui)})`);
+    assert.ok(Buffer.byteLength(css) < OPENCODE_READ, `within OpenCode's read: ${Buffer.byteLength(css)} bytes (ui.css ${Buffer.byteLength(ui)})`);
     const files = Object.keys((await t.platform.loadVersion("site-connection", done.resultVersion!)).files);
     assert.ok(!files.includes("PLATFORM_UI.css") && !files.includes("BUILDER.md"));
+  });
+
+  test("cssWithoutComments: every comment goes, each as a space, and the blank lines it leaves", () => {
+    assert.equal(cssWithoutComments("/*\n * Header\n */\n.a { color: red; } /* why */\n\n\n/* B */\n.b { margin: 1px/**/2px; }\n"), ".a { color: red; }\n\n.b { margin: 1px 2px; }\n");
   });
 
   test("the connection's skeleton is a connection", async () => {

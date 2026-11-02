@@ -191,6 +191,10 @@ describe("what a build keeps", () => {
     assert.equal(first.replaceAll("\n  ", ""), `OWNER: ${"x".repeat(4000)}…\n\nINTAKE: ok\n\nOWNER: make it orange`, "a huge first turn leaves room for the rest");
     assert.ok(first.split("\n").every((line) => line.length <= LINE_CHARS), "in lines a reader doesn't cut short");
     assert.match(words([{ role: "user", content: "a log" }, { role: "intake", content: "ok" }, { role: "user", content: big }]).replaceAll("\n  ", ""), /INTAKE: ok\n\nOWNER: x{4000}…$/, "a huge last turn is kept, cut short");
+    // What was attached is wrapped too (15 names of up to 120 characters).
+    const attached = words([{ role: "user", content: "these", attachments: Array.from({ length: 15 }, (_, i) => ({ ref: `r${i}`, kind: "file" as const, name: `${"notes ".repeat(19)}${i}.txt`, mediaType: "text/plain", bytes: 1 })) }]);
+    assert.ok(attached.split("\n").every((line) => line.length <= LINE_CHARS), "no line a reader cuts short");
+    assert.match(attached, /\(attached: notes notes/);
     // A long line breaks at a space; the turn's words are all there.
     const prose = Array.from({ length: 400 }, (_, i) => `word${i}`).join(" ");
     const turn = words([{ role: "user", content: prose }]).trimEnd();
