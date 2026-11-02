@@ -274,6 +274,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
+      // Polish: the passes on a tool already live (owner only). `realData`: the builder sees a copy of the tool's own data.
+      case "POST polish": {
+        const body = await readJson(req);
+        return platform.polish(owner, { capabilityId: id, ...(body.note !== undefined ? { note: body.note } : {}), ...(body.realData !== undefined ? { realData: body.realData } : {}), ...pick(body, ["model", "effort"]) });
+      }
       case "DELETE widgets":
         return platform.removeWidget(owner, id, arg);
       case "POST widgets": {
