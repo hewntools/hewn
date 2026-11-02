@@ -1511,10 +1511,13 @@ export class Builds extends Domain {
     };
   }
 
-  /** PLATFORM_UI.css for a workspace: the design system to read (served to UIs as /_platform/ui.css). */
+  /**
+   * PLATFORM_UI.css for a workspace: the design system to read (served to UIs as /_platform/ui.css),
+   * without its comments, so a builder reads all of it (OpenCode reads 51,200 bytes of a file).
+   */
   private async designSystemFile(): Promise<Files> {
     const css = await this.designSystem?.().catch(() => undefined);
-    return css ? { "PLATFORM_UI.css": bytes(css) } : {};
+    return css ? { "PLATFORM_UI.css": bytes(cssWithoutComments(css)) } : {};
   }
 
   /**
@@ -1739,6 +1742,15 @@ function turnText(t: BuildTurn): string {
   // Room for who said it ("INTAKE: ") or the indent, and the "…".
   text = text.slice(0, OWNERS_TURN_CHARS).split("\n").flatMap((line) => wrapped(line, LINE_CHARS - "INTAKE: ".length - 1)).join("\n");
   return `${text}${cut ? "…" : ""}${attached}`.replaceAll("\n", "\n  ");
+}
+
+/** CSS without its comments and the blank lines they leave; every rule as it is (no string in ui.css holds a comment's marks). */
+export function cssWithoutComments(css: string): string {
+  return css
+    .replace(/\/\*[^]*?\*\//g, "")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\n+/, "");
 }
 
 /** The longest line Hewn writes in a builder's workspace: a reader cuts longer ones short (OpenCode at 2,000 characters). */

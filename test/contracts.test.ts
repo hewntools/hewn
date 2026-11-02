@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { callableOperations, type CapabilityManifest } from "@hewntools/core/manifest.ts";
-import { CONTRACTS_DIR, contractsIndex, contractText, INDEX_PURPOSE_CHARS, LINE_CHARS, shortLines } from "@hewntools/core/platform/builds.ts";
+import { catalogNote, CONTRACTS_DIR, contractsIndex, contractText, INDEX_PURPOSE_CHARS, LINE_CHARS, shortLines } from "@hewntools/core/platform/builds.ts";
 import { editJson, editText, FIXTURES, SEED, setup } from "./helpers.ts";
 
 /** What the builder finds in its workspace about the owner's other capabilities. */
@@ -160,6 +160,28 @@ describe("the owner's other capabilities' contracts", () => {
     assert.match(files["CONTRACTS.md"], /`extra_149@1`/);
     assert.match(files["BUILDER.md"], /word999/);
     assert.match(files["OWNERS_WORDS.md"], /word499/);
+  });
+
+  test("BUILDER.md leaves room in OpenCode's 50 KB read: with the longest request so far, a conversation, instructions and 60 other tools, 2.5 KB to spare", async () => {
+    // OpenCode reads 51,200 bytes of a file's lines (the line numbers it shows don't count).
+    const READ = 51_200;
+    const SPARE = 2_560;
+    // The longest request on the owner's Hewn so far: 6,521 characters.
+    const request = Array.from({ length: 900 }, (_, i) => `word${i}`).join(" ").slice(0, 6_521);
+    t.platform.setInstructions(USER, undefined, ["Metric units, and dates as 1 Nov 2026.", "Keep screens calm: no confetti."]);
+    let brief = "";
+    await t.build(() => t.platform.create(USER, { name: "Run Report", purpose: "reports", requirements: request, conversation: [{ role: "user", content: "a report on my runs" }] }), (ws) => {
+      brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+      throw new Error("the builder gave up");
+    });
+    // 60 others, their names as long as the owner's tools' are on average ("Habit Log 12 (`habit-log-12`)").
+    const others = Array.from({ length: 60 }, (_, i) => ({ id: `habit-log-${i}`, manifest: { name: `Habit Log ${i}` } as CapabilityManifest, calls: [] }));
+    const size = Buffer.byteLength(brief) + Buffer.byteLength(catalogNote(others));
+    assert.ok(
+      size <= READ - SPARE,
+      `BUILDER.md comes to ${size} bytes with the longest request so far (6,521 characters) and 60 other tools: ${READ - size} to spare of OpenCode's ${READ}, under the ${SPARE} this test keeps. ` +
+        "The brief (spec/builder-brief.md, " + Buffer.byteLength(readFileSync(join(import.meta.dirname, "..", "spec", "builder-brief.md"))) + " bytes) has grown: cut it, or move it out of BUILDER.md into a file of its own.",
+    );
   });
 
   test("shortLines: a long line is wrapped at a space, a list item's further lines under its text; anything else as it is", () => {
