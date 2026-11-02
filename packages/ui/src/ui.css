@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/*
+/*!
  * Hewn UI v2, "Signal". Shared by the web client and every capability UI.
  * Served at /_platform/ui.css. Plain CSS, no build step, no external resources.
  *
@@ -162,7 +162,7 @@ small, .muted { color: var(--text-2); }
 .glass-bar { display: inline-flex; gap: 2px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--hl), var(--shadow); -webkit-backdrop-filter: var(--blur-strong); backdrop-filter: var(--blur-strong); }
 .glass-bar > button, .glass-bar > a { min-height: 30px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--text-2); padding: 0 14px; }
 .glass-bar > [aria-current], .glass-bar > [aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
-/* Wallpaper: big soft pixels behind glass. <div class="wallpaper"><i style="--h:250;--x:10%;--y:20%;--w:380px"></i>…</div> */
+/*! Wallpaper: big soft pixels behind glass. <div class="wallpaper"><i style="--h:250;--x:10%;--y:20%;--w:380px"></i>…</div> */
 .wallpaper { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
 .wallpaper i { position: absolute; left: var(--x, 0); top: var(--y, 0); width: var(--w, 360px); aspect-ratio: 1; border-radius: 32px; background: oklch(var(--wp-l) calc(var(--wp-c) * var(--s, 1)) var(--h, 125)); opacity: var(--wp-a); filter: blur(80px); }
 .wallpaper.dim i { opacity: calc(var(--wp-a) * 0.5); }
@@ -216,7 +216,7 @@ button.icon-only, .btn.icon-only { width: 36px; padding: 0; }
 label.field { display: block; margin: var(--s3) 0; }
 label.field > .label, .field-label { display: block; font-size: var(--fs-sm); font-weight: 600; margin-bottom: 6px; }
 label.field > .hint, .field-hint { display: block; font-size: var(--fs-xs); color: var(--text-2); margin-top: 6px; }
-/* Fields: text inputs, selects and textareas share one look. .sm for compact rows. */
+/*! Fields: text inputs, selects and textareas share one look. .sm for compact rows. */
 input[type=text], input[type=number], input[type=date], input[type=datetime-local], input[type=time], input[type=password], input[type=search], input[type=email], input[type=url], select, textarea {
   width: 100%; min-height: 40px; padding: 9px 12px; font: inherit; font-size: var(--fs); line-height: 1.35; color: var(--text);
   background-color: var(--field); border: 1px solid var(--field-border); border-radius: 10px; box-shadow: var(--field-inset);
@@ -228,7 +228,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
 input[aria-invalid="true"], textarea[aria-invalid="true"], form.tried :invalid { border-color: var(--danger); }
 input.sm, select.sm { min-height: 32px; padding: 5px 10px; font-size: var(--fs-sm); border-radius: 8px; }
-/* Select: no native chrome; a drawn chevron that follows the theme. */
+/*! Select: no native chrome; a drawn chevron that follows the theme. */
 select {
   -webkit-appearance: none; appearance: none; padding-right: 36px; cursor: pointer; text-overflow: ellipsis;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
@@ -290,7 +290,7 @@ dialog h2, .dialog h2 { margin-top: 0; }
 .toast-region { position: fixed; bottom: var(--s5); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: var(--s2); z-index: 50; }
 
 /* ======================= app icon (pixel glyph on tinted tile) ======================= */
-/* <span class="app-icon" style="--hue:250"><svg viewBox="0 0 5 5">…5×5 rects…</svg></span>
+/*! <span class="app-icon" style="--hue:250"><svg viewBox="0 0 5 5">…5×5 rects…</svg></span>
    or <span class="app-icon" style="--hue:250">RL</span> for the monogram fallback. */
 .app-icon {
   /* --s: saturation, a multiple of the tile's chroma (0–1.5). Below 0.25 the glyph turns to ink, so 0
@@ -382,7 +382,7 @@ dialog h2, .dialog h2 { margin-top: 0; }
 .list > li.link { cursor: pointer; }
 .list > li.link:hover { color: var(--text); }
 .list > li.link::after { content: "›"; color: var(--text-3); font-size: 18px; }
-/* Chip: a pill for a thing (with its icon) or a filter. <button class="chip"> or <a class="chip">;
+/*! Chip: a pill for a thing (with its icon) or a filter. <button class="chip"> or <a class="chip">;
    .plain without an icon; aria-pressed="true" when selected; <span class="caret"></span> for a menu. */
 .chip {
   display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 3px 12px 3px 4px; border-radius: var(--radius-pill);

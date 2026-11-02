@@ -1513,7 +1513,8 @@ export class Builds extends Domain {
 
   /**
    * PLATFORM_UI.css for a workspace: the design system to read (served to UIs as /_platform/ui.css),
-   * without its comments, so a builder reads all of it (OpenCode reads 51,200 bytes of a file).
+   * without the comments it doesn't mark to keep, so a builder reads all of it (OpenCode reads 51,200
+   * bytes of a file).
    */
   private async designSystemFile(): Promise<Files> {
     const css = await this.designSystem?.().catch(() => undefined);
@@ -1915,12 +1916,13 @@ const schemaText = (schema: unknown) => {
 };
 
 /**
- * CSS without its comments and the blank lines they leave; every rule as it is. A comment becomes a
- * space, as it parts what's either side of it. No string in ui.css holds a comment's marks.
+ * CSS without its comments and the blank lines they leave, but for those marked to keep (`/*! … *\/`:
+ * in ui.css, its header and how to use a component); every rule as it is. A comment becomes a space,
+ * as it parts what's either side of it. No string in ui.css holds a comment's marks.
  */
 export function cssWithoutComments(css: string): string {
   return css
-    .replace(/\/\*[^]*?\*\//g, " ")
+    .replace(/\/\*(?!!)[^]*?\*\//g, " ")
     .replace(/[ \t]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/^\n+/, "");

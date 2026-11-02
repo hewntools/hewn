@@ -86,19 +86,22 @@ describe("dependent builds", () => {
     });
     const done = await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
     assert.match(css, /--field/, "the real ui.css");
-    // Without its comments, so a builder reads all of it; every rule kept.
+    // Without its comments but the header and how to use a component (marked /*! … */), so a builder reads all of it; every rule kept.
     const ui = readFileSync(join(import.meta.dirname, "..", "packages", "ui", "src", "ui.css"), "utf8");
     assert.doesNotMatch(ui, /"[^"\n]*\/\*|'[^'\n]*\/\*/, "no string in ui.css holds a comment's marks");
     const rules = (s: string) => s.replace(/\/\*[^]*?\*\//g, " ").replace(/\s+/g, " ").trim();
     assert.equal(rules(css), rules(ui), "the same rules as ui.css");
-    assert.ok(!css.includes("/*"), "no comments");
-    assert.ok(Buffer.byteLength(css) < OPENCODE_READ, `within OpenCode's read: ${Buffer.byteLength(css)} bytes (ui.css ${Buffer.byteLength(ui)})`);
+    assert.doesNotMatch(css, /\/\*(?!!)/, "no other comment");
+    assert.match(css, /^\/\*!\n \* Hewn UI v2[^]*Use the tokens, never raw colours\./, "the header");
+    assert.match(css, /\/\*! Chip: a pill for a thing/, "how to use a component");
+    assert.ok(Buffer.byteLength(css) < 48 * 1024 && Buffer.byteLength(css) < OPENCODE_READ, `under 48 KB, within OpenCode's read: ${Buffer.byteLength(css)} bytes (ui.css ${Buffer.byteLength(ui)})`);
     const files = Object.keys((await t.platform.loadVersion("site-connection", done.resultVersion!)).files);
     assert.ok(!files.includes("PLATFORM_UI.css") && !files.includes("BUILDER.md"));
   });
 
-  test("cssWithoutComments: every comment goes, each as a space, and the blank lines it leaves", () => {
+  test("cssWithoutComments: every comment goes, each as a space, and the blank lines it leaves; one marked /*! … */ stays", () => {
     assert.equal(cssWithoutComments("/*\n * Header\n */\n.a { color: red; } /* why */\n\n\n/* B */\n.b { margin: 1px/**/2px; }\n"), ".a { color: red; }\n\n.b { margin: 1px 2px; }\n");
+    assert.equal(cssWithoutComments("/*! How to use .c */\n.c { gap: 0; } /* x */\n"), "/*! How to use .c */\n.c { gap: 0; }\n");
   });
 
   test("the connection's skeleton is a connection", async () => {
