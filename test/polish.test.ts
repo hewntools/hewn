@@ -13,7 +13,7 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 import { USER } from "@hewntools/core/auth.ts";
 import { fromBase64, text, toBase64 } from "@hewntools/core/files.ts";
 import { POLISH_KEEPS, REAL_DATA_RULE } from "@hewntools/core/passes.ts";
-import type { BuildStepState } from "@hewntools/core/platform/builds.ts";
+import { type BuildStepState, polishWords } from "@hewntools/core/platform/builds.ts";
 import type { BuildView } from "@hewntools/core/platform.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
@@ -39,7 +39,7 @@ const countingVisual = (): VisualCheck => async (req) => {
 const breakTests = (ws: string) => writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "get", operation: "get", input: {}, expect: { count: 5 } }]));
 
 /** What a run of the builder was given. */
-type Seen = { attempt: number; pass?: string; request?: string; feedback?: string; brief: string; shot?: string };
+type Seen = { attempt: number; pass?: string; request?: string; feedback?: string; brief: string; shot?: string; words?: string };
 const recorder = (jobs: Seen[]) => (ws: string, job: BuildJob) =>
   void jobs.push({
     attempt: job.attempt,
@@ -47,6 +47,7 @@ const recorder = (jobs: Seen[]) => (ws: string, job: BuildJob) =>
     ...(job.feedback ? { feedback: job.feedback } : {}),
     brief: readFileSync(join(ws, "BUILDER.md"), "utf8"),
     ...(existsSync(join(ws, "screenshots", "desktop-light.png")) ? { shot: readFileSync(join(ws, "screenshots", "desktop-light.png"), "utf8") } : {}),
+    ...(existsSync(join(ws, "OWNERS_WORDS.md")) ? { words: readFileSync(join(ws, "OWNERS_WORDS.md"), "utf8") } : {}),
   });
 
 /** The UI Counter fixture without its sample data, in a folder of its own. */
@@ -98,6 +99,9 @@ describe("Polish", () => {
     assert.ok(jobs[0].request!.includes(POLISH_KEEPS));
     assert.ok(!jobs[1].request!.includes(POLISH_KEEPS), "the craft pass doesn't redesign anyway");
     assert.doesNotMatch(jobs[0].request!, /own data/);
+    // Installed from a directory: no conversation led to it, so no OWNERS_WORDS.md and no mention of one.
+    assert.equal(jobs[0].words, undefined);
+    assert.doesNotMatch(jobs[0].brief + jobs[0].request!, /OWNERS_WORDS|OWNER'S OWN WORDS/);
     // The live version was checked first, as validation does.
     assert.ok(view.log.some((l) => /^v1: 2 test cases passed/.test(l)), view.log.join("\n"));
     assert.ok(view.log.some((l) => /^craft pass: promoted: implementation v2 is now active/.test(l)), view.log.join("\n"));
@@ -186,6 +190,82 @@ describe("Polish", () => {
     assert.equal(checked, "desktop-light v:b count 3", "a check shows the sample data");
     assert.ok(on.view.log.some((l) => /with a copy of your own data \(screenshot attached, with your own data\)/.test(l)), on.view.log.join("\n"));
     assert.equal(((await t.platform.invoke(USER, { capabilityId: "ui-counter", operation: "get" })) as { result: { count: number } }).result.count, 7, "its data is as it was");
+  });
+
+  /** UI Counter as the owner asked for it in the chat, then changed once in the chat and once by an agent. */
+  const ownersCounter = async () => {
+    const asked = await t.build(() => t.platform.create(USER, { name: "UI Counter", purpose: "Count.", requirements: "A counter.", conversation: [{ role: "user", content: "A counter for my push-ups, big and sporty" }, { role: "intake", content: "One counter or one per exercise?" }, { role: "user", content: "Just one" }] }), (ws) => void cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true }));
+    assert.equal(asked.status, "promoted", asked.log.join("\n"));
+    const changed = await t.build(() => t.platform.modify(USER, { capabilityId: "ui-counter", request: "Show today's total", conversation: [{ role: "user", content: "Can it show today's total in green?" }] }), (ws) => markUi(ws, "v:change"));
+    assert.equal(changed.status, "promoted", changed.log.join("\n"));
+    const agents = await t.build(() => t.platform.modify(t.claude, { capabilityId: "ui-counter", request: "Say hi" }), (ws) => markUi(ws, "v:agent"));
+    assert.equal(agents.status, "promoted", agents.log.join("\n"));
+  };
+
+  test("the conversations that led to the tool go with it, oldest first, the note last; the critique points at them", async () => {
+    await ownersCounter();
+    const jobs: Seen[] = [];
+    const record = recorder(jobs);
+    const { view } = await polish({ note: "Bolder, it's for workouts" }, (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws, job) => (record(ws, job), markUi(ws, "v:craft")));
+    assert.equal(view.status, "promoted", view.log.join("\n"));
+    const words = jobs[0].words!;
+    const day = new Date().toISOString().slice(0, 10);
+    const order = [`## The tool as first asked for (v1, ${day})`, "OWNER: A counter for my push-ups, big and sporty", "INTAKE: One counter or one per exercise?", "OWNER: Just one", `## A change (v2, ${day})`, "OWNER: Can it show today's total in green?", "## This Polish: what the owner asked of it", "OWNER: Bolder, it's for workouts"];
+    const at = order.map((line) => words.indexOf(`\n${line}\n`));
+    assert.ok(at.every((i, n) => i > 0 && (n === 0 || i > at[n - 1])), words);
+    assert.match(words, /^# THE OWNER'S OWN WORDS\n\nTheir conversations with the intake that led to this tool as it is, oldest first, each under a heading \(a line starting "## "\) naming the build it led to, and last what they asked of this Polish\. The request in `BUILDER\.md` \(this Polish\) is the plan;/);
+    // The agent's change (v3) had no conversation: nothing of it.
+    assert.doesNotMatch(words, /v3|Say hi/);
+    assert.match(jobs[0].brief, /THE OWNER'S OWN WORDS: their conversations with the intake that led to this tool as it is are in `OWNERS_WORDS\.md` in your workspace, oldest first, with this Polish's note last\./);
+    assert.match(jobs[0].request!, /THE OWNER'S OWN WORDS in OWNERS_WORDS\.md\./);
+    assert.equal(jobs[1].words, words, "the craft pass has the same file");
+    // None of it goes into the tool.
+    const cap = t.platform.registry.getCapability("ui-counter")!;
+    assert.ok(!(await t.platform.loadVersion("ui-counter", cap.activeVersion!)).files["OWNERS_WORDS.md"]);
+  });
+
+  test("a tool an agent asked for has no conversation: no OWNERS_WORDS.md, and nothing points at one, note or not", async () => {
+    const made = await t.build(() => t.platform.create(t.claude, { name: "UI Counter", purpose: "Count.", requirements: "A counter." }), (ws) => void cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true }));
+    assert.equal(made.status, "promoted", made.log.join("\n"));
+    const jobs: Seen[] = [];
+    const record = recorder(jobs);
+    const { view } = await polish({ note: "Bolder" }, (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    assert.equal(view.status, "promoted", view.log.join("\n"));
+    assert.equal(jobs[0].words, undefined);
+    assert.doesNotMatch(jobs[0].brief + jobs[0].request!, /OWNERS_WORDS|OWNER'S OWN WORDS/);
+    assert.match(jobs[0].brief, /What the owner asks of this Polish: Bolder/, "the note is in BUILDER.md");
+  });
+
+  test("a change undone by a restore isn't in it, and neither is what Ask builder to fix adds to the note", async () => {
+    await ownersCounter();
+    await t.platform.rollback(USER, "ui-counter", 1);
+    const failed = await polish({ note: "Bolder" }, breakTests, breakTests);
+    assert.equal(failed.view.status, "failed");
+    const jobs: Seen[] = [];
+    const record = recorder(jobs);
+    const fixed = await t.build(() => t.platform.retryBuild(USER, failed.view.buildId, { fix: true }), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
+    assert.match(jobs[0].words!, /## The tool as first asked for \(v1, /);
+    assert.doesNotMatch(jobs[0].words!, /today's total|## A change/);
+    assert.match(jobs[0].words!, /OWNER: Bolder\n$/);
+    assert.doesNotMatch(jobs[0].words!, /Fix request/);
+    assert.match(jobs[0].brief, /What the owner asks of this Polish: Bolder\n\n--- Fix request ---/);
+  });
+
+  test("a history past 40,000 bytes keeps every heading, the first ask, the newest turns and the note", () => {
+    const long = (who: "user" | "intake", tag: string) => ({ role: who, content: `${tag} ${"word ".repeat(180)}` });
+    const history = ["v1", "v2", "v3"].map((v) => ({ heading: `A change (${v}, 2026-10-20)`, turns: Array.from({ length: 20 }, (_, i) => long(i % 2 ? "intake" : "user", `${v}-turn-${i}`)) }));
+    const words = polishWords(history, "Bolder");
+    assert.ok(new TextEncoder().encode(words).length <= 40_000 + 1000, `within the cap (the intro aside): ${words.length}`);
+    for (const v of ["v1", "v2", "v3"]) assert.ok(words.includes(`## A change (${v}, 2026-10-20)`), v);
+    assert.match(words, /OWNER: v1-turn-0 /, "the first ask");
+    assert.match(words, /INTAKE: v3-turn-19 /, "the newest turn");
+    assert.match(words, /OWNER: Bolder\n$/, "the note last");
+    assert.doesNotMatch(words, /v1-turn-5 /, "an old turn left out");
+    assert.match(words, /\(\d+ turns left out\)/);
+    // Nothing kept: empty, note or not.
+    assert.equal(polishWords([], "Bolder"), "");
+    assert.equal(polishWords([{ heading: "x", turns: [] }], ""), "");
   });
 
   test("only for a tool with a screen, by the owner", async () => {

@@ -856,10 +856,13 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
-    const what = isPolish(b.request) ? polishRequest(String(b.request.note ?? ""), !base.files[SAMPLE_FILE], b.request.realData === true) : b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`;
+    const polish = isPolish(b.request);
+    // A Polish has no conversation of its own: the ones that led to the tool as it is, and its note (without what "Ask builder to fix" added).
+    const words = polish ? polishWords(this.historyOf(cap.id), String(b.request.note ?? "").split(FIX_MARK)[0].trim()) : "";
+    const what = polish ? polishRequest(String(b.request.note ?? ""), !base.files[SAMPLE_FILE], b.request.realData === true, !!words) : b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`;
     const ask = `${what}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1598,6 +1601,27 @@ export class Builds extends Domain {
     return words ? { "OWNERS_WORDS.md": bytes(words) } : {};
   }
 
+  /**
+   * The conversations that led to a tool as it is: from its active version's build back through the
+   * version each was built on to its create, the builds that kept one (the owner's, since Hewn keeps
+   * them), oldest first, each named by its kind, version and day. A change undone by a restore isn't on the way back.
+   */
+  private historyOf(capabilityId: string): OwnersConversation[] {
+    const history: OwnersConversation[] = [];
+    const seen = new Set<number>();
+    for (let v = this.registry.getCapability(capabilityId)?.activeVersion ?? null; v !== null && !seen.has(v); ) {
+      seen.add(v);
+      const row = this.registry.getVersion(capabilityId, v);
+      const b = row && this.registry.getBuild(row.buildId);
+      if (!b) break;
+      const turns = this.registry.buildContext(b.id)?.conversation;
+      const what = b.kind === "create" ? "The tool as first asked for" : b.kind === "widgets" ? "Its widgets" : "A change";
+      if (turns?.length) history.unshift({ heading: `${what} (v${v}, ${b.createdAt.slice(0, 10)})`, turns });
+      v = b.baseVersion;
+    }
+    return history;
+  }
+
   /** BUILDER.md: the request, where the owner's own words are and how they count, the owner's instructions (as the build recorded them, `build_context`), the brief, the catalog. */
   private brief_(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
     const submit = "When the candidate is complete, stop. The platform validates it automatically. If validation fails, you are run again with the failure log.";
@@ -1754,14 +1778,49 @@ function ownersWordsNote(conversation: BuildTurn[] | undefined): string {
  */
 export function ownersWords(conversation: BuildTurn[] | undefined): string {
   if (!conversation?.length) return "";
-  const turns = conversation.map((t) => `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`);
-  const size = turns.map((turn) => bytes(turn).length);
-  let keep = new Set(turns.keys());
-  if (bytes(turns.join("\n\n")).length > MAX_OWNERS_WORDS) {
-    // Each kept turn and mark costs its size and a blank line; a gap may open on either side of the owner's latest.
-    keep = new Set([0, conversation.findLastIndex((t) => t.role === "user")].filter((i) => i >= 0));
-    let room = MAX_OWNERS_WORDS - 2 * (bytes(leftOut(turns.length)).length + 2) - [...keep].reduce((n, i) => n + size[i] + 2, 0);
-    for (let i = turns.length - 1; i > 0; i--) {
+  return ownersFile(`Their conversation with the intake, oldest first. ${ownersRule("The request in \`BUILDER.md\`")}`, [{ turns: conversation }]);
+}
+
+/** One conversation in OWNERS_WORDS.md, under a heading when the file holds several (a Polish's). */
+export interface OwnersConversation {
+  heading?: string;
+  turns: BuildTurn[];
+}
+
+/**
+ * A Polish's OWNERS_WORDS.md: the conversations that led to the tool as it is (`history`: its create's,
+ * its changes', each under its build), oldest first, then what the owner asked of this Polish (`note`)
+ * as their latest word. Empty when none of its builds kept one (built from an agent's request, or
+ * before Hewn kept conversations): the note alone is in BUILDER.md.
+ */
+export function polishWords(history: OwnersConversation[], note: string): string {
+  const parts = history.filter((c) => c.turns.length);
+  if (!parts.length) return "";
+  const asked = note ? [{ heading: "This Polish: what the owner asked of it", turns: [{ role: "user" as const, content: note }] }] : [];
+  return ownersFile(
+    `Their conversations with the intake that led to this tool as it is, oldest first, each under a heading (a line starting "## ") naming the build it led to${note ? ", and last what they asked of this Polish" : ""}. ${ownersRule("The request in \`BUILDER.md\` (this Polish)")}`,
+    [...parts, ...asked],
+  );
+}
+
+/**
+ * OWNERS_WORDS.md: `intro`, then the conversations, oldest first. A long one keeps every heading, the
+ * first turn, the owner's latest and the latest that fit in `MAX_OWNERS_WORDS` bytes, and says where
+ * turns were left out.
+ */
+function ownersFile(intro: string, conversations: OwnersConversation[]): string {
+  const items = conversations.flatMap((c) => [
+    ...(c.heading ? [{ text: `## ${c.heading}`, heading: true, owner: false }] : []),
+    ...c.turns.map((t) => ({ text: `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`, heading: false, owner: t.role === "user" })),
+  ]);
+  const size = items.map((it) => bytes(it.text).length);
+  let keep = new Set(items.keys());
+  if (bytes(items.map((it) => it.text).join("\n\n")).length > MAX_OWNERS_WORDS) {
+    // Each kept item and mark costs its size and a blank line; a gap may open before each heading and on either side of the owner's latest.
+    const headings = [...items.keys()].filter((i) => items[i].heading);
+    keep = new Set([...headings, items.findIndex((it) => !it.heading), items.findLastIndex((it) => it.owner)].filter((i) => i >= 0));
+    let room = MAX_OWNERS_WORDS - (headings.length + 2) * (bytes(leftOut(items.length)).length + 2) - [...keep].reduce((n, i) => n + size[i] + 2, 0);
+    for (let i = items.length - 1; i >= 0; i--) {
       if (keep.has(i)) continue;
       if (size[i] + 2 > room) break;
       keep.add(i);
@@ -1770,14 +1829,14 @@ export function ownersWords(conversation: BuildTurn[] | undefined): string {
   }
   const kept: string[] = [];
   let gap = 0;
-  turns.forEach((turn, i) => {
+  items.forEach((it, i) => {
     if (!keep.has(i)) return void gap++;
     if (gap) kept.push(leftOut(gap));
-    kept.push(turn);
+    kept.push(it.text);
     gap = 0;
   });
   if (gap) kept.push(leftOut(gap));
-  return `# THE OWNER'S OWN WORDS\n\nTheir conversation with the intake, oldest first. ${ownersRule("The request in \`BUILDER.md\`")} Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}\n`;
+  return `# THE OWNER'S OWN WORDS\n\n${intro} Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}\n`;
 }
 
 /** Where OWNERS_WORDS.md leaves turns of the owner's conversation out. */
@@ -1952,12 +2011,13 @@ export function contractText({ id, manifest: m, calls }: Callee): string {
 
 /**
  * BUILDER.md's request for a Polish: what it's for, the sample data to write first when the tool has
- * none, what it keeps, and what the owner asked of it (`note`), if anything.
+ * none, what it keeps, what the owner asked of it (`note`), if anything, and where the conversations
+ * that led to the tool are (`ownersWords`: OWNERS_WORDS.md, when it has any).
  */
-const polishRequest = (note: string, needsSample: boolean, real: boolean) =>
+const polishRequest = (note: string, needsSample: boolean, real: boolean, ownersWords: boolean) =>
   `This is a **Polish**: the tool works and is live; this build lifts its design, not what it does. Hewn shows you screenshots of it filled with ${real ? "a copy of the owner's own data (they allowed it)" : "its sample data"} for two passes: a design review (the five biggest problems, fixed), then a craft pass (what's broken, cramped or cut off, fixed).
 
-${needsSample ? `First, before the passes: the tool has no sample data. Write ${SAMPLE_FILE} (see "${SAMPLE_FILE}" below) with made-up entries that show what it does, change nothing else, and stop. Hewn validates it, then shows you the screenshots.\n\n` : ""}${POLISH_KEEPS} In the passes, change only ui/: the operations, state and tests stay as they are.${note ? `\n\nWhat the owner asks of this Polish: ${note}` : ""}`;
+${needsSample ? `First, before the passes: the tool has no sample data. Write ${SAMPLE_FILE} (see "${SAMPLE_FILE}" below) with made-up entries that show what it does, change nothing else, and stop. Hewn validates it, then shows you the screenshots.\n\n` : ""}${POLISH_KEEPS} In the passes, change only ui/: the operations, state and tests stay as they are.${note ? `\n\nWhat the owner asks of this Polish: ${note}` : ""}${ownersWords ? `\n\nTHE OWNER'S OWN WORDS: their conversations with the intake that led to this tool as it is are in \`OWNERS_WORDS.md\` in your workspace, oldest first${note ? ", with this Polish's note last" : ""}. Read all of it before the passes (in parts, if your reader cuts it short): the screen should still be what they asked for, and feel the way they wanted. It says how their words count.` : ""}`;
 
 /** BUILDER.md's request for a widgets build. */
 const widgetsRequest = (request: string) =>
