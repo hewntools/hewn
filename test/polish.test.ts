@@ -18,7 +18,7 @@ import type { BuildView } from "@hewntools/core/platform.ts";
 import { remoteBuilder } from "@hewntools/cli/builders/remote.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { findBrowser, launchBrowser, type VisualCheck } from "@hewntools/cli/visual.ts";
-import { intakePrompt, parseIntake, SCHEMA, type Intake } from "@hewntools/cli/intake.ts";
+import { intakePrompt, NO_SCREEN_TO_POLISH, parseIntake, SCHEMA, type Intake } from "@hewntools/cli/intake.ts";
 import type { IntakeRequest } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { FIXTURES, installFrom, platformWith, type Script, serve, setup } from "./helpers.ts";
 
@@ -300,13 +300,22 @@ describe("Polish", () => {
     assert.match(polishWords([], { note: "Bolder", conversation: [{ role: "user", content: "Polish it." }, { role: "intake", content: "Bolder it is." }] }), /\n## This Polish: the conversation that asked for it\n\nOWNER: Polish it\.\n\nINTAKE: Bolder it is\.\n$/);
   });
 
-  test("the intake, asked for a Polish, replies with one: its note in the owner's terms; asked for a change, it isn't told of it", () => {
+  test("the intake, asked for a Polish, replies with one (its note in the owner's terms); a tool without a screen gets an answer and the offer of one", () => {
     assert.ok((SCHEMA.properties.kind.enum as string[]).includes("polish"));
     const reply = parseIntake(JSON.stringify({ kind: "polish", message: "A second look, then.", request: " Bolder " }), "modify");
     assert.deepEqual(reply, { kind: "polish", message: "A second look, then.", polish: { note: "Bolder" } });
-    const req: IntakeRequest = { mode: "modify", capabilityId: "ui-counter", messages: [{ role: "user", content: "Polish it." }] };
-    assert.match(intakePrompt({ ...req, polish: true }), /The owner opened this as a Polish: [^\n]*Reply kind "polish": [^\n]*never reply kind "questions"\./);
-    assert.doesNotMatch(intakePrompt(req), /opened this as a Polish|kind "polish"/);
+    const withScreen = JSON.parse(readFileSync(join(FIXTURES, "ui-counter", "capability.json"), "utf8"));
+    const req: IntakeRequest = { mode: "modify", capabilityId: "ui-counter", messages: [{ role: "user", content: "Polish it." }], current: withScreen };
+    assert.match(intakePrompt({ ...req, polish: true }), /- The owner opened this as a Polish\. A Polish \(when the owner asks for one\): [^\n]*Reply kind "polish": [^\n]*never reply kind "questions" for one\./);
+    // Asked for by name in an ordinary change: the same, but nothing says they opened one.
+    assert.match(intakePrompt(req), /- A Polish \(when the owner asks for one by name\): [^\n]*Reply kind "polish"/);
+    assert.doesNotMatch(intakePrompt(req), /opened this as a Polish/);
+    // A tool without a screen: nothing to polish; the intake says so and offers a screen, and a Polish reply becomes that answer.
+    const { ui: _ui, ...noScreen } = withScreen;
+    assert.match(intakePrompt({ ...req, polish: true, current: noScreen }), /This tool has no screen of its own [^\n]*nothing to polish: if they ask for one, reply kind "answer"[^\n]*offer to give it a screen of its own; if they say yes, reply kind "draft"/);
+    assert.doesNotMatch(intakePrompt({ ...req, polish: true, current: noScreen }), /Reply kind "polish"/);
+    assert.deepEqual(parseIntake(JSON.stringify({ kind: "polish", message: "", request: "" }), "modify", noScreen), { kind: "answer", message: NO_SCREEN_TO_POLISH });
+    assert.deepEqual(parseIntake(JSON.stringify({ kind: "polish", message: "Aurora Watch has no screen to polish. Want one?", request: "" }), "modify", noScreen), { kind: "answer", message: "Aurora Watch has no screen to polish. Want one?" });
   });
 
   test("only for a tool with a screen, by the owner", async () => {
@@ -361,9 +370,13 @@ describe("Polish", () => {
       const items = await page.eval<string[]>(`[...document.querySelectorAll('.menu [role="menuitem"]')].map((b) => b.textContent)`);
       assert.deepEqual(items.slice(0, 4), ["Open", "Change…", "Polish…", "Info"]);
       await page.eval(`[...document.querySelectorAll('.menu [role="menuitem"]')].find((b) => b.textContent === "Polish…").click()`);
-      // The tool with its Change drawer, in Polish mode: it asks the intake at once.
+      // The tool with its Change drawer, in Polish mode: "Polish it." in the box, waiting for the owner's Send.
       const hash = await until("the drawer", async () => ((await page.eval<string>("location.hash")).includes("change=1") ? page.eval<string>("location.hash") : null));
       assert.match(hash, /^#\/app\/ui-counter\?change=1&polish=1$/);
+      assert.equal(await until("the box", () => page.eval<string>(`document.querySelector(".drawer-intake .composer-input")?.value ?? ""`)), "Polish it.");
+      await new Promise((r) => setTimeout(r, 500));
+      assert.equal(asked.length, 0, "nothing is sent until the owner sends it");
+      await page.eval(`(() => { const i = document.querySelector(".drawer-intake .composer-input"); i.value = "Polish it. The count should lead."; i.dispatchEvent(new Event("input")); i.closest("form").requestSubmit(); })()`);
       const card = await until("the Polish card", () =>
         page.eval<{ title: string; text: string; build: boolean; box: { checked: boolean; disabled: boolean } } | null>(`(() => { const c = document.querySelector(".drawer-intake .proposal"); const box = c?.querySelector('input[type="checkbox"][aria-label="Show the builder my own data"]'); return c && box && !box.disabled ? { title: document.querySelector(".drawer-title")?.textContent, text: c.textContent, build: [...c.querySelectorAll("button")].some((b) => b.textContent === "Build polish"), box: { checked: box.checked, disabled: box.disabled } } : null })()`),
       );
@@ -374,16 +387,16 @@ describe("Polish", () => {
       assert.match(card.text, /Note Bolder, the count first/);
       assert.match(card.text, /Show the builder my own data · its screenshots then show UI Counter with your own entries instead of made-up sample data, and the builder's AI model sees them/);
       assert.match(card.text, /A longer build than a change: two design passes\. If one fails, nothing changes\./);
-      assert.ok(await page.eval<boolean>(`[...document.querySelectorAll(".drawer-intake button")].some((b) => b.textContent === "Polish now ›")`), "Polish now skips the intake");
-      // The intake was asked for a Polish.
+      assert.ok(!(await page.eval<boolean>(`[...document.querySelectorAll(".drawer-intake button")].some((b) => /Polish now/.test(b.textContent))`)), "no Polish now: Draft now is the way past questions, and a Polish asks none");
+      // The intake was asked for a Polish, with what the owner added.
       assert.equal(asked.length, 1);
       assert.equal(asked[0].polish, true);
-      assert.equal(asked[0].messages[0].content, "Polish it.");
+      assert.equal(asked[0].messages[0].content, "Polish it. The count should lead.");
       await page.eval(`[...document.querySelectorAll(".drawer-intake .proposal button")].find((b) => b.textContent === "Build polish").click()`);
       const started = await until("the Polish to start", async () => t.platform.registry.recentBuilds(5).map((id) => t.platform.getBuild(USER, id)).find((x) => x.request.polish && x.step?.step === "critique"));
       assert.deepEqual(started.request, { capabilityId: "ui-counter", request: "Polish: Bolder, the count first", note: "Bolder, the count first", polish: true });
       const context = t.platform.buildContext(USER, started.buildId);
-      assert.deepEqual(context.conversation?.map((m) => [m.role, m.content.split("\n")[0]]), [["user", "Polish it."], ["intake", "I'll give it a second look."]]);
+      assert.deepEqual(context.conversation?.map((m) => [m.role, m.content.split("\n")[0]]), [["user", "Polish it. The count should lead."], ["intake", "I'll give it a second look."]]);
       // The drawer follows the build: a Polish's steps.
       const rows = await until("the build's steps", async () => {
         const r = await page.eval<[string, string][]>(`[...document.querySelectorAll(".drawer ol.steps li")].map((li) => [li.className.replace("step ", ""), (li.children[0].querySelector("summary") ?? li.children[0]).textContent.trim()])`);

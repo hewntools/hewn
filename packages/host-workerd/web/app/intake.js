@@ -76,7 +76,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   caps().then((m) => (all = m)).catch(() => {});
   const widgetParam = q?.get("widget");
   const widgetsMode = widgetParam === "new";
-  // Polish… (the tool's menu): the intake proposes a Polish, its note in the owner's terms; Polish now skips it.
+  // Polish… (the tool's menu): "Polish it." in the box; once sent, the intake proposes a Polish, its note in the owner's terms.
   const polishMode = mode === "modify" && q?.get("polish") === "1";
   let focus = null;
   const messages = [];
@@ -245,15 +245,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       ),
     );
   // Continue the last conversation? sits above the box, not in it.
-  // Polish now: no proposal first, no note (the builder takes it from the screenshots).
-  const polishNow =
-    polishMode &&
-    h(
-      "div",
-      { class: "row end" },
-      h("button", { type: "button", class: "link sm", onclick: (e) => ((e.target.disabled = true), api(`/capabilities/${enc(capId)}/polish`, { method: "POST", body: {} }).then((b) => (invalidateCaps(), built(b)), (err) => ((e.target.disabled = false), fail(err)))) }, "Polish now ›"),
-    );
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, polishNow, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, hubLink));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, hubLink));
   const say = (who, text, attachments) => (hubLink && (hubLink.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
@@ -496,8 +488,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     })().catch(fail);
     me.arrive = (result, text) => ready.then(() => (settle?.(), land(result, text)));
   }
-  // Opened with text to send (Info's "Change it", the first run, a new widget), send it.
-  if ((q?.get("send") === "1" || widgetsMode || polishMode || connection) && input.value.trim()) setTimeout(ask);
+  // Opened with what the owner typed and sent elsewhere (Home's box, Info's "Change it"): sent. Text Hewn
+  // puts in the box (a new widget, a Polish, a connection, "Ask builder to fix this") waits for the owner's
+  // Send, so they can add to it first (the owner, 2026-11-02).
+  if (q?.get("send") === "1" && input.value.trim()) setTimeout(ask);
   return {
     el,
     // In a drawer, its head holds + New (the page has it in its heading).
@@ -957,21 +951,25 @@ function proposalCard(kind, list, ctx) {
   // see), and how long it takes; whether the tool has data or sample data is asked once.
   const polishDetails = (r) => {
     const note = r.d.note && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, "Note "), r.d.note);
-    const realText = h("span", { class: "faint" }, "");
+    // The choice only once Hewn knows the tool has data of its own; with none, a line saying what it sees instead.
+    const own = h("label", { class: "check small", hidden: true }, r.real, h("span", {}, " Show the builder my own data", h("span", { class: "faint" }, ` · its screenshots then show ${cap.name} with your own entries instead of made-up sample data, and the builder's AI model sees them`)));
+    const none = h("div", { class: "small faint", hidden: true }, `${cap.name} has no data of its own yet, so the builder sees made-up sample data.`);
     const longer = h("div", { class: "small faint" }, "A longer build than a change: two design passes. If one fails, nothing changes.");
     if (!readOnly)
       api(`/capabilities/${enc(cap.id)}/data`)
         .then((data) => {
           r.real.dataset.none = data?.rows ? "" : "1";
           r.real.disabled = !data?.rows || build.disabled;
-          realText.textContent = data?.rows ? ` · its screenshots then show ${cap.name} with your own entries instead of made-up sample data, and the builder's AI model sees them` : ` · ${cap.name} has no data of its own yet`;
+          own.hidden = !data?.rows;
+          none.hidden = !!data?.rows;
           if (!data?.sample) longer.textContent = "A longer build than a change: sample data first (it has none), then two design passes. If one fails, nothing changes.";
         })
         .catch(() => {});
     return [
       h("div", { class: "small muted" }, "The builder reviews screenshots of it and fixes the biggest problems, then the details. It keeps what the tool does and its character."),
       note,
-      !readOnly && h("label", { class: "check small" }, r.real, h("span", {}, " Show the builder my own data", realText)),
+      !readOnly && own,
+      !readOnly && none,
       !readOnly && longer,
     ];
   };
