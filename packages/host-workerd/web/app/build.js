@@ -41,9 +41,11 @@ const installSteps = (b) => [
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
+/** A Polish's steps: its builder writes no code, only sample data when the tool has none (else that step is done at once). */
+const POLISH_STEPS = STEPS.map(([k, label]) => [k, k === "code" ? "Sample data" : label]);
 /** The steps, with the passes the build runs (`passes`, from its step) right after its tests. */
 const stepsOf = (b, passes) => {
-  const steps = b.builder === "bundle" ? installSteps(b) : STEPS;
+  const steps = b.builder === "bundle" ? installSteps(b) : b.request?.polish ? POLISH_STEPS : STEPS;
   const after = steps.findIndex(([k]) => k === "tests") + 1;
   const extra = (passes ?? []).filter((p) => PASS_STEPS[p]).map((p) => [p, PASS_STEPS[p][0]]);
   return [...steps.slice(0, after), ...extra, ...steps.slice(after)];
@@ -52,7 +54,7 @@ const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000)
 const BUILD_KIND = { create: "new", modify: "change", widgets: "widgets" };
 const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
 /** A build's kind in words: a change that only touched the manifest is a quick change. */
-const kindWord = (b) => (b.builder === "keep" || b.request?.manifestOnly ? "quick change" : BUILD_KIND[b.kind] ?? b.kind);
+const kindWord = (b) => (b.builder === "keep" || b.request?.manifestOnly ? "quick change" : b.request?.polish ? "polish" : BUILD_KIND[b.kind] ?? b.kind);
 
 /**
  * Failed builds nobody has dealt with yet: not retried, and nothing of that tool promoted since (a

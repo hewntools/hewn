@@ -10,11 +10,11 @@ import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
-import type { CallHandler, CheckResult, CodeRef, ExecutionTarget, Files, StateRef, VisualShot } from "../ports.ts";
+import type { CallHandler, CheckResult, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
-import { isPart } from "../passes.ts";
+import { isPart, isPolish } from "../passes.ts";
 import { Domain } from "./context.ts";
 
 /** A candidate that passed validation, held in memory: nothing about the tool has changed yet. */
@@ -30,8 +30,10 @@ export interface Candidate {
   shots?: VisualShot[];
   /** With `measure`: what the visual check measured for the builder to fix. */
   defects?: string[];
-  /** Whether `shots` show the tool filled with its sample data (else empty). */
+  /** Whether `shots` show the tool filled with its sample data (else empty), or, with `real`, with a copy of its own. */
   sampled?: boolean;
+  /** `shots` show a copy of the tool's own data: a Polish the owner let see it (`realData`). */
+  real?: boolean;
   /** The build page's screenshot of it (light, dark): written again when it's promoted, so the page shows this candidate. */
   screenshot?: Uint8Array;
   screenshotDark?: Uint8Array;
@@ -153,11 +155,13 @@ export class Validation extends Domain {
     const visualState: StateRef = { capabilityId: id, scratch: `visual:${build.id}` };
     const dryRun: StateRef = { capabilityId: id, scratch: `dryrun:${build.id}` };
     const sampleState: StateRef = { capabilityId: id, scratch: `sample:${build.id}` };
+    // A copy of the tool's own data, for a Polish the owner let see it (not a builder's check: those show sample data).
+    const realState: StateRef = { capabilityId: id, scratch: `real:${build.id}` };
     // Sample calls run as they do after an install: nothing granted (no secrets, settings, hosts, other tools or model).
     const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
-    let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean } = {};
+    let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean; real?: boolean } = {};
     let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
       await this.runtime.dropState(testState);
@@ -197,9 +201,10 @@ export class Validation extends Domain {
         softFail((e as Error).message);
       }
       // A new tool with a screen is seen in use (its screenshots, the passes after its build, sharing):
-      // its builder writes sample data. An install brings what it has.
+      // its builder writes sample data, as a Polish's does before its passes. An install brings what it has.
       const installing = build.builder === "bundle" || !!build.builder?.startsWith("copy:");
-      if (sample === null && build.kind === "create" && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: a new tool with a screen needs sample data that fills it (see "sample/calls.json" in BUILDER.md)`);
+      const polish = isPolish(build.request);
+      if (sample === null && (build.kind === "create" || polish) && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: ${polish ? "a Polish shows the builder the tool filled with sample data" : "a new tool with a screen needs sample data that fills it"} (see "sample/calls.json" in BUILDER.md)`);
       if (sample) {
         await this.runtime.dropState(sampleState);
         await this.runtime.migrate(sampleState, migrations, code);
@@ -256,8 +261,11 @@ export class Validation extends Domain {
               return { result };
             },
           });
+        // A Polish the owner let see their data: rendered once more, filled with a copy of it, and that's what the
+        // builder is shown. A tool with none of its own (empty tables) shows its sample data instead.
+        const real = polish && build.request.realData === true && !opts.check && (await this.hasOwnData(id, base?.code ?? code));
         const measure = !!opts.measure;
-        const empty = await check(visualState, measure && !sample);
+        const empty = await check(visualState, measure && !sample && !real);
         if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
         else {
           if (empty.errors.length) {
@@ -265,15 +273,26 @@ export class Validation extends Domain {
             if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
             softFail("UI didn't render cleanly", empty.errors);
           }
-          const filled = sample ? await check(sampleState, measure) : undefined;
-          const v = filled && !filled.skipped ? filled : empty;
+          const filled = sample ? await check(sampleState, measure && !real) : undefined;
+          let own: VisualCheckResult | undefined;
+          if (real) {
+            await this.runtime.copyState({ capabilityId: id }, realState);
+            await this.runtime.migrate(realState, migrations, code);
+            own = await check(realState, measure);
+          }
+          const v = own && !own.skipped ? own : filled && !filled.skipped ? filled : empty;
           await keep(v);
-          rendered = { shots: v.shots, defects: v.defects, sampled: v === filled };
+          rendered = { shots: v.shots, defects: v.defects, sampled: v === filled || v === own, ...(v === own ? { real: true } : {}) };
           if (filled?.errors.length) {
             if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
             softFail("UI didn't render cleanly with its sample data", filled.errors);
           }
-          if (!empty.errors.length && !filled?.errors.length) step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
+          if (own?.errors.length) {
+            if (own.screenshot) step("UI renders with errors filled with a copy of the owner's own data (screenshot attached, with the owner's own data)");
+            softFail("UI didn't render cleanly with the owner's own data", own.errors);
+          }
+          if (!empty.errors.length && !filled?.errors.length && !own?.errors.length)
+            step(v === own ? `UI renders without errors, empty${filled ? ", with its sample data" : ""} and with a copy of the owner's own data (screenshot attached, with the owner's own data)` : v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
       }
@@ -314,7 +333,7 @@ export class Validation extends Domain {
         }
       }
     } finally {
-      for (const s of [testState, visualState, dryRun, sampleState]) await this.runtime.dropState(s).catch(() => {});
+      for (const s of [testState, visualState, dryRun, sampleState, realState]) await this.runtime.dropState(s).catch(() => {});
     }
     return {
       manifest,
@@ -325,6 +344,7 @@ export class Validation extends Domain {
       ...(rendered.shots ? { shots: rendered.shots } : {}),
       ...(rendered.defects ? { defects: rendered.defects } : {}),
       ...(rendered.shots ? { sampled: rendered.sampled } : {}),
+      ...(rendered.real ? { real: true } : {}),
       ...(kept.screenshot ? { screenshot: kept.screenshot } : {}),
       ...(kept.screenshotDark ? { screenshotDark: kept.screenshotDark } : {}),
       ...(opts.check ? { failures } : {}),

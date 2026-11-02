@@ -42,8 +42,8 @@ async function openCapability(c) {
  * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once; `from`: the
  * build whose conversation the intake continues from.
  */
-function changeHref(c, { m, send, widget, from, fix } = {}) {
-  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}) });
+function changeHref(c, { m, send, widget, from, fix, polish } = {}) {
+  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}), ...(polish ? { polish: "1" } : {}) });
   return `#/${c.ui ? "app" : "run"}/${enc(c.id)}?${q}`;
 }
 const openChange = (c, o) => go(changeHref(c, o));
@@ -82,6 +82,8 @@ function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
   return [
     ["Open", () => openCapability(c).catch(fail)],
     ["Change…", () => openChange(c)],
+    // A tool with a screen: a second look at its design, in the Change drawer (the owner's, 2026-11-02: in this menu, under Change…).
+    c.ui && !connection && ["Polish…", () => openChange(c, { polish: true })],
     ["Info", () => go(`#/c/${id}`)],
     "-",
     !connection && ["Widgets…", () => toolWidgetsSheet(c).catch(fail)],

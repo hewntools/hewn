@@ -46,6 +46,8 @@ const turnOf = (reply) => ({
       ? [reply.message, `IDEAS\n${reply.ideas.map((d, i) => `${i + 1}. ${draftText(d)}`).join("\n\n")}`].filter(Boolean).join("\n\n")
     : reply.kind === "schedules"
       ? [reply.message, `SCHEDULES\n${scheduleText(reply.schedules)}`].filter(Boolean).join("\n\n")
+    : reply.kind === "polish"
+      ? [reply.message, `POLISH${reply.polish.note ? `\nNote: ${reply.polish.note}` : ""}`].filter(Boolean).join("\n\n")
     : [reply.message, `DRAFT\n${draftText(reply.draft)}`].filter(Boolean).join("\n\n"),
   reply,
 });
@@ -74,6 +76,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   caps().then((m) => (all = m)).catch(() => {});
   const widgetParam = q?.get("widget");
   const widgetsMode = widgetParam === "new";
+  // Polish… (the tool's menu): "Polish it." in the box; once sent, the intake proposes a Polish, its note in the owner's terms.
+  const polishMode = mode === "modify" && q?.get("polish") === "1";
   let focus = null;
   const messages = [];
   const thread = h("div", { class: "thread", "aria-live": "polite" });
@@ -99,7 +103,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // Not for a picked-up one (from=, or Continue), widgets or a connection. Opened with text put in (m=, or
   // "Ask builder to fix this"), it's a new conversation: the one kept stays until this one is sent, then it's replaced.
   const keepKey = `hewn.intake.${mode === "create" ? "new" : `change.${capId}`}`;
-  const keepable = !widgetsMode && !connection;
+  const keepable = !widgetsMode && !polishMode && !connection;
   // "Ask builder to fix this" left what failed here (too long for the address); it goes in the box below.
   const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
   const prefilled = !!(q?.get("m") || failure);
@@ -127,7 +131,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
   const offer = h("div", { class: "card continue-card", hidden: true });
   thread.append(offer);
-  if (mode === "modify" && capId && !from && !widgetsMode) {
+  if (mode === "modify" && capId && !from && !widgetsMode && !polishMode) {
     api(`/capabilities/${enc(capId)}`)
       .then(async (d) => {
         const last = d.versions?.find((v) => v.buildId);
@@ -147,10 +151,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const input = h("textarea", {
     class: "composer-input",
     rows: embedded ? 3 : 1,
-    placeholder: connection ? `What should your tools do with ${connection}?` : mode === "create" ? "Track my coffee beans and how I rated each brew" : widgetsMode ? "The next word to practise, with buttons to grade it" : "e.g. show pace per km in the table",
+    placeholder: connection ? `What should your tools do with ${connection}?` : mode === "create" ? "Track my coffee beans and how I rated each brew" : widgetsMode ? "The next word to practise, with buttons to grade it" : polishMode ? "Anything in particular? e.g. Make the chart the main thing" : "e.g. show pace per km in the table",
     "aria-label": "Message",
   });
-  input.value = q?.get("m") || (widgetsMode ? "Suggest some widgets." : connection ? `A connection to ${connection}, so my tools can use it.` : "");
+  input.value = q?.get("m") || (widgetsMode ? "Suggest some widgets." : polishMode ? "Polish it." : connection ? `A connection to ${connection}, so my tools can use it.` : "");
   const placeholder = input.placeholder;
   const grow = () => ((input.style.height = "auto"), (input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`));
   input.addEventListener("input", grow);
@@ -222,7 +226,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   };
   const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, "+ New");
   const heading = embedded
-    ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : "What should change?")
+    ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : polishMode ? `Polish ${cap?.name ?? "it"}` : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
   // Q1 New: or start from a tool someone made: one in Hub, or a file someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
@@ -295,6 +299,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     } else if (reply.kind === "schedules") {
       messages.push(turnOf(reply));
       showProposal(...proposalCard("schedules", reply.schedules, ctx));
+    } else if (reply.kind === "polish") {
+      // The note as text too, so "and darker" revises it.
+      messages.push(turnOf(reply));
+      showProposal(...proposalCard("polish", [reply.polish], ctx));
     } else {
       // The whole draft, so "Keep talking" changes it instead of starting over.
       messages.push(turnOf(reply));
@@ -347,7 +355,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       let reply = null;
       let failure = null;
       const progress = (data) => ((flight.last = { ...flight.last, ...data }), flight.listeners.forEach((f) => f(data)));
-      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       result = { reply };
     } catch (err) {
@@ -480,8 +488,10 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     })().catch(fail);
     me.arrive = (result, text) => ready.then(() => (settle?.(), land(result, text)));
   }
-  // Opened with text to send (Info's "Change it", the first run, a new widget), send it.
-  if ((q?.get("send") === "1" || widgetsMode || connection) && input.value.trim()) setTimeout(ask);
+  // Opened with what the owner typed and sent elsewhere (Home's box, Info's "Change it"): sent. Text Hewn
+  // puts in the box (a new widget, a Polish, a connection, "Ask builder to fix this") waits for the owner's
+  // Send, so they can add to it first (the owner, 2026-11-02).
+  if (q?.get("send") === "1" && input.value.trim()) setTimeout(ask);
   return {
     el,
     // In a drawer, its head holds + New (the page has it in its heading).
@@ -788,7 +798,7 @@ const conversationNodes = (turns, ctx = {}) =>
     // A turn kept as text only (from before replies were kept) is read back into the reply it was.
     const r = t.role === "intake" ? (t.reply ?? legacyReply(t.content, ctx.mode)) : null;
     if (r?.kind === "questions") return themBubble(chatText(r.message, r.questions));
-    const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : null;
+    const list = r?.kind === "draft" ? [r.draft] : r?.kind === "ideas" ? r.ideas : r?.kind === "widgets" ? r.proposals : r?.kind === "schedules" ? r.schedules : r?.kind === "polish" ? [r.polish] : null;
     if (list?.length && "cap" in ctx) {
       const mode = ctx.mode ?? (r.kind === "draft" && r.draft?.name ? "create" : "modify");
       const card = proposalCard(r.kind, list, { mode, cap: ctx.cap ?? null, all: ctx.all ?? new Map(), connection: null, keepTalking: () => {}, onBuilt: () => {}, embedded: true, messages: [], done: () => {}, nextVersion: ctx.version, readOnly: true })[0];
@@ -878,7 +888,9 @@ function proposalCard(kind, list, ctx) {
   const byId = new Map();
   const rows = list.map((d, i) => {
     const box = h("input", { type: "checkbox", checked: kind === "widgets" ? i < 2 : kind === "ideas" ? list.length === 1 || d.connection?.mode !== "create" : true, "aria-label": "Build this" });
-    const r = { d, box, ticks: scheduleTicks(kind === "schedules" ? [] : d.schedules) };
+    const r = { d, box, ticks: scheduleTicks(kind === "schedules" || kind === "polish" ? [] : d.schedules) };
+    // A Polish: the owner's own data, off unless ticked (and only once Hewn knows the tool has some).
+    if (kind === "polish") r.real = h("input", { type: "checkbox", disabled: true, "aria-label": "Show the builder my own data" });
     if (ideas) byId.set(capabilityId(d.name), r);
     return r;
   });
@@ -895,6 +907,8 @@ function proposalCard(kind, list, ctx) {
         ? single
           ? list[0].replaces ? "Change widget" : "Build widget"
           : `Build ${plural(n, "widget")}`
+        : kind === "polish"
+          ? "Build polish"
         : kind === "schedules"
           ? n <= 1 ? "Set schedule" : `Set ${n} schedules`
           : connection
@@ -933,10 +947,37 @@ function proposalCard(kind, list, ctx) {
       d.connection && kindTag(d.connection.mode === "create" ? "needs a new connection" : "changes a connection", "warn"),
     ];
   };
+  // A Polish: what it keeps, its note, the owner's own data (off unless ticked, saying what the model would
+  // see), and how long it takes; whether the tool has data or sample data is asked once.
+  const polishDetails = (r) => {
+    const note = r.d.note && h("div", { class: "small brief-part" }, h("span", { class: "faint" }, "Note "), r.d.note);
+    // The choice only once Hewn knows the tool has data of its own; with none, a line saying what it sees instead.
+    const own = h("label", { class: "check small", hidden: true }, r.real, h("span", {}, " Show the builder my own data", h("span", { class: "faint" }, ` · its screenshots then show ${cap.name} with your own entries instead of made-up sample data, and the builder's AI model sees them`)));
+    const none = h("div", { class: "small faint", hidden: true }, `${cap.name} has no data of its own yet, so the builder sees made-up sample data.`);
+    const longer = h("div", { class: "small faint" }, "A longer build than a change: two design passes. If one fails, nothing changes.");
+    if (!readOnly)
+      api(`/capabilities/${enc(cap.id)}/data`)
+        .then((data) => {
+          r.real.dataset.none = data?.rows ? "" : "1";
+          r.real.disabled = !data?.rows || build.disabled;
+          own.hidden = !data?.rows;
+          none.hidden = !!data?.rows;
+          if (!data?.sample) longer.textContent = "A longer build than a change: sample data first (it has none), then two design passes. If one fails, nothing changes.";
+        })
+        .catch(() => {});
+    return [
+      h("div", { class: "small muted" }, "The builder reviews screenshots of it and fixes the biggest problems, then the details. It keeps what the tool does and its character."),
+      note,
+      !readOnly && own,
+      !readOnly && none,
+      !readOnly && longer,
+    ];
+  };
   const details = (r) => {
     const d = r.d;
     if (kind === "widgets") return [h("div", { class: "small muted" }, `${TEMPLATE_LABEL[d.template] ?? d.template} · ${d.sizes.map((s) => SIZE_LABEL[s] ?? s).join(", ")}`), d.replaces && h("div", { class: "small muted" }, `Replaces the current “${d.replaces}” widget`), h("div", { class: "small faint" }, "The tool itself stays as it is.")];
     if (kind === "schedules") return [h("div", { class: "small muted" }, d.why), h("div", { class: "small faint" }, "Nothing gets built. Pause or change it under Info › Schedules.")];
+    if (kind === "polish") return polishDetails(r);
     const spec = d.spec ?? { operations: [], uses: [], hosts: [], secrets: [] };
     const on = plan ? plan.needs(d) : [];
     const existing = spec.uses.filter((u) => !on.includes(u));
@@ -965,8 +1006,8 @@ function proposalCard(kind, list, ctx) {
     const block = h("div", { class: "inset-block stack-sm" }, details(r));
     const name = kind === "widgets" ? d.title : kind === "schedules" ? d.operation : mode === "modify" ? `${cap.name} · v${ctx.nextVersion ?? (cap.version ?? 0) + 1}` : d.name;
     // A change's brief says what it changes in the block below, not raw here.
-    const purpose = kind === "widgets" ? d.shows : kind === "schedules" ? cadenceText(d.cadence) : mode === "modify" ? !briefOf(d).CHANGES && d.request : d.purpose;
-    const pills = kind === "widgets" ? [kindTag(TEMPLATE_LABEL[d.template] ?? d.template), kindTag(d.sizes.map((s) => SIZE_LETTER[s]).join(" "))] : kind === "schedules" ? [kindTag("schedule", "accent")] : toolPills(d);
+    const purpose = kind === "widgets" ? d.shows : kind === "schedules" ? cadenceText(d.cadence) : kind === "polish" ? "A second look at its design" : mode === "modify" ? !briefOf(d).CHANGES && d.request : d.purpose;
+    const pills = kind === "widgets" ? [kindTag(TEMPLATE_LABEL[d.template] ?? d.template), kindTag(d.sizes.map((s) => SIZE_LETTER[s]).join(" "))] : kind === "schedules" ? [kindTag("schedule", "accent")] : kind === "polish" ? [kindTag("polish", "accent")] : toolPills(d);
     return h(
       "li",
       { class: "proposal-row" },
@@ -978,13 +1019,18 @@ function proposalCard(kind, list, ctx) {
 
   build.addEventListener("click", async () => {
     build.disabled = true;
-    rows.forEach((r) => (r.box.disabled = true));
-    const reenable = () => (rows.forEach((r) => (r.box.disabled = false)), count());
+    rows.forEach((r) => ((r.box.disabled = true), r.real && (r.real.disabled = true)));
+    const reenable = () => (rows.forEach((r) => ((r.box.disabled = false), r.real && (r.real.disabled = r.real.dataset.none === "1"))), count());
     try {
       if (kind === "widgets") {
         const picked = chosen().map((r) => r.d);
         // A replacement keeps its widget's name, so it stays where it is on Home.
         const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`, messages);
+        return onBuilt(b);
+      }
+      if (kind === "polish") {
+        const b = await api(`/capabilities/${enc(cap.id)}/polish`, { method: "POST", body: { note: list[0].note ?? "", realData: !!rows[0].real?.checked, ...(messages?.length ? { conversation: messages } : {}) } });
+        invalidateCaps();
         return onBuilt(b);
       }
       if (kind === "schedules") {
@@ -1050,7 +1096,7 @@ function proposalCard(kind, list, ctx) {
   });
   count();
   const n = rows.length;
-  const summary = kind === "widgets" ? plural(n, "widget") : kind === "schedules" ? plural(n, "schedule") : connection ? "connection" : mode === "modify" ? "change" : plural(n, "tool");
+  const summary = kind === "widgets" ? plural(n, "widget") : kind === "schedules" ? plural(n, "schedule") : kind === "polish" ? "polish" : connection ? "connection" : mode === "modify" ? "change" : plural(n, "tool");
   const card = h(
     "div",
     { class: "card spec-card proposal" },

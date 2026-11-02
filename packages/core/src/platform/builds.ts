@@ -12,7 +12,8 @@ import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnec
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { BuildPass, Files } from "../ports.ts";
-import { type Pass, PASS_TRIES, passRequest } from "../passes.ts";
+import { isPolish, type Pass, PASS_TRIES, PASSES, POLISH_KEEPS, passRequest } from "../passes.ts";
+import { SAMPLE_FILE } from "../bundle.ts";
 import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReview, BuildRow, BuildTurn } from "../registry.ts";
 import { sha256 } from "../sha256.ts";
 import { MAX_SATURATION } from "./presentation.ts";
@@ -131,6 +132,8 @@ const MAX_TURNS = 200;
 const MAX_TURN_CHARS = 50_000;
 /** The longest note with the owner's answer to "Got what you asked for?". */
 const MAX_FEEDBACK_NOTE = 1000;
+/** The longest note the owner may give a Polish ("try a bolder look"). */
+const MAX_POLISH_NOTE = 2000;
 
 /** One build in the feedback report (`hewn feedback`): what it ran on, how it ended, what the owner said, and the signs in the record. */
 export interface BuildReportRow {
@@ -798,6 +801,44 @@ export class Builds extends Domain {
     return this.buildView(this.registry.getBuild(buildId)!);
   }
 
+  /**
+   * Polish: a change that runs the passes (critique, then craft) on a tool already live, filled with its
+   * sample data; one without any has its builder write it first (`runBuilder`). Owner only: it costs
+   * more than a change, and `realData` (the passes see a copy of the tool's own data instead) is
+   * theirs to allow. `note`: what the owner asks of it, if anything ("a bolder look"). It keeps the
+   * tool's identity unless the note asks for a new look. `conversation`: the owner's with the intake
+   * that asked for it (the Change drawer's Polish), kept with the build as a change's is.
+   * `marks`: a retry's, from `retryBuild`.
+   */
+  async polish(owner: Agent, req: { capabilityId: string; note?: string; realData?: boolean; conversation?: BuildTurn[] } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
+    requireOwner(owner);
+    const conversation = this.checkConversation(owner, req.conversation) ?? this.retried(marks);
+    // A retry's note may carry why the last build failed ("Ask builder to fix"), past the owner's own limit.
+    if (req.note !== undefined && (typeof req.note !== "string" || (req.note.length > MAX_POLISH_NOTE && !marks.retryOf))) throw new PlatformError("invalid_request", `note: text of at most ${MAX_POLISH_NOTE} characters`);
+    if (req.realData !== undefined && typeof req.realData !== "boolean") throw new PlatformError("invalid_request", "realData must be true or false");
+    const cap = this.visibleActive(owner, req.capabilityId);
+    const manifest = this.activeManifest(cap.id);
+    if (isConnection(manifest)) throw new PlatformError("invalid_request", `${cap.id} is a connection; it has no screen to polish`);
+    if (!manifest.ui?.available) throw new PlatformError("invalid_request", `${cap.id} has no screen to polish`);
+    const builder = this.requireBuilder();
+    if (noBuilderRuns(builder)) throw new PlatformError("conflict", "Polish needs a builder (Settings → builder)");
+    const model = this.modelFor(owner, builder, req);
+    const dependsOn = this.queueBehind(cap.id, marks);
+    const note = req.note?.trim() ?? "";
+    // `request` as every change has it (what Versions and Activity show); `note` as the owner wrote it.
+    const request = { capabilityId: cap.id, request: note ? `Polish: ${note}` : "Polish", ...(note ? { note } : {}), polish: true, ...(req.realData ? { realData: true } : {}), ...pickAsk(req), ...marks };
+    const buildId = newBuildId();
+    this.registry.transaction(() => {
+      this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: owner.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
+      this.registry.setBuildModel(buildId, model);
+      this.recordContext(buildId, cap.id, conversation);
+      this.takePlace(buildId, marks);
+    });
+    if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [polish ${cap.id} by ${owner.id}]`, true);
+    else await this.startModify(buildId);
+    return this.buildView(this.registry.getBuild(buildId)!);
+  }
+
   /** Open a modify (or widgets) build's workspace from the active version (at start time) and start its builder. */
   private async startModify(buildId: string) {
     const b = this.mustBuild(buildId);
@@ -818,9 +859,27 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
     const attached = await this.d.attachments.attachmentsForBuild(buildId);
-    const ask = `${b.kind === "widgets" ? widgetsRequest(request) : `Requested change: ${request}`}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
-    // versionFiles: versions stored before builder configuration was dropped may still carry it.
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, this.registry.buildContext(buildId))), ...this.ownersWordsFile(buildId), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    const polish = isPolish(b.request);
+    const context = this.registry.buildContext(buildId);
+    // A Polish's OWNERS_WORDS.md: the conversations that led to the tool as it is, then its own (or its note, without what "Ask builder to fix" added).
+    const history = polish ? this.historyOf(cap.id) : [];
+    const polishAsk = { note: String(b.request.note ?? "").split(FIX_MARK)[0].trim(), ...(context?.conversation?.length ? { conversation: context.conversation } : {}) };
+    const words = polish ? polishWords(history, polishAsk) : "";
+    const requestText = polish
+      ? polishRequest({
+          note: String(b.request.note ?? ""),
+          needsSample: !base.files[SAMPLE_FILE],
+          // What validation will fill the screenshots with: the owner's own data only when they allowed it and there is some.
+          real: b.request.realData === true && (await this.hasOwnData(cap.id, base.code)),
+          ...(words ? { ownersWords: { history: history.length > 0, last: polishAsk.conversation ? ("conversation" as const) : polishAsk.note ? ("note" as const) : undefined } } : {}),
+        })
+      : b.kind === "widgets"
+        ? widgetsRequest(request)
+        : `Requested change: ${request}`;
+    const ask = `${requestText}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
+    // versionFiles: versions stored before builder configuration was dropped may still carry it. A Polish's
+    // request says where its owner's words are (BUILDER.md's own note on them is for a single conversation).
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.brief_(b.kind, cap.id, ask, polish && context ? { ...context, conversation: undefined } : context)), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -873,11 +932,13 @@ export class Builds extends Domain {
       // "Ask builder to fix": the same request plus why the last build failed.
       const f = explainFailure(old.log);
       const context = `${FIX_MARK}\nThe previous build failed: ${f.title}. ${f.detail}\nIts validation log ended with:\n${old.log.slice(-8).join("\n")}`;
-      const field = old.kind === "create" ? "requirements" : "request";
+      const field = old.kind === "create" ? "requirements" : old.request.polish ? "note" : "request";
       req[field] = `${String(req[field] ?? "").split(FIX_MARK)[0].trimEnd()}\n\n${context}`;
     }
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
     return (async () => {
+      // A Polish again, with its conversation (`polish` takes it from the build it retries).
+      if (old.kind === "modify" && isPolish(old.request)) return this.polish(agent, { capabilityId: old.capabilityId, ...(typeof req.note === "string" ? { note: req.note } : {}), ...(req.realData ? { realData: true } : {}), ...pickAsk(req) }, marks);
       if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string }, marks);
       if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
@@ -1176,6 +1237,20 @@ export class Builds extends Domain {
     this.planPasses(buildId, passes);
     const submitter = `builder ${builder}`;
     let feedback: string | undefined;
+    // A Polish of a tool with sample data has nothing to build first: the live version, checked as it
+    // is today, goes straight to the passes (one that fails the checks goes to the builder to fix).
+    if (isPolish(build.request) && (await this.workbench.file(buildId, SAMPLE_FILE))) {
+      this.assertSubmittable(build);
+      const label = `v${build.baseVersion}`;
+      const v = await this.validateCandidate(build, "Hewn", { measure: passes[0] === "craft" });
+      run.history.push(...v.log.map((l) => `${label}: ${l}`));
+      if (!v.candidate) feedback = v.log.join("\n");
+      else {
+        const failure = await this.passesThenPromote(run, { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) }, passes);
+        if (failure === undefined) return;
+        feedback = failure.join("\n");
+      }
+    }
     for (let attempt = 1; attempt <= max; attempt++) {
       const label = `attempt ${attempt}`;
       const r = await this.runOnce(run, { label, n: attempt, max, feedback });
@@ -1191,26 +1266,37 @@ export class Builds extends Domain {
         feedback = v.log.join("\n");
         continue;
       }
-      const built: PassCandidate = { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
-      const best = passes.length ? await this.runPasses(run, built, passes) : built;
-      if (best === "cancelled") return;
-      // A pass that doesn't end in a valid candidate ends the build as an attempt would (owner, 2026-11-01).
-      if ("end" in best) return this.endRun(run, best);
-      const { version, review, log } = await this.promoteCandidate(build, submitter, best);
-      run.history.push(...log.map((l) => `${best.label}: ${l}`));
-      if (review) {
-        this.registry.updateBuild(buildId, { status: "review", review, log: run.history });
-        this.logger(`${run.tag} waits for the owner's review (${reviewReason(review)})`);
-        return;
-      }
-      if (version) {
-        this.registry.updateBuild(buildId, { status: "promoted", resultVersion: version, log: run.history });
-        return;
-      }
-      feedback = log.join("\n");
+      const failure = await this.passesThenPromote(run, { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) }, passes);
+      if (failure === undefined) return;
+      feedback = failure.join("\n");
     }
     this.note(run, `FAILED: no valid candidate after ${max} attempts`);
     this.registry.updateBuild(buildId, { status: "failed", log: run.history });
+  }
+
+  /**
+   * A validated candidate through the build's passes, then promoted (or held for the owner's review).
+   * Undefined once the build has ended (promoted, in review, cancelled, or ended by a pass); else the
+   * promotion's log, for another attempt to fix.
+   */
+  private async passesThenPromote(run: BuilderRun, built: PassCandidate, passes: Pass[]): Promise<string[] | undefined> {
+    const { build } = run;
+    const best = passes.length ? await this.runPasses(run, built, passes) : built;
+    if (best === "cancelled") return undefined;
+    // A pass that doesn't end in a valid candidate ends the build as an attempt would (owner, 2026-11-01).
+    if ("end" in best) return void this.endRun(run, best);
+    const { version, review, log } = await this.promoteCandidate(build, `builder ${run.builder}`, best);
+    run.history.push(...log.map((l) => `${best.label}: ${l}`));
+    if (review) {
+      this.registry.updateBuild(build.id, { status: "review", review, log: run.history });
+      this.logger(`${run.tag} waits for the owner's review (${reviewReason(review)})`);
+      return undefined;
+    }
+    if (version) {
+      this.registry.updateBuild(build.id, { status: "promoted", resultVersion: version, log: run.history });
+      return undefined;
+    }
+    return log;
   }
 
   /** The build ends here, failed (or paused by the builder's host, its work kept), saying why. */
@@ -1307,10 +1393,14 @@ export class Builds extends Domain {
     return "done";
   }
 
-  /** The passes a build runs once its candidate validates: a new tool's (not a connection's or an install's), as the owner set them. */
+  /**
+   * The passes a build runs once its candidate validates: a new tool's (not a connection's or an
+   * install's), as the owner set them; a Polish's, both always (they're what the owner asked for).
+   */
   private passesFor(build: BuildRow, builder: string): Pass[] {
-    if (build.kind !== "create" || (build.request as CreateRequest).kind === "connection") return [];
     if (noBuilderRuns(builder)) return [];
+    if (build.kind === "modify" && isPolish(build.request)) return [...PASSES];
+    if (build.kind !== "create" || (build.request as CreateRequest).kind === "connection") return [];
     return this.platform.buildPasses();
   }
 
@@ -1328,10 +1418,12 @@ export class Builds extends Domain {
    * it; resumes the builder's session with what the pass asks; and validates what it leaves. The last
    * pass's candidate is the one promoted. A pass that ends without a valid one (after its tries, or
    * paused, declined, its builder gone) ends the build as an attempt would, saying why. Nothing
-   * to look at (the UI wasn't rendered): no passes.
+   * to look at (the UI wasn't rendered): no passes, and a Polish (that's all it is) ends there.
    */
   private async runPasses(run: BuilderRun, first: PassCandidate, passes: Pass[]): Promise<PassCandidate | "cancelled" | RunEnd> {
+    const polish = isPolish(run.build.request);
     if (!first.candidate.shots?.length) {
+      if (polish) return { end: "nothing to polish: Hewn couldn't render the tool's screen to show the builder (the log says why)" };
       this.planPasses(run.build.id, []);
       return first;
     }
@@ -1341,7 +1433,7 @@ export class Builds extends Domain {
     for (const [i, pass] of passes.entries()) {
       const shots = Object.fromEntries((current.candidate.shots ?? []).map((s) => [`screenshots/${s.name}.png`, s.png]));
       await this.workbench.writeFolder(run.build.id, "screenshots", shots);
-      const request = passRequest(pass, { files: Object.keys(shots), sampled: !!current.candidate.sampled, defects: current.candidate.defects ?? [], ownersWords, otherTools });
+      const request = passRequest(pass, { files: Object.keys(shots), sampled: !!current.candidate.sampled, real: !!current.candidate.real, defects: current.candidate.defects ?? [], ownersWords, otherTools, polish });
       const next = await this.runPass(run, pass, request, passes[i + 1] === "craft");
       if (next === "cancelled" || "end" in next) return next;
       current = next;
@@ -1529,6 +1621,29 @@ export class Builds extends Domain {
   private ownersWordsFile(buildId: string): Files {
     const words = ownersWords(this.registry.buildContext(buildId)?.conversation);
     return words ? { "OWNERS_WORDS.md": bytes(words) } : {};
+  }
+
+  /**
+   * The conversations that led to a tool as it is: from its active version's build back through the
+   * version each was built on to its create, the builds that kept one (the owner's, since Hewn keeps
+   * them), oldest first, each named by its kind, version and day. A change undone by a restore isn't on the way back.
+   */
+  private historyOf(capabilityId: string): OwnersConversation[] {
+    const history: OwnersConversation[] = [];
+    const seen = new Set<number>();
+    for (let v = this.registry.getCapability(capabilityId)?.activeVersion ?? null; v !== null && !seen.has(v); ) {
+      seen.add(v);
+      const row = this.registry.getVersion(capabilityId, v);
+      const b = row && this.registry.getBuild(row.buildId);
+      if (!b) break;
+      const turns = this.registry.buildContext(b.id)?.conversation;
+      const what = b.kind === "create" ? "The tool as first asked for" : b.kind === "widgets" ? "Its widgets" : isPolish(b.request) ? "A Polish" : "A change";
+      // The same conversation on two builds in a row (a create's widgets build carries the create's): once, under the earlier.
+      if (turns?.length && JSON.stringify(turns) === JSON.stringify(history[0]?.turns)) history.shift();
+      if (turns?.length) history.unshift({ heading: `${what} (v${v}, ${b.createdAt.slice(0, 10)})`, turns });
+      v = b.baseVersion;
+    }
+    return history;
   }
 
   /** BUILDER.md: the request, where the owner's own words are and how they count, the owner's instructions (as the build recorded them, `build_context`), the brief, the catalog. */
@@ -1722,14 +1837,54 @@ function ownersWordsNote(conversation: BuildTurn[] | undefined): string {
  */
 export function ownersWords(conversation: BuildTurn[] | undefined): string {
   if (!conversation?.length) return "";
-  const turns = conversation.map((t) => `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`);
-  const size = turns.map((turn) => bytes(turn).length);
-  let keep = new Set(turns.keys());
-  if (bytes(turns.join("\n\n")).length > MAX_OWNERS_WORDS) {
-    // Each kept turn and mark costs its size and a blank line; a gap may open on either side of the owner's latest.
-    keep = new Set([0, conversation.findLastIndex((t) => t.role === "user")].filter((i) => i >= 0));
-    let room = MAX_OWNERS_WORDS - 2 * (bytes(leftOut(turns.length)).length + 2) - [...keep].reduce((n, i) => n + size[i] + 2, 0);
-    for (let i = turns.length - 1; i > 0; i--) {
+  return ownersFile(`Their conversation with the intake, oldest first. ${ownersRule("The request in \`BUILDER.md\`")}`, [{ turns: conversation }]);
+}
+
+/** One conversation in OWNERS_WORDS.md, under a heading when the file holds several (a Polish's). */
+export interface OwnersConversation {
+  heading?: string;
+  turns: BuildTurn[];
+}
+
+/**
+ * A Polish's OWNERS_WORDS.md: the conversations that led to the tool as it is (`history`: its create's,
+ * its changes', each under its build), oldest first, then this Polish's own: the owner's conversation
+ * that asked for it (the Change drawer's), else their note, as their latest word. Empty when there's
+ * no conversation in it (built from an agent's request, or before Hewn kept them, and a Polish asked
+ * for without one): a note alone is in BUILDER.md.
+ */
+export function polishWords(history: OwnersConversation[], asked: { note?: string; conversation?: BuildTurn[] }): string {
+  const parts = history.filter((c) => c.turns.length);
+  if (!parts.length && !asked.conversation?.length) return "";
+  const last = asked.conversation?.length
+    ? [{ heading: "This Polish: the conversation that asked for it", turns: asked.conversation }]
+    : asked.note
+      ? [{ heading: "This Polish: what the owner asked of it", turns: [{ role: "user" as const, content: asked.note }] }]
+      : [];
+  const intro = parts.length
+    ? `Their conversations with the intake that led to this tool as it is, oldest first, each under a heading (a line starting "## ") naming the build it led to${last.length ? ", and last what they asked of this Polish" : ""}.`
+    : `Their conversation with the intake that asked for this Polish (none led to the tool itself).`;
+  return ownersFile(`${intro} ${ownersRule("The request in \`BUILDER.md\` (this Polish)")}`, [...parts, ...last]);
+}
+
+/**
+ * OWNERS_WORDS.md: `intro`, then the conversations, oldest first. A long one keeps every heading, the
+ * first turn, the owner's latest and the latest that fit in `MAX_OWNERS_WORDS` bytes, and says where
+ * turns were left out.
+ */
+function ownersFile(intro: string, conversations: OwnersConversation[]): string {
+  const items = conversations.flatMap((c) => [
+    ...(c.heading ? [{ text: `## ${c.heading}`, heading: true, owner: false }] : []),
+    ...c.turns.map((t) => ({ text: `${t.role === "user" ? "OWNER" : "INTAKE"}: ${turnText(t)}`, heading: false, owner: t.role === "user" })),
+  ]);
+  const size = items.map((it) => bytes(it.text).length);
+  let keep = new Set(items.keys());
+  if (bytes(items.map((it) => it.text).join("\n\n")).length > MAX_OWNERS_WORDS) {
+    // Each kept item and mark costs its size and a blank line; a gap may open before each heading and on either side of the owner's latest.
+    const headings = [...items.keys()].filter((i) => items[i].heading);
+    keep = new Set([...headings, items.findIndex((it) => !it.heading), items.findLastIndex((it) => it.owner)].filter((i) => i >= 0));
+    let room = MAX_OWNERS_WORDS - (headings.length + 2) * (bytes(leftOut(items.length)).length + 2) - [...keep].reduce((n, i) => n + size[i] + 2, 0);
+    for (let i = items.length - 1; i >= 0; i--) {
       if (keep.has(i)) continue;
       if (size[i] + 2 > room) break;
       keep.add(i);
@@ -1738,14 +1893,14 @@ export function ownersWords(conversation: BuildTurn[] | undefined): string {
   }
   const kept: string[] = [];
   let gap = 0;
-  turns.forEach((turn, i) => {
+  items.forEach((it, i) => {
     if (!keep.has(i)) return void gap++;
     if (gap) kept.push(leftOut(gap));
-    kept.push(turn);
+    kept.push(it.text);
     gap = 0;
   });
   if (gap) kept.push(leftOut(gap));
-  return `# THE OWNER'S OWN WORDS\n\nTheir conversation with the intake, oldest first. ${ownersRule("The request in \`BUILDER.md\`")} Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}\n`;
+  return shortLines(`# THE OWNER'S OWN WORDS\n\n${intro} Each turn starts with who said it, its further lines indented; only OWNER turns are the owner's.\n\n${kept.join("\n\n")}\n`);
 }
 
 /** Where OWNERS_WORDS.md leaves turns of the owner's conversation out. */
@@ -1908,6 +2063,17 @@ export function contractText({ id, manifest: m, calls }: Callee): string {
   const ops = callableOperations(m, calls);
   return shortLines(`# ${m.name} (\`${id}\`)\n\n${m.purpose}\n\nThe operations you may call: the newest version of each${calls.length ? ", and the ones this tool calls today" : ""}. Call one with \`ctx.call("${id}", "<name>@<version>", input)\`, declared in \`requires.capabilities\` (see "Calling other capabilities" in \`BUILDER.md\`).\n\n${ops.length ? ops.map(op).join("\n\n") : "Nothing to call."}\n`);
 }
+
+/**
+ * BUILDER.md's request for a Polish: what it's for, what its screenshots show (`real`: a copy of the
+ * owner's own data), the sample data to write first when the tool has none, what it keeps, what the
+ * owner asked of it (`note`), if anything, and what OWNERS_WORDS.md holds (`ownersWords`, when there is
+ * one: the conversations that led to the tool, if any, and last this Polish's conversation or note).
+ */
+const polishRequest = ({ note, needsSample, real, ownersWords }: { note: string; needsSample: boolean; real: boolean; ownersWords?: { history: boolean; last?: "conversation" | "note" } }) =>
+  `This is a **Polish**: the tool works and is live; this build lifts its design, not what it does. Hewn shows you screenshots of it filled with ${real ? "a copy of the owner's own data (they allowed it)" : "its sample data"} for two passes: a design review (the five biggest problems, fixed), then a craft pass (what's broken, cramped or cut off, fixed).
+
+${needsSample ? `First, before the passes: the tool has no sample data. Write ${SAMPLE_FILE} (see "${SAMPLE_FILE}" below) with made-up entries that show what it does, change nothing else, and stop. Hewn validates it, then shows you the screenshots.\n\n` : ""}${POLISH_KEEPS} In the passes, change only ui/: the operations, state and tests stay as they are.${note ? `\n\nWhat the owner asks of this Polish: ${note}` : ""}${ownersWords ? `\n\nTHE OWNER'S OWN WORDS: ${ownersWords.history ? `their conversations with the intake that led to this tool as it is are in \`OWNERS_WORDS.md\` in your workspace, oldest first${ownersWords.last === "conversation" ? ", with the one that asked for this Polish last" : ownersWords.last === "note" ? ", with this Polish's note last" : ""}` : "their conversation with the intake that asked for this Polish is in `OWNERS_WORDS.md` in your workspace"}. Read all of it before the passes (in parts, if your reader cuts it short): the screen should still be what they asked for, and feel the way they wanted. It says how their words count.` : ""}`;
 
 /** A schema as a contract file shows it: on one line when it fits after "output: " (the longer label), else over several. */
 const schemaText = (schema: unknown) => {
