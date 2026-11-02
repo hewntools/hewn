@@ -9,6 +9,7 @@ type Snapshot = {
   buildSeconds7d: { count: number; sum: number };
   calls24h: Record<string, { ok: number; error: number }>;
   calls7d: Record<string, { ok: number; error: number }>;
+  toolsUsed24h: Record<string, number>;
   model: { month: string; usd: number; inputTokens: number; outputTokens: number; calls: number };
   agents: { connected: number; active7d: number };
   schedules: Record<string, number>;
@@ -35,6 +36,7 @@ export function prometheusText(s: Snapshot, version: string): string {
   metric("hewn_build_seconds_7d_sum", "Total time of builds promoted in the last 7 days", "gauge", [[{}, s.buildSeconds7d.sum]]);
   metric("hewn_build_seconds_7d_count", "Builds promoted in the last 7 days", "gauge", [[{}, s.buildSeconds7d.count]]);
   metric("hewn_calls", "Tool calls by origin and outcome, from the call logs", "gauge", [...calls("24h", s.calls24h), ...calls("7d", s.calls7d)]);
+  metric("hewn_tools_used", "Different tools called, by the kind of caller that called them directly, from the call logs", "gauge", Object.entries(s.toolsUsed24h).map(([caller, n]) => [{ window: "24h", caller }, n]));
   metric("hewn_model_spend_usd", "Model spend this month", "gauge", [[{ month: s.model.month }, s.model.usd]]);
   metric("hewn_model_tokens", "Model tokens this month", "gauge", [[{ month: s.model.month, direction: "input" }, s.model.inputTokens], [{ month: s.model.month, direction: "output" }, s.model.outputTokens]]);
   metric("hewn_model_calls", "Model calls this month", "gauge", [[{ month: s.model.month }, s.model.calls]]);
