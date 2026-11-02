@@ -274,6 +274,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
+      // Polish: the passes on a tool already live (owner only). `realData`: the builder sees a copy of the tool's own data.
+      case "POST polish": {
+        const body = await readJson(req);
+        return platform.polish(owner, { capabilityId: id, ...(body.note !== undefined ? { note: body.note } : {}), ...(body.realData !== undefined ? { realData: body.realData } : {}), ...pick(body, ["model", "effort", "conversation"]) });
+      }
       case "DELETE widgets":
         return platform.removeWidget(owner, id, arg);
       case "POST widgets": {
@@ -666,7 +671,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const started = Date.now();
     const finish = (reply?: IntakeReply, error?: string) => {
       const turn = body.messages.filter((m) => m.role === "user").length;
-      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : reply.kind === "answer" ? "answer" : "draft";
+      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "polish" ? "polish" : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : reply.kind === "answer" ? "answer" : "draft";
       host.log(
         `web intake ${body.mode}${body.capabilityId ? ` ${body.capabilityId}` : ""} turn ${turn} → ${outcome} (${Math.round((Date.now() - started) / 1000)}s)`,
       );

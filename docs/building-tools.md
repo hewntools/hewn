@@ -37,7 +37,7 @@ Then Hewn:
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
 3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
-4. for a new tool, has the builder look at its screen again, twice (below)
+4. for a new tool (or a [Polish](#polishing-a-tool)), has the builder look at its screen again, twice (below)
 5. makes it live if all of that passes
 
 **A second look, for a new tool.** Once a new tool passes its checks, the builder carries on with screenshots of it filled with its sample data, on a desktop and a phone, light and dark, the whole page (a long one in parts it can read):
@@ -45,7 +45,7 @@ Then Hewn:
 - **Reviewing the design:** it writes down the five biggest problems it sees, as a demanding designer would (what the eye lands on first, how generic it looks, how the data is drawn, the phone, dark mode), and fixes them. It holds the screen against what you said and against your other tools' looks too.
 - **Fixing details:** fresh screenshots, with what Hewn measured on them (what sticks out past the phone's edge, text cut short, things drawn over each other, buttons that break the page): it fixes those without redesigning anything.
 
-Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** or **Ask builder to fix** builds it again. A build the host pauses during one is paused as at any other point. Changes and installs don't get one. The build's steps show each as it runs.
+Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** or **Ask builder to fix** builds it again. A build the host pauses during one is paused as at any other point. Changes and installs don't get one; a tool you already have gets one when you [polish it](#polishing-a-tool). The build's steps show each as it runs.
 
 What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
 
@@ -67,11 +67,27 @@ The proposal for a change is a short brief too: what changes, what must keep wor
 
 Changes to one tool take turns: ask for another while one builds (or an agent does) and it waits, then starts from the version the first one leaves, whether that one goes live or fails. An agent's change waiting for your approval doesn't hold the next one up. The box and your agents see the changes on their way, so the next one builds on them instead of asking for the same thing again.
 
+Text Hewn puts in the box for you (**+ Ask for one** under Widgets puts "Suggest some widgets.", **Polish…** "Polish it.", **Ask builder to fix this** what failed) waits there for you to add to and send; nothing goes to the intake until you do.
+
 A tool without a screen of its own shows its operations as forms. **Give it a proper screen** asks for one.
 
 Some changes need no builder: picking another model tier, for example, is a new version right away.
 
 **Changes made by agents:** an agent's change that adds operations, or changes a connection, waits for you to approve it (the Inbox, or `hewn review`). You see what it adds before it goes live. Other changes go live after their checks, and any new grants still wait for you.
+
+## Polishing a tool
+
+**Polish…** in a tool's menu gives a tool you already have the second look a new tool gets ([above](#the-build)): **Reviewing the design**, then **Fixing details**, on screenshots of its screen filled with its sample data. It's for tools built before 0.4.10, which never had one. The tool keeps what it does and its character (its concept, its colour and the palette in `ui/look.json`); the builder lifts what the eye lands on first, the details and how your data is drawn.
+
+It opens the tool with the [change panel](#changing-a-tool), "Polish it." in the box: add what you'd like ("the count should lead", "try a bolder, darker look") and send it. The intake answers with a **Polish** proposal: what it will look at, and a note for the builder with what you asked; a new look only when you ask for one. **Build polish** on the proposal starts it, and the panel follows the build as for any change. Ask for something that changes what the tool does and the intake drafts a change instead. A tool without a screen of its own has nothing to polish: the intake says so and offers to give it one (a connection never has one).
+
+The design review holds the screen against what you asked for: the builder gets your conversations with the intake that led to the tool as it is (the one that asked for it, then each change you talked through), oldest first, in `OWNERS_WORDS.md` as for a new tool, with the conversation that asked for the Polish last, as your latest word. A change you undid with **Restore** isn't in it. Hewn has kept conversations since 0.4.6 (late October 2026), so an older tool, or one an agent asked for, has none to give.
+
+A tool without sample data gets some first: the builder writes `sample/calls.json` (made-up entries that show what the tool does, as a new tool has), Hewn checks it, then the two passes carry on in the same session. A tool that has sample data goes straight to them. Either way it's a longer build than a change, about as long as a new tool's second look.
+
+**Show the builder my own data**, on the proposal of a tool with data of its own, is off unless you tick it. Ticked, the screenshots show the tool filled with a copy of your own entries instead of its sample data, which can say more about a tool you use every day; the builder's AI model then sees them, as it sees everything else in the build. It's told they're private and to keep them out of the tool's files (its sample data, tests and text stay made up). Its own checks while it works still use the sample data, and your data itself isn't touched.
+
+If a pass fails, the build fails like any other: nothing goes live, the tool stays on the version it had, and **Retry** or **Ask builder to fix** polishes it again. Polish needs a tool with a screen, and only you can start it, since it costs more than a change and the choice about your data is yours: agents can't, though they can still ask for a change.
 
 ## Instructions
 

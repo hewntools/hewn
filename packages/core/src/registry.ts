@@ -489,7 +489,7 @@ export class Registry {
     const buildTime = one<{ n: number; seconds: number | null }>(`
       SELECT count(*) AS n, sum((julianday(updated_at) - julianday(created_at)) * 86400) AS seconds
       FROM builds WHERE status = 'promoted' AND created_at >= ?`, since7d);
-    const calls = (since: string) => all<{ entry: string }>("SELECT entry FROM capability_logs WHERE at >= ?", since).map((r) => r.entry);
+    const calls = (since: string) => all<{ capability_id: string; entry: string }>("SELECT capability_id, entry FROM capability_logs WHERE at >= ?", since);
     const model = one<{ usd: number | null; input: number | null; output: number | null; calls: number }>(`
       SELECT sum(cost_usd) AS usd, sum(input_tokens) AS input, sum(output_tokens) AS output, count(*) AS calls
       FROM model_calls WHERE month = ?`, month);
