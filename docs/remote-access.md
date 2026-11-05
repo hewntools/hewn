@@ -92,7 +92,7 @@ Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text a
 - `hewn_tools_used`: how many different tools were called in the last 24 hours, by the same kinds of caller. A tool called many times counts once; never which tools.
 - Model spend, tokens and calls this month; connected agents (and those active in the last 7 days); schedules by status, and those failing.
 
-Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)). A status or caller Hewn doesn't know shows as `other`. For calls per tool or per agent, look in [Activity](using-hewn.md#activity), which filters by both.
+Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)). A build or schedule status Hewn doesn't know shows as `other`. For calls per tool or per agent, look in [Activity](using-hewn.md#activity), which filters by both.
 
 ### Other reverse proxies
 
