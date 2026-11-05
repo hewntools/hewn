@@ -85,14 +85,14 @@ Then the web client and its pages never send the owner to a command: signed out,
 
 ### Metrics (`HEWN_METRICS_PORT`)
 
-Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text at `GET /metrics` on that port, for whoever runs Hewn to scrape. It listens on all interfaces, so let only your scraper reach it. Off unless set, and pulled only: Hewn sends it nowhere. It has counts and sums, never what's in your tools:
+Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text at `GET /metrics` on that port, for whoever runs Hewn to scrape. It listens on all interfaces, so let only your scraper reach it. Off unless set, and pulled only: Hewn sends it nowhere. It has counts and sums, never what's in your tools, and its labels are fixed categories: no tool, widget or agent is ever named, so what you called your tools stays with you, also in whatever stores the scraped series:
 
 - `hewn_info` (the version), `hewn_tools` by state, `hewn_builds` by status, and the time of builds promoted in the last 7 days.
-- `hewn_calls`: tool calls in the last 24 hours and 7 days, by who started them (`agent`: you, a connected agent by its name, or a tool's page, widget or schedule) and how they went (`outcome`).
-- `hewn_tools_used`: how many different tools were called in the last 24 hours, by the kind of caller that called them directly (`caller`): `user` (you), `agent`, `ui` (a tool's own page), `widget`, `schedule`, or `capability` (another tool). A tool called many times counts once; never which tools.
+- `hewn_calls`: tool calls in the last 24 hours and 7 days, by the kind of caller that called them directly (`caller`): `user` (you), `agent` (any connected agent), `ui` (a tool's own page), `widget`, `schedule`, or `capability` (another tool); and how they went (`outcome`: `ok` or `error`).
+- `hewn_tools_used`: how many different tools were called in the last 24 hours, by the same kinds of caller. A tool called many times counts once; never which tools.
 - Model spend, tokens and calls this month; connected agents (and those active in the last 7 days); schedules by status, and those failing.
 
-Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)).
+Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)). A status or caller Hewn doesn't know shows as `other`. For calls per tool or per agent, look in [Activity](using-hewn.md#activity), which filters by both.
 
 ### Other reverse proxies
 
