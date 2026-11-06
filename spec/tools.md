@@ -178,7 +178,7 @@ The database schema is `migrations/NNN_name.sql` (`001_init.sql`, `002_add_notes
 
 ## Sample data (since 2.5)
 
-`sample/calls.json` is what the tool looks like in use: a list of operation calls, replayed in order on an empty tool when the owner installs it **with sample data** (on by default), or starts it over with sample data. Hewn needs it to share a tool, because a tool that opens empty shows nothing of what it does. Schema: [`schemas/sample.schema.json`](schemas/sample.schema.json); type: `SampleCall` in [`src/cases.ts`](src/cases.ts).
+`sample/calls.json` is what the tool looks like in use: a list of operation calls, replayed in order on an empty tool when the owner installs it **with sample data** (on by default), or starts it over with sample data. Hewn needs it to share a tool, because a tool that opens empty shows nothing of what it does, and Hewn's builds need it for a new tool with a UI, which isn't promoted without it (a tool installed from a file comes as it is). Schema: [`schemas/sample.schema.json`](schemas/sample.schema.json); type: `SampleCall` in [`src/cases.ts`](src/cases.ts).
 
 ```json
 [
