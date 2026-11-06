@@ -187,7 +187,7 @@ The database schema is `migrations/NNN_name.sql` (`001_init.sql`, `002_add_notes
 ]
 ```
 
-Each entry has `operation`, an optional `version` (default the highest) and `input` (default `{}`). Up to 200 calls. They run as the owner, through the contract like any call, before the owner has granted anything: no network, no other tools, no model. So use plain writes that store data, with made-up names and places, never the owner's own. A version whose sample data doesn't replay without errors isn't promoted.
+Each entry has `operation`, an optional `version` (default the highest) and `input` (default `{}`). Between 1 and 200 calls. They run through the contract before anything is granted: no secrets, config values, network, other tools or model. Prefer local writes with made-up names and places, never the owner's own. A tool with no data of its own (it reads other tools or the network) can use a local read returning an honest empty or unavailable result, without duplicating their data for a preview. A version whose sample data doesn't replay without errors isn't promoted.
 
 ## Tests and promotion
 
@@ -209,6 +209,8 @@ Each entry has `operation`, an optional `version` (default the highest) and `inp
 `expect` is a subset match: every key in an expected object must match in the output, and other output keys are ignored. Arrays must have the same length and match element by element. The string `"$any"` matches any value that is present.
 
 Validation never touches anything real. There is no network (`fetch` gets `403`), secrets and config are whatever the case passes, `ctx.call` returns the case's `calls` entry (a call that isn't declared fails, and one without an entry fails the case), and `ctx.model` serves the case's `model` replies (running out fails the case). Put logic that needs the network or a model behind operations that can also run on fake data.
+
+UI renders are offline too: test-case `calls` and `model` mocks are not reused for screenshots. Operations called on load must handle unavailable external sources with schema-valid empty/unavailable results so the page renders without failed requests or fake production data.
 
 A host validates a new version, then promotes it. Hewn does this, in order:
 
@@ -358,7 +360,7 @@ The operation returns one view, or a view per size (`{ "medium": {…}, "large":
 - **`reveal`** (≤ 280): text hidden behind a "Show" button until tapped, such as the answer on a practice card. The host shows it; nothing is written.
 - **`buttons`** (any template, up to 3): `[{ "label": "Done" (≤ 24), "operation": "op@N", "input"?: { … } }]`. A button runs one of the tool's own operations, writes included, as whoever pressed it: the owner on Home (the host asks first for a destructive one), or the agent in a chat (where a destructive one waits for the owner's confirmation). The widget then refreshes. Put the item's id in `input`.
 
-Declare the widget operation's `outputSchema` loosely (`{ "type": "object", "required": ["template"] }`); the host checks the output against the template itself.
+Declare the widget operation's `outputSchema` loosely (`{ "type": "object" }`); the host checks each view against its template. A top-level required `template` works only for a single view, not views per size.
 
 ### Rules
 

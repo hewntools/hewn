@@ -28,7 +28,7 @@ describe("a later attempt resumes the builder's session", () => {
     const first = claudeArgs(job(), { id: "11111111-1111-4111-8111-111111111111", resume: false });
     assert.equal(first[0], "-p");
     assert.match(first[1], /Read BUILDER\.md, the request, then BRIEF\.md, all of it \(in parts, if your reader cuts it short\), before you write anything: it is the implementation contract/);
-    assert.match(first[1], /Right after reading BUILDER\.md and BRIEF\.md, before reading anything else, write ui\/icon\.svg[^]*\(see "Icon" in BRIEF\.md\)/);
+    assert.match(first[1], /After reading BUILDER\.md, BRIEF\.md, and any OWNERS_WORDS\.md and OTHER_TOOLS\.md, write ui\/icon\.svg[^]*as your first implementation changes \(see "Icon" in BRIEF\.md\)/);
     assert.deepEqual(first.slice(2, 4), ["--session-id", "11111111-1111-4111-8111-111111111111"]);
     assert.ok(first.includes("--restricted"));
     assert.ok(first.includes("--disallowedTools") && first[first.indexOf("--disallowedTools") + 1] === "Bash");

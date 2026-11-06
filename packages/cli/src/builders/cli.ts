@@ -20,8 +20,8 @@ export function builderPrompt(job: BuildJob): string {
     `Your current directory is the build workspace. Read BUILDER.md, the request, then BRIEF.md, all of it (in parts, if your reader cuts it short), before you write anything: it is the implementation contract, how to build for Hewn. Implement the request in place.`,
     `Only change files inside this directory. Do not try to start, call or promote anything on the platform. When the candidate is complete, stop. The platform validates it automatically.`,
   ];
-  // The owner watches Home while it builds: the glyph first, not after reading everything.
-  if (job.kind === "create" && !job.pass) lines.push(`Right after reading BUILDER.md and BRIEF.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
+  // Read the context that determines identity first; retries and passes keep the candidate's icon.
+  if (job.kind === "create" && job.attempt === 1 && !job.retryOf && !job.pass) lines.push(`After reading BUILDER.md, BRIEF.md, and any OWNERS_WORDS.md and OTHER_TOOLS.md, write ui/icon.svg and set "hue" in capability.json as your first implementation changes (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
   // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
   if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and BRIEF.md for the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
   if (job.feedback) {

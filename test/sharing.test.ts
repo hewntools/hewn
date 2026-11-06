@@ -525,6 +525,13 @@ describe("sharing: a tool as a file", () => {
     await assert.rejects(t.platform.setSample(USER, "running-log", "[{ nope"), /not valid JSON/);
     await assert.rejects(t.platform.setSample(USER, "running-log", "[]"), /sample\/calls\.json/);
   });
+
+  test("sample calls may read local state without adding made-up records", async () => {
+    const done = await t.platform.settle((await t.platform.setSample(USER, "running-log", JSON.stringify([{ operation: "get_summary" }]))).buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.ok(done.log.some((l) => /sample data replays \(1 calls\)/.test(l)), done.log.join("\n"));
+    assert.equal(await runs(t), 0, "sample reads leave the owner's data unchanged");
+  });
 });
 
 describe("code from outside stays outside", () => {

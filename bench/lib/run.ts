@@ -19,6 +19,8 @@ import { startUiServer, type Served } from "./ui-server.ts";
 
 const REPO = resolve(import.meta.dirname, "..", "..");
 const BENCH = join(REPO, "bench", "bench.ts");
+/** What the bench's screenshots show (Hewn's own passes say sample data, real data or empty). */
+const FILLED = "\n\nThe screenshots show it filled with data.";
 
 export interface Job {
   arm: string;
@@ -270,14 +272,14 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
         for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
           if (existsSync(join(job.from, "shots", `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(job.from, "shots", `${f}.png`);
         }
-        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: craftRequest(defects) });
+        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: craftRequest(defects) + FILLED });
         build = await settle(bp.platform, started.buildId);
       } else if (job.critique) {
         // The builder gets its own UI, with the data, as the owner sees it.
         for (const f of ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"]) {
           if (existsSync(join(job.from, "shots", `${f}.png`))) bp.extraFiles[`screenshots/${f}.png`] = join(job.from, "shots", `${f}.png`);
         }
-        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: CRITIQUE_REQUEST + othersNote(otherTools(job.others)) });
+        const started = await bp.platform.modify(USER, { capabilityId: base.capabilityId!, request: CRITIQUE_REQUEST + FILLED + othersNote(otherTools(job.others)) });
         build = await settle(bp.platform, started.buildId);
       } else {
         throw new Error(`arm ${job.arm} starts from ${job.from} but does nothing to it (critique or craft)`);
@@ -354,10 +356,10 @@ export async function runOne(dir: string, o: { builder?: CapabilityBuilder } = {
         const defects = await measureDefects(bp, capabilityId, versionDir);
         result.defectsBefore = defects;
         log(`defects: ${defects.length ? defects.join(" | ") : "none measured"}`);
-        request = craftRequest(defects);
+        request = craftRequest(defects) + FILLED;
       } else {
         const said = existsSync(join(dir, "conversation.json")) ? JSON.parse(readFileSync(join(dir, "conversation.json"), "utf8")) : undefined;
-        request = CRITIQUE_REQUEST + (said ? "\n\nAlso check the screen against what the owner asked for and how they wanted it to feel:" + ownersWords(said) : "") + othersNote(otherTools(job.others));
+        request = CRITIQUE_REQUEST + FILLED + (said ? "\n\nAlso check the screen against what the owner asked for and how they wanted it to feel:" + ownersWords(said) : "") + othersNote(otherTools(job.others));
       }
       const review = await settle(bp.platform, (await bp.platform.modify(USER, { capabilityId, request })).buildId);
       result.builds.push(buildSummary(review, join(dir, "transcripts")));
