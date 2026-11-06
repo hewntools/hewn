@@ -380,7 +380,8 @@ const phoneLike = (m: string) => {
 // Bounded, and anchored where a run starts, so no line makes them backtrack for long.
 const PII: [string, RegExp, ((m: string) => boolean)?][] = [
   ["Looks like an email", /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}\b/g],
-  ["Looks like a phone number", /(?<![\w.:])\+?\d[\d ()-]{7,24}\d(?![\w.:])/g, phoneLike],
+  // Never from inside a run of numbers (an SVG path's "C12 68 12 80 17 90") or a colour's "rgb(255 143 112 / 0.5)".
+  ["Looks like a phone number", /(?<![\w.:]|\d |[a-z]\()\+?\d[\d ()-]{7,24}\d(?![\w.:])/g, phoneLike],
   ["Looks like a place (coordinates)", /\b-?\d{1,2}\.\d{3,},\s*-?\d{1,3}\.\d{3,}\b/g],
 ];
 const KEYS: [string, RegExp][] = [

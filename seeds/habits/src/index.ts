@@ -14,6 +14,31 @@ const dayBefore = (date: string) => {
   return iso(d);
 };
 
+/** `date` moved by `n` calendar days. */
+const addDays = (date: string, n: number) => {
+  const d = new Date(`${date}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return iso(d);
+};
+/** A real calendar date in YYYY-MM-DD (not 2026-02-31). */
+const isRealDate = (date: string) => {
+  const d = new Date(`${date}T12:00:00`);
+  return !Number.isNaN(d.getTime()) && iso(d) === date;
+};
+
+/** Longest run of consecutive days in an ascending list of dates. */
+function longestRun(dates: string[]): number {
+  let best = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const d of dates) {
+    run = prev !== null && addDays(prev, 1) === d ? run + 1 : 1;
+    if (run > best) best = run;
+    prev = d;
+  }
+  return best;
+}
+
 function habit(db: DatabaseSync, habitId: string): HabitRow {
   const row = db.prepare("SELECT id, name FROM habits WHERE id = ?").get(habitId) as HabitRow | undefined;
   if (!row) throw new Error(`no habit with id ${habitId}`);
@@ -57,6 +82,37 @@ export const operations = {
   "get_day@1"(input: { date?: string }, { db }: Ctx) {
     const date = input.date ?? today();
     return { date, habits: day(db, date) };
+  },
+
+  "get_history@1"(input: { to?: string; days?: number }, { db }: Ctx) {
+    const to = input.to ?? today();
+    if (!isRealDate(to)) throw new Error(`${to} is not a calendar date`);
+    const from = addDays(to, -((input.days ?? 35) - 1));
+    const habits = db.prepare("SELECT id, name, created_at FROM habits ORDER BY created_at, rowid").all() as (HabitRow & { created_at: string })[];
+    const all = db.prepare("SELECT habit_id, date FROM check_ins ORDER BY habit_id, date").all() as { habit_id: string; date: string }[];
+    const byHabit = new Map<string, string[]>();
+    for (const c of all) {
+      const list = byHabit.get(c.habit_id);
+      if (list) list.push(c.date);
+      else byHabit.set(c.habit_id, [c.date]);
+    }
+    return {
+      from,
+      to,
+      habits: habits.map((h) => {
+        const dates = byHabit.get(h.id) ?? [];
+        const added = iso(new Date(h.created_at));
+        const since = dates.length && dates[0] < added ? dates[0] : added;
+        return {
+          habitId: h.id,
+          name: h.name,
+          since,
+          days: dates.filter((d) => d >= from && d <= to),
+          streak: streak(db, h.id, to),
+          best: longestRun(dates),
+        };
+      }),
+    };
   },
 
   // Widgets get a read-only database. The button runs check_in@1, a normal (writing) call.

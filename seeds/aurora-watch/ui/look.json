@@ -1,0 +1,23 @@
+{
+  "hue": 150,
+  "palette": {
+    "aurora": "#13804f / #5fe0a0",
+    "violet": "#6d4bc2 / #b9a1ff",
+    "night": "#2d3a80 / #6f7cff",
+    "teal": "#0f7a86 / #63d3dc",
+    "moon": "#a87a12 / #f0cf6e",
+    "cloud": "#6b7486 / #a3abbb",
+    "veil": "#8a92a4 / #3a4152 (cloud hiding the Kp bars)",
+    "sky": "#141b45→#2c3a7a / #070b1f→#18224f (the sky window only; ridge #0b1030 / #03050d, cabin light #ffd27a)",
+    "neutrals": "platform --bg / --surface (white, pale grey; near-black in dark)"
+  },
+  "type": {
+    "display": "ui-rounded, 'SF Pro Rounded', system-ui",
+    "body": "system-ui",
+    "numbers": "ui-monospace, tabular figures",
+    "labels": "system-ui 13px semibold, sentence case"
+  },
+  "layout": "Place bar on top (pixel glyph, name, coordinates, quiet Change place). Tonight hero: the rating word large in its colour with a low/possible/good scale, verdict, reason and the green Refresh on the left; the sky window on the right (below on phones). Then the night ribbon card, headed by dark window, moon and best hour. Then recent nights as a column strip (fits a phone without scrolling) with an insight line and a detail panel (with its own small sky) for the chosen night. Before a place: a centred place form with quick picks.",
+  "signature": "The sky window: a night sky drawn from the forecast, with stars dimmed by moonlight, aurora curtains as tall as Kp is strong for this place (violet tops when strong), cloud banks as thick as the cover, the moon in its phase, and hills with a lit cabin. Cloud also veils the Kp curtains in the night ribbon and hatches the top of each recent night's bar, so 'strong Kp, clouded out' reads at a glance. The ribbon keeps its Kp curtains, cloud band, indigo dark window, violet best hour and 'now' line.",
+  "mood": "Calm night-watch instrument: quiet neutral page, colour only where the sky data is."
+}

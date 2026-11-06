@@ -26,11 +26,29 @@ function book(db: DatabaseSync, bookId: string): BookRow {
   return row;
 }
 
+// Readable, stable ids ("middlemarch", "piranesi-2"): easy for agents to say back, and
+// predictable enough that sample data can log progress on the books it adds.
+function newBookId(db: DatabaseSync, title: string): string {
+  const base =
+    title
+      .normalize("NFKD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48)
+      .replace(/-+$/, "") || "book";
+  const taken = db.prepare("SELECT 1 FROM books WHERE id = ?");
+  if (!taken.get(base)) return base;
+  for (let n = 2; n < 1000; n++) if (!taken.get(`${base}-${n}`)) return `${base}-${n}`;
+  return `${base}-${randomUUID().slice(0, 8)}`;
+}
+
 const percent = (b: Pick<BookRow, "page" | "pages">) => (b.pages ? Math.min(100, Math.round((b.page / b.pages) * 100)) : null);
 
 export const operations = {
   "add_book@1"(input: { title: string; author?: string; pages?: number; status?: "want" | "reading" }, { db }: Ctx) {
-    const bookId = randomUUID();
+    const bookId = newBookId(db, input.title);
     db.prepare("INSERT INTO books (id, title, author, status, pages, added_at) VALUES (?, ?, ?, ?, ?, ?)").run(
       bookId,
       input.title,

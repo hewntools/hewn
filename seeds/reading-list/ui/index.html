@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reading list</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page rl">
+    <header class="top">
+      <h1>Reading list</h1>
+      <button type="button" class="primary" id="addBtn" aria-expanded="false" aria-controls="addPanel">
+        <svg class="ico" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Add a book
+      </button>
+    </header>
+
+    <section id="addPanel" class="add-panel" hidden aria-label="Add a book">
+      <form id="addForm" novalidate>
+        <div class="add-grid">
+          <label class="field f-title"><span class="label">Title</span>
+            <input type="text" name="title" required maxlength="200" autocomplete="off" placeholder="The book's title"></label>
+          <label class="field f-author"><span class="label">Author</span>
+            <input type="text" name="author" maxlength="200" autocomplete="off" placeholder="Optional"></label>
+          <label class="field f-pages"><span class="label">Pages</span>
+            <input type="number" name="pages" min="1" step="1" inputmode="numeric" placeholder="Optional"></label>
+        </div>
+        <div class="add-foot">
+          <div class="segmented" role="group" aria-label="Where it goes">
+            <button type="button" data-status="want" aria-pressed="true">Want to read</button>
+            <button type="button" data-status="reading" aria-pressed="false">Reading now</button>
+          </div>
+          <span class="spacer"></span>
+          <button type="button" class="ghost" id="addCancel">Cancel</button>
+          <button type="submit" class="primary" id="addSubmit">Add book</button>
+        </div>
+        <p class="notice danger" id="addError" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <p class="notice danger" id="pageError" role="alert" hidden></p>
+
+    <section id="reading" class="sec" aria-labelledby="readingH">
+      <div class="sec-head"><h2 id="readingH">Reading now</h2><span class="count" id="readingCount"></span></div>
+      <div id="readingList" class="now-grid" aria-busy="true">
+        <div class="now-card skel"><span class="skeleton" style="height:22px;width:60%"></span><span class="skeleton" style="height:14px;margin-top:12px"></span></div>
+      </div>
+    </section>
+
+    <section id="year" class="sec year" aria-labelledby="yearH">
+      <div class="year-side">
+        <div class="year-head">
+          <h2 id="yearH">This year on the shelf</h2>
+          <div id="yearPick" class="year-pick" role="group" aria-label="Choose a year" hidden></div>
+        </div>
+        <div id="yearFigs" class="figs"></div>
+        <p id="paceLine" class="pace-line" hidden></p>
+      </div>
+      <div id="yearShelf" class="yshelf"></div>
+    </section>
+
+    <div class="lower">
+      <section id="want" class="sec" aria-labelledby="wantH">
+        <div class="sec-head"><h2 id="wantH">Want to read</h2><span class="count" id="wantCount"></span></div>
+        <div id="pile"></div>
+      </section>
+
+      <section id="finished" class="sec" aria-labelledby="doneH">
+        <div class="sec-head"><h2 id="doneH">Finished</h2><span class="count" id="doneCount"></span></div>
+        <div id="doneList"></div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="finishDlg" aria-labelledby="finishH">
+    <form id="finishForm" novalidate>
+      <h2 id="finishH">Finished</h2>
+      <p class="dlg-book" id="finishBook"></p>
+      <fieldset class="rate">
+        <legend>Your rating <span class="muted">(optional)</span></legend>
+        <div class="stars-in" id="starsIn"></div>
+        <span class="rate-word" id="rateWord" aria-live="polite">No rating</span>
+      </fieldset>
+      <label class="field"><span class="label">Finished on</span>
+        <input type="date" name="date" id="finishDate" required></label>
+      <p class="notice danger" id="finishError" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" class="ghost" data-close>Cancel</button>
+        <button type="submit" class="primary" id="finishSubmit">Mark finished</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="removeDlg" aria-labelledby="removeH">
+    <form id="removeForm" novalidate>
+      <h2 id="removeH">Remove this book?</h2>
+      <p id="removeText"></p>
+      <p class="notice danger" id="removeError" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" class="ghost" data-close>Keep it</button>
+        <button type="submit" class="danger solid" id="removeSubmit">Remove</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

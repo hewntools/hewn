@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Running Log</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page app">
+    <div class="top-wrap">
+      <header class="top">
+        <span class="mark" aria-hidden="true">
+          <svg viewBox="0 0 5 5" shape-rendering="crispEdges"><path d="M4 0h1v5H0V4h1V3h1V2h1V1h1z"/></svg>
+        </span>
+        <div class="top-text">
+          <h1>Running log</h1>
+          <p class="tagline" id="tagline">&nbsp;</p>
+        </div>
+        <div class="streak" id="streak" hidden></div>
+      </header>
+      <div class="notice danger load-error" id="load-error" role="alert" hidden>
+        <p><span id="load-error-text">Couldn't load your runs.</span> <button type="button" class="link" id="retry">Try again</button></p>
+      </div>
+    </div>
+
+    <section class="board" aria-label="Totals">
+      <article class="period" id="week" aria-live="polite">
+        <span class="skeleton" style="width:40%;height:18px"></span>
+        <span class="skeleton" style="width:60%;height:48px;margin-top:14px"></span>
+        <span class="skeleton" style="width:100%;height:64px;margin-top:14px"></span>
+      </article>
+      <article class="period" id="month" aria-live="polite">
+        <span class="skeleton" style="width:40%;height:18px"></span>
+        <span class="skeleton" style="width:60%;height:48px;margin-top:14px"></span>
+        <span class="skeleton" style="width:100%;height:64px;margin-top:14px"></span>
+      </article>
+    </section>
+
+    <section class="entry" aria-labelledby="log-h">
+      <div class="entry-head">
+        <h2 id="log-h">Log a run</h2>
+        <button type="button" class="chip plain repeat" id="repeat" hidden></button>
+      </div>
+      <form id="run-form" novalidate autocomplete="off">
+        <div class="field f-date">
+          <div class="date-row">
+            <label class="label" for="f-date">Date</label>
+            <div class="quick" role="group" aria-label="Quick date">
+              <button type="button" class="qd" data-days="0" aria-pressed="true">Today</button>
+              <button type="button" class="qd" data-days="1" aria-pressed="false">Yesterday</button>
+            </div>
+          </div>
+          <input type="date" id="f-date" name="date" required>
+        </div>
+        <div class="dial">
+          <label class="dial-cell">
+            <span class="label">Distance</span>
+            <span class="dial-input">
+              <input type="text" id="f-dist" name="distance" inputmode="decimal" placeholder="5.0" required aria-describedby="form-error">
+              <span class="unit" aria-hidden="true">km</span>
+            </span>
+          </label>
+          <label class="dial-cell">
+            <span class="label">Time</span>
+            <span class="dial-input">
+              <input type="text" id="f-time" name="time" placeholder="28:30" required aria-describedby="time-hint form-error">
+            </span>
+          </label>
+          <p class="time-hint" id="time-hint">Time as mm:ss or h:mm:ss</p>
+        </div>
+        <label class="field note-field">
+          <span class="label">Note <span class="opt">optional</span></span>
+          <input type="text" id="f-note" name="notes" placeholder="How did it feel?" maxlength="280">
+        </label>
+        <div class="notice danger" id="form-error" role="alert" hidden></div>
+        <div class="form-actions">
+          <div class="preview idle" id="preview" aria-live="polite">
+            <span class="pv-label">Pace</span>
+            <span class="pv-value" id="pv-value">–</span><span class="pv-unit">/km</span>
+          </div>
+          <button type="submit" class="primary lg" id="save">Save run</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="trace" aria-labelledby="trace-h">
+      <div class="trace-head">
+        <h2 id="trace-h">Runs over time</h2>
+        <div class="keys" aria-hidden="true">
+          <span class="key k-dist"><i></i>Distance</span>
+          <span class="key k-pace"><i></i>Pace</span>
+          <span class="key k-best"><i></i>Best</span>
+          <span class="key k-avg"><i></i>Avg</span>
+        </div>
+        <div class="segmented" role="group" aria-label="Time span" id="ranges">
+          <button type="button" data-range="3m" aria-pressed="true">3 months</button>
+          <button type="button" data-range="6m" aria-pressed="false">6 months</button>
+          <button type="button" data-range="1y" aria-pressed="false">Year</button>
+          <button type="button" data-range="all" aria-pressed="false">All</button>
+        </div>
+      </div>
+      <div class="chart-box" id="chart">
+        <span class="skeleton" style="height:260px"></span>
+      </div>
+      <div class="tip" id="tip" role="tooltip" hidden></div>
+    </section>
+
+    <section class="runs" aria-labelledby="runs-h">
+      <div class="runs-head">
+        <h2 id="runs-h">Runs</h2>
+        <span class="runs-count" id="runs-count"></span>
+      </div>
+      <div class="sheet">
+        <div class="ledger-head" aria-hidden="true">
+          <span>Day</span><span>Distance</span><span class="r">Time</span><span class="r">Pace</span><span>Note</span>
+        </div>
+        <ol class="ledger" id="ledger"></ol>
+      </div>
+      <div class="ledger-more">
+        <button type="button" class="ghost" id="show-all" hidden>Show all runs</button>
+      </div>
+    </section>
+  </main>
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

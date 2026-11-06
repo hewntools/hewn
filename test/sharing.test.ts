@@ -147,6 +147,7 @@ describe("bundles: the zip and the scan", () => {
     const files = {
       "tests/cases.json": bytes(['{ "email": "anna.berg@example.com", "phone": "+46 70 123 45 67", "at": "63.8258, 20.2630" }', '{ "date": "2026-10-20", "id": "1234567890", "time": "07:30" }'].join("\n")),
       "src/index.ts": bytes(['const key = "sk-abcdefghijklmnopqrstuvwxyz";', 'const mine = "my-own-todoist-token-123";', "const plain = 'running is good for you';"].join("\n")),
+      "ui/app.css": bytes([".a { color: rgb(255 143 112 / 0.5); background: light-dark(rgb(106 75 220), hsl(180 160 255)); }", '<path d="M20 62C12 68 12 80 17 90"/> <path d="M19 26 C31 22 55 26 67 24 S103 12 115 16"/>', "Call 070 123 45 67 or (555) 123-4567 today"].join("\n")),
     };
     const found = scanFiles(files, ["my-own-todoist-token-123", "km"]);
     const at = (file: string, line: number) => found.filter((f) => f.file === file && f.line === line).map((f) => f.kind);
@@ -155,6 +156,9 @@ describe("bundles: the zip and the scan", () => {
     assert.deepEqual(at("src/index.ts", 1), ["key"]);
     assert.deepEqual(at("src/index.ts", 2), ["secret"]);
     assert.deepEqual(at("src/index.ts", 3), []);
+    assert.deepEqual(at("ui/app.css", 1), [], "colours aren't phone numbers");
+    assert.deepEqual(at("ui/app.css", 2), [], "nor are an SVG path's numbers");
+    assert.deepEqual(found.filter((f) => f.file === "ui/app.css" && f.line === 3).map((f) => f.text), ["070 123 45 67", "555) 123-4567"], "phone numbers in text still are");
     const email = found.find((f) => f.label.includes("email"))!;
     assert.equal(email.masked, "a••••@e••••.com");
     assert.equal(email.text, "anna.berg@example.com");

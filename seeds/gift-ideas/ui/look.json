@@ -1,0 +1,26 @@
+{
+  "hue": 340,
+  "palette": {
+    "rose": "#c13a82",
+    "rose-dark": "#ef93c1",
+    "rose-tint": "#f8dcea",
+    "rose-tint-dark": "#5a2342",
+    "teal-bought": "#1b8173",
+    "teal-bought-dark": "#6fcdb8",
+    "amber-nothing-yet": "#b4741c",
+    "amber-nothing-yet-dark": "#ecbd62",
+    "page": "#f6f7f9",
+    "page-dark": "#121417",
+    "card": "#ffffff",
+    "card-dark": "#1b1d20"
+  },
+  "type": {
+    "display": "ui-rounded, SF Pro Rounded, system-ui (bold, tight)",
+    "body": "system-ui",
+    "numbers": "ui-rounded with tabular figures",
+    "labels": "system-ui, sentence case, small and muted"
+  },
+  "layout": "Desktop: gift-year ring card beside a 'Coming up' agenda, a one-line 'Jot down an idea' bar below, then people as cards. Phone: ring (the answer), idea form, agenda, people. Person detail opens in a sheet.",
+  "signature": "The gift year: a ring of the next 12 months starting today at the top, the next 90 days shaded rose, each occasion a small gift box on its date (teal filled when bought, rose when ideas are saved, dashed when nothing yet, amber when that's close), with a countdown to the next occasion in the middle. The same gift-box glyph marks status everywhere and stacks into a 'shelf' on each person card.",
+  "mood": "Warm, tidy and a little festive: wrapping paper rose on clean neutral paper, no clutter."
+}

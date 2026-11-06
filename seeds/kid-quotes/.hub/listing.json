@@ -4,12 +4,17 @@
     "Kids",
     "Family"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "Polished: a quote to remember, and each child's quotes along the years",
+      "date": "2026-11-06"
     }
   ],
   "summary": {

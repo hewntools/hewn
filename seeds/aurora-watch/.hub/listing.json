@@ -1,0 +1,37 @@
+{
+  "line": "Tonight's aurora chances, where you are",
+  "tags": [
+    "Outdoors",
+    "Sky"
+  ],
+  "version": 1,
+  "versions": [
+    {
+      "version": 1,
+      "line": "On the shelf, for any place",
+      "date": "2026-11-06"
+    }
+  ],
+  "summary": {
+    "message": "Tells you each evening whether it's worth looking for the aurora from the place you choose: NOAA's Kp forecast and MET Norway's cloud cover, with the darkness and the moon worked out on its own. Tonight and the recent nights on its screen, and a widget.",
+    "keeps": "Your place (a name, coordinates and its time zone), one rated forecast per night, and the last answers from NOAA and MET Norway.",
+    "reaches": "NOAA for the Kp forecast, with nothing about you in it, and MET Norway with your place's coordinates rounded to two decimals (about a kilometre).",
+    "findings": [
+      {
+        "kind": "warn",
+        "title": "Choosing a place somewhere else clears the stored nights",
+        "detail": "A night is rated for one place, so moving starts afresh; renaming the place keeps them.",
+        "file": "src/index.ts",
+        "line": 237
+      },
+      {
+        "kind": "ok",
+        "title": "Reaches only NOAA and MET Norway, the two hosts it asks for"
+      },
+      {
+        "kind": "ok",
+        "title": "The darkness, the moon and the ratings are worked out inside the tool"
+      }
+    ]
+  }
+}

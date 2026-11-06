@@ -1,0 +1,833 @@
+{
+  "id": "aurora-watch",
+  "name": "Aurora Watch",
+  "purpose": "Tell the owner each evening whether it's worth looking for the aurora where they are, combining NOAA's Kp forecast, MET Norway's cloud cover and whether it is actually dark. The owner chooses the place (a name, coordinates and its time zone).",
+  "abi": "2.3",
+  "hue": 150,
+  "ui": {
+    "available": true
+  },
+  "tags": [
+    "aurora",
+    "weather",
+    "sky"
+  ],
+  "requires": {
+    "hosts": [
+      "services.swpc.noaa.gov",
+      "api.met.no"
+    ]
+  },
+  "operations": [
+    {
+      "name": "set_place",
+      "version": 1,
+      "sideEffect": "write",
+      "description": "Choose where the owner watches from: a name, latitude and longitude (decimal degrees, north and east positive) and the place's IANA time zone (e.g. Europe/Oslo). Nights and local times follow that zone, and how strong an aurora has to be follows the place's geomagnetic latitude. Moving somewhere else (other coordinates) clears the stored nights and the cached cloud forecasts for the old place; renaming keeps them. It checks every field and its error says what is wrong with each (a blank or over-long name, a latitude outside −90…90, a longitude outside −180…180, an unknown time zone).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "timezone"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What to call the place, e.g. Tromsø (1–60 characters)"
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Decimal degrees, −90 to 90, north positive"
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Decimal degrees, −180 to 180, east positive"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone, e.g. Europe/Oslo"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "timezone",
+          "geomagnetic_latitude",
+          "kp_possible",
+          "kp_good"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone; nights and local times are in it"
+          },
+          "geomagnetic_latitude": {
+            "type": "number",
+            "description": "Degrees, negative in the south"
+          },
+          "kp_possible": {
+            "type": "number",
+            "description": "The Kp an aurora needs to be possible here (rule of thumb)"
+          },
+          "kp_good": {
+            "type": "number",
+            "description": "The Kp for a good chance here"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_place",
+      "version": 1,
+      "sideEffect": "read",
+      "description": "The place the owner watches from, with the Kp an aurora needs there (kp_possible, kp_good), or null before one is chosen.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": [
+          "name",
+          "latitude",
+          "longitude",
+          "timezone",
+          "geomagnetic_latitude",
+          "kp_possible",
+          "kp_good"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone; nights and local times are in it"
+          },
+          "geomagnetic_latitude": {
+            "type": "number",
+            "description": "Degrees, negative in the south"
+          },
+          "kp_possible": {
+            "type": "number",
+            "description": "The Kp an aurora needs to be possible here (rule of thumb)"
+          },
+          "kp_good": {
+            "type": "number",
+            "description": "The Kp for a good chance here"
+          }
+        }
+      }
+    },
+    {
+      "name": "fetch_tonight",
+      "version": 1,
+      "description": "Fetch NOAA's 3-hour Kp forecast and MET Norway's cloud cover for the owner's place, keep the slots inside tonight's dark window (sun below −12°), rate the aurora chances for that place's latitude and store the result. Also stores the best hour of the window (highest Kp, clearest), the moon brightness (computed locally) and a short verdict. 'Tonight' is the coming night: the evening of the current local date in the place's time zone, into the next morning; only while it is still dark in the early hours is it the night that began yesterday evening. For a night already in progress only the remaining slots from now on are used. Upstream responses are cached for at least 30 minutes. If a source fails, it errors and leaves any stored forecast untouched. When it never gets that dark (around midsummer, far north) it stores 'none' (too light) without fetching. Returns null, fetching nothing, before a place is chosen (so a schedule set up early does no harm). Optional date picks another night; optional noaa/met payloads replace the live fetch (for replays and tests). Optional quiet: true returns null instead of an error when a source fails (offline, a host not approved yet), leaving any stored forecast untouched and logging why; the screen uses it for its one fetch on open.",
+      "sideEffect": "write",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Local date the evening starts (YYYY-MM-DD); defaults to tonight"
+          },
+          "noaa": {
+            "type": [
+              "array",
+              "object"
+            ],
+            "description": "Optional NOAA planetary K-index forecast payload to use instead of fetching"
+          },
+          "met": {
+            "type": "object",
+            "description": "Optional MET Norway locationforecast compact payload to use instead of fetching"
+          },
+          "now": {
+            "type": "string",
+            "description": "Optional ISO instant to act as the current time (which night is tonight, and the fetched time stored); for replays and tests"
+          },
+          "quiet": {
+            "type": "boolean",
+            "description": "When true, a failing source returns null instead of an error (the stored forecast stays as it was; the reason is logged)"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": [
+          "night_date",
+          "fetched_at",
+          "dark_start",
+          "dark_end",
+          "kp_max",
+          "kp_slots",
+          "cloud_avg_pct",
+          "cloud_slots",
+          "rating",
+          "reason"
+        ],
+        "properties": {
+          "night_date": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string"
+          },
+          "fetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When this forecast was fetched (ISO)"
+          },
+          "dark_start": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dark_end": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kp_max": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "kp_slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "time",
+                "kp"
+              ],
+              "properties": {
+                "time": {
+                  "type": "string"
+                },
+                "kp": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "cloud_avg_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cloud_slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "time",
+                "pct"
+              ],
+              "properties": {
+                "time": {
+                  "type": "string"
+                },
+                "pct": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "rating": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "possible",
+              "good"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "best_hour": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Best hour of the dark window: highest Kp, then lowest cloud",
+            "required": [
+              "start",
+              "end",
+              "start_local",
+              "end_local",
+              "kp",
+              "cloud_pct"
+            ],
+            "properties": {
+              "start": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "start_local": {
+                "type": "string"
+              },
+              "end_local": {
+                "type": "string"
+              },
+              "kp": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cloud_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "moon_brightness": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "0 (new, dark) to 1 (full, bright), computed locally"
+          },
+          "moon_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short label for the moon brightness"
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short sentence derived from the rating and moon"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_tonight",
+      "version": 1,
+      "description": "Get the stored forecast for a night (default tonight: the current local date's night at the owner's place, or last night while it is still dark in the early hours), or null if none was fetched or no place is chosen yet.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Local date the evening starts (YYYY-MM-DD)"
+          },
+          "now": {
+            "type": "string",
+            "description": "Optional ISO instant to resolve tonight at; for replays and tests"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "required": [
+          "night_date",
+          "fetched_at",
+          "dark_start",
+          "dark_end",
+          "kp_max",
+          "kp_slots",
+          "cloud_avg_pct",
+          "cloud_slots",
+          "rating",
+          "reason"
+        ],
+        "properties": {
+          "night_date": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string",
+            "description": "When it was fetched (ISO); empty when an older record doesn't say"
+          },
+          "fetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When this forecast was fetched (ISO), null when unknown"
+          },
+          "dark_start": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dark_end": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kp_max": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "kp_slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "time",
+                "kp"
+              ],
+              "properties": {
+                "time": {
+                  "type": "string"
+                },
+                "kp": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "cloud_avg_pct": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "cloud_slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "time",
+                "pct"
+              ],
+              "properties": {
+                "time": {
+                  "type": "string"
+                },
+                "pct": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "rating": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "possible",
+              "good"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "best_hour": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Best hour of the dark window, null when unknown (older records)",
+            "properties": {
+              "start": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "start_local": {
+                "type": "string"
+              },
+              "end_local": {
+                "type": "string"
+              },
+              "kp": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "cloud_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "moon_brightness": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "moon_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_nights",
+      "version": 1,
+      "sideEffect": "read",
+      "description": "The stored nights, latest first (default 14, at most 60), each as get_tonight returns it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "nights"
+        ],
+        "properties": {
+          "nights": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "night_date",
+                "fetched_at",
+                "dark_start",
+                "dark_end",
+                "kp_max",
+                "kp_slots",
+                "cloud_avg_pct",
+                "cloud_slots",
+                "rating",
+                "reason"
+              ],
+              "properties": {
+                "night_date": {
+                  "type": "string"
+                },
+                "fetched_at": {
+                  "type": "string",
+                  "description": "When it was fetched (ISO); empty when an older record doesn't say"
+                },
+                "fetchedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "When this forecast was fetched (ISO), null when unknown"
+                },
+                "dark_start": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "dark_end": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kp_max": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "kp_slots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "time",
+                      "kp"
+                    ],
+                    "properties": {
+                      "time": {
+                        "type": "string"
+                      },
+                      "kp": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                "cloud_avg_pct": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "cloud_slots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "time",
+                      "pct"
+                    ],
+                    "properties": {
+                      "time": {
+                        "type": "string"
+                      },
+                      "pct": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                "rating": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "low",
+                    "possible",
+                    "good"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "best_hour": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "Best hour of the dark window, null when unknown (older records)",
+                  "properties": {
+                    "start": {
+                      "type": "string"
+                    },
+                    "end": {
+                      "type": "string"
+                    },
+                    "start_local": {
+                      "type": "string"
+                    },
+                    "end_local": {
+                      "type": "string"
+                    },
+                    "kp": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "cloud_pct": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "moon_brightness": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "moon_label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "verdict": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "dark_window",
+      "version": 1,
+      "description": "When it is dark enough for aurora at the owner's place on a night (sun below −12°, computed locally, no network), and how bright the moon is. dark is false when it never gets that dark (around midsummer, far north). The default night is tonight: the current local date's night, or last night while it is still dark in the early hours. Errors before a place is chosen.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Local date the evening starts (YYYY-MM-DD); defaults to tonight"
+          },
+          "now": {
+            "type": "string",
+            "description": "Optional ISO instant to resolve tonight at; for replays and tests"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "date",
+          "dark",
+          "dark_start",
+          "dark_end",
+          "dark_start_local",
+          "dark_end_local",
+          "dark_hours",
+          "moon_brightness",
+          "moon_label"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "dark": {
+            "type": "boolean"
+          },
+          "dark_start": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UTC ISO time"
+          },
+          "dark_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UTC ISO time"
+          },
+          "dark_start_local": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HH:MM in the place's time zone"
+          },
+          "dark_end_local": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "HH:MM in the place's time zone"
+          },
+          "dark_hours": {
+            "type": "integer",
+            "description": "Length of the dark window, rounded to whole hours"
+          },
+          "moon_brightness": {
+            "type": "number",
+            "description": "0 (new, dark) to 1 (full, bright), computed locally"
+          },
+          "moon_label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "widget_aurora",
+      "version": 1,
+      "description": "Widget: the forecast fetch_tonight stored for tonight at the owner's place (the current local date's night, or last night while it is still dark in the early hours). Small shows the rating word and, when it fits, a short line (cloud cover, or the best hour); large lists the rating, Kp, cloud cover, dark window, moon brightness, verdict, best hour and when it was fetched. Before tonight is fetched it shows the dark window and moon (known offline) with Refresh; before a place is chosen it says to choose one. Reads only stored data.",
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Night to show (YYYY-MM-DD); defaults to tonight"
+          },
+          "now": {
+            "type": "string",
+            "description": "Optional ISO instant to resolve tonight at; for replays and tests"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object"
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "name": "aurora",
+      "version": 1,
+      "title": "Aurora tonight",
+      "operation": "widget_aurora@1",
+      "sizes": [
+        "small",
+        "large"
+      ],
+      "refresh": {
+        "every": "30m"
+      }
+    }
+  ]
+}

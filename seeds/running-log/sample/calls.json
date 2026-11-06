@@ -1,8 +1,18 @@
 [
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.0, "durationSeconds": 1710, "date": "2026-09-08", "notes": "First run back after the summer"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 6.2, "durationSeconds": 2100, "date": "2026-09-13"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.5, "durationSeconds": 1840, "date": "2026-09-17"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 9.0, "durationSeconds": 3240, "date": "2026-09-21", "notes": "Forest trail, muddy"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 6.0, "durationSeconds": 1960, "date": "2026-09-26"}},
   {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.2, "durationSeconds": 1720, "date": "2026-10-03", "notes": "Easy loop by the river"}},
   {"operation": "record_run", "version": 1, "input": {"distanceKm": 8.0, "durationSeconds": 2790, "date": "2026-10-06"}},
   {"operation": "record_run", "version": 1, "input": {"distanceKm": 6.4, "durationSeconds": 2050, "date": "2026-10-09", "notes": "Hill repeats, 6 × 200 m"}},
   {"operation": "record_run", "version": 1, "input": {"distanceKm": 12.1, "durationSeconds": 4380, "date": "2026-10-12", "notes": "Long and slow"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.8, "durationSeconds": 1830, "date": "2026-10-16"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 10.0, "durationSeconds": 3420, "date": "2026-10-19", "notes": "Steady 10 with the club"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 6.6, "durationSeconds": 2080, "date": "2026-10-23"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 13.5, "durationSeconds": 4800, "date": "2026-10-26", "notes": "Longest since spring"}},
+  {"operation": "record_run", "version": 1, "input": {"distanceKm": 7.0, "durationSeconds": 2190, "date": "2026-10-30", "notes": "Tempo, 3 km at race pace"}},
   {"operation": "record_run", "version": 1, "input": {"distanceKm": 5.0, "durationSeconds": 1580}},
   {"operation": "record_run", "version": 1, "input": {"distanceKm": 7.3, "durationSeconds": 2410, "notes": "Felt fast today"}}
 ]
