@@ -583,7 +583,7 @@
         ${scaleHTML(t.rating)}
         ${t.verdict ? `<p class="verdict-line">${esc(t.verdict)}</p>` : ""}
         <p class="reason">${esc(t.reason)}</p>
-        <div class="actions-row">${refreshBtn}<span class="fetched">Fetched ${esc(fetchedText(t.fetchedAt || t.fetched_at))}</span></div>
+        <div class="actions-row">${refreshBtn}<span class="fetched">Fetched ${esc(fetchedText(t.fetched_at))}</span></div>
         ${S.refreshError ? `<div class="notice danger" role="alert">${esc(S.refreshError)}</div>` : ""}
       </div>`;
     } else if (S.fetch === "fetching") {
@@ -630,7 +630,7 @@
             ${f.verdict ? `<p class="verdict-line">${esc(f.verdict)}</p>` : ""}
           </div>
           <p class="reason">${esc(f.reason)}</p>
-          <p class="fetched">Fetched ${esc(fetchedText(f.fetchedAt || f.fetched_at))}</p>
+          <p class="fetched">Fetched ${esc(fetchedText(f.fetched_at))}</p>
         </div>
         ${skyFigure(skyOf(f, key), "mini")}
       </div>

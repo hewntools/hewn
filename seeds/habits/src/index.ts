@@ -7,14 +7,7 @@ type HabitRow = { id: string; name: string };
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const today = () => iso(new Date());
-/** The calendar day before `date` (YYYY-MM-DD), counted at noon so DST changes don't matter. */
-const dayBefore = (date: string) => {
-  const d = new Date(`${date}T12:00:00`);
-  d.setDate(d.getDate() - 1);
-  return iso(d);
-};
-
-/** `date` moved by `n` calendar days. */
+/** `date` (YYYY-MM-DD) moved by `n` calendar days, counted at noon so DST changes don't matter. */
 const addDays = (date: string, n: number) => {
   const d = new Date(`${date}T12:00:00`);
   d.setDate(d.getDate() + n);
@@ -49,9 +42,9 @@ const done = (db: DatabaseSync, habitId: string, date: string) => !!db.prepare("
 
 /** Days in a row up to `date`. A day not checked in yet doesn't break the streak until it's over. */
 function streak(db: DatabaseSync, habitId: string, date: string): number {
-  let day = done(db, habitId, date) ? date : dayBefore(date);
+  let day = done(db, habitId, date) ? date : addDays(date, -1);
   let n = 0;
-  while (done(db, habitId, day)) (n++, (day = dayBefore(day)));
+  while (done(db, habitId, day)) (n++, (day = addDays(day, -1)));
   return n;
 }
 

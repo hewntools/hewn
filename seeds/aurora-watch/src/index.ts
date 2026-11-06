@@ -12,14 +12,17 @@ import {
   isoMinute,
   kpNeeded,
   localHHMM,
-  moonBrightness,
+  nightMoon,
   overlaps,
   parseClouds,
   parseKp,
   rate,
   resolveNight,
   verdictFor,
+  type BestHour,
+  type CloudSlot,
   type DarkWindow,
+  type KpSlot,
   type Place,
 } from "./aurora.ts";
 import { forgetPlace, listNights, readNight, readPlace, writeNight, writePlace, type Db, type Forecast } from "./store.ts";
@@ -146,7 +149,7 @@ export function widgetView(place: Place | null, f: Forecast | null, nowMs: numbe
     // Nothing fetched for the night yet: what is known without the network (darkness, moon).
     const night = date ?? resolveNight(nowMs, place);
     const win = darkWindow(night, place);
-    const moon = moonBrightness(Date.parse(`${night}T22:00:00Z`));
+    const moon = nightMoon(night, place);
     return {
       small: { template: "text", text: "Not fetched yet", buttons },
       large: {
@@ -162,7 +165,7 @@ export function widgetView(place: Place | null, f: Forecast | null, nowMs: numbe
     };
   }
 
-  const fetchedMs = f.fetchedAt ? Date.parse(f.fetchedAt) : NaN;
+  const fetchedMs = Date.parse(f.fetched_at);
   const known = Number.isFinite(fetchedMs);
   const fetchedRow = { title: "Fetched", value: known ? fmtWhen(fetchedMs, nowMs, tz) : "unknown", detail: place.name };
 
@@ -233,8 +236,9 @@ export const operations = {
     const place: Place = { name, latitude, longitude, timezone: String(input.timezone).trim() };
     const before = readPlace(ctx.db);
     ctx.db.transaction(() => {
-      // Nights fetched for somewhere else say nothing about the new place, and the old place's coordinates go with them.
-      if (before && (before.latitude !== latitude || before.longitude !== longitude)) forgetPlace(ctx.db);
+      // Nights rated for somewhere else, or dated in another time zone, say nothing about the new place;
+      // the old place's coordinates go with them. A new name alone keeps them.
+      if (before && (before.latitude !== latitude || before.longitude !== longitude || before.timezone !== place.timezone)) forgetPlace(ctx.db);
       writePlace(ctx.db, place);
     });
     return placeView(place);
@@ -271,11 +275,11 @@ export const operations = {
 
   "dark_window@1": (input: NightInput, ctx: Ctx) => darkWindowOp(input, ctx),
 
-  "widget_aurora@1": (input: NightInput, ctx: Ctx) => {
+  "widget_aurora@1": (input: { date?: string }, ctx: Ctx) => {
     // Only the resolved night's record counts; an older night shows what's known offline.
     input = input ?? {};
     const place = readPlace(ctx.db);
-    const now = clock(input);
+    const now = Date.now();
     if (!place) return widgetView(null, null, now, input.date);
     return widgetView(place, readNight(ctx.db, input.date ?? resolveNight(now, place)), now, input.date);
   },
@@ -288,30 +292,13 @@ async function fetchTonight(input: NightInput & { noaa?: unknown; met?: unknown 
   const now = clock(input);
   const date = input.date ?? resolveNight(now, place);
   const win = darkWindow(date, place);
-  const fetchedAt = isoMinute(now);
-  const moon = moonBrightness(Date.parse(`${date}T22:00:00Z`));
+  const moon = nightMoon(date, place);
 
-  let forecast: Forecast;
-  if (!win) {
-    // Light all night: nothing upstream can change the answer, so don't fetch.
-    const rating = rate({ kp_max: null, cloud_avg: null, dark: false, place });
-    forecast = {
-      night_date: date,
-      fetched_at: fetchedAt,
-      dark_start: null,
-      dark_end: null,
-      kp_max: null,
-      kp_slots: [],
-      cloud_avg_pct: null,
-      cloud_slots: [],
-      ...rating,
-      fetchedAt,
-      best_hour: null,
-      moon_brightness: moon.brightness,
-      moon_label: moon.label,
-      verdict: verdictFor(rating.rating, moon),
-    };
-  } else {
+  // Light all night (no window): nothing upstream can change the answer, so nothing is fetched.
+  let kpSlots: KpSlot[] = [];
+  let cloudSlots: CloudSlot[] = [];
+  let best: BestHour | null = null;
+  if (win) {
     // Any failure here throws before the upsert, so a stored good record survives.
     const noaaJson = input.noaa ?? (await fetchJson(ctx.db, NOAA_URL, "NOAA SWPC"));
     const metJson = input.met ?? (await fetchJson(ctx.db, metUrl(place), "MET Norway"));
@@ -319,30 +306,30 @@ async function fetchTonight(input: NightInput & { noaa?: unknown; met?: unknown 
     // now on, so the past part of the window can't (and needn't) be covered.
     const remaining = remainingWindow(win, now);
     const which = remaining === win ? "the night" : "the rest of the night";
-    const kpSlots = parseKp(noaaJson).filter((s) => overlaps(s.time, KP_SLOT_MS, remaining));
-    const cloudSlots = parseClouds(metJson).filter((s) => overlaps(s.time, CLOUD_SLOT_MS, remaining));
+    kpSlots = parseKp(noaaJson).filter((s) => overlaps(s.time, KP_SLOT_MS, remaining));
+    cloudSlots = parseClouds(metJson).filter((s) => overlaps(s.time, CLOUD_SLOT_MS, remaining));
     if (!kpSlots.length) throw new Error(`NOAA's Kp forecast doesn't cover ${which} of ${date}`);
     if (!cloudSlots.length) throw new Error(`MET Norway's forecast doesn't cover ${which} of ${date}`);
-    const kpMax = Math.max(...kpSlots.map((s) => s.kp));
-    const cloudAvg = Math.round(cloudSlots.reduce((a, s) => a + s.pct, 0) / cloudSlots.length);
-    const rating = rate({ kp_max: kpMax, cloud_avg: cloudAvg, dark: true, place });
-    forecast = {
-      night_date: date,
-      fetched_at: fetchedAt,
-      dark_start: win.start,
-      dark_end: win.end,
-      kp_max: kpMax,
-      kp_slots: kpSlots,
-      cloud_avg_pct: cloudAvg,
-      cloud_slots: cloudSlots,
-      ...rating,
-      fetchedAt,
-      best_hour: bestHour(remaining, kpSlots, cloudSlots, place.timezone),
-      moon_brightness: moon.brightness,
-      moon_label: moon.label,
-      verdict: verdictFor(rating.rating, moon),
-    };
+    best = bestHour(remaining, kpSlots, cloudSlots, place.timezone);
   }
+  const kpMax = kpSlots.length ? Math.max(...kpSlots.map((s) => s.kp)) : null;
+  const cloudAvg = cloudSlots.length ? Math.round(cloudSlots.reduce((a, s) => a + s.pct, 0) / cloudSlots.length) : null;
+  const rating = rate({ kp_max: kpMax, cloud_avg: cloudAvg, dark: win !== null, place });
+  const forecast: Forecast = {
+    night_date: date,
+    fetched_at: isoMinute(now),
+    dark_start: win?.start ?? null,
+    dark_end: win?.end ?? null,
+    kp_max: kpMax,
+    kp_slots: kpSlots,
+    cloud_avg_pct: cloudAvg,
+    cloud_slots: cloudSlots,
+    ...rating,
+    best_hour: best,
+    moon_brightness: moon.brightness,
+    moon_label: moon.label,
+    verdict: verdictFor(rating.rating, moon),
+  };
   writeNight(ctx.db, forecast);
   return forecast;
 }
@@ -352,7 +339,7 @@ function darkWindowOp(input: NightInput, ctx: Ctx) {
   const place = placeOrThrow(ctx.db);
   const date = input.date ?? resolveNight(clock(input), place);
   const win = darkWindow(date, place);
-  const moon = moonBrightness(Date.parse(`${date}T22:00:00Z`));
+  const moon = nightMoon(date, place);
   const moonFields = { moon_brightness: moon.brightness, moon_label: moon.label };
   if (!win) {
     return { date, dark: false, dark_start: null, dark_end: null, dark_start_local: null, dark_end_local: null, dark_hours: 0, ...moonFields };

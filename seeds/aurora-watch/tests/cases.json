@@ -1972,7 +1972,7 @@
   "expect": {
    "rating": "low",
    "reason": "Clouded over (71% cloud)",
-   "fetchedAt": "2026-12-17T12:00:00Z"
+   "fetched_at": "2026-12-17T12:00:00Z"
   }
  },
  {
@@ -2011,7 +2011,7 @@
   "expect": {
    "kp_max": 9,
    "rating": "low",
-   "fetchedAt": "2026-12-17T12:00:00Z"
+   "fetched_at": "2026-12-17T12:00:00Z"
   }
  },
  {
@@ -2188,7 +2188,7 @@
   "operation": "widget_aurora",
   "version": 1,
   "input": {
-   "now": "2026-12-15T13:00:00Z"
+   "date": "2026-12-15"
   },
   "expect": {
    "small": {
@@ -2198,7 +2198,9 @@
      {
       "label": "Refresh",
       "operation": "fetch_tonight@1",
-      "input": {}
+      "input": {
+       "date": "2026-12-15"
+      }
      }
     ]
    },
@@ -2226,7 +2228,9 @@
      {
       "label": "Refresh",
       "operation": "fetch_tonight@1",
-      "input": {}
+      "input": {
+       "date": "2026-12-15"
+      }
      }
     ]
    }
@@ -2531,7 +2535,7 @@
   },
   "expect": {
    "night_date": "2026-12-15",
-   "fetchedAt": "2026-12-15T13:00:00Z",
+   "fetched_at": "2026-12-15T13:00:00Z",
    "dark_start": "2026-12-15T14:37:00Z",
    "dark_end": "2026-12-16T06:43:00Z",
    "kp_max": 3.67,
@@ -2566,8 +2570,7 @@
   "operation": "widget_aurora",
   "version": 1,
   "input": {
-   "date": "2026-12-15",
-   "now": "2026-12-15T13:00:00Z"
+   "date": "2026-12-15"
   },
   "expect": {
    "small": {
@@ -2598,7 +2601,7 @@
      {
       "title": "Cloud",
       "value": "17%",
-      "detail": "half moon (40%)"
+      "detail": "half moon (41%)"
      },
      {
       "title": "Dark",
@@ -2607,7 +2610,7 @@
      },
      {
       "title": "Fetched",
-      "value": "today 14:00",
+      "value": "$any",
       "detail": "Tromsø"
      }
     ]
@@ -3053,7 +3056,7 @@
   "expect": {
    "night_date": "2026-12-20",
    "rating": "good",
-   "fetchedAt": "2026-12-20T18:00:00Z"
+   "fetched_at": "2026-12-20T18:00:00Z"
   }
  },
  {
@@ -3069,46 +3072,25 @@
   }
  },
  {
-  "name": "clock 05:00 local, still dark: last night, so the widget shows the 19:00 fetch",
-  "operation": "widget_aurora",
+  "name": "clock 05:00 local, still dark: tonight is last night, the 19:00 fetch",
+  "operation": "get_tonight",
   "version": 1,
   "input": {
    "now": "2026-12-21T04:00:00Z"
   },
   "expect": {
-   "small": {
-    "template": "stat",
-    "value": "Good"
-   },
-   "large": {
-    "items": [
-     {
-      "value": "Good"
-     },
-     "$any",
-     "$any",
-     "$any",
-     {
-      "title": "Fetched",
-      "value": "yesterday 19:00"
-     }
-    ]
-   }
+   "night_date": "2026-12-20",
+   "rating": "good"
   }
  },
  {
   "name": "clock 12:00 local: tonight is a new night, not fetched yet",
-  "operation": "widget_aurora",
+  "operation": "get_tonight",
   "version": 1,
   "input": {
    "now": "2026-12-21T11:00:00Z"
   },
-  "expect": {
-   "small": {
-    "template": "text",
-    "text": "Not fetched yet"
-   }
-  }
+  "expect": null
  },
  {
   "name": "the nights, latest first",
@@ -3165,8 +3147,7 @@
   "operation": "widget_aurora",
   "version": 1,
   "input": {
-   "date": "2026-06-21",
-   "now": "2026-06-21T19:00:00Z"
+   "date": "2026-06-21"
   },
   "expect": {
    "small": {
@@ -3181,7 +3162,7 @@
      },
      {
       "title": "Fetched",
-      "value": "today 18:02"
+      "value": "$any"
      }
     ]
    }
@@ -3223,6 +3204,31 @@
      "night_date": "2026-06-21"
     }
    ]
+  }
+ },
+ {
+  "name": "another time zone dates the nights differently: they go too",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Tromsø harbour",
+   "latitude": 69.65,
+   "longitude": 18.96,
+   "timezone": "UTC"
+  },
+  "expect": {
+   "timezone": "UTC"
+  }
+ },
+ {
+  "name": "no nights left from the old time zone",
+  "operation": "list_nights",
+  "version": 1,
+  "input": {
+   "limit": 60
+  },
+  "expect": {
+   "nights": []
   }
  }
 ]

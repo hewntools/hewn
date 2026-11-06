@@ -19,10 +19,10 @@
     "findings": [
       {
         "kind": "warn",
-        "title": "Choosing a place somewhere else clears the stored nights",
-        "detail": "A night is rated for one place, so moving starts afresh; renaming the place keeps them.",
+        "title": "Choosing another place deletes the stored nights",
+        "detail": "A night is rated for one place and time zone, so moving starts afresh, and an agent has to ask you first; renaming the place keeps them.",
         "file": "src/index.ts",
-        "line": 237
+        "line": 241
       },
       {
         "kind": "ok",

@@ -308,6 +308,11 @@ export function moonBrightness(ms: number): Moon {
   return { brightness, label };
 }
 
+/** The moon on the night of `date` at the place: at its local midnight, whatever the time zone. */
+export function nightMoon(date: string, place: Place): Moon {
+  return moonBrightness(localNoonUTC(date, place.timezone) + 12 * 3_600_000);
+}
+
 // ---------- best hour ----------
 
 export type BestHour = {

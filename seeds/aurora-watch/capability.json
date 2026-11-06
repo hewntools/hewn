@@ -22,8 +22,8 @@
     {
       "name": "set_place",
       "version": 1,
-      "sideEffect": "write",
-      "description": "Choose where the owner watches from: a name, latitude and longitude (decimal degrees, north and east positive) and the place's IANA time zone (e.g. Europe/Oslo). Nights and local times follow that zone, and how strong an aurora has to be follows the place's geomagnetic latitude. Moving somewhere else (other coordinates) clears the stored nights and the cached cloud forecasts for the old place; renaming keeps them. It checks every field and its error says what is wrong with each (a blank or over-long name, a latitude outside −90…90, a longitude outside −180…180, an unknown time zone).",
+      "sideEffect": "destructive",
+      "description": "Choose where the owner watches from: a name, latitude and longitude (decimal degrees, north and east positive) and the place's IANA time zone (e.g. Europe/Oslo). Nights and local times follow that zone, and how strong an aurora has to be follows the place's geomagnetic latitude. Moving somewhere else (other coordinates or another time zone) deletes the stored nights and the cached cloud forecasts for the old place; renaming keeps them. It checks every field and its error says what is wrong with each (a blank or over-long name, a latitude outside −90…90, a longitude outside −180…180, an unknown time zone).",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -203,13 +203,6 @@
           },
           "fetched_at": {
             "type": "string"
-          },
-          "fetchedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "When this forecast was fetched (ISO)"
           },
           "dark_start": {
             "type": [
@@ -391,14 +384,7 @@
           },
           "fetched_at": {
             "type": "string",
-            "description": "When it was fetched (ISO); empty when an older record doesn't say"
-          },
-          "fetchedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "When this forecast was fetched (ISO), null when unknown"
+            "description": "When it was fetched (ISO)"
           },
           "dark_start": {
             "type": [
@@ -477,7 +463,7 @@
               "object",
               "null"
             ],
-            "description": "Best hour of the dark window, null when unknown (older records)",
+            "description": "Best hour of the dark window, null when it never gets dark",
             "properties": {
               "start": {
                 "type": "string"
@@ -570,14 +556,7 @@
                 },
                 "fetched_at": {
                   "type": "string",
-                  "description": "When it was fetched (ISO); empty when an older record doesn't say"
-                },
-                "fetchedAt": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "When this forecast was fetched (ISO), null when unknown"
+                  "description": "When it was fetched (ISO)"
                 },
                 "dark_start": {
                   "type": [
@@ -656,7 +635,7 @@
                     "object",
                     "null"
                   ],
-                  "description": "Best hour of the dark window, null when unknown (older records)",
+                  "description": "Best hour of the dark window, null when it never gets dark",
                   "properties": {
                     "start": {
                       "type": "string"
@@ -802,10 +781,6 @@
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "description": "Night to show (YYYY-MM-DD); defaults to tonight"
-          },
-          "now": {
-            "type": "string",
-            "description": "Optional ISO instant to resolve tonight at; for replays and tests"
           }
         },
         "additionalProperties": false

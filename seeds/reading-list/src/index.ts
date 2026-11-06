@@ -26,14 +26,18 @@ function book(db: DatabaseSync, bookId: string): BookRow {
   return row;
 }
 
+// Letters NFKD leaves whole: "Søren" is "soren", not "s-ren".
+const LETTERS: Record<string, string> = { ø: "o", æ: "ae", œ: "oe", ß: "ss", ł: "l", đ: "d", ð: "d", þ: "th", ı: "i" };
+
 // Readable, stable ids ("middlemarch", "piranesi-2"): easy for agents to say back, and
 // predictable enough that sample data can log progress on the books it adds.
 function newBookId(db: DatabaseSync, title: string): string {
   const base =
     title
       .normalize("NFKD")
-      .replace(/[̀-ͯ]/g, "")
+      .replace(/\p{M}/gu, "")
       .toLowerCase()
+      .replace(/[øæœßłđðþı]/g, (c) => LETTERS[c])
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .slice(0, 48)

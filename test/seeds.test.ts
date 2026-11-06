@@ -82,6 +82,38 @@ describe("seeds", () => {
     await assert.rejects(call("aurora-watch", "set_place", { name: "Fairbanks", latitude: 64.84, longitude: -147.72, timezone: "Alaska" }), /Unknown time zone/);
   });
 
+  test("aurora watch: moving deletes the nights and the cloud forecasts cached for the old place; NOAA's Kp stays cached", async () => {
+    await installFrom(t.platform, join(SEEDS, "aurora-watch"));
+    t.platform.approveGrants(USER, "aurora-watch");
+    const at = (h: number) => new Date(Date.parse("2026-12-16T00:00:00Z") + h * 3_600_000).toISOString();
+    const noaa = [["time_tag", "kp", "observed", "noaa_scale"], ...[0, 3, 6, 9, 12, 15, 18].map((h) => [at(h).slice(0, 19).replace("T", " "), "2.00", "predicted", null])];
+    const met = { properties: { timeseries: Array.from({ length: 20 }, (_, h) => ({ time: at(h).replace(".000", ""), data: { instant: { details: { cloud_area_fraction: 20 } } } })) } };
+    const hosts: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL) => {
+      const host = new URL(String(url)).host;
+      hosts.push(host);
+      return Response.json(host === "api.met.no" ? met : noaa);
+    }) as typeof fetch;
+    try {
+      const fairbanks = { name: "Fairbanks", latitude: 64.84, longitude: -147.72, timezone: "America/Anchorage" };
+      const night = { date: "2026-12-15", now: "2026-12-15T20:00:00Z" };
+      await call("aurora-watch", "set_place", fairbanks);
+      assert.equal((await call("aurora-watch", "fetch_tonight", night)).rating, "good");
+      await call("aurora-watch", "fetch_tonight", night);
+      assert.deepEqual(hosts, ["services.swpc.noaa.gov", "api.met.no"], "the second fetch is served from the cache");
+      await call("aurora-watch", "set_place", { ...fairbanks, name: "Fairbanks, the dome" });
+      assert.equal((await call("aurora-watch", "list_nights")).nights.length, 1, "a new name keeps them");
+      await call("aurora-watch", "set_place", { name: "Yellowknife", latitude: 62.45, longitude: -114.37, timezone: "America/Edmonton" });
+      assert.deepEqual((await call("aurora-watch", "list_nights")).nights, []);
+      await call("aurora-watch", "set_place", fairbanks);
+      await call("aurora-watch", "fetch_tonight", night);
+      assert.deepEqual(hosts, ["services.swpc.noaa.gov", "api.met.no", "api.met.no"], "back in Fairbanks: its clouds are fetched again, NOAA's Kp isn't");
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
   test("habits: check-ins, streaks across days, undo, the widget's button", async () => {
     await installFrom(t.platform, join(SEEDS, "habits"));
     const { habitId } = await call("habits", "add_habit", { name: "Stretch" });

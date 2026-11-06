@@ -23,6 +23,8 @@
     "expect": { "bookId": "piranesi-2" } },
   { "name": "accents fold into the id", "operation": "add_book", "input": { "title": "Rött, vitt & kungligt blå" },
     "expect": { "bookId": "rott-vitt-kungligt-bla" } },
+  { "name": "so do letters of their own", "operation": "add_book", "input": { "title": "Brødrene Løvehjerte, Straße" },
+    "expect": { "bookId": "brodrene-lovehjerte-strasse" } },
   { "name": "set the page", "operation": "set_progress", "input": { "bookId": "middlemarch", "page": 220 },
     "expect": { "bookId": "middlemarch", "page": 220, "percent": 25 } },
   { "name": "a page past the end stops at the last page", "operation": "set_progress", "input": { "bookId": "middlemarch", "page": 9999 },

@@ -23,9 +23,7 @@ export type Forecast = {
   cloud_slots: CloudSlot[];
   rating: Rating;
   reason: string;
-  /** When the forecast was fetched (ISO), or null when an older record doesn't say. */
-  fetchedAt: string | null;
-  /** Best hour of the dark window, or null when not known (older records, no window). */
+  /** Best hour of the dark window, or null when there is none (too light). */
   best_hour: BestHour | null;
   /** How bright the moon is, 0 (dark) to 1 (full), or null when not known. */
   moon_brightness: number | null;
@@ -35,74 +33,13 @@ export type Forecast = {
   verdict: string | null;
 };
 
-function bestHourOf(v: unknown): BestHour | null {
-  if (!v) return null;
-  let obj: any = v;
-  if (typeof v === "string") {
-    try {
-      obj = JSON.parse(v);
-    } catch {
-      return null;
-    }
-  }
-  if (!obj || typeof obj !== "object" || typeof obj.start !== "string" || typeof obj.end !== "string") return null;
-  return {
-    start: obj.start,
-    end: obj.end,
-    start_local: typeof obj.start_local === "string" ? obj.start_local : "",
-    end_local: typeof obj.end_local === "string" ? obj.end_local : "",
-    kp: numOrNull(obj.kp),
-    cloud_pct: numOrNull(obj.cloud_pct),
-  };
-}
-
-function strOrNull(v: unknown): string | null {
-  return typeof v === "string" && v ? v : null;
-}
-
-const RATINGS: Rating[] = ["none", "low", "possible", "good"];
-
-function slots<T>(v: unknown): T[] {
-  if (Array.isArray(v)) return v as T[];
-  if (typeof v !== "string" || !v) return [];
-  try {
-    const parsed = JSON.parse(v);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function numOrNull(v: unknown): number | null {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** A valid ISO timestamp, or null (missing, empty or unparseable means unknown). */
-export function fetchedAtOf(v: unknown): string | null {
-  return typeof v === "string" && v && Number.isFinite(Date.parse(v)) ? v : null;
-}
-
-/** Map a stored row (or a record of the same shape) to a Forecast, tolerating older records. */
+/** A stored row as the operations return it (writeNight is the only writer). */
 export function toForecast(row: any): Forecast {
-  const fetchedAt = fetchedAtOf(row.fetched_at ?? row.fetchedAt);
   return {
-    night_date: String(row.night_date),
-    fetched_at: fetchedAt ?? "",
-    dark_start: row.dark_start || null,
-    dark_end: row.dark_end || null,
-    kp_max: numOrNull(row.kp_max),
-    kp_slots: slots<KpSlot>(row.kp_slots),
-    cloud_avg_pct: numOrNull(row.cloud_avg_pct),
-    cloud_slots: slots<CloudSlot>(row.cloud_slots),
-    rating: RATINGS.includes(row.rating) ? row.rating : "low",
-    reason: typeof row.reason === "string" ? row.reason : "",
-    fetchedAt,
-    best_hour: bestHourOf(row.best_hour),
-    moon_brightness: numOrNull(row.moon_brightness),
-    moon_label: strOrNull(row.moon_label),
-    verdict: strOrNull(row.verdict),
+    ...row,
+    kp_slots: JSON.parse(row.kp_slots),
+    cloud_slots: JSON.parse(row.cloud_slots),
+    best_hour: row.best_hour ? JSON.parse(row.best_hour) : null,
   };
 }
 
@@ -147,7 +84,7 @@ export function writeNight(db: Db, f: Forecast): void {
        moon_brightness = excluded.moon_brightness, moon_label = excluded.moon_label, verdict = excluded.verdict`,
   ).run(
     f.night_date,
-    f.fetchedAt ?? f.fetched_at,
+    f.fetched_at,
     f.dark_start,
     f.dark_end,
     f.kp_max,
