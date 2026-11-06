@@ -1,0 +1,18 @@
+[
+  { "name": "empty summary", "operation": "get_summary", "input": {},
+    "expect": { "runCount": 0, "totalDistanceKm": 0, "averageDistanceKm": null, "averagePaceSecondsPerKm": null } },
+  { "name": "record a run", "operation": "record_run", "version": 1,
+    "input": { "distanceKm": 5, "durationSeconds": 1680, "date": "2026-10-01", "notes": "easy" },
+    "expect": { "runId": "$any" } },
+  { "name": "record another", "operation": "record_run",
+    "input": { "distanceKm": 10, "durationSeconds": 3300, "date": "2026-10-03" },
+    "expect": { "runId": "$any" } },
+  { "name": "list in range", "operation": "list_runs", "input": { "from": "2026-10-02" },
+    "expect": { "runs": [{ "date": "2026-10-03", "distanceKm": 10, "durationSeconds": 3300 }] } },
+  { "name": "list keeps notes", "operation": "list_runs", "input": { "to": "2026-10-01" },
+    "expect": { "runs": [{ "distanceKm": 5, "notes": "easy" }] } },
+  { "name": "summary", "operation": "get_summary", "input": {},
+    "expect": { "runCount": 2, "totalDistanceKm": 15, "totalDurationSeconds": 4980, "averageDistanceKm": 7.5, "averagePaceSecondsPerKm": 332 } },
+  { "name": "rejects negative distance", "operation": "record_run", "input": { "distanceKm": -1, "durationSeconds": 60 }, "expectError": true },
+  { "name": "rejects unknown field", "operation": "record_run", "input": { "distanceKm": 1, "durationSeconds": 60, "mood": "great" }, "expectError": true }
+]

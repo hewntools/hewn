@@ -1,0 +1,32 @@
+{
+  "hue": 130,
+  "palette": {
+    "leaf": "#3a7b41",
+    "leafDark": "#8fcf8a",
+    "leafDry": "#9a9a4a",
+    "leafDryDark": "#b4ae6a",
+    "water": "#3a78c0",
+    "waterDark": "#7fb8ea",
+    "feed": "#b5802a",
+    "feedDark": "#e8c06a",
+    "repot": "#86664a",
+    "repotDark": "#c2a183",
+    "ceramic": "#f4f1ec",
+    "ceramicDark": "#3a3734",
+    "shelfWood": "#d6c3a8",
+    "shelfWoodDark": "#4e3f31",
+    "late": "platform --danger",
+    "due": "platform --warn",
+    "neutrals": "platform --bg / --surface (white and pale grey, near-black in dark)"
+  },
+  "type": {
+    "display": "ui-rounded, \"SF Pro Rounded\", system-ui (headings, big counts)",
+    "body": "system-ui (platform --font)",
+    "numbers": "ui-rounded with tabular numerals",
+    "labels": "system-ui 12-13px, sentence case, weight for hierarchy",
+    "botanical": "ui-serif italic for species names"
+  },
+  "layout": "Home: header with today's date, then a two-column top (Water today checklist card | 14-day watering schedule), then the windowsill: every plant as a pot on a wooden shelf per window, filterable by window. Plant page: hero (large pot, name, botanical name, next water, facts), a care-rhythm timeline, log card beside history, details behind a disclosure. One column on phones in the order answer, action, visual, rest.",
+  "signature": "Drawn pots: each plant is an SVG pot whose blue fill is how much of its watering interval is left; the foliage (blades, broad leaves, trailing vines or a bush, picked from the name or species) wilts and yellows when thirsty or late. Plus a 14-day schedule grid with water drops and feed dots, and a care-rhythm timeline whose watering gaps turn red when they ran longer than planned.",
+  "mood": "A calm, friendly windowsill: leaf green and water blue on neutral white or near-black, warm shelf wood, rounded type."
+}

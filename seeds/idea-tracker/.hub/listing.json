@@ -4,12 +4,17 @@
     "Work",
     "Writing"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "Polished: where your ideas stand, by stage and rating",
+      "date": "2026-11-06"
     }
   ],
   "summary": {

@@ -30,7 +30,7 @@ describe("seeds", () => {
 
   test("the Official shelf: each tool on it has sample data, Hewn's reading and a screen; .hub/ never enters a version", () => {
     const shelf = readShelf(SEEDS);
-    assert.ok(shelf.tools.length >= 7, shelf.tools.map((t) => t.id).join());
+    assert.ok(shelf.tools.length >= 8, shelf.tools.map((t) => t.id).join());
     assert.equal(shelf.firstRun.length, 3);
     for (const t of shelf.tools) {
       assert.ok(readSample(t.files)?.length, `${t.id}: sample data`);
@@ -67,6 +67,51 @@ describe("seeds", () => {
       bookId, title: "Middlemarch", author: "George Eliot", status: "finished", pages: 880, page: 880, rating: 5, finishedOn: "2026-10-19",
     });
     await assert.rejects(call("reading-list", "set_progress", { bookId, page: 1 }), /already finished/);
+  });
+
+  test("aurora watch: no place of its own; the owner's place sets the nights, their time zone and the Kp it takes", async () => {
+    await installFrom(t.platform, join(SEEDS, "aurora-watch"));
+    t.platform.approveGrants(USER, "aurora-watch");
+    assert.equal(await call("aurora-watch", "get_place"), null);
+    assert.equal(await call("aurora-watch", "fetch_tonight"), null, "a schedule set up before a place does nothing, and fetches nothing");
+    assert.deepEqual((await call("aurora-watch", "widget_aurora")).small, { template: "text", text: "Choose your place" });
+    const place = await call("aurora-watch", "set_place", { name: "Fairbanks", latitude: 64.84, longitude: -147.72, timezone: "America/Anchorage" });
+    assert.deepEqual([place.kp_possible, place.kp_good], [0.67, 2], "far closer to the oval than its latitude says");
+    const dark = await call("aurora-watch", "dark_window", { date: "2026-12-15" });
+    assert.deepEqual([dark.dark_start_local, dark.dark_end_local], ["17:16", "08:18"], "in Alaska's time");
+    await assert.rejects(call("aurora-watch", "set_place", { name: "Fairbanks", latitude: 64.84, longitude: -147.72, timezone: "Alaska" }), /Unknown time zone/);
+  });
+
+  test("aurora watch: moving deletes the nights and the cloud forecasts cached for the old place; NOAA's Kp stays cached", async () => {
+    await installFrom(t.platform, join(SEEDS, "aurora-watch"));
+    t.platform.approveGrants(USER, "aurora-watch");
+    const at = (h: number) => new Date(Date.parse("2026-12-16T00:00:00Z") + h * 3_600_000).toISOString();
+    const noaa = [["time_tag", "kp", "observed", "noaa_scale"], ...[0, 3, 6, 9, 12, 15, 18].map((h) => [at(h).slice(0, 19).replace("T", " "), "2.00", "predicted", null])];
+    const met = { properties: { timeseries: Array.from({ length: 20 }, (_, h) => ({ time: at(h).replace(".000", ""), data: { instant: { details: { cloud_area_fraction: 20 } } } })) } };
+    const hosts: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL) => {
+      const host = new URL(String(url)).host;
+      hosts.push(host);
+      return Response.json(host === "api.met.no" ? met : noaa);
+    }) as typeof fetch;
+    try {
+      const fairbanks = { name: "Fairbanks", latitude: 64.84, longitude: -147.72, timezone: "America/Anchorage" };
+      const night = { date: "2026-12-15", now: "2026-12-15T20:00:00Z" };
+      await call("aurora-watch", "set_place", fairbanks);
+      assert.equal((await call("aurora-watch", "fetch_tonight", night)).rating, "good");
+      await call("aurora-watch", "fetch_tonight", night);
+      assert.deepEqual(hosts, ["services.swpc.noaa.gov", "api.met.no"], "the second fetch is served from the cache");
+      await call("aurora-watch", "set_place", { ...fairbanks, name: "Fairbanks, the dome" });
+      assert.equal((await call("aurora-watch", "list_nights")).nights.length, 1, "a new name keeps them");
+      await call("aurora-watch", "set_place", { name: "Yellowknife", latitude: 62.45, longitude: -114.37, timezone: "America/Edmonton" });
+      assert.deepEqual((await call("aurora-watch", "list_nights")).nights, []);
+      await call("aurora-watch", "set_place", fairbanks);
+      await call("aurora-watch", "fetch_tonight", night);
+      assert.deepEqual(hosts, ["services.swpc.noaa.gov", "api.met.no", "api.met.no"], "back in Fairbanks: its clouds are fetched again, NOAA's Kp isn't");
+    } finally {
+      globalThis.fetch = real;
+    }
   });
 
   test("habits: check-ins, streaks across days, undo, the widget's button", async () => {

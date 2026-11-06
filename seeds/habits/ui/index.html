@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Habits</title>
+  <link rel="stylesheet" href="/_platform/ui.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main class="page">
+    <section class="today" aria-labelledby="today-title">
+      <header class="hero">
+        <div class="hero-date">
+          <h1 id="today-title"><span class="visually-hidden">Today, </span><span id="today-wd">Today</span></h1>
+          <p class="today-date" id="today-date"></p>
+        </div>
+        <div class="meter" id="meter" hidden>
+          <div class="meter-count" id="meter-count"></div>
+          <div class="meter-chain" id="meter-chain"></div>
+        </div>
+      </header>
+      <p class="insight" id="insight" hidden></p>
+
+      <div class="notice danger" id="load-error" role="alert" hidden>
+        <p id="load-error-text"></p>
+        <button type="button" class="sm" id="retry">Try again</button>
+      </div>
+
+      <ul class="habits" id="habits" aria-live="polite">
+        <li><span class="skeleton tile-skeleton"></span></li>
+        <li><span class="skeleton tile-skeleton"></span></li>
+      </ul>
+
+      <div class="first" id="first" hidden>
+        <svg class="first-glyph" viewBox="0 0 5 5" aria-hidden="true">
+          <rect x="4" y="0" width="1" height="1"/>
+          <rect x="3" y="1" width="1" height="1"/><rect x="4" y="1" width="1" height="1"/>
+          <rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/>
+          <rect x="0" y="3" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/>
+          <rect x="1" y="4" width="1" height="1"/>
+        </svg>
+        <div>
+          <strong>Nothing to check off yet</strong>
+          <p>Add one small thing you want to do every day. Tap it when it's done, and its chain starts.</p>
+        </div>
+      </div>
+
+      <form class="add" id="add-form" autocomplete="off">
+        <label class="visually-hidden" for="add-name">New habit</label>
+        <span class="add-plus" aria-hidden="true">
+          <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+        </span>
+        <input type="text" id="add-name" name="name" maxlength="60" placeholder="Add a habit">
+        <button type="submit" class="primary" id="add-btn">Add</button>
+      </form>
+      <div class="notice danger" id="add-error" role="alert" hidden></div>
+    </section>
+
+    <section class="weeks" id="weeks" aria-labelledby="weeks-title" hidden>
+      <header class="weeks-head">
+        <div>
+          <h2 id="weeks-title">Chains</h2>
+          <p class="weeks-sub" id="weeks-sub"></p>
+        </div>
+        <ul class="legend" aria-label="Legend">
+          <li><svg width="26" height="12" aria-hidden="true"><rect class="run live" x="1" y="1" width="24" height="10" rx="5"/></svg>Current run</li>
+          <li><svg width="26" height="12" aria-hidden="true"><rect class="run past" x="1" y="1" width="24" height="10" rx="5"/></svg>Earlier run</li>
+          <li><svg width="10" height="12" aria-hidden="true"><rect class="gap" x="1" y="1" width="8" height="10" rx="3"/></svg>Missed</li>
+          <li><svg width="12" height="12" aria-hidden="true"><rect class="due" x="1" y="1" width="10" height="10" rx="3.5"/></svg>Today, not yet</li>
+        </ul>
+      </header>
+      <div class="board">
+        <div class="board-row axis-row" aria-hidden="true">
+          <span class="lane-label"></span>
+          <div class="axis" id="axis"></div>
+        </div>
+        <ol class="lanes" id="lanes"></ol>
+      </div>
+    </section>
+  </main>
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

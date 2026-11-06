@@ -1,0 +1,33 @@
+{
+  "hue": 15,
+  "palette": {
+    "binding": "#a1263b",
+    "binding-dark": "#ec8e93",
+    "gilt": "#ab7f22",
+    "gilt-dark": "#e8c164",
+    "paper-edge": "#f3ecdc",
+    "paper-edge-dark": "#3a3529",
+    "cloth-navy": "#2d4a7c",
+    "cloth-navy-dark": "#3f5d95",
+    "cloth-forest": "#2f6a4f",
+    "cloth-forest-dark": "#3d7c5e",
+    "cloth-plum": "#6c3a70",
+    "cloth-plum-dark": "#7d4882",
+    "cloth-teal": "#22646d",
+    "cloth-teal-dark": "#2f7781",
+    "cloth-slate": "#4c5866",
+    "cloth-slate-dark": "#5d6977",
+    "plank": "#a7784f",
+    "plank-dark": "#6b4a2f",
+    "neutral-bg": "platform --bg / --surface"
+  },
+  "type": {
+    "display": "system-ui, heavy weight (720–780), tight tracking",
+    "body": "system-ui",
+    "numbers": "ui-rounded, tabular figures, large percent and year count",
+    "small": "system-ui 12–13px, sentence case"
+  },
+  "layout": "Single page up to 1120px: header with Add a book; 'Reading now' cards in a responsive grid (drawn cloth cover, big percent, bookmark track, pages to go with a pace estimate, one control row: page field, Finished it, remove). Then a full-width year shelf: figures (books, pages, average rating, pace) left, twelve month bays right (two rows of six on phone). Below, two columns on desktop: want-to-read pile left, finished list right; stacked on phone.",
+  "signature": "Books as objects: a year bookcase with one bay per month where each finished book stands as a spine in the month it was finished (thickness by pages, rating as gilt dots, months still to come hatched); the want-to-read pile as cloth books lying flat (thickness by page count); progress as a gilt ribbon bookmark over a page-edge track.",
+  "mood": "A well-kept home bookshelf: deep cloth bindings, gilt details, warm wood, calm neutral page in light and dark."
+}

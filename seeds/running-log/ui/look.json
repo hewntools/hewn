@@ -1,0 +1,21 @@
+{
+  "hue": 25,
+  "palette": {
+    "ember": "#c4422b",
+    "ember-dark": "#ff8f70",
+    "lake": "#1d6f8f",
+    "lake-dark": "#72c7e8",
+    "gold": "#a86b0c",
+    "gold-dark": "#f3c25e",
+    "neutral-bg": "platform --bg / --surface (white-grey light, near-black dark)"
+  },
+  "type": {
+    "display": "system-ui 760, tight tracking",
+    "body": "system-ui",
+    "numbers": "ui-rounded, SF Pro Rounded, system-ui with tabular numerals (watch face)",
+    "labels": "system-ui 12.5-13px 500, sentence case"
+  },
+  "layout": "Desktop: header with a 12-week streak strip; a split scoreboard (this week | this month) then the training trace on the left; the sticky 'Log a run' form (watch-face distance and time, Today/Yesterday, live pace beside Save) on the right; the run sheet grouped by week full width below. Phone: header, scoreboard stacked in one panel, form, trace, sheet.",
+  "signature": "Training trace: a time-true SVG chart whose week columns carry their weekly km on top (this week in ember), ember distance bars per run day and a smoothed lake-blue pace thread on an inverted right axis (faster is higher) with a dashed average-pace guide whose value is tagged on the pace axis; gold marks the longest run and fastest pace. Plus the month race: this month's cumulative km as an ember step line against last month's dashed one.",
+  "mood": "Sporty and precise, like a watch face and a coach's split sheet; warm ember on calm neutrals."
+}

@@ -6,6 +6,7 @@
   "abi": "2.3",
   "hue": 280,
   "tags": ["habits", "daily", "streaks"],
+  "ui": { "available": true },
   "operations": [
     {
       "name": "add_habit",
@@ -89,6 +90,43 @@
                 "name": { "type": "string" },
                 "done": { "type": "boolean" },
                 "streak": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_history",
+      "description": "Every habit's check-ins over a span of days ending on `to` (default today, 35 days), with its current streak as of `to`, its longest run ever, and the first day it was tracked.",
+      "version": 1,
+      "sideEffect": "read",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "to": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "days": { "type": "integer", "minimum": 1, "maximum": 371 }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["from", "to", "habits"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "habits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["habitId", "name", "since", "days", "streak", "best"],
+              "properties": {
+                "habitId": { "type": "string" },
+                "name": { "type": "string" },
+                "since": { "type": "string", "description": "First day tracked: the day it was added, or its earliest check-in if earlier." },
+                "days": { "type": "array", "items": { "type": "string" }, "description": "Days checked in within from..to, ascending." },
+                "streak": { "type": "integer" },
+                "best": { "type": "integer", "description": "Longest run of consecutive days ever." }
               }
             }
           }

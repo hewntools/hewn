@@ -1,0 +1,22 @@
+{
+  "hue": 45,
+  "palette": {
+    "marigold": "#f59a2e / dark #ffa94d (accent fill, first kid)",
+    "marigold-ink": "#a24f00 / dark #ffbf73",
+    "teal": "#1b9a94 / dark #4fd1c5 (second kid)",
+    "plum": "#c0478a / dark #f28cc6 (third kid)",
+    "sky": "#3a7bd5 / dark #82b1ff (fourth kid)",
+    "violet": "#7a5cd6 / dark #b7a2ff (fifth kid)",
+    "neutrals": "platform --bg / --surface-solid (white and pale grey; near-black in dark)"
+  },
+  "type": {
+    "display": "ui-rounded, 'SF Pro Rounded', system-ui; 700-760",
+    "body": "system font stack (platform --font)",
+    "quotes": "ui-rounded 520-660, 18-27px",
+    "numbers": "ui-rounded 760 tabular (ages: big numbers, small units)",
+    "small": "system 12.5-13px, sentence case"
+  },
+  "layout": "Header with a speech-bubble mark; a hero row with the quote composer (bubble-shaped textarea, kid avatar chips) beside a spotlight card that brings back an on-this-day or random quote; a full-width timeline; then all quotes as speech-bubble cards in a responsive grid with avatar, context, age and date underneath. Stacks composer, spotlight, timeline, list on phones.",
+  "signature": "'Growing up, in their words': one life line per kid from birth to today, birthday ticks labelled with ages, a dot per quote in the kid's colour; tapping a dot brings that quote into the spotlight.",
+  "mood": "Warm, playful and kid-sized: rounded type, speech bubbles, one colour per child on neutral paper."
+}

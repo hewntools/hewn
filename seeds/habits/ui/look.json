@@ -1,0 +1,29 @@
+{
+  "hue": 280,
+  "palette": {
+    "violet": "#6a4bdc",
+    "violetDark": "#b4a0ff",
+    "violetSoft": "#efeafe",
+    "violetSoftDark": "#2a2346",
+    "violetRing": "#bfb0f5",
+    "violetRingDark": "#6a5aa8",
+    "linkOff": "#d9cffc",
+    "linkOffDark": "#4c4180",
+    "violetPast": "#bcaef0",
+    "violetPastDark": "#5a4b94",
+    "amber": "#a86400",
+    "amberDark": "#ffc061",
+    "amberSoft": "#fff3df",
+    "amberSoftDark": "#3a2c14",
+    "neutrals": "platform --bg / --surface / --text greys"
+  },
+  "type": {
+    "display": "ui-rounded, 'SF Pro Rounded', system-ui",
+    "body": "system-ui",
+    "numbers": "ui-rounded with tabular numerals",
+    "small": "system-ui 12-13px, sentence case"
+  },
+  "layout": "One column. Hero: the weekday large, the date, and a done count beside a side-on chain meter (one link per habit, lit when done), then one computed insight line (a run at risk, a new best). Then one tap tile per habit (two across on desktop), a streak shown only when there is one, and a quiet dashed 'Add a habit' row. Below: the Chains board, a panel with a name column and a five-week, Monday-aligned day grid on a shared axis (stacked on phones).",
+  "signature": "Streak chains: consecutive check-ins merge into one violet capsule labelled with its length (the live run solid, past runs pale). A missed day is an empty grey cell, days before tracking are faint dots, today's open day is a dashed amber slot on an amber column, and the rest of the week sits outlined ahead. The hero repeats the idea as a side-on chain of links for today.",
+  "mood": "Calm, tactile, encouraging"
+}

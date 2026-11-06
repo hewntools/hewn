@@ -1,7 +1,22 @@
 [
+  {"operation": "add_book", "input": {"title": "Station Eleven", "author": "Emily St. John Mandel", "pages": 333}},
+  {"operation": "add_book", "input": {"title": "The Remains of the Day", "author": "Kazuo Ishiguro", "pages": 258}},
+  {"operation": "add_book", "input": {"title": "Pachinko", "author": "Min Jin Lee", "pages": 496}},
+  {"operation": "add_book", "input": {"title": "Klara and the Sun", "author": "Kazuo Ishiguro", "pages": 303}},
+  {"operation": "add_book", "input": {"title": "The Name of the Rose", "author": "Umberto Eco", "pages": 536}},
+  {"operation": "add_book", "input": {"title": "Kindred", "author": "Octavia E. Butler", "pages": 287}},
+  {"operation": "finish_book", "input": {"bookId": "the-remains-of-the-day", "rating": 5, "date": "2026-02-14"}},
+  {"operation": "finish_book", "input": {"bookId": "station-eleven", "rating": 4, "date": "2026-04-03"}},
+  {"operation": "finish_book", "input": {"bookId": "pachinko", "rating": 4, "date": "2026-06-21"}},
+  {"operation": "finish_book", "input": {"bookId": "the-name-of-the-rose", "rating": 3, "date": "2026-08-30"}},
+  {"operation": "finish_book", "input": {"bookId": "klara-and-the-sun", "date": "2026-09-18"}},
+  {"operation": "finish_book", "input": {"bookId": "kindred", "rating": 5, "date": "2026-10-27"}},
   {"operation": "add_book", "input": {"title": "Middlemarch", "author": "George Eliot", "pages": 880, "status": "reading"}},
   {"operation": "add_book", "input": {"title": "The Left Hand of Darkness", "author": "Ursula K. Le Guin", "pages": 304, "status": "reading"}},
-  {"operation": "add_book", "input": {"title": "A Gentleman in Moscow", "author": "Amor Towles", "pages": 462, "status": "want"}},
-  {"operation": "add_book", "input": {"title": "Piranesi", "author": "Susanna Clarke", "pages": 272, "status": "want"}},
-  {"operation": "add_book", "input": {"title": "The Overstory", "author": "Richard Powers", "pages": 502, "status": "want"}}
+  {"operation": "set_progress", "input": {"bookId": "middlemarch", "page": 312}},
+  {"operation": "set_progress", "input": {"bookId": "the-left-hand-of-darkness", "page": 241}},
+  {"operation": "add_book", "input": {"title": "A Gentleman in Moscow", "author": "Amor Towles", "pages": 462}},
+  {"operation": "add_book", "input": {"title": "Piranesi", "author": "Susanna Clarke", "pages": 272}},
+  {"operation": "add_book", "input": {"title": "The Overstory", "author": "Richard Powers", "pages": 502}},
+  {"operation": "add_book", "input": {"title": "Braiding Sweetgrass", "author": "Robin Wall Kimmerer", "pages": 391}}
 ]

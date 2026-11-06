@@ -1,0 +1,3234 @@
+[
+ {
+  "name": "no place yet: get_place is null",
+  "operation": "get_place",
+  "version": 1,
+  "expect": null
+ },
+ {
+  "name": "no place yet: the widget asks for one, on both sizes, with no button",
+  "operation": "widget_aurora",
+  "version": 1,
+  "expect": {
+   "small": {
+    "template": "text",
+    "text": "Choose your place"
+   },
+   "large": {
+    "template": "text",
+    "text": "$any"
+   }
+  }
+ },
+ {
+  "name": "no place yet: a scheduled fetch does nothing and doesn't fail",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "now": "2026-12-15T17:00:00Z"
+  },
+  "expect": null
+ },
+ {
+  "name": "no place yet: nothing for tonight",
+  "operation": "get_tonight",
+  "version": 1,
+  "expect": null
+ },
+ {
+  "name": "no place yet: no nights",
+  "operation": "list_nights",
+  "version": 1,
+  "expect": {
+   "nights": []
+  }
+ },
+ {
+  "name": "no place yet: the dark window says to choose one",
+  "operation": "dark_window",
+  "version": 1,
+  "expectError": true
+ },
+ {
+  "name": "a latitude past the pole is refused",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Oslo",
+   "latitude": 91,
+   "longitude": 10.75,
+   "timezone": "Europe/Oslo"
+  },
+  "expectError": true
+ },
+ {
+  "name": "an unknown time zone is refused",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Oslo",
+   "latitude": 59.91,
+   "longitude": 10.75,
+   "timezone": "Mars/Olympus_Mons"
+  },
+  "expectError": true
+ },
+ {
+  "name": "a longitude past 180 is refused",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Oslo",
+   "latitude": 59.91,
+   "longitude": 190,
+   "timezone": "Europe/Oslo"
+  },
+  "expectError": true
+ },
+ {
+  "name": "an over-long name is refused",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "A very long place name that goes on and on past the sixty character limit",
+   "latitude": 59.91,
+   "longitude": 10.75,
+   "timezone": "Europe/Oslo"
+  },
+  "expectError": true
+ },
+ {
+  "name": "nothing was stored by the refused places",
+  "operation": "get_place",
+  "version": 1,
+  "expect": null
+ },
+ {
+  "name": "a blank name is refused",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "   ",
+   "latitude": 59.91,
+   "longitude": 10.75,
+   "timezone": "Europe/Oslo"
+  },
+  "expectError": true
+ },
+ {
+  "name": "Oslo: the Kp it takes there follows its geomagnetic latitude",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Oslo",
+   "latitude": 59.91,
+   "longitude": 10.75,
+   "timezone": "Europe/Oslo"
+  },
+  "expect": {
+   "name": "Oslo",
+   "latitude": 59.91,
+   "longitude": 10.75,
+   "timezone": "Europe/Oslo",
+   "geomagnetic_latitude": 59.7,
+   "kp_possible": 3.67,
+   "kp_good": 5
+  }
+ },
+ {
+  "name": "get_place reads it back",
+  "operation": "get_place",
+  "version": 1,
+  "expect": {
+   "name": "Oslo",
+   "latitude": 59.91,
+   "longitude": 10.75,
+   "timezone": "Europe/Oslo",
+   "kp_possible": 3.67,
+   "kp_good": 5
+  }
+ },
+ {
+  "name": "Oslo: Kp 5 and 40% cloud is good",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 12:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 15:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 21:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 00:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 03:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 06:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 09:00:00",
+     "5.00",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-17T12:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T13:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T08:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 40
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "rating": "good",
+   "kp_max": 5,
+   "cloud_avg_pct": 40,
+   "reason": "Kp 5 and mostly clear skies (40% cloud)"
+  }
+ },
+ {
+  "name": "Oslo: Kp 5 and 41% cloud is possible",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 12:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 15:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 21:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 00:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 03:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 06:00:00",
+     "5.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 09:00:00",
+     "5.00",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-17T12:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T13:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T08:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 41
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "rating": "possible"
+  }
+ },
+ {
+  "name": "Oslo: Kp 3.67 and 60% cloud is possible",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 12:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 15:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 21:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 00:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 03:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 06:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 09:00:00",
+     "3.67",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-17T12:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T13:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T08:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 60
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "rating": "possible",
+   "reason": "Kp 3.67 with 60% cloud"
+  }
+ },
+ {
+  "name": "Oslo: Kp 3.67 and 61% cloud is too cloudy",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 12:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 15:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 21:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 00:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 03:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 06:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 09:00:00",
+     "3.67",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-17T12:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T13:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T08:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 61
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "rating": "low",
+   "reason": "Too cloudy for Kp 3.67 (61% cloud)"
+  }
+ },
+ {
+  "name": "Oslo: Kp 3.33 under a clear sky is too weak to reach it",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 12:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 15:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 21:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 00:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 03:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 06:00:00",
+     "3.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 09:00:00",
+     "3.33",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-17T12:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T13:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T08:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "rating": "low",
+   "reason": "Kp 3.33 is too weak to reach Oslo (it needs about 3.67)"
+  }
+ },
+ {
+  "name": "Oslo: Kp 9 with 71% cloud is clouded over",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 12:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 15:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-17 21:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 00:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 03:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 06:00:00",
+     "9.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-18 09:00:00",
+     "9.00",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-17T12:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T13:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T08:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-18T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 71
+         }
+        }
+       }
+      }
+     ]
+    }
+   },
+   "now": "2026-12-17T12:00:00Z"
+  },
+  "expect": {
+   "rating": "low",
+   "reason": "Clouded over (71% cloud)",
+   "fetched_at": "2026-12-17T12:00:00Z"
+  }
+ },
+ {
+  "name": "a malformed MET payload errors",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-17 18:00:00",
+     "5.00",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "type": "Feature"
+   }
+  },
+  "expectError": true
+ },
+ {
+  "name": "and leaves the stored night untouched",
+  "operation": "get_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-17"
+  },
+  "expect": {
+   "kp_max": 9,
+   "rating": "low",
+   "fetched_at": "2026-12-17T12:00:00Z"
+  }
+ },
+ {
+  "name": "Oslo's night is stored",
+  "operation": "list_nights",
+  "version": 1,
+  "expect": {
+   "nights": [
+    {
+     "night_date": "2026-12-17",
+     "rating": "low"
+    }
+   ]
+  }
+ },
+ {
+  "name": "moving to Tromsø: much weaker aurora reaches it",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Tromsø",
+   "latitude": 69.65,
+   "longitude": 18.96,
+   "timezone": "Europe/Oslo"
+  },
+  "expect": {
+   "name": "Tromsø",
+   "latitude": 69.65,
+   "longitude": 18.96,
+   "timezone": "Europe/Oslo",
+   "geomagnetic_latitude": 67.5,
+   "kp_possible": 0,
+   "kp_good": 1.33
+  }
+ },
+ {
+  "name": "moving clears the nights stored for the old place",
+  "operation": "list_nights",
+  "version": 1,
+  "expect": {
+   "nights": []
+  }
+ },
+ {
+  "name": "December: dark from mid-afternoon",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15"
+  },
+  "expect": {
+   "date": "2026-12-15",
+   "dark": true,
+   "dark_start_local": "15:37",
+   "dark_end_local": "07:43",
+   "dark_hours": 16,
+   "moon_label": "$any"
+  }
+ },
+ {
+  "name": "midsummer: never dark",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "date": "2026-06-21"
+  },
+  "expect": {
+   "dark": false,
+   "dark_start": null,
+   "dark_end": null,
+   "dark_hours": 0
+  }
+ },
+ {
+  "name": "the March equinox: a short night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "date": "2026-03-20"
+  },
+  "expect": {
+   "dark": true,
+   "dark_start_local": "20:20",
+   "dark_end_local": "03:22",
+   "dark_hours": 7
+  }
+ },
+ {
+  "name": "rejects a malformed date",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "date": "tomorrow"
+  },
+  "expectError": true
+ },
+ {
+  "name": "rejects a malformed clock",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "teatime"
+  },
+  "expectError": true
+ },
+ {
+  "name": "00:30 CET on the March DST day, dark: still the 28th's night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "2026-03-28T23:30:00Z"
+  },
+  "expect": {
+   "date": "2026-03-28"
+  }
+ },
+ {
+  "name": "01:59 CET just before the March switch, dark: still the 28th's night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "2026-03-29T00:59:00Z"
+  },
+  "expect": {
+   "date": "2026-03-28"
+  }
+ },
+ {
+  "name": "07:00 CEST after the March switch, light: the coming night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "2026-03-29T05:00:00Z"
+  },
+  "expect": {
+   "date": "2026-03-29"
+  }
+ },
+ {
+  "name": "02:30 CEST just before the October switch, dark: last night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "2026-10-25T00:30:00Z"
+  },
+  "expect": {
+   "date": "2026-10-24"
+  }
+ },
+ {
+  "name": "04:00 CET after the October switch, still dark: last night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "2026-10-25T03:00:00Z"
+  },
+  "expect": {
+   "date": "2026-10-24"
+  }
+ },
+ {
+  "name": "06:00 CET, light again: the coming night",
+  "operation": "dark_window",
+  "version": 1,
+  "input": {
+   "now": "2026-10-25T05:00:00Z"
+  },
+  "expect": {
+   "date": "2026-10-25"
+  }
+ },
+ {
+  "name": "nothing fetched yet: the widget shows what's known offline, with Refresh",
+  "operation": "widget_aurora",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15"
+  },
+  "expect": {
+   "small": {
+    "template": "text",
+    "text": "Not fetched yet",
+    "buttons": [
+     {
+      "label": "Refresh",
+      "operation": "fetch_tonight@1",
+      "input": {
+       "date": "2026-12-15"
+      }
+     }
+    ]
+   },
+   "large": {
+    "template": "list",
+    "items": [
+     {
+      "title": "Tonight",
+      "value": "Not fetched"
+     },
+     {
+      "title": "Dark",
+      "value": "15:37–07:43"
+     },
+     {
+      "title": "Moon",
+      "value": "$any"
+     },
+     {
+      "title": "Place",
+      "value": "Tromsø"
+     }
+    ],
+    "buttons": [
+     {
+      "label": "Refresh",
+      "operation": "fetch_tonight@1",
+      "input": {
+       "date": "2026-12-15"
+      }
+     }
+    ]
+   }
+  }
+ },
+ {
+  "name": "a placed widget's date goes to Refresh",
+  "operation": "widget_aurora",
+  "version": 1,
+  "input": {
+   "date": "2027-01-05"
+  },
+  "expect": {
+   "small": {
+    "buttons": [
+     {
+      "label": "Refresh",
+      "operation": "fetch_tonight@1",
+      "input": {
+       "date": "2027-01-05"
+      }
+     }
+    ]
+   }
+  }
+ },
+ {
+  "name": "parses NOAA's table format and MET's clouds, keeping only slots in the dark window",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15",
+   "now": "2026-12-15T13:00:00Z",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-15 09:00:00",
+     "7.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-15 12:00:00",
+     "2.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-15 15:00:00",
+     "2.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-15 18:00:00",
+     "3.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-15 21:00:00",
+     "3.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-16 00:00:00",
+     "2.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-16 03:00:00",
+     "1.67",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-16 06:00:00",
+     "1.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-16 09:00:00",
+     "6.00",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-15T10:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 0
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T14:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 30
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 30
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 30
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 30
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 30
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 30
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-15T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T07:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T09:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 100
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "night_date": "2026-12-15",
+   "fetched_at": "2026-12-15T13:00:00Z",
+   "dark_start": "2026-12-15T14:37:00Z",
+   "dark_end": "2026-12-16T06:43:00Z",
+   "kp_max": 3.67,
+   "cloud_avg_pct": 17,
+   "rating": "good",
+   "reason": "Kp 3.67 and mostly clear skies (17% cloud)",
+   "best_hour": {
+    "start_local": "21:00",
+    "end_local": "22:00",
+    "kp": 3.67,
+    "cloud_pct": 10
+   },
+   "verdict": "$any"
+  }
+ },
+ {
+  "name": "the stored forecast reads back",
+  "operation": "get_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15"
+  },
+  "expect": {
+   "night_date": "2026-12-15",
+   "kp_max": 3.67,
+   "cloud_avg_pct": 17,
+   "rating": "good"
+  }
+ },
+ {
+  "name": "the widget shows the rating word and a caption",
+  "operation": "widget_aurora",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15"
+  },
+  "expect": {
+   "small": {
+    "template": "stat",
+    "value": "Good",
+    "caption": "17% cloud",
+    "buttons": [
+     {
+      "label": "Refresh",
+      "operation": "fetch_tonight@1",
+      "input": {
+       "date": "2026-12-15"
+      }
+     }
+    ]
+   },
+   "large": {
+    "template": "list",
+    "items": [
+     {
+      "title": "Tonight",
+      "value": "Good"
+     },
+     {
+      "title": "Kp max",
+      "value": "3.67"
+     },
+     {
+      "title": "Cloud",
+      "value": "17%",
+      "detail": "half moon (41%)"
+     },
+     {
+      "title": "Dark",
+      "value": "15:37–07:43",
+      "detail": "best 21:00–22:00 · Kp 3.67, 10% cloud"
+     },
+     {
+      "title": "Fetched",
+      "value": "$any",
+      "detail": "Tromsø"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "name": "a failing source errors (MET offline)",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-15 21:00:00",
+     "1.00",
+     "predicted",
+     null
+    ]
+   ]
+  },
+  "expectError": true
+ },
+ {
+  "name": "quiet: a failing source returns null instead of an error",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15",
+   "quiet": true,
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-15 21:00:00",
+     "1.00",
+     "predicted",
+     null
+    ]
+   ]
+  },
+  "expect": null
+ },
+ {
+  "name": "the good record survives the failed fetch",
+  "operation": "get_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-15"
+  },
+  "expect": {
+   "kp_max": 3.67,
+   "rating": "good"
+  }
+ },
+ {
+  "name": "parses NOAA's array-of-objects format",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-12-16",
+   "noaa": [
+    {
+     "time_tag": "2026-12-16T18:00:00",
+     "kp": 1,
+     "observed": "predicted",
+     "noaa_scale": null
+    },
+    {
+     "time_tag": "2026-12-16T21:00:00",
+     "kp": 0.67,
+     "observed": "predicted",
+     "noaa_scale": null
+    }
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-16T15:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T16:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T17:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-16T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-17T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 55
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "kp_max": 1,
+   "cloud_avg_pct": 55,
+   "rating": "possible"
+  }
+ },
+ {
+  "name": "the small widget drops the caption under a long word",
+  "operation": "widget_aurora",
+  "version": 1,
+  "input": {
+   "date": "2026-12-16"
+  },
+  "expect": {
+   "small": {
+    "template": "stat",
+    "value": "Possible",
+    "buttons": "$any"
+   }
+  }
+ },
+ {
+  "name": "clock 19:00 local: a fetch with no date stores tonight",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "now": "2026-12-20T18:00:00Z",
+   "noaa": [
+    [
+     "time_tag",
+     "kp",
+     "observed",
+     "noaa_scale"
+    ],
+    [
+     "2026-12-20 18:00:00",
+     "4.33",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-20 21:00:00",
+     "4.00",
+     "predicted",
+     null
+    ],
+    [
+     "2026-12-21 00:00:00",
+     "3.00",
+     "predicted",
+     null
+    ]
+   ],
+   "met": {
+    "properties": {
+     "timeseries": [
+      {
+       "time": "2026-12-20T18:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-20T19:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-20T20:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-20T21:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-20T22:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-20T23:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T00:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T01:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T02:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T03:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T04:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T05:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      },
+      {
+       "time": "2026-12-21T06:00:00Z",
+       "data": {
+        "instant": {
+         "details": {
+          "cloud_area_fraction": 10
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "expect": {
+   "night_date": "2026-12-20",
+   "rating": "good",
+   "fetched_at": "2026-12-20T18:00:00Z"
+  }
+ },
+ {
+  "name": "clock 19:00 local: get_tonight with no date reads it",
+  "operation": "get_tonight",
+  "version": 1,
+  "input": {
+   "now": "2026-12-20T18:00:00Z"
+  },
+  "expect": {
+   "night_date": "2026-12-20",
+   "rating": "good"
+  }
+ },
+ {
+  "name": "clock 05:00 local, still dark: tonight is last night, the 19:00 fetch",
+  "operation": "get_tonight",
+  "version": 1,
+  "input": {
+   "now": "2026-12-21T04:00:00Z"
+  },
+  "expect": {
+   "night_date": "2026-12-20",
+   "rating": "good"
+  }
+ },
+ {
+  "name": "clock 12:00 local: tonight is a new night, not fetched yet",
+  "operation": "get_tonight",
+  "version": 1,
+  "input": {
+   "now": "2026-12-21T11:00:00Z"
+  },
+  "expect": null
+ },
+ {
+  "name": "the nights, latest first",
+  "operation": "list_nights",
+  "version": 1,
+  "expect": {
+   "nights": [
+    {
+     "night_date": "2026-12-20"
+    },
+    {
+     "night_date": "2026-12-16"
+    },
+    {
+     "night_date": "2026-12-15"
+    }
+   ]
+  }
+ },
+ {
+  "name": "list_nights takes a limit",
+  "operation": "list_nights",
+  "version": 1,
+  "input": {
+   "limit": 1
+  },
+  "expect": {
+   "nights": [
+    {
+     "night_date": "2026-12-20"
+    }
+   ]
+  }
+ },
+ {
+  "name": "midsummer is too light, without fetching",
+  "operation": "fetch_tonight",
+  "version": 1,
+  "input": {
+   "date": "2026-06-21",
+   "now": "2026-06-21T16:02:00Z"
+  },
+  "expect": {
+   "night_date": "2026-06-21",
+   "dark_start": null,
+   "kp_max": null,
+   "rating": "none",
+   "reason": "Too light: the sun never gets 12° below the horizon",
+   "verdict": "Too light for aurora"
+  }
+ },
+ {
+  "name": "the widget says too light at midsummer",
+  "operation": "widget_aurora",
+  "version": 1,
+  "input": {
+   "date": "2026-06-21"
+  },
+  "expect": {
+   "small": {
+    "template": "stat",
+    "value": "Too light"
+   },
+   "large": {
+    "template": "list",
+    "items": [
+     {
+      "title": "Too light"
+     },
+     {
+      "title": "Fetched",
+      "value": "$any"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "name": "renaming the place keeps its nights",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Tromsø harbour",
+   "latitude": 69.65,
+   "longitude": 18.96,
+   "timezone": "Europe/Oslo"
+  },
+  "expect": {
+   "name": "Tromsø harbour"
+  }
+ },
+ {
+  "name": "the nights are still there",
+  "operation": "list_nights",
+  "version": 1,
+  "input": {
+   "limit": 60
+  },
+  "expect": {
+   "nights": [
+    {
+     "night_date": "2026-12-20"
+    },
+    {
+     "night_date": "2026-12-16"
+    },
+    {
+     "night_date": "2026-12-15"
+    },
+    {
+     "night_date": "2026-06-21"
+    }
+   ]
+  }
+ },
+ {
+  "name": "another time zone dates the nights differently: they go too",
+  "operation": "set_place",
+  "version": 1,
+  "input": {
+   "name": "Tromsø harbour",
+   "latitude": 69.65,
+   "longitude": 18.96,
+   "timezone": "UTC"
+  },
+  "expect": {
+   "timezone": "UTC"
+  }
+ },
+ {
+  "name": "no nights left from the old time zone",
+  "operation": "list_nights",
+  "version": 1,
+  "input": {
+   "limit": 60
+  },
+  "expect": {
+   "nights": []
+  }
+ }
+]

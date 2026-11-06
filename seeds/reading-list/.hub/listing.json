@@ -3,16 +3,21 @@
   "tags": [
     "Reading"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "A screen: what you're reading, how far in, and the year's books on a shelf",
+      "date": "2026-11-06"
     }
   ],
   "summary": {
-    "message": "Books you want to read, are reading and have finished: your page in each, a rating when you finish, and a widget with the one on your nightstand.",
+    "message": "Books you want to read, are reading and have finished: your page in each, a rating when you finish, the year's finished books on a shelf on its screen, and a widget with the ones on your nightstand.",
     "keeps": "Books with title, author, pages, your page, status, rating and finish date.",
     "reaches": "",
     "findings": [
@@ -20,6 +25,11 @@
         "kind": "ok",
         "title": "Keeps your data inside the tool",
         "detail": "It reaches nothing outside itself."
+      },
+      {
+        "kind": "ok",
+        "title": "Removing a book is marked destructive",
+        "detail": "An agent has to ask you before it can."
       }
     ]
   }

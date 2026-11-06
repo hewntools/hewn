@@ -6,6 +6,7 @@
   "abi": "2.3",
   "hue": 15,
   "tags": ["books", "reading"],
+  "ui": { "available": true },
   "operations": [
     {
       "name": "add_book",
@@ -141,7 +142,8 @@
       "title": "On the nightstand",
       "operation": "widget_nightstand@1",
       "sizes": ["small", "medium"],
-      "refresh": { "every": "1h" }
+      "refresh": { "every": "1h" },
+      "open": "ui#reading"
     }
   ]
 }

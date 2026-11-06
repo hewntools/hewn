@@ -13,7 +13,8 @@ import { startServer } from "@hewntools/test-host/server.ts";
 import { nodePlatform, type NodePlatformOptions } from "@hewntools/test-host/index.ts";
 import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
 
-export const SEED = resolve(import.meta.dirname, "../seeds/running-log");
+/** The suite's tool: Running Log as it was before the shelf's polish (seeds/ moves with the shelf; this doesn't). */
+export const SEED = resolve(import.meta.dirname, "fixtures/running-log");
 export const FIXTURES = resolve(import.meta.dirname, "fixtures");
 /** How much of a file OpenCode reads: the bytes of its lines and their newlines (not the line numbers it shows). */
 export const OPENCODE_READ = 51_200;
