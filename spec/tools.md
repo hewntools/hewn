@@ -187,7 +187,7 @@ The database schema is `migrations/NNN_name.sql` (`001_init.sql`, `002_add_notes
 ]
 ```
 
-Each entry has `operation`, an optional `version` (default the highest) and `input` (default `{}`). Between 1 and 200 calls. They run through the contract before anything is granted: no secrets, config values, network, other tools or model. Prefer local writes with made-up names and places, never the owner's own. A tool whose data comes entirely from other tools can use a local read returning an honest empty/unavailable result, without duplicating their data for a preview. A version whose sample data doesn't replay without errors isn't promoted.
+Each entry has `operation`, an optional `version` (default the highest) and `input` (default `{}`). Between 1 and 200 calls. They run through the contract before anything is granted: no secrets, config values, network, other tools or model. Prefer local writes with made-up names and places, never the owner's own. A tool with no data of its own (it reads other tools or the network) can use a local read returning an honest empty or unavailable result, without duplicating their data for a preview. A version whose sample data doesn't replay without errors isn't promoted.
 
 ## Tests and promotion
 
@@ -210,6 +210,8 @@ Each entry has `operation`, an optional `version` (default the highest) and `inp
 
 Validation never touches anything real. There is no network (`fetch` gets `403`), secrets and config are whatever the case passes, `ctx.call` returns the case's `calls` entry (a call that isn't declared fails, and one without an entry fails the case), and `ctx.model` serves the case's `model` replies (running out fails the case). Put logic that needs the network or a model behind operations that can also run on fake data.
 
+UI renders are offline too: test-case `calls` and `model` mocks are not reused for screenshots. Operations called on load must handle unavailable external sources with schema-valid empty/unavailable results so the page renders without failed requests or fake production data.
+
 A host validates a new version, then promotes it. Hewn does this, in order:
 
 1. The manifest is valid.
@@ -224,8 +226,6 @@ A host validates a new version, then promotes it. Hewn does this, in order:
 10. The live database is backed up, migrations are applied, and the version becomes active.
 
 If anything fails, nothing changes: the active version keeps serving. A promoted version that asks for something new (a host, a secret, another tool's operation, a model) is not ready until the owner approves it.
-
-UI renders are offline too: test-case `calls` and `model` mocks are not reused for screenshots. Operations called on load must handle unavailable external sources with schema-valid empty/unavailable results so the page renders without failed requests or fake production data.
 
 ## Grants
 

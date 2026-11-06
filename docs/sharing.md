@@ -27,7 +27,7 @@ From the terminal: `hewn share <id> [--version N] [--out file]` prints the same 
 
 ## Sample data
 
-Sample data is what a tool looks like in use: a list of calls to its operations (`sample/calls.json`) that fill an empty tool with made-up entries. Whoever installs your tool can start with it instead of a blank screen, and the tool's screenshots show it: each build's, and a Hub card's. It holds made-up names and places, never yours.
+Sample data is what a tool looks like in use: a list of calls to its operations (`sample/calls.json`) that show it in use, usually by filling an empty tool with made-up entries. Whoever installs your tool can start with it instead of a blank screen, and the tool's screenshots show it: each build's, and a Hub card's. It holds made-up names and places, never yours.
 
 Builders write sample data when they create a tool, and keep it working when a change reshapes the operations. For a tool from before that, **Ask builder** in Share… adds some. **Write it yourself** opens `sample/calls.json` in an editor, with the format and what each operation takes beside it (**+ Add** puts in a call with its required fields): saving makes a new version, which goes live only if every call runs without an error on an empty tool. The calls run before the tool is allowed anything: no keys, settings, network, other tools or model. Use local writes with made-up entries; a tool with no data of its own can use a local read showing an honest empty or unavailable state. The format is in [the tool spec](../spec/tools.md#sample-data-since-25).
 

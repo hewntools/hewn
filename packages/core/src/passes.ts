@@ -31,7 +31,7 @@ export const passesIn = (list: unknown): Pass[] => (Array.isArray(list) ? PASSES
 /** What the critique pass asks for (the bench's words). */
 export const CRITIQUE_REQUEST = [
   "Design review pass. The screenshots in screenshots/ show this tool's current UI (desktop light, desktop dark, mobile light, mobile dark). Open every one of them and look at them critically, as a demanding senior product designer would.",
-  "First write down the five biggest problems you see (hierarchy, density, what the eye lands on first, how generic it looks, how well the data is visualised, the main action, small-screen layout, dark mode, delight). Then fix them in ui/, raising the bar: a screen the owner is delighted to open, with its own character and at least one custom data visual. Stay within requested behavior and preserve every feature.",
+  "First write down the five biggest problems you see (hierarchy, density, what the eye lands on first, how generic it looks, how well the data is visualised, the main action, small-screen layout, dark mode, delight). Then fix them in ui/, raising the bar: a screen the owner is delighted to open, with its own character and at least one custom data visual. Stay within requested behaviour and preserve every feature.",
   "Change only ui/ (the operations, state and tests stay exactly as they are). The screenshots/ folder is never part of the tool; don't link to it.",
 ].join("\n\n");
 
@@ -46,7 +46,7 @@ export function craftRequest(defects: string[]): string {
 }
 
 /** What a Polish keeps (the owner, 2026-11-02): the tool's identity, unless the owner asks for a new look. */
-export const POLISH_KEEPS = "This tool is live and the owner uses it: lift its design, but keep its identity (its concept, its hue and the palette family in ui/look.json) and every feature, unless the request in BUILDER.md asks for a new look.";
+export const POLISH_KEEPS = "This tool is live and the owner uses it: lift its design, but keep its identity (its concept, its hue and the palette family in ui/look.json) and every feature, unless the request in BUILDER.md asks for a new look. A tinted page background still becomes neutral (white or pale grey, black or near-black grey in dark).";
 
 /** Why a Polish's screenshots are private, and what that rules out: the owner let the builder see their own data. */
 export const REAL_DATA_RULE = "They show the owner's own data (they allowed it for this Polish), not sample data. It's private: never copy any of it into the tool's files. Sample data, tests and the UI's text stay made up.";
