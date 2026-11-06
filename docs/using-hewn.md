@@ -99,6 +99,8 @@ A build's page lists its steps while it runs. So does the change panel while a c
 - **Reviewing the design** and **Fixing details:** a new tool's second look, and a Polish's ([The build](building-tools.md#the-build)).
 - **Your authorization:** anything new it asks for (a host, a key, another tool, a model), once it's built.
 
+![A new tool's build page, Bike Care: the builder, its model and effort, Conversation, then the steps, with Spec agreed, Writing code and Running tests done and timed, Reviewing the design running, Fixing details and Your authorization to come, and the log below](images/build-second-look.png)
+
 Each step shows how long it took, by Hewn's clock, so it's the same whenever you open the page; the running one counts up. You can leave: it keeps building. Once it's live, the log folds under **Show log**. A failed build says why (in the second look, which step), with its log open, **Ask builder to fix** and **Retry**. A build a host's builder paused shows the host's note with **Continue** and **Stop** ([When a build fails](building-tools.md#when-a-build-fails)).
 
 ## Agents and Accounts

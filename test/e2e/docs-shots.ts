@@ -127,10 +127,11 @@ const settle = async (buildId: string) => {
   }
   throw new Error(`build ${buildId} didn't settle`);
 };
-const shot = async (name: string, opts: { width: number; height: number; clip?: { x: number; y: number; width: number; height: number } }) => {
+/** `fullPage`: the clip may reach below the window (in page coordinates). */
+const shot = async (name: string, opts: { width: number; height: number; clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean }) => {
   await page.setViewportSize({ width: opts.width, height: opts.height });
   await page.waitForTimeout(400);
-  await page.screenshot({ path: join(OUT, `${name}.png`), ...(opts.clip ? { clip: opts.clip } : {}) });
+  await page.screenshot({ path: join(OUT, `${name}.png`), ...(opts.clip ? { clip: opts.clip } : {}), ...(opts.fullPage ? { fullPage: true } : {}) });
   console.log("✔", name, opts.clip ? `${Math.round(opts.clip.width)}×${Math.round(opts.clip.height)}` : `${opts.width}×${opts.height}`);
 };
 
@@ -174,6 +175,8 @@ try {
   // 4. The spec proposal: Bike Care, in the create chat.
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`${web}/#/new`);
+  // The page reads the settings once as it loads, before Claude Code was chosen above (the host's builder, until then).
+  await page.reload();
   const box = page.locator(".composer textarea, .composer-input textarea, textarea").first();
   await box.waitFor();
   await box.fill("A tracker for my bike: rides, and remind me when the chain needs oiling.");
@@ -190,9 +193,10 @@ try {
   console.log("   boxes", JSON.stringify(boxes));
   const left = Math.min(boxes.thread!.left, boxes.composer!.left) - 16;
   const right = Math.max(boxes.thread!.right, boxes.composer!.right) + 16;
-  const top = Math.max(0, boxes.thread!.top - 40);
+  const top = Math.max(0, boxes.thread!.top - 16);
   const bottom = boxes.composer!.bottom + 20;
-  await shot("spec-proposal", { width: 1280, height: 1000, clip: { x: left, y: top + boxes.scrollY, width: right - left, height: bottom - top } });
+  // The conversation, the card and the box below it, which can reach past the window.
+  await shot("spec-proposal", { width: 1280, height: 1000, clip: { x: left, y: top + boxes.scrollY, width: right - left, height: bottom - top }, fullPage: true });
 
   // 5. A failed change to Plant Care: 1 of 3 tests didn't pass.
   const p1 = await post("/capabilities", { name: TOOLS["plant-care"].name, purpose: TOOLS["plant-care"].purpose, requirements: "plants and watering" });
