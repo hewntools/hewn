@@ -213,7 +213,7 @@ export class Validation extends Domain {
           try {
             await this.replayCall(manifest, sampleTarget, c);
           } catch (e) {
-            softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
+            softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
             replayed = false;
             break;
           }

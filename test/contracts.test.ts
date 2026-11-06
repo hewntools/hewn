@@ -70,7 +70,9 @@ describe("the owner's other capabilities' contracts", () => {
     assert.equal(seen.index, undefined, "no other capabilities: no CONTRACTS.md");
     assert.deepEqual(seen.contracts, {}, "and no contracts folder");
     assert.doesNotMatch(seen.request, /## The owner's other capabilities/);
-    assert.match(seen.brief, /named at the end of `BUILDER.md`; `CONTRACTS.md` in your workspace lists their operations,\nand `\.hewn-contracts\/<id>.md` has each one's full contract/, "the brief says where they are");
+    assert.match(seen.brief, /named at (?:the )?end of `BUILDER\.md`/, "the brief points to the catalog");
+    assert.match(seen.brief, /`CONTRACTS\.md`[^\n]*lists their (?:operations|ops)/, "the brief points to the operation index");
+    assert.match(seen.brief, /`\.hewn-contracts\/<id>\.md`[^\n]*full contract/, "the brief points to the complete schemas");
 
     // A connection's build gets them too: nothing stops a connection calling another capability.
     const conn = await t.build(() => t.platform.create(USER, { name: "Site Connection", purpose: "the site", requirements: "r", kind: "connection" }), (ws) => ((seen = inWorkspace(ws)), cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true })));

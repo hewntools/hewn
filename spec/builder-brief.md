@@ -1,12 +1,8 @@
 ## Implementation contract
 
-You are acting as a **builder**. You write a *candidate* in this workspace. You cannot
-promote it. The platform validates and tests the candidate. If it passes, the platform
-freezes it as a new immutable version and makes that version active. Until then the
-current version keeps serving.
+Write a **candidate** in this workspace; the platform owns validation and promotion. Passing candidates become immutable versions; an agent-requested change to a connection or adding operations waits for owner review. The current version serves until promotion.
 
-{{SUBMIT}} If you have a `check` tool, check your work with it before you stop (see "Check your
-work" at the end).
+{{SUBMIT}} If you have a `check` tool, use it before you stop (see the end).
 
 Workspace layout:
 
@@ -17,56 +13,43 @@ package.json         optional: npm dependencies (the platform installs and bundl
 migrations/NNN_*.sql state schema (SQLite), append-only
 tests/cases.json     test cases the platform runs before promotion
 sample/calls.json    sample data: calls that fill an empty tool with made-up entries (see below)
-ui/icon.svg          the app icon: a 5×5 pixel glyph (always write one, see "Icon")
+ui/index.html        optional human UI: static HTML, CSS and JS
+ui/icon.svg          app icon: a 5×5 pixel glyph (see "Icon")
 ui/look.json         with a UI: its look (palette, type, layout; see "Design it before you write it")
 ```
 
 ### Runtime
 
-Capabilities run as JavaScript in an isolate (a V8 sandbox like a Cloudflare Worker), not as a
-Node.js process. The platform bundles `src/index.ts` and its imports (including npm packages from
-`package.json`) into one module. Leave `"runtime"` out of capability.json. State is SQLite.
+Capabilities run as JS in a V8 isolate, like a Cloudflare Worker. Platform bundles `src/index.ts` and its imports into one module. Leave `"runtime"` out of capability.json.
+
+Call chains have 30 seconds, with up to 120 seconds of model waiting excluded; widgets have 15 seconds. `ctx.call` chains reach at most three capabilities, with no cycles or self-calls. Batch long work and report progress for later calls.
 
 ### capability.json
 
-Set `"abi"` to the lowest Hewn ABI (`major.minor`) whose features you use. This Hewn implements
-ABI {{ABI}}. Features added after 2.0 are marked "(ABI 2.x)" in this brief; if you use none,
-write `"abi": "2.0"`. Validation fails if you use a feature newer than the version you declare.
+Set `"abi"` to the lowest Hewn ABI (`major.minor`) whose features you use; this Hewn implements {{ABI}}. Features after 2.0 are marked "(ABI 2.x)"; if you use none, write `"abi": "2.0"`. Using a feature newer than you declare fails validation.
 
-Each operation has: `name` (snake_case), `description`, `version` (contract major, integer),
-`inputSchema` and `outputSchema` (JSON Schema, input must be `type: object`), and
-`sideEffect` (`read` | `write` | `destructive`).
+Keep `id` equal to the capability id in `BUILDER.md`. Each operation has `name` (snake_case), `description`, `version` (contract major, integer ≥1), `inputSchema` and `outputSchema` (JSON Schema 2020-12; input must be `type: object`), and `sideEffect`:
 
-Set `"hue"` (integer 0–359, OKLCH) to the subject's colour: the one it's known for (e.g. 145 for
-plants or money, 295 for sleep, 240 for water, 25 for workouts). A subject with no colour of its own
-(people, plans, words, time) gets a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues go
-round a circle: 350 and 10 are 20° apart), or, when no hue is that far from all of them, the middle
-of the widest gap between them, which `OTHER_TOOLS.md` names; so its tile stands apart on Home. It
-colours the app icon's tile, and it leads the UI's palette too. The design system derives the tile
-and glyph shades from it in light and dark mode.
+- `read`: changes nothing.
+- `write`: records or changes data.
+- `destructive`: removes or irreversibly overwrites data. Agent calls require owner confirmation, including through other capabilities; these operations cannot be scheduled.
 
-`"saturation"` (ABI 2.4; integer 0–150, default 100) says how colourful the tile is. Leave it out
-unless the tool stands for a brand: a connection to a black-and-white service (Ghost, Notion, the
-BBC) gets `0` (black or white on grey), a muted brand 30–60, a loud brand colour (Todoist red) up to
-150, with the brand's hue.
+Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g. 145 plants or money, 295 sleep, 240 water, 25 workouts, warm paper tones for books). A subject without one (people, plans, words, time) takes a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues wrap: 350 and 10 are 20° apart), or, when none is that far, the middle of the widest gap, which `OTHER_TOOLS.md` names. The hue colours the icon tile and leads the UI palette; the design system derives light and dark shades from it.
 
-Never write `"source"` (ABI 2.5): it records where an installed tool came from, and the platform
-writes it. Leave `hub` and `minVersion` out of `requires.capabilities` too; the platform fills them in.
+`"saturation"` (ABI 2.4; integer 0–150, default 100) is how colourful the tile is. Set it only for a brand, with the brand's hue: `0` for a black-and-white service (Ghost, Notion, the BBC: black or white on grey), 30–60 for a muted brand, up to 150 for a loud one (Todoist red).
 
-### Icon (required, and first)
+Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them.
 
-**Write `ui/icon.svg` and set `"hue"` in capability.json before anything else.** The owner's home
-screen shows the icon while you build, so it should exist within your first minute.
+### Icon
 
-Ship `ui/icon.svg` as a **5×5 pixel glyph**, even if the capability has no other UI:
+**New tools:** after reading `BUILDER.md`, this brief, and any `OWNERS_WORDS.md` and `OTHER_TOOLS.md`, make `ui/icon.svg` and `"hue"` your first implementation changes: Home shows them while you build. On retries and changes, preserve the existing icon and hue unless the request asks for a new identity; add a missing icon when the build scope allows it.
+
+Ship `ui/icon.svg` as a **5×5 pixel glyph**, even with no other UI:
 
 - `viewBox="0 0 5 5"`, whole-unit `<rect>`s only (`width="1" height="1"`)
-- `fill="currentColor"` and `shape-rendering="crispEdges"` on the `<svg>`; no colours in the file
-- 7–17 lit cells, one simple idea, readable at 28px
-- centred in the grid: the lit cells' bounding box sits in the middle of the 5×5 (an empty column
-  on the left has one on the right, an empty row at the top one at the bottom; a 4-wide shape goes
-  in columns 0–3 or 1–4 only when it reads better that way, never by accident)
-- set `"hue"` in capability.json (above)
+- `fill="currentColor"` and `shape-rendering="crispEdges"` on `<svg>`; no colours in the file
+- 7–17 lit cells, one simple idea from the subject, readable at 28px
+- centred: the lit cells' bounding box sits mid-grid (an empty column left needs one right, an empty row top one bottom; a 4-wide shape uses columns 0–3 or 1–4 only when it reads better)
 
 Running Log (a rising slope):
 
@@ -77,16 +60,6 @@ Running Log (a rising slope):
   <rect x="2" y="2" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/>
   <rect x="1" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/>
   <rect x="0" y="4" width="1" height="1"/><rect x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/><rect x="3" y="4" width="1" height="1"/><rect x="4" y="4" width="1" height="1"/>
-</svg>
-```
-
-Reading List (lines of text):
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5" fill="currentColor" shape-rendering="crispEdges">
-  <rect x="0" y="0" width="1" height="1"/><rect x="1" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="3" y="0" width="1" height="1"/><rect x="4" y="0" width="1" height="1"/>
-  <rect x="0" y="2" width="1" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/>
-  <rect x="0" y="4" width="1" height="1"/><rect x="1" y="4" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/>
 </svg>
 ```
 
@@ -119,55 +92,30 @@ export const operations = {
 };
 ```
 
-- `ctx.db` is this capability's own private SQLite database. It is **synchronous** (no `await`)
-  and is the only state you get. Use `db.transaction(() => { … })` to group writes atomically (it
-  nests). `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` statements are not allowed.
-- Handlers may be `async` (for `fetch` or `ctx.call`). Return plain JSON values.
-- Input is validated against `inputSchema` before your handler runs. Output is validated
-  against `outputSchema` after it returns.
-- Available: standard web APIs (`fetch`, `crypto`, `URL`, `TextEncoder`, `Date`, …) and Node
-  built-ins that work without a host (`node:crypto`, `node:buffer`, `node:util`, …).
-  **Not available:** a filesystem (`node:fs` sees an empty, throwaway disk), child processes,
-  raw sockets, environment variables. Keep everything you need in the database.
-- npm packages: list them in `package.json` `dependencies` and import them normally. Pick packages
-  that run in browsers or Workers (no native addons, no `fs`-heavy tooling). Don't commit `node_modules`.
-  Versions from the npm registry only (`"^1.2.0"`): a git, `file:`, `link:` or URL dependency, or an
-  `.npmrc`, fails the build.
-- `console.log` / `console.error` are the capability's logs (the owner sees them). The return
-  value is the result.
+- `ctx.db` is this capability's private SQLite database, **synchronous** (no `await`). `db.transaction(() => { … })` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed.
+- Handlers may be `async` (for `fetch` or `ctx.call`) and return plain JSON. Input is validated against `inputSchema` before they run, output against `outputSchema` after.
+- Available: standard web APIs (`fetch`, `crypto`, `URL`, `TextEncoder`, `Date`, …) and host-free Node built-ins (`node:crypto`, `node:buffer`, `node:util`, …). **Not available:** a filesystem (`node:fs` sees an empty throwaway disk), child processes, raw sockets, environment variables. Keep everything in the database.
+- npm packages: list them in `package.json` `dependencies` and import normally. Pick browser/Worker-safe packages (no native addons or `fs`-heavy tooling); don't commit `node_modules`. Registry versions only (`"^1.2.0"`): a git, `file:`, `link:` or URL dependency, or an `.npmrc`, fails the build.
+- `console.log`/`console.error` are the capability's logs, which the owner sees.
 
 ### Network and credentials (`requires`)
 
-A capability that needs network access declares the hosts in capability.json:
+A capability that needs the network declares its hosts:
 
 ```json
 "requires": { "hosts": ["api.example.com"] }
 ```
 
-**Only connections hold credentials (ABI 2.1).** A service that needs a key, token or login is
-wrapped by a *connection*: a capability with `"kind": "connection"` (see "Connections" below).
-Ordinary capabilities can't declare `secrets`; they call the connection's operations instead
-(see "Calling other capabilities"). Public, keyless APIs (e.g. weather) are a plain host.
+**Only connections hold credentials (ABI 2.1).** A service needing a key, token or login is wrapped by a *connection* (`"kind": "connection"`, see "Connections"); ordinary capabilities can't declare `secrets` and call its operations instead. A public keyless API (e.g. weather) is a plain host.
 
-- Code runs isolated. Its `fetch` can reach declared, owner-approved `hosts` only; anything else
-  gets a `403` response. Its SQLite database is the only thing it can read or write.
-- Connections: secrets arrive per call as `ctx.secrets.API_TOKEN`. To persist a refreshed token:
-  `ctx.updateSecret(name, value)`. Declared names only.
-- **You never receive real secret values, and there is no network during validation.** Design so
-  that operations which don't need the network work offline. Network-dependent operations should
-  fail cleanly (a clear error) when offline or when secrets are missing. Put pure logic (parsing,
-  aggregation) in functions that test cases can exercise with fake data.
-- Test cases may pass fake secrets: `{ "name": "...", "operation": "...", "secrets": { "API_TOKEN": "fake" }, ... }`.
-- After promotion the user must provide secrets and approve hosts before the capability is usable.
-  Request only what you need. Every new secret or host needs fresh user approval.
+- `fetch` reaches declared, owner-approved `hosts` only; anything else gets `403`.
+- Builders never see production credentials. At runtime a connection reads its secrets as `ctx.secrets.API_TOKEN` and saves a refreshed one with `ctx.updateSecret(name, value)`. Test cases pass fakes: `"secrets": { "API_TOKEN": "fake" }`.
+- Operations that don't need the network work offline; network operations fail with a clear error when offline or missing secrets. Put pure logic (parsing, aggregation) in functions test cases can exercise.
+- **Readiness:** ordinary calls fail with `not_ready` until every declared grant (hosts, other operations, model), secret and config value is satisfied, even for operations not using them. Owner approves new authority after promotion. Request the minimum; prefer other capabilities' read operations.
 
 ### Calling other capabilities (composition)
 
-Use another capability's public operations instead of duplicating its data. Example: record runs
-in Running Log rather than keeping your own runs table. The owner's other capabilities, when there
-are any, are named at the end of `BUILDER.md`; `CONTRACTS.md` in your workspace lists their operations,
-and `.hewn-contracts/<id>.md` has each one's full contract (input and output schemas). Read it
-before you call one.
+Use another capability's public operations instead of duplicating its data (record runs in Running Log, not your own runs table). The owner's other capabilities are named at the end of `BUILDER.md`; `CONTRACTS.md` lists their operations and `.hewn-contracts/<id>.md` each full contract. Read it before calling.
 
 1. Declare every call, pinned to a contract version:
    ```json
@@ -175,29 +123,25 @@ before you call one.
    ```
 2. Call through the platform: `const out = await ctx.call("running-log", "list_runs@1", { from: "2026-10-01" });`
 
-   Undeclared or ungranted calls fail. The callee validates your input against its schema.
-3. Test with mocks; validation never calls real capabilities:
+   Undeclared or ungranted calls fail; the callee validates your input.
+3. Mock calls in test cases:
    ```json
    { "name": "...", "operation": "weekly_review", "input": {}, "calls": { "running-log/list_runs@1": { "runs": [] } }, "expect": { ... } }
    ```
-4. `ctx.caller` tells a handler who called it (`{ kind, id }`, e.g. `{ kind: "capability", id: "reading-stats" }`).
-   Use it for provenance (e.g. store `source`), not for authorization.
-5. After promotion, the owner authorizes each declared operation. Ask only for what you use.
-   Prefer read operations; writes into another capability are shown to the owner as such.
+4. `ctx.caller` (`{ kind, id }`, e.g. `{ kind: "capability", id: "reading-stats" }`) says who called:
+   use it for provenance (e.g. store `source`), not authorization.
 
 ### Using a model (ABI 2.2)
 
-For work only a language model can do (explain a word, summarise a note, read a photo of a
-receipt), ask the platform to run one. Never call a model provider yourself and never ask for an
-API key: the owner's keys, model choice and monthly budget live in Hewn.
+For work only a language model can do (explain a word, summarise a note, read a receipt photo), ask the platform to run one. Never call a provider or ask for an API key: keys, model choice and budget are the owner's, in Hewn.
 
-1. Declare it, with the lowest tier that does the job (`light`, `standard`, `strong`, `max`), and
+1. Declare the lowest tier that does the job (`light`, `standard`, `strong`, `max`), plus
    `"input": ["image"]` if prompts carry images:
    ```json
    "abi": "2.2",
    "requires": { "model": { "tier": "light" } }
    ```
-   Pin an exact model (`{ "model": "anthropic/claude-sonnet-5-5" }`) only when the owner asks for one.
+   Pin an exact model (`{ "model": "anthropic/claude-sonnet-5-5" }`) only when the owner asks.
 2. Call it:
    ```ts
    const r = await ctx.model.generate({
@@ -209,33 +153,21 @@ API key: the owner's keys, model choice and monthly budget live in Hewn.
    r.json.explanation; // r.text, r.usage, r.cost (USD), r.model
    ```
    - `prompt` is a string or parts: `[{ type: "text", text }, { type: "image", data: "<base64>", mediaType: "image/png" }]`
-     (png, jpeg, webp, gif; at most 5 MB and 8000 px a side each, 20 per call). `messages`
+     (png, jpeg, webp, gif; each ≤ 5 MB and 8000 px a side, 20 per call). `messages`
      (`[{ role: "user" | "assistant", content }]`) replaces `prompt` for a conversation.
-   - Whenever your code reads data from the reply, pass `schema` (type object): the reply is
-     checked and returned parsed as `json`. Don't parse JSON out of `r.text` yourself.
-   - Size `maxTokens` to the longest reply the operation can need, with room to spare: a label or
-     a sentence 200, a paragraph 1000, a recipe or a list of items 4000–8000. It defaults to 1024
-     (at most 16000). A reply that reaches the limit is cut off, and the call throws ("cut off at
-     this tool's limit") instead of returning half of it.
-   - Each call is checked against the owner's budget before it's made; a refused call throws, so
-     catch it.
-3. **Never block a write on the model.** Store the record first with the generated field empty,
-   then fill gaps in a separate, best-effort operation (e.g. `enrich_missing@1`) that does as many
-   items as fit and returns `{ "done": n, "remaining": m }`. If the model is down or over budget,
-   the import still succeeds and the next run fills the rest.
-4. Text from outside (tasks, notes, web pages, images) can carry instructions. Treat model output
-   as data: store or show it, never execute it or let it choose what your code does next.
-5. Test with fake replies; validation never calls a real model. `"model"` lists the replies in the
-   order the case makes calls (`{ "text": "..." }`, `{ "json": {...} }`, or `{ "error": "..." }`):
+   - When code reads data from the reply, pass `schema` (type object); the reply is checked and returned parsed as `json`. Don't parse `r.text` yourself.
+   - Size `maxTokens` to the longest possible reply, with headroom: a label or sentence 200, a paragraph 1000, a recipe or item list 4000–8000 (default 1024, max 16000). A reply hitting the limit throws ("cut off at this tool's limit") instead of returning half.
+   - A call over the owner's budget throws; catch it.
+3. **Never block a write on the model.** Store the record with the generated field empty, then fill gaps in a separate best-effort operation (e.g. `enrich_missing@1`) that does as many as fit and returns `{ "done": n, "remaining": m }`. If the model is down or over budget, the import still succeeds; the next run fills the rest.
+4. Outside text (tasks, notes, web pages, images) can carry instructions. Model output is data: store or show it, never execute it or let it steer your code.
+5. Fake replies in test cases: `"model"` lists them in call order (`{ "text": "..." }`, `{ "json": {...} }` or `{ "error": "..." }`):
    ```json
    { "name": "explains", "operation": "enrich_missing", "input": {}, "model": [{ "json": { "explanation": "Happy." } }], "expect": { "done": 1 } }
    ```
 
 ### Widgets (ABI 2.3)
 
-A widget is a glanceable card the owner places on Hewn's Home, and agents show in chats: a data
-snapshot drawn by the platform. You write no HTML for it. You write a **read** operation that
-returns a view model for one of five templates, and declare the widget:
+A widget is a glanceable card on Hewn's Home and in agents' chats, drawn by the platform. You write no HTML: write a **read** operation returning a view for one of five templates, and declare it (up to eight per tool):
 
 ```json
 "abi": "2.3",
@@ -248,17 +180,10 @@ returns a view model for one of five templates, and declare the widget:
 }]
 ```
 
-- `sizes`: `small` (1×1, about 110 px square: one number), `medium` (2×1: a number with context,
-  3 list rows, a short chart), `large` (2×2: 5 rows or a taller chart). Offer only the sizes the
-  content fits; one size is fine (a word, its definition and buttons is `["large"]`). Validation
-  draws every offered size and **fails a size whose content (or revealed text) is cut off**.
-- `refresh.every`: 5m–24h, how often Home refreshes it while open (default 30m).
-- `open` (needs a UI): where a tap lands; `"ui#section"` opens the UI with `location.hash` set to
-  `#section`. Without it, a tap opens the capability.
-- The operation returns one view (below), **or a view per size** when a bigger size can show
-  more: `{ "medium": { "template": "text", … }, "large": { "template": "list", … } }` (any of
-  small / medium / large; a size without its own view uses the nearest one). Use the room: a large
-  widget that shows the same two lines as the medium one is wasted space.
+- `sizes`: `small` (1×1, ~110 px: one number), `medium` (2×1: a number with context, 3 list rows, a short chart), `large` (2×2: 5 rows or a taller chart). Offer only sizes the content fits; one is fine. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short. Validation draws every offered size and **fails one whose content (or revealed text) is cut off**.
+- `refresh.every`: 5m–24h, while Home is open (default 30m).
+- `open` (needs a UI): where a tap lands; `"ui#section"` opens the UI with `location.hash` set to `#section`. Default: the capability.
+- Return one view (below), **or one per size** when bigger sizes show more: `{ "medium": { "template": "text", … }, "large": { "template": "list", … } }` (a size without its own view uses the nearest). Use the room: a large widget repeating the medium's two lines wastes it.
 - Views (every template takes optional `buttons`; stat, list and text also take `reveal`):
   - `{ "template": "stat", "value": 7, "unit"?: "km", "caption"?: "words to test" }`
   - `{ "template": "list", "items": [{ "title": "…", "detail"?: "…", "value"?: "…" }], "empty"?: "Nothing due" }` (at most 5 items)
@@ -266,31 +191,17 @@ returns a view model for one of five templates, and declare the widget:
   - `{ "template": "progress", "value": 2, "max": 3, "label"?: "2 of 3 runs", "caption"?: "…" }`
   - `{ "template": "text", "text": "…" (≤ 280 chars), "caption"?: "…" }`
   - `"buttons": [{ "label": "Got it", "operation": "mark@1", "input"?: { "word": "…", "result": "ok" } }]`
-    (up to 3): each runs one of this capability's own operations, **writes included**, when
-    pressed, by whoever pressed it (the owner on Home, the agent in a chat; destructive ones are
-    confirmed first). The widget then refreshes, so a button can move it on: grade a word and the
-    next one shows. Put the item's id in `input`.
-  - `"reveal": "…"` (≤ 280 chars): hidden behind a "Show" button until tapped, e.g. the answer on
-    a practice card. The platform shows it; nothing is written.
-  - Buttons and "Show" share one row (a medium widget fits about 4 short labels, 1–2 words each).
-    A card you interact with (reveal + grading) reads best large: offer large, and medium only
-    if the text is short.
-- Keep strings short (titles ≤ 80, captions ≤ 80). Write for a glance: the number first.
-- **Drawing a widget is read-only; pressing its buttons is not.** The widget operation must be
-  `"sideEffect": "read"`; it runs with state it can only read (any INSERT/UPDATE/DELETE/CREATE
-  throws), may call other capabilities' read operations only, and has no `ctx.model`. Compute
-  from stored data; never fetch or generate on render. Changes happen in the operations its
-  buttons call. If it takes input (e.g. which list), the owner sets it when placing the widget;
-  give every property a default so `{}` works.
-- Name widget operations `widget_<name>` and declare `outputSchema` loosely (`{"type":"object","required":["template"]}`):
-  the platform checks the output against the template itself.
-- Every widget needs a test case for its operation; validation checks its output against the
-  template, read-only. Seed data with earlier cases so the widget shows something real.
+    (up to 3): each runs one of this capability's own operations, **writes included**, as whoever pressed it (owner on Home, agent in chat; destructive ones confirmed first). The widget then refreshes, so a button can advance it: grade a word, the next shows. Put the item's id in `input`.
+  - `"reveal": "…"` (≤ 280 chars): hidden behind "Show" until tapped, e.g. a practice card's answer. Nothing is written.
+  - Buttons and "Show" share one row (medium fits ~4 labels of 1–2 words).
+- Limits: widget title ≤ 40; list item title and detail, captions and empty text ≤ 80; unit ≤ 12; chart label ≤ 16, series name ≤ 24; progress label ≤ 40, `max` > 0; button label ≤ 24. Unknown view fields fail validation. Write for a glance: the number first.
+- **Drawing is read-only; buttons are not.** The widget operation is `"sideEffect": "read"` and runs with read-only state (any INSERT/UPDATE/DELETE/CREATE throws), other capabilities' read operations only, no `ctx.model`, secret updates dropped. Compute from stored data; never fetch or generate on render. If it takes input (e.g. which list), the owner sets it when placing the widget; default every property so `{}` works.
+- Name widget operations `widget_<name>` with `outputSchema` `{"type":"object"}`; the platform checks each view against its template (a required top-level `template` breaks per-size views).
+- Every widget needs a test case; seed data with earlier cases so it shows something real.
 
 ### Connections (ABI 2.1)
 
-A connection wraps **one** external service that needs credentials (GitHub, Notion, a self-hosted server…) and
-exposes its API as operations. It is the only kind of capability that may declare `secrets`.
+A connection wraps **one** credentialed service (GitHub, Notion, a self-hosted server…) and exposes its API as operations.
 
 ```json
 {
@@ -304,253 +215,109 @@ exposes its API as operations. It is the only kind of capability that may declar
 }
 ```
 
-- **Generic API operations only:** `list_files`, `upload_file`, `list_issues`, `create_issue`…
-  Use-case logic (a weekly digest, a summary for one purpose) belongs in the capability that calls the
-  connection. Restrict what can be done by leaving operations out (no `delete_file` means nothing can delete).
-- **`health@1` is required:** a `read` operation with no required input returning
-  `{ "status": "connected" | "expired" | "broken", "detail"?: string }`. The platform calls it for the
-  owner's Accounts view. Make it cheap: one authenticated request, or none if the credentials are missing.
-- **Credentials only in the secret store.** Refreshed tokens go back with `ctx.updateSecret(name, value)`,
-  never into the database.
-- **Config is not secret:** settings the owner fills in, like a server URL, are `config` (read them as
-  `ctx.config.SERVER_URL`). A host can come from config: `"config:SERVER_URL"` in `requires.hosts` means the
-  host in that value. Test cases may pass fake config: `"config": { "SERVER_URL": "https://cloud.example.com" }`.
-- **A sign-in step for login flows (optional):** when the service needs a login rather than a pasted key,
-  add a `connect` operation (`write`). Only the owner runs it, in Hewn (agents never can); it runs before the
-  secrets exist, so it is how they get filled. Its input is the sign-in form (mark passwords
-  `"format": "password"`); it signs in and stores the tokens with `ctx.updateSecret`, then returns
-  `{ "status": "connected" }`. For a second step (a code from an email or app), return
+- **Generic API operations only** (`list_files`, `upload_file`, `create_issue`…). Use-case logic (a weekly digest) belongs in the capability calling the connection. Leave operations out to restrict it (no `delete_file`: nothing can delete).
+- **`health@1` is required:** a `read` operation with no required input, returning `{ "status": "connected" | "expired" | "broken", "detail"?: string }` for the owner's Accounts view. Keep it cheap: one authenticated request, or none without credentials.
+- **Credentials live only in the secret store:** refreshed tokens go back via `ctx.updateSecret`, never the database.
+- **Config (any tool, ABI 2.1):** non-secret owner settings, unique names matching `^[A-Z][A-Z0-9_]*$`, read as `ctx.config.SERVER_URL`. `"config:SERVER_URL"` in `requires.hosts` means the host in that value. Test cases pass fakes: `"config": { "SERVER_URL": "https://cloud.example.com" }`.
+- **Sign-in step (optional):** for a login rather than a pasted key, add a `connect` operation (`write`). Only the owner runs it, in Hewn (never agents or schedules). It may run before secrets exist, but other grants, config and dependencies must be ready. Its input is the sign-in form (passwords `"format": "password"`); it signs in, stores tokens with `ctx.updateSecret` and returns `{ "status": "connected" }`. For a second step (a code from email or an app), return
   `{ "status": "needs_input", "message": "Enter the code we sent you", "inputSchema": { …the next fields… }, "state": "<opaque>" }`;
-  the owner's next call carries your `state` plus the new fields. Keep the first step's schema to what's
-  needed up front. A connection with a sign-in step gets its secrets only through it, so describe them as
-  "stored by signing in".
-  There is no OAuth: Hewn can't open a service's "Allow access" page or take its redirect, so a service that
-  only lets apps in that way (Google Calendar, Spotify…) can't be connected yet.
-- A connection has no UI; the owner sees it under Accounts.
+  the owner's next call carries your `state` plus the new fields. Ask only what's needed up front. Its secrets arrive only through it, so describe them as "stored by signing in".
+  No OAuth: Hewn can't open a service's "Allow access" page or take its redirect, so OAuth-only services (Google Calendar, Spotify…) can't connect yet.
+- No UI or widgets; the owner sees it under Accounts.
 
 ### Deprecating and removing operations (ABI 2.1)
 
-Published operations can't simply disappear. To retire one, mark it in capability.json:
+Published operations can't simply disappear. To retire one, mark it:
 
 ```json
 { "name": "search", "version": 1, "deprecated": { "replacement": "find@1", "note": "find pages through results" }, … }
 ```
 
-It keeps working; callers see the notice. A later version may remove it, and validation allows that
-only if it was already deprecated in the active version and no capability or schedule still uses it.
+It keeps working and callers see the notice. A later version may remove it only if it was deprecated in the active version and no capability or schedule still uses it.
 
 ### UI
 
-Ship a human UI when the owner will look at or enter data themselves: a tracker, a list, a log, a
-dashboard, a review. Skip it for plumbing that only agents or other capabilities call (and a
-connection never has one). Set `"ui": { "available": true }` and put static files in `ui/`, with
-`ui/index.html` as the entry point. The platform serves it at `/tools/<id>/` under Hewn's address, in a
-browser sandbox: the page gets an origin of its own (an opaque one). The UI is just another client:
-it calls the capability's own public operations, and nothing else:
+Ship a UI when the owner looks at or enters data: a tracker, list, log, dashboard, review. Skip it for plumbing only agents or capabilities call (connections never have one). Set `"ui": { "available": true }` with static files in `ui/`, entry `ui/index.html`. It is served at `/tools/<id>/~<key>/` in a sandbox with its own opaque origin, and calls only its capability's public operations.
+
+The platform injects `session.js` before your scripts. It authenticates and routes API requests and provides:
 
 ```js
-const call = (operation, input = {}) =>
-  fetch("/api/invoke", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-hewn-ui": "1" },
-    body: JSON.stringify({ operation, input }),
-  }).then((r) => r.json()); // { result } or { error, message, details }
+const out = await hewn.call("record_run", { distanceKm: 5 });
+if (out.error) showError(out.message);
+else render(out.result);
 ```
 
 #### The UI is the product
 
-The owner judges the whole tool by this screen. A correct backend behind a bland form is a failed
-build. Give the UI at least as much care and time as the operations: it is the part a person sees
-every day. What the request asks of the screen is the floor, not the ceiling. Your job is to make
-it something the owner is delighted to open.
+The owner judges the tool by this screen: a correct backend behind a bland form is a failed build. The request is the floor, not the ceiling; make a screen the owner is delighted to open. Aim high in design, not scope: no operations, grants or workflows the request didn't ask for.
 
 #### Design it before you write it
 
-Before writing `ui/`, think like a senior product designer and decide (say it in one short message
-before you write the files):
+For a **new UI or requested redesign**, read `OTHER_TOOLS.md` when present. Before UI code (after a new tool's icon), write a short design plan as a message:
 
-1. **The moment:** who opens it, when, and what they want to know or do in the first five seconds.
-2. **The answer first, as a picture:** what answers that question, at the top and big, drawn
-   where it can be (the plants that are thirsty, the week's sleep, the budget left) rather than
-   written out. A big number only when the number really is the answer.
-3. **Its own identity:** this tool lives on the owner's Home among their other tools; read how each
-   of them looks in `OTHER_TOOLS.md` (in your workspace when there are any). It needs an identity
-   of its own: someone glancing at two of the owner's tools
-   should never mistake one for the other. Tell it apart by its concept, layout, type and signature
-   visual. **Colour comes from the subject when it has one:** use the colours the subject is known
-   for (green for money and plants, purple or deep blue for sleep, blue for water, red for workouts,
-   warm paper and cloth for books), even if another tool is in similar shades. A subject without a
-   colour of its own (people, plans, words, time) takes a lead hue at least 40° from every hue in
-   `OTHER_TOOLS.md` (or, on a crowded Home, the middle of the widest gap it names), rather than the
-   warm yellow such tools tend to get. The icon's hue is the
-   tool's lead colour; pick it the same way.
-4. **Three directions, then the best one:** sketch three visual directions that really differ: in
-   palette, type pairing, layout structure and signature visual, not three shades of one idea. Each
-   takes its character from the tool's own world (a running log could feel like a race-day bib; a
-   recipe box like stained index cards; a bike log like a workshop manual). Drop any that would look
-   like one of the owner's other tools or like "Looks to avoid" below, then pick the strongest of
-   the rest: the one that best serves the owner's moment and has the most character. Unusual is good
-   when it serves the tool, never for its own sake. Say in a line why it won.
-5. **A plan before code:** for the chosen direction, write down its colours (a palette, not one
-   hue in several shades: a lead colour, a second colour from a different colour family, an accent,
-   and neutrals; named, with the values for light and for dark), its type roles (display, body,
-   numbers, small labels, each with its font stack) and its layout structure. Check the plan against
-   "Looks to avoid" below and against the owner's other tools, and change whatever matches.
-6. **Record the look** in `ui/look.json`, so the owner's next tools can be told what this one looks
-   like: `{"hue": …, "palette": {"name": "#hex", …}, "type": {"display": "…", "body": "…"},
-   "layout": "…", "signature": "…", "mood": "a few words"}`. Keep it true if you change the design later.
-7. **Big visuals, not forms:** the data drawn is the main content of the screen, not a garnish.
-   At least one large, custom, data-driven visual that fits the data better than a table would (a
-   timeline, a calendar heatmap, a gauge, a ring, a map of rooms, a small illustration that changes
-   with the data). Draw it yourself with inline SVG or `<canvas>`.
-8. **The main action:** the one thing they do most, reachable at once, with as little typing as
-   possible (one tap where it can be).
-9. **Day one:** an empty state that looks intentional and inviting, and leads to the main action.
-10. **Something extra:** one or two touches nobody asked for that make it feel smart (a computed
-   insight, a streak, a gentle nudge, a sensible default learned from the data).
+1. **Moment:** who opens it, when, and what they need within five seconds. Put that answer first and largest; keep the main action beside what it acts on, with minimal typing.
+2. **Three directions:** explore different concepts, layouts, type and signature visuals from the subject's world (race bib, recipe cards, workshop manual). Pick the strongest for the owner's task and say why; distinguish it from their other tools by more than colour.
+3. **Palette and type:** lead with manifest hue; choose a second colour family, accent and neutrals, with light/dark values. Keep page and surface backgrounds neutral: white or pale grey in light, black or near-black grey in dark (the base's `--bg` and `--surface` already are); colour goes into the data, visuals and accents. Specify display, body, number and small-label font stacks, layout and signature visual. Check "Looks to avoid" below.
+4. **Data:** the drawn data is the main content: at least one large custom SVG/canvas visual that fits it better than a table or form (timeline, calendar heatmap, gauge, ring, room map), labelled and sized to its data. Plus an intentional empty state leading to the main action.
+5. **Something extra:** one or two touches nobody asked for (a computed insight, a streak, a learned default), built on the requested operations.
 
-**Changing a tool** that has a UI keeps its design: its concept, palette, type and layout stay unless
-the request asks for a new look, and whatever is new is designed to fit them. Keep `ui/look.json`
-true; a tool without one gets one, describing the look it has.
+Record the result in `ui/look.json`: `{"hue": …, "palette": {"name": "#hex", …}, "type": {"display": "…", "body": "…"}, "layout": "…", "signature": "…", "mood": "…"}`. Other tools' builders see this record.
+
+**Changes:** preserve concept, icon, hue, palette, type and layout unless a new look is requested. Design additions to fit; skip three-direction exploration for routine changes. Keep `ui/look.json` accurate; if missing, record the existing look. Follow narrower widgets/Polish build scope in `BUILDER.md`.
 
 #### The design system is your base, not your limit
 
-**Read `PLATFORM_UI.css` in your workspace before writing any UI.** Link `/_platform/ui.css` (don't
-copy it into `ui/`): it gives you a reset, form controls, buttons, tokens and light/dark handling,
-so everything works and fits Hewn. Build on it, and add your own CSS (inline `<style>` or a
-`ui/*.css` file) for the concept: your own palette (several colours led by the tool's `hue`,
-defined for light and dark, readable contrast), a type scale with real hierarchy (clear steps in
-size and weight), gradients, shadows, borders, radii, textures and illustration where they serve
-the concept. System font stacks only (a tool can't load fonts from the web): `ui-serif`,
-`ui-rounded`, `ui-monospace` and `system-ui` already give you plenty of range.
+**Read `PLATFORM_UI.css` before UI code.** Link `/_platform/ui.css` (don't copy it) for reset, controls, tokens and themes, then build the concept on it: your palette, a type scale with real hierarchy, and gradients, shadows, textures or illustration where they serve. Your CSS outside its `hewn` cascade layer overrides base selectors. System font stacks only (`system-ui`, `ui-serif`, `ui-rounded`, `ui-monospace`); external fonts can't load.
 
-- Useful classes from the base: layout (`.page`, `.stack`, `.row`, `.grid`), `.card`, `.stats`,
-  `.pill`, `.chip`, `.segmented`, `.switch`, `.stepper`, `.field`, `.table-wrap`, `.empty`,
-  `.skeleton`, `.toast-region`/`.toast`. Use them when they fit; don't let them dictate the layout
-  (`.page` is a centred column up to 960 px: widen it when the data is worth the width).
-- The base's accent is Hewn's own (an acid green). Set `--accent` (a fill: its primary buttons),
-  `--accent-text` (the text on it), `--accent-ink` (links, focus rings) and `--accent-soft` from
-  your palette, so its controls wear your colours, not Hewn's.
-- `/_platform/chart.js` has `barChart(el, { labels, series: [{ name, values }], stacked?, unit? })`
-  and `lineChart(el, { … })` for plain series. Anything more specific (heatmaps, timelines, rings,
-  sparklines, illustrations): draw it yourself.
-- **Motion:** purposeful transitions and micro-interactions (an item settling into a list, a
-  satisfying check, numbers counting up, a visual updating smoothly). Respect
-  `prefers-reduced-motion`.
-- **Light and dark:** both must look designed, not just inverted: define your colours for both.
-- Vary scale and density; make the important thing big and the rest quiet. Forms that aren't the
-  main action live behind a button, a sheet or a disclosure, not on the page at all times.
-- **Show, don't list:** never lay a record out as `Label: value` lines or a key-value table. A
-  record's facts become part of a visual (a bar's length, a position on a timeline, a colour, a
-  fill level), a short sentence, or the layout itself.
+- Base classes: `.page` (centred, max 960 px), `.stack`, `.row`, `.grid`, `.card`, `.stats`, `.pill`, `.chip`, `.segmented`, `.switch`, `.stepper`, `.field`, `.table-wrap`, `.empty`, `.skeleton`, `.toast-region`/`.toast`. Use those that fit the plan; widen layout when data needs room.
+- The base accent is Hewn's own acid green: set `--accent` (primary fill), `--accent-text`, `--accent-ink` (links/focus) and `--accent-soft` from your palette.
+- `/_platform/chart.js`: `barChart(el, { labels, series: [{ name, values }], stacked?, unit? })`, `lineChart(el, { … })`. Draw subject-specific visuals yourself.
+- Use purposeful transitions and feedback; respect `prefers-reduced-motion`.
 
 #### Looks to avoid
 
-Every model reaches for the same few looks, so a tool that uses them looks generated, however well
-it's made. Don't use these (if the concept truly needs one, say why in your plan):
+Every model reaches for these, so they look generated. Lead with the subject; justify any exception in the plan:
 
-- **Warm cream or parchment background with a high-contrast serif display and a terracotta, clay or
-  peach accent** as the default "tasteful" look. Paper tones are fine where the subject is paper
-  (books, letters, recipes); not as a style for everything.
-- **Near-black background with an acid-green, lime or vermilion accent** (Hewn's own look, too).
-- **Purple or blue gradients on white;** soft gradient washes in a corner of the page.
-- **Tracked-out ALL-CAPS micro-labels** above headings and sections (`MONDAY, OCTOBER 26`,
-  `THE WEEK AHEAD`): don't use the base's `.eyebrow` for this. Let size, weight and position carry
-  the hierarchy instead.
-- **Middle-dot meta strings** (`Kitchen · watered 3 days ago · due today`): put facts in their own
-  places (columns, a second line with a clear role, a visual) instead of a chain of fragments.
-- **The oversized serif number with a sentence beside it** as the hero of every screen.
-- **Every section in an identical rounded card** (the SaaS card kit), and **pills or badges on
-  everything.**
-- **A centred narrow column** with wide empty margins on a desktop screen: use the width when the
-  data is worth showing.
-- **Emoji as icons.**
-- **One hue in several shades** as the whole palette (a single-colour ramp on a tinted background).
-- **A screen of labelled fields** (`Name: …`, `Due: …`, `Status: …`) where a picture of the data would
-  say more.
-
-#### Get it right the first time
-
-Check your markup and CSS against the mistakes first versions make most often (a design review of
-many of them found the same ones again and again):
-
-- **Dark mode designed, not inverted.** Write each colour with both its values, the dark one chosen
-  for the dark palette: `--leaf: light-dark(#2f7a4a, #8fd4a6)` (colours only: for a shadow or a
-  gradient, use such tokens inside it). That follows Hewn's Light or Dark as well as the system's;
-  a plain `@media (prefers-color-scheme: dark)` follows only the system's. The base is in a cascade
-  layer, so your own CSS wins over it whatever the selectors.
-- **One answer first.** The top of the screen answers the owner's question; nothing above or beside
-  it competes for the eye.
-- **Each piece of data in one place.** Don't show the same items in a hero and again in a list, or
-  the same bar three times.
-- **Lists don't take over.** Show the few that matter now (5–8) and a way to see all; a long history
-  becomes a visual, not a wall of identical rows.
-- **The signature visual earns its space.** Sized to its data, labelled, readable at a glance: not a
-  big, mostly empty illustration, and not a tiny garnish under everything else.
-- **The main action is quick and close.** One or two taps, next to what it acts on; on a phone it's
-  reachable without covering content.
-- **The phone layout is designed, not just stacked.** At 375 px the order is the answer, the main
-  action, the visual, then the rest. Nothing is wider than the screen: `min-width: 0` on grid and
-  flex children, `max-width: 100%` on images and SVG, `flex-wrap` where a row can't fit,
-  `overflow-wrap: anywhere` on long text, and chart labels that don't collide at that width.
-- **No dead space.** No half-empty panels or large blank areas on a wide screen.
-- **Cut text keeps its meaning.** Truncate only where the full text is still available (a `title`,
-  the item's own page), never a label whose cut hides what it says.
-- **States are unmistakable.** Done and not done, due and late, selected and not: tell them apart
-  at a glance, not by a subtle shade.
-
-Before you stop, read your UI files once more against this list and fix what you find; with a
-`check` tool, look for them in its screenshots too.
+- Cream/parchment, high-contrast serif and terracotta/clay/peach as a universal default.
+- A page tinted with the tool's colour (deep green, purple, tan, cream); real sites use neutral pages.
+- Near-black with acid-green/lime/vermilion (Hewn's own look); purple/blue gradients on white; corner gradient washes.
+- Tracked-out ALL-CAPS micro-labels or `.eyebrow`; use size, weight and position for hierarchy.
+- Repeated `Label: value` rows or middle-dot metadata strings. Give facts meaningful columns, lines or visual encodings.
+- Oversized serif number plus sentence as every hero; identical rounded cards for every section; badges on everything.
+- A single hue ramp as the whole palette; emoji icons (use SVG unless emoji belong to the concept).
 
 #### Checklist (do all of these)
 
-- **Forms:** sensible defaults (today's date, the last value used, the most common choice); Enter
-  submits; the first field is focused; the button is disabled while saving; after success the form
-  clears (or closes) and the new item shows up at once (animated in); after a failure the input
-  stays and the error is shown next to the form (`.notice.danger` with the operation's `message`).
-- **Formatting:** dates and times readable and local (`Intl.DateTimeFormat`, "today", "3 days ago"),
-  numbers with units (`12.4 km`, `5:12 /km`), never raw ISO strings, ids, or JSON.
-- **Order:** the most useful first (newest, most urgent, highest rated), not insertion order.
-- **Destructive actions:** ask first (or offer Undo in the toast); say what will be lost.
-- **Copy:** plain words from the owner's world, not the API's ("Add a word", not "Invoke add_word";
-  no "payload", "record", "operation"). Sentence case. Short, warm, specific; no welcome text at the
-  top. Emoji only if they truly belong to the concept, never as icons: draw icons as SVG.
-- **Small screens:** works at 375 px wide: one column, nothing cut off, tap targets ≥ 36 px.
-- **Accessible:** real `<button>`s and `<label>`s, visible focus, keyboard reachable, readable contrast.
-- **Errors:** an operation's `{ error }` is shown in the page; nothing is thrown or logged as an error.
+- **Hierarchy/density:** one primary answer; each datum in one place. Useful content fills desktop width without half-empty panels. Show 5–8 relevant list items and a way to see all; long history benefits from a visual.
+- **Dark mode:** choose both values for every colour: `--leaf: light-dark(#2f7a4a, #8fd4a6)`. Use colour tokens inside shadows/gradients. This follows Hewn's Light/Dark and System; plain `prefers-color-scheme` follows System only.
+- **Phone:** design from 375 px (validation uses 390): answer, action, visual, rest. Use `min-width: 0` on grid/flex children, `max-width: 100%` on images/SVG, row wrapping and `overflow-wrap: anywhere`; avoid colliding chart labels. Tap targets ≥36 px. Forms other than the main action live behind a button, sheet or disclosure.
+- **Forms:** sensible defaults; Enter submits; focus first field when form opens; disable during save. Success clears/closes form and updates content immediately; failure keeps input and shows error beside form (`.notice.danger`).
+- **Formatting/order:** local readable dates (`Intl.DateTimeFormat`, "today", "3 days ago"), numbers with units; useful ordering (newest/urgent/highest rated). Keep raw ids, ISO timestamps and JSON out of display copy.
+- **Actions/states:** distinguish done, due, late and selected at a glance. Confirm destructive actions with what will be lost, or provide working Undo.
+- **Copy/accessibility:** short, specific words from owner's world ("Add a word", not "Invoke add_word"), sentence case, no welcome block or API jargon. Real buttons/labels, visible focus, keyboard access, readable contrast. Truncate only with full text available elsewhere; keep action labels meaningful.
+- **Errors:** display API `{ error, message }` and catch rejected requests; preserve input and usable page state. Avoid uncaught errors and `console.error` in the UI.
 
-**The platform renders your UI before promotion**, headlessly, against a fresh empty state, in
-light and dark, at 1280 and 390 px wide, and again filled with your sample data. Any uncaught error,
-`console.error` or failed request, on either screen, fails the build, and the owner sees the screenshot (with the sample data, when there is some).
-So the empty state and a full one must both render cleanly.
+Before you stop, reread your UI against this checklist and "Looks to avoid"; fix what you find.
 
-- `POST /api/invoke` takes `{ operation, input, operationVersion? }`. Without `operationVersion` it calls the
-  **latest** contract version of that operation. Pass it explicitly when the UI depends on a specific version.
-- `GET /api/manifest` (same header) returns the manifest and readiness `status`.
-- The CSP allows only your own files, your API and `/_platform/`: **no CDNs, external scripts, fonts
-  or APIs**. Inline `<script>`/`<style>` and files under `ui/` are fine. Plain HTML/JS/CSS, no build step.
-- **Link your own files with relative paths** (`app.js`, `img/logo.svg`), never `/app.js`: the UI
-  lives under `/tools/<id>/`. `/api/…` and `/_platform/…` work as written.
-- **No browser storage:** the sandbox has no `localStorage`, `sessionStorage`, IndexedDB or cookies
-  (using them throws). Keep everything in the capability's state through operations; keep only
-  view state (an open tab, a filter) in memory or in the URL fragment.
+**The platform renders your UI before promotion** on empty and sample-filled databases, and the owner sees the screenshot. An uncaught error, `console.error` or failed request fails the build. These renders are offline: no real network, dependency calls or model; test-case `calls`/`model` mocks do not feed the UI. Operations called on load must handle unavailable external sources with schema-valid empty/unavailable results, so the UI renders without a failing request. Show that state honestly; never hardcode fake production results.
+
+- `POST /api/invoke` takes `{ operation, input, operationVersion? }`; without `operationVersion` it calls the **latest** version. Pass it when the UI depends on one.
+- `hewn.manifest()` or `GET /api/manifest` returns the manifest and readiness `status`. The session shim sets API headers; explicit fetch requests use `x-hewn-ui: 1`.
+- The CSP allows only your own files, your API and `/_platform/`: **no CDNs, external scripts, fonts or APIs**. Inline `<script>`/`<style>` and files under `ui/` are fine. Plain HTML/JS/CSS, no build step.
+- **Link your own files with relative paths** (`app.js`, `img/logo.svg`), never `/app.js`; `/api/…` and `/_platform/…` work as written.
+- **No browser storage:** `localStorage`, `sessionStorage`, IndexedDB and cookies throw. Keep data in the capability's state; keep view state (an open tab, a filter) in memory or the URL fragment.
 
 ### Contract rules (enforced)
 
-- Published operation contracts (`name@version`) must stay backward compatible: no removed
-  fields, no newly required input fields, no type changes, no removed output guarantees,
-  no `sideEffect` change.
-- Adding an optional input field or a new output field is compatible. Keep the same version.
-- A breaking change means adding a new operation version (`name@2`) next to the old one.
-  Never delete or edit `name@1`.
+- Preserve each published `name@version`: no removed fields/type changes, new required inputs, narrowed input enums, tightened input constraints, loosened output guarantees or changed `sideEffect`. Changes to composite schema keywords (`oneOf`, `$ref`, etc.) count as breaking.
+- Compatible additions (optional input/new output fields) and implementation fixes keep the version.
+- Breaking changes add `name@2` beside the working `name@1`. Removal follows "Deprecating and removing operations" above.
 
 ### State rules (enforced)
 
-- Existing migration files are immutable. Add new files only: `002_add_x.sql`, ...
-- No `DROP TABLE`, `DROP COLUMN`, `DELETE FROM`, `TRUNCATE` in migrations, and no
-  `BEGIN`/`COMMIT` (each migration file already runs atomically).
-- Before promotion, migrations are dry-run on a copy of live state. Live state is backed up
-  before they are applied.
+- Existing migration files are immutable; add new ones (`002_add_x.sql`, ...).
+- No `DROP TABLE`, `DROP COLUMN`, `DELETE FROM`, `TRUNCATE` or `BEGIN`/`COMMIT` in migrations (each file already runs atomically).
+- Before promotion, migrations dry-run on a copy of live state, and live state is backed up before they apply.
 
 ### tests/cases.json
 
@@ -563,14 +330,13 @@ An ordered list. All cases share one fresh state DB with all migrations applied:
 ]
 ```
 
-`expect` is a subset match. `"$any"` matches any present value. Cover every operation.
+At least one case; cover every operation. `expect` matches object subsets; arrays must have equal length and match in order. `"$any"` matches any present value. `version` defaults to the highest, `input` to `{}`.
+
+**Validation is offline:** no network, no real secrets, no other capabilities, no model. Cases supply fakes via `secrets`, `config`, `calls`, `model` keys (examples in each section).
 
 ### sample/calls.json (ABI 2.5)
 
-Sample data: what the tool looks like in use. The owner can install or start over with it, and
-a tool needs it to be shared (its screenshots show it). When you create a tool, write one (a new
-tool with a screen fails validation without it); when a change renames or reshapes the operations it
-calls, update it.
+Sample data shows the tool in use for install, Start over, sharing and screenshots. New tools with a UI and Polish builds require it; keep it valid when changing operations.
 
 ```json
 [
@@ -579,22 +345,10 @@ calls, update it.
 ]
 ```
 
-5–20 calls (at most 200), in order, `version` optional. They replay on an empty database as the
-owner, before anything is granted: plain writes only, no network, no other tools, no model. Use
-made-up names, places and dates that look real and fill the UI and widgets well; never anything
-from the owner's own data or the conversation. The platform replays it on a fresh database before
-promotion, and a call that fails fails the version. It needs no `"abi"` change.
+1–200 ordered local calls; aim for 5–20 writes that fill UI/widgets. `version` defaults to highest, `input` to `{}`. Replayed on a fresh DB before promotion and on owner-requested install/reset, with no secrets, config values, network, other tools or model; a failing call fails validation. Use made-up data that looks real, never the owner's data or conversation. Dependency-only tools can supply a local read returning honest empty/unavailable output; do not add duplicate storage or fake production behavior just for screenshots. No `"abi"` change needed for this file.
 
 ### Check your work: the `check` tool
 
-When you have a `check` tool, call it before you stop. It runs what the platform runs before
-promotion (the manifest, bundling, contracts, migrations, `tests/cases.json`, `sample/calls.json`,
-the widgets) and renders your UI filled with your sample data, 1280 and 390 px wide, light and
-dark. It answers PASS or FAIL with every failure, what it measured on the UI (what sticks out past
-the phone's edge, text cut short, page errors, buttons that break the page), and the four
-screenshots (also in `screenshots/`).
+When you have a `check` tool, call it before you stop. It runs the platform's pre-promotion checks (manifest, bundling, contracts, migrations, `tests/cases.json`, `sample/calls.json`, widgets) and renders your UI headless, empty and with sample data, at 1280 and 390 px, light and dark. It answers PASS or FAIL with every failure, UI measurements (overflow past the phone edge, cut text, page errors, buttons that break the page) and four screenshots (also in `screenshots/`).
 
-Fix every failure, then open each screenshot and fix what looks broken, cramped, cut off or
-unreadable; check again until it passes. A check takes up to a minute, and you have 10 in an
-attempt. Nothing you check goes live: what you leave when you stop does, after the platform
-validates it. `screenshots/` isn't part of the tool: don't link to it.
+Fix failures and measured defects, then open every screenshot (long pages come in further parts) and fix what looks broken, cramped, cut off or unreadable; PASS can still have visual defects. Up to 10 checks per attempt; when they run out, fix the last findings and stop. Checks never promote: what you leave when you stop is what gets validated, so don't stop mid-experiment. `screenshots/` is workspace-only; don't link it from the UI.

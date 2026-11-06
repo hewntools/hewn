@@ -187,7 +187,7 @@ The database schema is `migrations/NNN_name.sql` (`001_init.sql`, `002_add_notes
 ]
 ```
 
-Each entry has `operation`, an optional `version` (default the highest) and `input` (default `{}`). Up to 200 calls. They run as the owner, through the contract like any call, before the owner has granted anything: no network, no other tools, no model. So use plain writes that store data, with made-up names and places, never the owner's own. A version whose sample data doesn't replay without errors isn't promoted.
+Each entry has `operation`, an optional `version` (default the highest) and `input` (default `{}`). Between 1 and 200 calls. They run through the contract before anything is granted: no secrets, config values, network, other tools or model. Prefer local writes with made-up names and places, never the owner's own. A tool whose data comes entirely from other tools can use a local read returning an honest empty/unavailable result, without duplicating their data for a preview. A version whose sample data doesn't replay without errors isn't promoted.
 
 ## Tests and promotion
 
@@ -224,6 +224,8 @@ A host validates a new version, then promotes it. Hewn does this, in order:
 10. The live database is backed up, migrations are applied, and the version becomes active.
 
 If anything fails, nothing changes: the active version keeps serving. A promoted version that asks for something new (a host, a secret, another tool's operation, a model) is not ready until the owner approves it.
+
+UI renders are offline too: test-case `calls` and `model` mocks are not reused for screenshots. Operations called on load must handle unavailable external sources with schema-valid empty/unavailable results so the page renders without failed requests or fake production data.
 
 ## Grants
 
@@ -358,7 +360,7 @@ The operation returns one view, or a view per size (`{ "medium": {…}, "large":
 - **`reveal`** (≤ 280): text hidden behind a "Show" button until tapped, such as the answer on a practice card. The host shows it; nothing is written.
 - **`buttons`** (any template, up to 3): `[{ "label": "Done" (≤ 24), "operation": "op@N", "input"?: { … } }]`. A button runs one of the tool's own operations, writes included, as whoever pressed it: the owner on Home (the host asks first for a destructive one), or the agent in a chat (where a destructive one waits for the owner's confirmation). The widget then refreshes. Put the item's id in `input`.
 
-Declare the widget operation's `outputSchema` loosely (`{ "type": "object", "required": ["template"] }`); the host checks the output against the template itself.
+Declare the widget operation's `outputSchema` loosely (`{ "type": "object" }`); the host checks each view against its template. A top-level required `template` works only for a single view, not views per size.
 
 ### Rules
 

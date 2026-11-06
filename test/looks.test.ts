@@ -50,7 +50,7 @@ describe("the owner's other tools' looks", () => {
     const first = await t.build(() => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }), (ws) => (read(ws), seedAs("running-log", "Running Log", { hue: 25, recorded: JSON.stringify(look, null, 2) })(ws)));
     assert.equal(first.status, "promoted", first.log.join("\n"));
     assert.equal(otherTools(), undefined, "the first tool has no others");
-    assert.match(brief, /read how each\s+of them looks in `OTHER_TOOLS.md`/, "the brief sends the builder there");
+    assert.match(brief, /read\s+`OTHER_TOOLS\.md`/i, "the brief sends the builder there");
     await t.build(() => t.platform.create(USER, { name: "Reading List", purpose: "books", requirements: "r" }), seedAs("reading-list", "Reading List"));
     // A connection has no UI: not among the looks, and its own build gets none.
     const conn = await t.build(() => t.platform.create(USER, { name: "Site Connection", purpose: "the site", requirements: "r", kind: "connection" }), (ws) => (read(ws), cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true })));

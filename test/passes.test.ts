@@ -409,6 +409,9 @@ describe("a pass, as the builder is asked", () => {
     assert.match(p, /The candidate in this workspace is built and passed validation: don't start over\.[^]*critique pass on it:\n\nDesign review pass\. Look\./);
     assert.doesNotMatch(p, /write ui\/icon\.svg/);
     assert.match(builderPrompt(job({ pass: undefined, attempt: 1 })), /write ui\/icon\.svg/);
+    for (const extra of [{ kind: "modify" as const }, { kind: "widgets" as const }, { attempt: 2 }, { retryOf: "b-old" }]) {
+      assert.doesNotMatch(builderPrompt(job({ pass: undefined, attempt: 1, ...extra })), /write ui\/icon\.svg/, "existing candidates keep their identity");
+    }
   });
 
   test("the critique points at the owner's words and the other tools' looks when there are some; the craft pass gets what was measured", () => {
@@ -416,6 +419,7 @@ describe("a pass, as the builder is asked", () => {
     const critique = passRequest("critique", { files, sampled: true, ownersWords: true, otherTools: true });
     assert.match(critique, /THE OWNER'S OWN WORDS in OWNERS_WORDS\.md/);
     assert.match(critique, /OTHER_TOOLS\.md/);
+    assert.match(critique, /made-up sample data from sample\/calls\.json/);
     assert.doesNotMatch(critique, /no sample data|in parts/);
     assert.doesNotMatch(passRequest("critique", { files, sampled: false }), /OWNER'S OWN WORDS|OTHER_TOOLS/);
     assert.match(passRequest("critique", { files, sampled: false }), /no sample data \(sample\/calls\.json\), so they show it empty/);
