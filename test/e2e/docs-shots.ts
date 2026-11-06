@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The docs screenshots that the UI changes touch, from a test host with a stub builder and intake:
-// PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/docs-shots.ts → /tmp/shots/*.png, then copy into docs/images/.
+// PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/docs-shots.ts → /tmp/shots/*.png (or SHOTS_DIR), then copy into docs/images/.
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -9,10 +9,10 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor } from "@hewntools/cli/supervisor/index.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
-import { editJson, SEED } from "../helpers.ts";
+import { editJson, FIXTURES, SEED } from "../helpers.ts";
 import { freePort } from "../workerd-helpers.ts";
 
-const OUT = "/tmp/shots";
+const OUT = process.env.SHOTS_DIR ?? "/tmp/shots";
 mkdirSync(OUT, { recursive: true });
 const pw = createRequire(process.env.PLAYWRIGHT_NODE_MODULES ?? import.meta.url)("playwright-core");
 const root = mkdtempSync(join(tmpdir(), "hewn-shots-"));
@@ -21,12 +21,27 @@ const port = await freePort();
 const TOOLS: Record<string, { name: string; purpose: string }> = {
   "running-log": { name: "Running Log", purpose: "Keep a running history that any approved agent can record into and summarize." },
   "plant-care": { name: "Plant Care", purpose: "Which plants need water today, and what each one got." },
+  "bike-care": { name: "Bike Care", purpose: "Log bike rides and remember when the chain needs oiling." },
 };
+// Bike Care's icon: a wheel and its hub.
+const WHEEL = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5" fill="currentColor" shape-rendering="crispEdges">${[[1, 0], [2, 0], [3, 0], [0, 1], [4, 1], [0, 2], [2, 2], [4, 2], [0, 3], [4, 3], [1, 4], [2, 4], [3, 4]].map(([x, y]) => `<rect x="${x}" y="${y}" width="1" height="1"/>`).join("")}</svg>`;
+// Bike Care's design review waits here until its shot is taken.
+let reviewed!: () => void;
+const review = new Promise<void>((r) => (reviewed = r));
 const builds: Record<string, number> = {};
 const builder: CapabilityBuilder = {
   name: "claude",
   build: async (job) => {
     builds[job.capabilityId] = (builds[job.capabilityId] ?? 0) + 1;
+    // Bike Care, a new tool with a screen (the UI Counter fixture under its name): its second look runs on it.
+    if (job.capabilityId === "bike-care") {
+      if (job.pass?.name === "critique") await review;
+      if (job.pass) return;
+      cpSync(join(FIXTURES, "ui-counter"), job.workspace, { recursive: true });
+      writeFileSync(join(job.workspace, "ui/icon.svg"), WHEEL);
+      editJson(join(job.workspace, "capability.json"), (m) => Object.assign(m, { id: job.capabilityId, name: TOOLS["bike-care"].name, purpose: TOOLS["bike-care"].purpose, hue: 220 }));
+      return;
+    }
     // Plant Care's second change: the builder's host pauses it part-way (as a host's builder at a build's allowance).
     if (job.capabilityId === "plant-care" && builds[job.capabilityId] === 3) throw Object.assign(new Error("This build has used 300 points and isn't finished. Its work is kept: Continue lets it go on for up to 300 more, or Stop it."), { paused: true });
     cpSync(SEED, job.workspace, { recursive: true });
@@ -86,7 +101,8 @@ const sv = await startSupervisor({
   intake: () => async () => BIKE as any,
   log: () => {},
   keySource: "file",
-  browser: "",
+  // Visual checks run (only Bike Care has a screen): its second look is on their screenshots.
+  browser: findBrowser() ?? "",
   tools: () => [
     { name: "claude" as const, label: "Claude Code", found: true, loggedIn: true },
     { name: "codex" as const, label: "Codex", found: true, loggedIn: true },
@@ -212,6 +228,20 @@ try {
   });
   await shot("build-paused", { width: 1280, height: 1000, clip: { x: pausedCard.x - 20, y: pausedCard.y - 20, width: pausedCard.width + 40, height: pausedCard.height + 40 } });
   await sv.admin("settings", { builder: "claude", intake: "claude", maxBuildAttempts: 1 });
+
+  // 5c. A new tool's second look: Bike Care's build, its builder reviewing the design.
+  const bike = await post("/capabilities", { name: TOOLS["bike-care"].name, purpose: TOOLS["bike-care"].purpose, requirements: BIKE.draft.requirements, conversation: [{ role: "user", content: "A tracker for my bike: rides, and remind me when the chain needs oiling." }] });
+  await page.goto(`${web}/#/b/${bike.buildId}`);
+  await page.locator("li.step.live", { hasText: "Reviewing the design" }).waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(1500);
+  const reviewCard = await page.evaluate(() => {
+    const el = document.querySelector(".build-head")?.closest(".card") ?? document.querySelector(".build-center > *");
+    const r = el!.getBoundingClientRect();
+    return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
+  });
+  await shot("build-second-look", { width: 1280, height: 1000, clip: { x: reviewCard.x - 20, y: reviewCard.y - 20, width: reviewCard.width + 40, height: reviewCard.height + 40 } });
+  reviewed();
+  console.log("   bike-care:", (await settle(bike.buildId)).status);
 
   // 6. The Hub: Hewn's own tools, every card in the shot.
   await page.setViewportSize({ width: 1280, height: 1000 });

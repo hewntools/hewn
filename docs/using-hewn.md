@@ -11,7 +11,7 @@ Home holds your tools as icons, and the widgets you've put there. Click a tool t
 ![Home with seven tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather, Tasks Today) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
 
 Right-click a tool for its menu:
-- **Open**, **Change…** and **Info**
+- **Open**, **Change…**, **Polish…** (a tool with a screen of its own: a second look at its design, [below](#a-tools-page)) and **Info**
 - **Widgets…**, **Activity** and **Versions**
 - **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand), **Share…** (the tool as a file: [Sharing tools](sharing.md)) and **Export data**
 - **Delete…**
@@ -44,7 +44,7 @@ The **Inbox** button on the right of the top bar holds everything that needs you
 - tools waiting for your approval of what they need (a host, a key, another tool, a model)
 - agents waiting to be approved
 - schedules an agent proposed
-- builds that failed
+- builds that failed, and builds a host's builder paused (**Continue** or **Stop**)
 - connections that need you to sign in again
 - model spend at 80% of your budget, or calls refused over it
 
@@ -85,9 +85,21 @@ Everything that happened, newest first: builds, calls, and access changes (agent
 
 ![Activity: today's calls, builds and access changes, newest first, each with who did it and when](images/activity.png)
 
-Builds show their milestones (spec, code, tests, and for a new tool or a Polish the design review and fixing details) as they happen. Open one to see its log. A failed build keeps its log open under the reason.
+Builds show their milestones (spec, code, tests, and for a new tool or a Polish the design review and fixing details) as they happen. Open one for its steps and its log ([A build](#a-build)).
 
 Call logs are kept for two weeks by default (Settings › Data).
+
+### A build
+
+A build's page lists its steps while it runs. So does the change panel while a change you asked for there builds; the tool keeps running its current version meanwhile.
+
+- **Spec agreed:** click it for the spec the builder works from. **Conversation**, above the steps, has what you and the intake said.
+- **Writing code:** the builder at work, with its log below, where each check it runs on its own work shows ("Checking its work (1 of 10)", "Check: 2 problems to fix"). A Polish has **Sample data** here instead: written first when the tool has none, else done at once.
+- **Running tests:** how many have passed so far.
+- **Reviewing the design** and **Fixing details:** a new tool's second look, and a Polish's ([The build](building-tools.md#the-build)).
+- **Your authorization:** anything new it asks for (a host, a key, another tool, a model), once it's built.
+
+Each step shows how long it took, by Hewn's clock, so it's the same whenever you open the page; the running one counts up. You can leave: it keeps building. Once it's live, the log folds under **Show log**. A failed build says why (in the second look, which step), with its log open, **Ask builder to fix** and **Retry**. A build a host's builder paused shows the host's note with **Continue** and **Stop** ([When a build fails](building-tools.md#when-a-build-fails)).
 
 ## Agents and Accounts
 

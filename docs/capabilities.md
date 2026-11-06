@@ -60,7 +60,7 @@ Three small tools in the repo's [`seeds/`](../seeds) are meant to be read and co
 
 From a checkout of the repo: `hewn install seeds/habits`.
 
-**Sample data** (`sample/calls.json`) is the tool in use: calls to its operations that fill an empty tool with made-up entries. Hewn replays it when someone installs the tool with sample data, and before every version goes live, and needs it to share the tool. See [the tool spec](../spec/tools.md#sample-data-since-25).
+**Sample data** (`sample/calls.json`) is the tool in use: calls to its operations that fill an empty tool with made-up entries. Hewn replays it when someone installs the tool with sample data, and before every version goes live, and needs it to share the tool and for a new tool with a screen to go live (its builder's second look is on screenshots filled with it). See [the tool spec](../spec/tools.md#sample-data-since-25).
 
 ## Reference
 
