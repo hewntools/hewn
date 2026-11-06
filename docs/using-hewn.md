@@ -30,7 +30,7 @@ A widget shows a tool's data at a glance: today's habits, tonight's aurora forec
 
 New also offers it under the box: **Or start from** a tool in Hub, or a file someone shared ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
 
-![The Hub: search, Install from a file, the Official and tag filters, and Hewn's seven own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
+![The Hub: search, Install from a file, the Official and tag filters, and Hewn's eight own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
 
 ## Search and commands
 

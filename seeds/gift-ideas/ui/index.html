@@ -6,42 +6,262 @@
   <title>Gift ideas</title>
   <link rel="stylesheet" href="/_platform/ui.css">
   <style>
+    :root {
+      --rose: light-dark(oklch(0.56 0.2 340), oklch(0.76 0.15 340));
+      --rose-ink: light-dark(oklch(0.5 0.19 340), oklch(0.82 0.12 340));
+      --rose-soft: light-dark(oklch(0.56 0.2 340 / 0.1), oklch(0.76 0.15 340 / 0.16));
+      --rose-window: light-dark(oklch(0.56 0.2 340 / 0.13), oklch(0.76 0.15 340 / 0.3));
+      --rose-tint: light-dark(oklch(0.93 0.045 340), oklch(0.36 0.08 340));
+      --teal: light-dark(oklch(0.55 0.11 175), oklch(0.78 0.11 175));
+      --teal-soft: light-dark(oklch(0.55 0.11 175 / 0.12), oklch(0.78 0.11 175 / 0.15));
+      --amber: light-dark(oklch(0.6 0.14 65), oklch(0.83 0.13 80));
+      --amber-soft: light-dark(oklch(0.75 0.14 75 / 0.18), oklch(0.83 0.13 80 / 0.14));
+      --card: light-dark(oklch(1 0 0), oklch(0.215 0.006 260));
+      --display: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif;
+
+      --accent: var(--rose);
+      --accent-text: light-dark(oklch(1 0 0), oklch(0.2 0.05 340));
+      --accent-ink: var(--rose-ink);
+      --accent-soft: var(--rose-soft);
+    }
+    body { background: var(--bg); }
+    .page { max-width: 1120px; }
+    .hidden { display: none !important; }
+
+    /* ------------------------------------------------ header */
+    .head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s4); }
+    .head h1 { font: 700 30px/1.1 var(--display); letter-spacing: -0.02em; margin: 0; }
+    .head .today { font-size: var(--fs-sm); color: var(--text-2); }
+
+    /* ------------------------------------------------ layout */
+    .layout { display: grid; gap: var(--s4); grid-template-columns: minmax(0, 1fr); grid-template-areas: "ring" "add" "agenda" "people"; }
+    .layout > * { min-width: 0; }
+    .a-ring { grid-area: ring; } .a-add { grid-area: add; } .a-agenda { grid-area: agenda; } .a-people { grid-area: people; }
+    @media (min-width: 880px) {
+      .layout { grid-template-columns: 372px minmax(0, 1fr); grid-template-areas: "ring agenda" "add add" "people people"; }
+    }
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 20px; box-shadow: 0 1px 2px oklch(0.2 0.02 260 / 0.04), 0 10px 30px -12px oklch(0.2 0.02 260 / 0.12); }
+    .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s3); }
+    .panel-head h2 { font: 650 18px/1.2 var(--display); margin: 0; letter-spacing: -0.01em; }
+    .panel-head .note { font-size: var(--fs-sm); color: var(--text-3); }
+
+    /* ------------------------------------------------ gift box glyph */
+    .box { width: 16px; height: 16px; flex: none; overflow: visible; color: var(--text-3); }
+    .box rect, .gift rect { fill: var(--card); stroke: currentColor; stroke-width: 1.5; }
+    .box .rib, .box .bow, .gift .rib, .gift .bow { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .g-bought { color: var(--teal); }
+    .g-bought rect { fill: var(--teal); }
+    .g-bought .rib { stroke: var(--card); }
+    .g-ideas { color: var(--rose); }
+    .g-ideas rect { fill: var(--rose-tint); }
+    .g-none { color: var(--text-3); }
+    .g-none rect { stroke-dasharray: 2.4 2; }
+    .g-soon { color: var(--amber); }
+    .g-given { color: var(--text-3); }
+    .g-given rect { fill: var(--text-3); }
+    .g-given .rib { stroke: var(--card); }
+
+    /* ------------------------------------------------ ring */
+    .a-ring { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s3); }
+    .ring-wrap { position: relative; width: 100%; max-width: 330px; aspect-ratio: 1; }
+    .ring-wrap > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .ring-track { fill: none; stroke: var(--surface-2); stroke-width: 18; }
+    .ring-window { fill: none; stroke: var(--rose-window); stroke-width: 18; stroke-linecap: round; }
+    .ring-tick { stroke: var(--border-strong); stroke-width: 1; }
+    .ring-month { font: 500 11.5px var(--font); fill: var(--text-3); }
+    .ring-month.now { fill: var(--rose-ink); font-weight: 650; }
+    .ring-today { fill: var(--rose); stroke: var(--card); stroke-width: 1.5; stroke-linejoin: round; }
+    .gift { cursor: default; transform-box: fill-box; transform-origin: center; animation: pop .5s var(--ease) backwards; }
+    .gift[data-person] { cursor: pointer; }
+    .gift[data-person]:hover rect { stroke-width: 2.2; }
+    .gift .hit { fill: transparent; stroke: none; }
+    .ring-general { fill: var(--text-3); }
+    .ring-more { font: 650 10px var(--font); fill: var(--text-2); }
+    @keyframes pop { from { opacity: 0; transform: scale(.4); } }
+
+    .ring-center { position: absolute; inset: 22%; display: grid; place-items: center; text-align: center; pointer-events: none; }
+    .rc { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px; max-width: 100%; min-height: 0; background: none; border: 0; border-radius: 50%; color: var(--text); font: inherit; white-space: normal; cursor: default; }
+    button.rc { cursor: pointer; }
+    button.rc:hover { background: none; }
+    button.rc:hover .rc-what { text-decoration: underline; text-underline-offset: 3px; }
+    .rc-label { font-size: var(--fs-xs); color: var(--text-2); }
+    .rc-num { font: 700 54px/0.95 var(--display); letter-spacing: -0.04em; color: var(--rose-ink); font-variant-numeric: tabular-nums; }
+    .rc-num small { font: 600 15px var(--display); letter-spacing: 0; margin-left: 3px; color: var(--rose-ink); }
+    .rc-num.word { font-size: 40px; }
+    .rc-what { font: 650 15px/1.25 var(--display); margin-top: 4px; overflow-wrap: anywhere; }
+    .rc-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
+
+    .legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; font-size: var(--fs-xs); color: var(--text-2); }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend .swatch { width: 18px; height: 8px; border-radius: 4px; background: var(--rose-window); }
+
+    /* ------------------------------------------------ readiness meter */
+    .meter { display: flex; gap: 3px; height: 10px; margin: 2px 0 8px; }
+    .meter span { border-radius: 5px; min-width: 6px; }
+    .meter .m-bought { background: var(--teal); }
+    .meter .m-ideas { background: var(--rose); }
+    .meter .m-none { background: repeating-linear-gradient(135deg, var(--amber) 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px var(--amber); }
+    .meter-note { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 var(--s3); }
+    .meter-note b { font: 700 15px var(--display); color: var(--text); margin-right: 3px; font-variant-numeric: tabular-nums; }
+
+    /* ------------------------------------------------ agenda */
+    .occs { list-style: none; margin: 0; padding: 0; }
+    .occ { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; grid-template-areas: "tag title when" "tag chips when"; gap: 6px 14px; align-items: start; padding: 12px 8px; margin: 0 -8px; border-radius: 12px; position: relative; }
+    .occ > .tag { grid-area: tag; }
+    .occ > .occ-when { grid-area: when; padding-top: 2px; }
+    .occ-main { display: contents; }
+    .occ-main > .occ-title { grid-area: title; }
+    .occ-main > .chips, .occ-main > .shared { grid-area: chips; }
+    .occ + .occ::before { content: ""; position: absolute; top: 0; left: 8px; right: 8px; border-top: 1px solid var(--border); }
+    .occ.link { cursor: pointer; transition: background var(--dur) var(--ease); }
+    .occ.link:hover { background: var(--surface-2); }
+    .tag { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 48px; height: 52px; border-radius: 12px; background: var(--surface-2); line-height: 1; }
+    .tag-m { font-size: 11px; font-weight: 600; color: var(--rose-ink); }
+    .tag-d { font: 700 22px/1 var(--display); margin-top: 3px; font-variant-numeric: tabular-nums; }
+    .occ.near .tag { background: var(--rose-soft); }
+    .occ-title { font-weight: 600; overflow-wrap: anywhere; }
+    .occ-title .turning { font-weight: 400; color: var(--text-2); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .st { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 10px 3px 7px; border-radius: 999px; font-size: var(--fs-sm); line-height: 1.2; background: var(--surface-2); border: 1px solid transparent; color: var(--text); white-space: normal; font-weight: 450; }
+    button.st { cursor: pointer; }
+    button.st:hover { border-color: var(--border-strong); background: var(--surface-2); }
+    .st.bought { background: var(--teal-soft); }
+    .st.ideas { background: var(--rose-soft); }
+    .st.none.soon { background: var(--amber-soft); }
+    .st b { font-weight: 600; }
+    .st .s { color: var(--text-2); }
+    .shared { font-size: var(--fs-sm); color: var(--text-3); }
+    .occ-when { text-align: right; display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+    .occ-when .n { font: 650 15px var(--display); font-variant-numeric: tabular-nums; }
+    .occ-when .wd { font-size: var(--fs-xs); color: var(--text-3); }
+    .occ.near .occ-when .n { color: var(--rose-ink); }
+    .agenda-empty { padding: var(--s4) 0; color: var(--text-2); }
+    .later-head { font: 600 var(--fs-sm) var(--font); color: var(--text-2); margin: var(--s4) 0 var(--s1); }
+    .later { list-style: none; margin: 0; padding: 0; }
+    .later li { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 40px; padding: 4px 8px; margin: 0 -8px; border-radius: 10px; font-size: var(--fs-sm); }
+    .later li.link { cursor: pointer; }
+    .later li.link:hover { background: var(--surface-2); }
+    .later .d { color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .later .t { overflow-wrap: anywhere; }
+    .later .w { color: var(--text-3); white-space: nowrap; }
+    .more-btn { margin-top: var(--s2); }
+
+    /* ------------------------------------------------ add idea */
+    .a-add { padding: 18px 20px; }
+    .add-grid { display: grid; gap: 10px 12px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; }
+    .add-grid > label.field { margin: 0; min-width: 0; }
+    .add-grid .f-for, .add-grid .f-idea, .add-grid .f-go, .add-grid [data-error] { grid-column: 1 / -1; }
+    .add-grid .f-go { width: 100%; min-height: 44px; font-size: var(--fs); }
+    .add-hint { font-size: var(--fs-sm); color: var(--text-3); }
+    @media (min-width: 880px) {
+      .add-grid { grid-template-columns: 170px minmax(0, 1.6fr) 110px minmax(0, 1fr) auto; }
+      .add-grid .f-for, .add-grid .f-idea, .add-grid .f-go { grid-column: auto; }
+      .add-grid .f-go { width: auto; min-height: 40px; padding: 0 20px; font-size: var(--fs-sm); }
+    }
+
+    /* ------------------------------------------------ people */
+    .people { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+    .person { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 4px 12px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; cursor: pointer; transition: border-color var(--dur) var(--ease), transform var(--dur) var(--ease); }
+    .person:hover { border-color: var(--rose); }
+    .person:active { transform: scale(0.99); }
+    .avatar { grid-row: span 2; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--rose-soft); color: var(--rose-ink); font: 700 17px var(--display); }
+    .p-name { font-weight: 650; overflow-wrap: anywhere; }
+    .p-rel { font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
+    .p-next { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: var(--s2); margin-top: 8px; font-size: var(--fs-sm); }
+    .p-next .w { color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .p-next .w.near { color: var(--rose-ink); font-weight: 600; }
+    .shelf { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding-top: 10px; margin-top: 4px; border-top: 1px dashed var(--border); font-size: var(--fs-sm); color: var(--text-2); }
+    .shelf .box { width: 15px; height: 15px; }
+    .shelf .count { margin-left: 6px; }
+    #person-form { margin: 0 0 var(--s4); padding: var(--s4); border-radius: 16px; background: var(--surface-2); }
+    #person-form .field { margin: 0; }
+
+    /* ------------------------------------------------ forms shared */
     .birthday { display: grid; grid-template-columns: 1.4fr 0.8fr 1fr; gap: var(--s2); }
     .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
-    .two > label.field { margin: 0; }
-    .form-actions { display: flex; gap: var(--s2); align-items: center; margin-top: var(--s3); }
-    .days { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
-    .list > li .actions-inline { display: flex; gap: var(--s1); flex: none; }
-    .when { min-width: 72px; text-align: right; }
-    dialog { width: min(560px, 94vw); max-height: 90vh; overflow: auto; }
-    dialog section + section { margin-top: var(--s5); }
-    .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s3); }
-    .dialog-head h2 { margin: 0; }
-    .year-head { margin-top: var(--s3); }
-    .suggestion .sub { white-space: normal; }
-    .hidden { display: none !important; }
-    @media (max-width: 480px) {
+    .two > label.field { margin: 0; min-width: 0; }
+    .form-actions { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-top: var(--s3); }
+
+    /* ------------------------------------------------ first run */
+    .first { display: grid; justify-items: center; text-align: center; gap: var(--s2); padding: var(--s6) var(--s4); }
+    .first svg.art { width: 96px; height: 96px; margin-bottom: var(--s2); }
+    .first svg.art * { stroke-width: 0.9; }
+    .first h2 { font: 700 22px/1.2 var(--display); margin: 0; }
+    .first p { color: var(--text-2); margin: 0 0 var(--s3); }
+
+    /* ------------------------------------------------ person sheet */
+    dialog { width: min(640px, calc(100vw - 16px)); max-height: 90vh; overflow: auto; background: var(--card); padding: 24px; -webkit-backdrop-filter: none; backdrop-filter: none; }
+    dialog section { margin-top: var(--s5); }
+    dialog h3 { font: 650 16px/1.2 var(--display); margin: 0 0 var(--s2); }
+    .dialog-head { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+    .dialog-head .avatar { width: 52px; height: 52px; font-size: 22px; border-radius: 16px; grid-row: auto; }
+    .dialog-head h2 { margin: 0; font: 700 24px/1.15 var(--display); overflow-wrap: anywhere; }
+    .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: var(--s4) 0 0; }
+    .facts > div { padding: 10px 12px; border-radius: 12px; background: var(--surface-2); min-width: 0; }
+    .facts dt { font-size: var(--fs-xs); color: var(--text-2); }
+    .facts dd { margin: 2px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+    .facts dd small { display: block; font-weight: 400; color: var(--text-2); font-size: var(--fs-xs); }
+    .sec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s1); }
+    .sec-head h3 { margin: 0; }
+    .gifts { list-style: none; margin: 0; padding: 0; }
+    .gifts > li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+    .gifts > li:first-child { border-top: 0; }
+    .gifts .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+    .gifts .sub { font-size: var(--fs-sm); color: var(--text-2); white-space: normal; }
+    .gifts .price { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+    .gifts .actions-inline { display: flex; gap: var(--s1); flex: none; }
+    .gifts button.sm { min-height: 32px; }
+    .gifts.suggest > li .box { color: var(--rose); }
+    .year-head { font: 650 var(--fs-sm) var(--display); color: var(--text-2); margin: var(--s3) 0 0; }
+    .empty-line { color: var(--text-3); font-size: var(--fs-sm); margin: var(--s2) 0; }
+    #wish-form { margin-bottom: var(--s2); }
+    #wish-form .field { margin: 0; }
+    #wish-form > button { margin-top: var(--s2); }
+    #notes-form .field { margin-top: var(--s4); }
+    #details-form { margin-top: var(--s3); padding: var(--s4); border-radius: 14px; background: var(--surface-2); }
+    #details-form .field { margin: 0; }
+    .danger-zone { padding-top: var(--s4); border-top: 1px solid var(--border); }
+
+    @media (max-width: 560px) {
+      .page { padding-left: 12px; padding-right: 12px; }
+      .panel { padding: 16px; border-radius: 18px; }
       .two { grid-template-columns: 1fr; }
       .birthday { grid-template-columns: 1fr 0.8fr 1fr; }
+      .occ { grid-template-columns: 44px minmax(0, 1fr); grid-template-areas: "tag title" "tag when" "tag chips"; gap: 2px 12px; }
+      .occ > .occ-when { flex-direction: row; align-items: baseline; gap: 8px; text-align: left; padding-top: 0; }
+      .occ-when .n { font-size: 14px; font-weight: 600; color: var(--text-2); }
+      .occ-main > .chips, .occ-main > .shared { margin-top: 6px; }
+      .tag { width: 44px; height: 48px; }
+      dialog { padding: 18px 16px; }
+      .gifts > li { flex-wrap: wrap; }
+      .gifts .actions-inline { margin-left: 28px; }
+      .person { grid-template-columns: 40px minmax(0, 1fr) auto; padding: 12px 14px; }
+      .p-next { grid-column: 3; grid-row: 1 / span 2; flex-direction: column; align-items: flex-end; justify-content: center; gap: 2px; margin-top: 0; text-align: right; }
+      .shelf { margin-top: 6px; padding-top: 8px; }
     }
+    @media (prefers-reduced-motion: reduce) { .gift { animation: none; } }
   </style>
 </head>
 <body>
-  <main class="page stack">
-    <h1>Gift ideas</h1>
+  <main class="page">
+    <header class="head">
+      <h1>Gift ideas</h1>
+      <span class="today" id="today-note"></span>
+    </header>
 
     <div id="load-error" class="notice danger hidden"></div>
 
-    <div id="loading" class="stack">
-      <span class="skeleton" style="height: 120px"></span>
-      <span class="skeleton" style="height: 220px"></span>
+    <div id="loading" class="layout">
+      <span class="skeleton a-ring" style="height: 380px; border-radius: 20px"></span>
+      <span class="skeleton a-agenda" style="height: 380px; border-radius: 20px"></span>
     </div>
 
     <!-- Day one -->
-    <section id="first-run" class="hidden">
-      <div class="empty">
-        <strong>Add the people you buy for</strong>
-        <span>Name and birthday is enough to start. Ideas come later.</span>
+    <section id="first-run" class="hidden panel">
+      <div class="first">
+        <svg class="box art" viewBox="0 0 16 16" aria-hidden="true"><g class="g-ideas"><rect x="1.5" y="5" width="13" height="9.5" rx="2"/><path class="rib" d="M8 5v9.5M1.5 9h13"/><path class="bow" d="M8 5C6.2 1.6 3 2.4 4.6 5M8 5c1.8-3.4 5-2.6 3.4 0"/></g></svg>
+        <h2>Add the people you buy for</h2>
+        <p>Name and birthday is enough to start. Ideas come later.</p>
         <form id="first-form" class="stack" style="width: min(420px, 100%); text-align: left" novalidate>
           <label class="field"><span class="label">Name</span><input type="text" name="name" required maxlength="100" autocomplete="off"></label>
           <div class="field-label">Birthday</div>
@@ -53,30 +273,38 @@
       </div>
     </section>
 
-    <section id="main" class="hidden stack">
-      <div class="card">
-        <div class="row between"><span class="eyebrow">Coming up</span><span class="faint small" id="window-note"></span></div>
-        <ul class="list" id="upcoming"></ul>
+    <section id="main" class="hidden layout">
+      <div class="panel a-ring">
+        <div class="ring-wrap" id="ring-wrap">
+          <svg id="ring" viewBox="0 0 340 340" role="img" aria-labelledby="ring-label"><title id="ring-label">The year ahead</title></svg>
+          <div class="ring-center" id="ring-center"></div>
+        </div>
+        <div class="legend" id="legend" aria-hidden="true"></div>
       </div>
 
-      <form id="idea-form" class="card" novalidate>
-        <h2 style="margin-top: 0">Add idea</h2>
-        <div class="two">
-          <label class="field"><span class="label">For</span><select name="person_id" required></select></label>
-          <label class="field"><span class="label">Idea</span><input type="text" name="idea" required maxlength="500" autocomplete="off" placeholder="e.g. Linen apron"></label>
-        </div>
-        <div class="two" style="margin-top: var(--s3)">
-          <label class="field"><span class="label">Link</span><input type="url" name="link" maxlength="2000" placeholder="Optional"></label>
+      <div class="panel a-agenda">
+        <div class="panel-head"><h2>Coming up</h2><span class="note" id="window-note"></span></div>
+        <div id="readiness"></div>
+        <ul class="occs" id="upcoming"></ul>
+        <div id="later"></div>
+      </div>
+
+      <form id="idea-form" class="panel a-add" novalidate>
+        <div class="panel-head"><h2>Jot down an idea</h2><span class="add-hint">Saved for their next occasion</span></div>
+        <div class="add-grid">
+          <label class="field f-for"><span class="label">For</span><select name="person_id" required></select></label>
+          <label class="field f-idea"><span class="label">Idea</span><input type="text" name="idea" required maxlength="500" autocomplete="off" placeholder="e.g. Linen apron"></label>
           <label class="field"><span class="label">Price</span><input type="number" name="price" min="0" step="any" inputmode="decimal" placeholder="Optional"></label>
+          <label class="field"><span class="label">Link</span><input type="url" name="link" maxlength="2000" placeholder="Optional"></label>
+          <button type="submit" class="primary f-go">Save idea</button>
+          <div class="notice danger hidden" data-error></div>
         </div>
-        <div class="notice danger hidden" data-error style="margin-top: var(--s3)"></div>
-        <div class="form-actions"><button type="submit" class="primary">Add idea</button></div>
       </form>
 
-      <div class="card">
-        <div class="row between">
-          <span class="eyebrow">People</span>
-          <button type="button" class="ghost sm" id="show-add-person">Add person</button>
+      <div class="panel a-people">
+        <div class="panel-head">
+          <h2>People</h2>
+          <button type="button" class="sm" id="show-add-person">Add person</button>
         </div>
         <form id="person-form" class="hidden" novalidate>
           <div class="two">
@@ -92,7 +320,7 @@
             <button type="button" class="ghost" data-cancel>Cancel</button>
           </div>
         </form>
-        <ul class="list" id="people"></ul>
+        <ul class="people" id="people"></ul>
       </div>
     </section>
   </main>

@@ -4,16 +4,21 @@
     "Health",
     "Running"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "A screen: your week, your month, and your runs over time",
+      "date": "2026-11-06"
     }
   ],
   "summary": {
-    "message": "A history of your runs that you and your agents record into: distance, time, date and a note, with totals and pace for any range of dates.",
+    "message": "A history of your runs that you and your agents record into: distance, time, date and a note, with totals and pace for any range of dates, and on its screen your week, your month against the last one and your runs over time.",
     "keeps": "Runs: date, distance, duration and a note.",
     "reaches": "",
     "findings": [

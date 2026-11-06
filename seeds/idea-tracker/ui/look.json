@@ -1,0 +1,30 @@
+{
+  "hue": 48,
+  "palette": {
+    "ember": "#e9823c",
+    "ember-dark": "#f39a55",
+    "ember-ink": "#a8501a",
+    "ember-ink-dark": "#f6b886",
+    "stage-raw": "#8a929f",
+    "stage-exploring": "#2b8a99",
+    "stage-exploring-dark": "#6fc8d4",
+    "stage-validating": "#c49a24",
+    "stage-validating-dark": "#e8c766",
+    "stage-active": "#e9823c",
+    "stage-parked": "#8b7fa6",
+    "stage-shipped": "#2f8a55",
+    "stage-shipped-dark": "#73d39b",
+    "stage-killed": "#b4483c",
+    "neutral-bg": "platform --bg (pale grey / near-black)",
+    "surface": "platform --surface-solid (white / dark grey)"
+  },
+  "type": {
+    "display": "ui-rounded, SF Pro Rounded, system-ui (700–750)",
+    "body": "system-ui (platform --font)",
+    "numbers": "ui-rounded, tabular figures",
+    "labels": "system-ui 12–13px, weight 600, sentence case"
+  },
+  "layout": "Bulb board: masthead with the best-bet line, a full-width quick-capture bar, then a two-column board (idea list left, sticky map right; one column on phones with the map first). Rows are aligned columns: idea, stage, stars, last change; a coloured stage edge on each row.",
+  "signature": "The stage × rating map: every idea is a pixel square (the bulb icon's pixel motif) placed by stage (rows, raw to shipped, with parked and killed off the path) and gut rating (columns, warming towards 5 stars). Stage labels filter the list; hovering a square lights up its row.",
+  "mood": "Warm workshop light: ideas start cool and warm up as they move from raw to active, then turn green when shipped."
+}

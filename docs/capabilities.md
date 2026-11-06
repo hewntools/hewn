@@ -52,11 +52,11 @@ It goes through the same validation as a built one.
 
 ## Examples
 
-Three small tools in the repo's [`seeds/`](../seeds) are meant to be read and copied (Apache-2.0):
+Hewn's own tools, the Hub's Official shelf, are in the repo's [`seeds/`](../seeds) to be read and copied (Apache-2.0). Three to start with:
 
-- [Running Log](../seeds/running-log): operations, a migration and test cases, nothing more
-- [Reading List](../seeds/reading-list): a widget, and an operation marked `destructive`
-- [Habits](../seeds/habits): a widget with a button that runs a write operation
+- [Running Log](../seeds/running-log): operations, a migration, test cases, sample data and a screen
+- [Reading List](../seeds/reading-list): a widget, an operation marked `destructive`, and a screen
+- [Habits](../seeds/habits): a widget with a button that runs a write operation, and a screen
 
 From a checkout of the repo: `hewn install seeds/habits`.
 

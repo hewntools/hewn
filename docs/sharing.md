@@ -56,7 +56,7 @@ A file can't bring a reading of its own: whatever it says about itself is ignore
 
 ## The Hub
 
-The **Hub** tab holds tools ready to install. In this release it's Hewn's own (**Official**): Habits, Plant Log, Gift Ideas, Kid Quotes, Idea Tracker, Reading List and Running Log, shipped with Hewn (`seeds/` in the repo). A tool's page shows what it does and what it keeps (Hewn's reading of its code), its operations and its **Source code**; there's no file to download. **Install** opens the same sheet as for a file, with Hewn's reading already in it, so there's no wait; **Check it yourself** has your builder read it too. Info shows "from Hub · Official", and Activity "Installed from Hub". They're yours once installed, like any tool. Tools from other people come to the same Hub later.
+The **Hub** tab holds tools ready to install. In this release it's Hewn's own (**Official**): Habits, Plant Log, Gift Ideas, Kid Quotes, Idea Tracker, Reading List, Running Log and Aurora Watch, shipped with Hewn (`seeds/` in the repo). A tool's page shows what it does and what it keeps (Hewn's reading of its code), its operations and its **Source code**; there's no file to download. **Install** opens the same sheet as for a file, with Hewn's reading already in it, so there's no wait; **Check it yourself** has your builder read it too. Info shows "from Hub · Official", and Activity "Installed from Hub". They're yours once installed, like any tool. Tools from other people come to the same Hub later.
 
 ![Install Plant Log from Hub: what it does, keeps and sends where, a warning that it sends a photo to the model when asked, Source code, what it will ask for, its name and Start with sample data](images/install.png)
 

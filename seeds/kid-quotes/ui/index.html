@@ -6,37 +6,204 @@
   <title>Kid Quotes</title>
   <link rel="stylesheet" href="/_platform/ui.css">
   <style>
-    .quote-text { font-size: var(--fs); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .quote-text::before { content: "\201C"; }
-    .quote-text::after { content: "\201D"; }
-    #text { font-size: var(--fs-lg); min-height: 120px; }
-    .two { display: grid; gap: var(--s3); grid-template-columns: 1fr 1fr; }
+    :root, [data-theme] {
+      /* Marigold (hue 45) leads; each kid gets a colour family of their own. */
+      --accent: light-dark(#f59a2e, #ffa94d);
+      --accent-text: #2b1600;
+      --accent-ink: light-dark(#a24f00, #ffbf73);
+      --accent-soft: light-dark(rgb(245 154 46 / 0.2), rgb(255 169 77 / 0.16));
+      --k0: light-dark(#ea8a1a, #ffaa4d); --k0-ink: light-dark(#a24f00, #ffbf73);
+      --k1: light-dark(#1b9a94, #4fd1c5); --k1-ink: light-dark(#0b6b66, #84e3d9);
+      --k2: light-dark(#c0478a, #f28cc6); --k2-ink: light-dark(#8f2c66, #f7b1d8);
+      --k3: light-dark(#3a7bd5, #82b1ff); --k3-ink: light-dark(#2457a0, #abc9ff);
+      --k4: light-dark(#7a5cd6, #b7a2ff); --k4-ink: light-dark(#553aa8, #cdbfff);
+      --kid: var(--k0); --kid-ink: var(--k0-ink);
+      --round: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+      --paper: var(--surface-solid);
+      --lift: 0 1px 2px light-dark(rgb(20 20 30 / 0.05), rgb(0 0 0 / 0.3)), 0 10px 30px light-dark(rgb(20 20 30 / 0.06), rgb(0 0 0 / 0.3));
+    }
+
+    .page { max-width: 1080px; padding-top: var(--s5); }
+    #app > * + * { margin-top: var(--s5); }
+    h1 { font: 750 30px/1.1 var(--round); letter-spacing: -0.02em; margin: 0; }
+    h2 { font: 720 20px/1.2 var(--round); letter-spacing: -0.01em; margin: 0; }
+
+    /* ---------- header ---------- */
+    .top-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand svg { width: 36px; height: 36px; flex: none; display: block; }
+    .add-kid { gap: 6px; font-family: var(--round); font-size: 14px; color: var(--text-2); }
+    .add-kid svg { width: 14px; height: 14px; }
+
+    /* ---------- shared surfaces ---------- */
+    .sheet { background: var(--paper); border: 1px solid var(--border); border-radius: 24px; padding: 20px; box-shadow: var(--lift); min-width: 0; }
+
+    /* ---------- hero: composer + spotlight ---------- */
+    .hero { display: grid; gap: 20px; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: stretch; }
+    .hero.solo { grid-template-columns: minmax(0, 1fr); }
+    .hero > * { min-width: 0; }
+    @media (max-width: 820px) { .hero { grid-template-columns: minmax(0, 1fr); } }
+
+    .composer-label { display: block; font: 720 18px/1.2 var(--round); margin-bottom: 10px; }
+    #text {
+      display: block; min-height: 112px; padding: 14px 16px; resize: vertical;
+      font: 520 19px/1.45 var(--round); border-radius: 20px 20px 20px 6px;
+    }
+    .meta { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 12px; margin-top: 14px; }
+    .meta > * { min-width: 0; }
+    .meta .who { grid-column: 1 / -1; }
+    .meta label.field { margin: 0; }
+    .meta .field-label, .meta .label { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+    @media (max-width: 480px) { .meta { grid-template-columns: minmax(0, 1fr); } }
+    .composer-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-top: 16px; flex-wrap: wrap; }
+    .composer-foot .keys { font-size: 12.5px; color: var(--text-3); }
+    @media (max-width: 600px) { .composer-foot .keys { display: none; } .composer-foot button { flex: 1; } }
+    #quote-error, #kid-error { margin-top: 12px; }
+
+    .kid-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+    .kid-chip {
+      display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 14px 4px 4px;
+      border-radius: 999px; border: 1.5px solid var(--border-strong); background: var(--paper);
+      font: 650 15px/1 var(--round); color: var(--text); cursor: pointer;
+      transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+    }
+    .kid-chip:hover { background: color-mix(in oklab, var(--kid) 8%, var(--paper)); border-color: var(--kid); }
+    .kid-chip[aria-pressed="true"] { background: color-mix(in oklab, var(--kid) 18%, var(--paper)); border-color: var(--kid); }
+    .kid-chip.sm { min-height: 36px; font-size: 14px; padding: 3px 13px 3px 10px; gap: 7px; }
+    .kid-chip .swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--kid); flex: none; }
+    .kid-chip.everyone .swatch { background: conic-gradient(var(--k0) 0 25%, var(--k1) 0 50%, var(--k2) 0 75%, var(--k3) 0); }
+
+    .avatar {
+      display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%;
+      background: var(--kid); color: #1a1206; font: 760 14px/1 var(--round); text-transform: uppercase;
+    }
+    .avatar.lg { width: 38px; height: 38px; font-size: 17px; }
+
+    /* ---------- spotlight ---------- */
+    .spot { display: flex; flex-direction: column; gap: 12px; position: relative; overflow: hidden; }
+    .spot-label { display: flex; align-items: center; gap: 8px; font: 680 14px/1.2 var(--round); color: var(--accent-ink); }
+    .spot-label svg { width: 16px; height: 16px; flex: none; }
+    .spot-body { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 6px 0 10px; }
+    .spot-mark { font: 800 88px/0.5 var(--round); color: var(--kid); height: 34px; margin-top: 18px; user-select: none; }
+    @media (max-width: 600px) {
+      .spot-body { padding: 0 0 4px; gap: 6px; }
+      .spot-mark { font-size: 64px; height: 24px; margin-top: 10px; }
+    }
+    .spot-quote {
+      margin: 0; font: 660 clamp(22px, 2.7vw, 30px)/1.28 var(--round); letter-spacing: -0.012em;
+      text-wrap: pretty; overflow-wrap: anywhere; white-space: pre-wrap;
+    }
+    .spot-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px dashed var(--border-strong); }
+    .byline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; align-items: center; min-width: 0; }
+    .byline .avatar { grid-row: 1 / span 3; grid-column: 1; align-self: center; }
+    .byline > :not(.avatar) { grid-column: 2; }
+    .byline .name { font: 700 15px/1.2 var(--round); color: var(--kid-ink); }
+    .byline .when { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+    .spot-next { gap: 6px; font-family: var(--round); }
+    .spot-next svg { width: 15px; height: 15px; }
+    .spot.swap .spot-quote, .spot.swap .spot-mark { animation: pop .38s var(--ease); }
+    @keyframes pop { from { opacity: 0; transform: translateY(6px); } }
+
+    /* ---------- timeline ---------- */
+    .sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .sec-head p { margin: 0; font-size: 14px; color: var(--text-2); }
+    .tl { width: 100%; min-width: 0; }
+    .tl svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+    .tl .gridline { stroke: var(--border-strong); stroke-dasharray: 2 4; }
+    .tl text { paint-order: stroke; stroke: var(--paper); stroke-width: 5px; stroke-linejoin: round; }
+    .tl .yr { font: 650 12px var(--round); fill: var(--text-3); }
+    .tl .now-line { stroke: var(--accent-ink); stroke-dasharray: 3 3; opacity: .7; }
+    .tl .now { font: 700 12px var(--round); fill: var(--accent-ink); }
+    .tl .lane-name { font: 720 15px var(--round); fill: var(--kid-ink); }
+    .tl .lane-age { font: 500 13px var(--font); fill: var(--text-2); }
+    .tl .lane-count { font: 650 13px var(--round); fill: var(--text-2); }
+    .tl .life { fill: var(--kid); opacity: .22; }
+    .tl .bday { stroke: var(--kid); stroke-width: 2; stroke-linecap: round; opacity: .75; }
+    .tl .bday-t { font: 650 11px var(--round); fill: var(--text-3); }
+    .tl .dot { fill: var(--kid); stroke: var(--paper); stroke-width: 2.5; cursor: pointer; transition: r var(--dur) var(--ease); }
+    .tl .dot:hover, .tl .dot:focus-visible { r: 9.5px; }
+    .tl .dot:focus-visible { outline: none; stroke: var(--text); }
+    .tl .ring { fill: none; stroke: var(--kid); stroke-width: 2; }
+    .tl-note { margin: 10px 0 0; font-size: 12.5px; color: var(--text-3); }
+
+    /* ---------- the quotes ---------- */
+    .list-head { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+    .list-head h2 { margin-right: auto; }
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; }
+    .search { width: 220px; min-width: 0; }
+    @media (max-width: 600px) { .list-head h2 { width: 100%; } .search { width: 100%; flex: 1 1 100%; } }
+
+    .quotes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 24px 18px; align-items: start; }
+    .q { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+    .q-bubble { position: relative; background: var(--paper); border: 1px solid var(--border); border-radius: 20px 20px 20px 6px; padding: 14px 46px 15px 16px; box-shadow: var(--lift); }
+    .q-text { margin: 0; font: 540 18px/1.42 var(--round); white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; }
+    .q-text::before { content: "\201C"; color: var(--kid); font-weight: 800; margin-right: 1px; }
+    .q-text::after { content: "\201D"; color: var(--kid); font-weight: 800; margin-left: 1px; }
+    .q-edit { position: absolute; top: 6px; right: 6px; width: 36px; min-height: 36px; padding: 0; color: var(--text-3); border-radius: 12px; }
+    .q-edit:hover { color: var(--text); }
+    .q-edit svg { width: 16px; height: 16px; }
+    .q-by { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding-left: 2px; }
+    .q-who { display: flex; flex-direction: column; min-width: 0; }
+    .q-name { font: 700 14.5px/1.25 var(--round); color: var(--kid-ink); }
+    .q-ctx { font-size: 13px; line-height: 1.3; color: var(--text-2); overflow-wrap: anywhere; }
+    .q-when { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+    .q-date { font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
+    .age { white-space: nowrap; line-height: 1.1; }
+    .age b { font: 760 17px/1 var(--round); font-variant-numeric: tabular-nums; }
+    .age small { font-size: 12px; color: var(--text-2); margin: 0 4px 0 1px; }
+    .age small:last-child { margin-right: 0; }
+
+    .q.editing { grid-column: 1 / -1; }
+    .edit-form { background: var(--paper); border: 1.5px solid var(--kid); border-radius: 20px; padding: 16px; box-shadow: var(--lift); }
+    .edit-form textarea { font: 520 17px/1.4 var(--round); }
+    .two { display: grid; gap: var(--s3); grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .two > * { min-width: 0; }
     .two label.field { margin: 0; }
-    .kid-picker { flex-wrap: wrap; }
-    .list > li { align-items: flex-start; }
-    .list > li > button { flex: none; }
-    .edit-form { width: 100%; }
-    .filters { gap: var(--s2); }
-    .search { flex: 1; min-width: 160px; }
-    section > .eyebrow { margin-bottom: var(--s2); }
-    @media (max-width: 480px) { .two { grid-template-columns: 1fr; } }
+    .edit-form label.field { margin: 10px 0; }
+    .edit-form .two { margin: 10px 0; }
+    @media (max-width: 480px) { .two { grid-template-columns: minmax(0, 1fr); } }
+    .edit-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+    .edit-actions .spacer { flex: 1; }
+
+    .more-row { display: flex; justify-content: center; margin-top: 20px; }
+    .empty-quotes { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 40px 20px; border: 1.5px dashed var(--border-strong); border-radius: 24px; color: var(--text-2); }
+    .empty-quotes svg { width: 64px; height: 52px; margin-bottom: 6px; }
+    .empty-quotes strong { font: 720 19px/1.2 var(--round); color: var(--text); }
+    .empty-quotes button { margin-top: 8px; }
+
+    /* ---------- kids sheet ---------- */
+    .kids-intro strong { display: block; font: 720 20px/1.2 var(--round); margin-bottom: 4px; }
+    .kids-intro p { margin: 0 0 6px; color: var(--text-2); }
+    .kid-form-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+    #kid-list { font-size: 13px; color: var(--text-2); }
   </style>
 </head>
 <body>
-  <main class="page stack" id="app">
-    <h1>Kid quotes</h1>
+  <main class="page" id="app">
+    <header class="top-bar">
+      <div class="brand">
+        <svg viewBox="0 0 36 36" aria-hidden="true">
+          <path d="M6 4h24a4 4 0 0 1 4 4v15a4 4 0 0 1-4 4H15l-7 6v-6H6a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4z" fill="var(--accent)"/>
+          <circle cx="12" cy="15.5" r="2.4" fill="#2b1600"/><circle cx="18" cy="15.5" r="2.4" fill="#2b1600"/><circle cx="24" cy="15.5" r="2.4" fill="#2b1600"/>
+        </svg>
+        <h1>Kid quotes</h1>
+      </div>
+      <button type="button" id="add-kid" class="ghost add-kid" hidden>
+        <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Add a kid
+      </button>
+    </header>
 
-    <div id="loading" class="stack" aria-hidden="true">
-      <span class="skeleton" style="height: 220px"></span>
-      <span class="skeleton" style="height: 48px"></span>
-      <span class="skeleton" style="height: 48px"></span>
+    <div id="loading" aria-hidden="true">
+      <span class="skeleton" style="height: 260px; border-radius: 24px"></span>
+      <span class="skeleton" style="height: 140px; border-radius: 24px; margin-top: 20px"></span>
     </div>
 
     <!-- Day one, and adding more kids later -->
-    <section id="kids-card" class="card" hidden>
-      <div id="kids-intro">
+    <section id="kids-card" class="sheet" hidden>
+      <div id="kids-intro" class="kids-intro">
         <strong>Who's talking?</strong>
-        <p class="muted small">Add each kid first. A birthdate is optional and gives every quote their age at the time.</p>
+        <p>Add each kid first. A birthdate is optional and gives every quote their age at the time.</p>
       </div>
       <form id="kid-form" novalidate>
         <div class="two">
@@ -44,54 +211,75 @@
           <label class="field"><span class="label">Birthdate</span><input type="date" id="kid-birthdate"><span class="hint">Optional</span></label>
         </div>
         <div id="kid-error" class="notice danger" role="alert" hidden></div>
-        <div class="row" style="margin-top: var(--s3)">
+        <div class="kid-form-row">
           <button type="submit" id="kid-save" class="primary">Add kid</button>
           <button type="button" id="kid-done" class="ghost" hidden>Done</button>
-          <span id="kid-list" class="muted small"></span>
+          <span id="kid-list"></span>
         </div>
       </form>
     </section>
 
-    <!-- Quick add -->
-    <section id="add-card" class="card" hidden>
-      <form id="quote-form" novalidate>
-        <label class="field" style="margin-top: 0">
-          <span class="label">What did they say?</span>
-          <textarea id="text" required maxlength="500"></textarea>
-        </label>
-        <div class="field">
-          <span class="field-label" id="kid-picker-label">Who said it</span>
-          <div id="kid-picker" class="row kid-picker" role="group" aria-labelledby="kid-picker-label"></div>
-        </div>
-        <div class="two">
-          <label class="field"><span class="label">When</span><input type="date" id="said-on" required></label>
-          <label class="field"><span class="label">Where or what was happening</span><input type="text" id="context" maxlength="200" placeholder="at dinner" autocomplete="off"></label>
-        </div>
-        <div id="quote-error" class="notice danger" role="alert" hidden></div>
-        <div class="row between" style="margin-top: var(--s4)">
-          <button type="submit" id="quote-save" class="primary lg">Save</button>
-          <button type="button" id="add-kid" class="ghost">Add a kid</button>
-        </div>
-      </form>
-    </section>
+    <div id="hero" class="hero" hidden>
+      <!-- Quick add -->
+      <section id="add-card" class="sheet composer">
+        <form id="quote-form" novalidate>
+          <label class="composer-label" for="text">What did they say?</label>
+          <textarea id="text" required maxlength="500" placeholder="Write it down before it's forgotten"></textarea>
+          <div class="meta">
+            <div class="field who">
+              <span class="field-label" id="kid-picker-label">Who said it</span>
+              <div id="kid-picker" class="kid-picker" role="group" aria-labelledby="kid-picker-label"></div>
+            </div>
+            <label class="field"><span class="label">When</span><input type="date" id="said-on" required></label>
+            <label class="field"><span class="label">Where or what was happening</span><input type="text" id="context" maxlength="200" placeholder="at dinner" autocomplete="off"></label>
+          </div>
+          <div id="quote-error" class="notice danger" role="alert" hidden></div>
+          <div class="composer-foot">
+            <span class="keys">Enter saves, Shift+Enter starts a new line</span>
+            <button type="submit" id="quote-save" class="primary lg">Save quote</button>
+          </div>
+        </form>
+      </section>
 
-    <section id="otd" hidden>
-      <div class="eyebrow">On this day</div>
-      <ul class="list card" id="otd-list"></ul>
+      <!-- One to remember: on this day, or picked at random -->
+      <section id="spot" class="sheet spot" aria-labelledby="spot-label" hidden>
+        <div class="spot-label">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l1.6 4.2 4.4.3-3.4 2.8 1.1 4.3L8 10.7l-3.7 2.4 1.1-4.3L2 6l4.4-.3z" fill="currentColor"/></svg>
+          <span id="spot-label"></span>
+        </div>
+        <div class="spot-body">
+          <div class="spot-mark" aria-hidden="true">&ldquo;</div>
+          <blockquote class="spot-quote" id="spot-text"></blockquote>
+        </div>
+        <div class="spot-foot">
+          <div class="byline" id="spot-by"></div>
+          <button type="button" id="spot-next" class="spot-next">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h8.5M8 2l3 3-3 3M14 11H5.5M8 8l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Another one
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <section id="timeline-card" class="sheet" aria-labelledby="tl-title" hidden>
+      <div class="sec-head">
+        <h2 id="tl-title">Growing up, in their words</h2>
+        <p id="insight"></p>
+      </div>
+      <div id="timeline" class="tl"></div>
+      <p class="tl-note">Each dot is a quote; tap one to bring it back. Ticks mark birthdays.</p>
     </section>
 
     <section id="all" hidden>
-      <div class="row between">
-        <div class="eyebrow" id="all-title">All quotes</div>
-      </div>
-      <div class="row filters" style="margin: var(--s2) 0 var(--s3)">
-        <div id="kid-filter" class="row filters"></div>
-        <input type="search" id="search" class="search sm" placeholder="Search" aria-label="Search quotes">
+      <div class="list-head">
+        <h2 id="all-title">All quotes</h2>
+        <div id="kid-filter" class="filters" role="group" aria-label="Show quotes from"></div>
+        <input type="search" id="search" class="search" placeholder="Search quotes" aria-label="Search quotes">
       </div>
       <div id="list-error" class="notice danger" role="alert" hidden></div>
-      <ul class="list" id="quote-list"></ul>
+      <ul class="quotes" id="quote-list"></ul>
       <div id="list-empty" hidden></div>
-      <div class="row" style="justify-content: center; margin-top: var(--s3)"><button type="button" id="more" class="ghost" hidden>Show more</button></div>
+      <div class="more-row"><button type="button" id="more" hidden>Show more</button></div>
     </section>
   </main>
   <div class="toast-region" id="toasts" aria-live="polite"></div>

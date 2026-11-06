@@ -4,23 +4,33 @@
     "Health",
     "Daily"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "A screen: today's habits, one tap each, and their chains over five weeks",
+      "date": "2026-11-06"
     }
   ],
   "summary": {
-    "message": "A short list of daily habits, each checked off once a day, with streaks and a widget for today with a Done button.",
-    "keeps": "Your habits and the days you checked each one off.",
+    "message": "A short list of daily habits, each checked off once a day, with streaks, your best runs and five weeks of each habit on its screen, and a widget for today with a Done button.",
+    "keeps": "Your habits, when each was added, and the days you checked each one off.",
     "reaches": "",
     "findings": [
       {
         "kind": "ok",
         "title": "Keeps your data inside the tool",
         "detail": "It reaches nothing outside itself."
+      },
+      {
+        "kind": "ok",
+        "title": "Nothing for an agent to delete",
+        "detail": "The only thing it takes back is one day's check-in."
       }
     ]
   }
