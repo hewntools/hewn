@@ -151,7 +151,12 @@ describe("passes after a new tool's build", () => {
     assert.ok(last.seconds.code! >= 0.6, `writing code, across its check: ${last.seconds.code}`);
     assert.ok(last.seconds.critique! >= 0.4, `the critique: ${last.seconds.critique}`);
     assert.ok(last.seconds.craft! >= 0.2, `the craft pass: ${last.seconds.craft}`);
-    assert.ok(last.seconds.tests! < 0.6, `the tests are timed apart: ${last.seconds.tests}`);
+    // The tests are timed apart: their own step, entered once, after the code (its check doesn't switch to
+    // them) and before the passes (whose tests are the pass's). No upper bound on a step's time: that
+    // measures the runner, not Hewn (a busy CI runner took 1.2 s over these tests).
+    const order = steps.map((s) => s.step).filter((s, i, all) => s !== all[i - 1]);
+    assert.deepEqual(order.slice(order.indexOf("code")), ["code", "tests", "critique", "craft", "done"]);
+    assert.ok(last.seconds.tests !== undefined, "the tests are timed");
     // Each step state carries them, so a page opened at any point shows the same.
     const atCraft = steps.find((s) => s.step === "craft")!;
     assert.equal(atCraft.seconds.code, last.seconds.code);
