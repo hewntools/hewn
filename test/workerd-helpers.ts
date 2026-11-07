@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { RemoteJobs } from "@hewntools/cli/builders/remote.ts";
 import type { Intake } from "@hewntools/cli/intake.ts";
 import type { Hosted } from "@hewntools/cli/supervisor/index.ts";
@@ -25,6 +26,14 @@ export const freePort = () =>
   });
 
 export const parse = (r: any) => JSON.parse(r.content[0].text);
+
+/**
+ * `builds_wait` for up to `seconds`, the MCP client waiting a little longer than the wait: its own
+ * default gives up at 60 s, and a build with a check (bundle, npm, the renders) can take about
+ * that long on a busy CI runner.
+ */
+export const waitBuild = async (client: Client, buildId: string, seconds: number) =>
+  parse(await client.callTool({ name: "builds_wait", arguments: { buildId, timeoutSeconds: seconds } }, CallToolResultSchema, { timeout: (seconds + 15) * 1000 }));
 
 /**
  * Start a supervisor on two ports that were free a moment ago. On a busy machine another process can
