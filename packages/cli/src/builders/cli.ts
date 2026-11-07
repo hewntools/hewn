@@ -11,25 +11,37 @@ import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./ac
 import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./models.ts";
 import { OPENCODE_NO_UPDATE, opencodeUserDirs } from "./opencode-dirs.ts";
 import { wrapBuilder } from "./sandbox.ts";
+import { CHECK_CLIENT_TIMEOUT_MS, CHECK_SERVER_NAME, type CheckServer, openCheck } from "./check.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
 
 export function builderPrompt(job: BuildJob): string {
   const lines = [
     `You are a builder for Hewn, a personal capability platform. Build ${job.buildId} (${job.kind} of capability '${job.capabilityId}').`,
-    `Your current directory is the build workspace. Read BUILDER.md: it holds the request and the implementation contract. Implement the request in place.`,
+    `Your current directory is the build workspace. Read BUILDER.md, the request, then BRIEF.md, all of it (in parts, if your reader cuts it short), before you write anything: it is the implementation contract, how to build for Hewn. Implement the request in place.`,
     `Only change files inside this directory. Do not try to start, call or promote anything on the platform. When the candidate is complete, stop. The platform validates it automatically.`,
   ];
-  // The owner watches Home while it builds: the glyph first, not after reading everything.
-  if (job.kind === "create") lines.push(`Right after reading BUILDER.md, before reading anything else, write ui/icon.svg and set "hue" in capability.json (see "Icon" in BUILDER.md): the owner's Home shows the icon while you build.`);
+  // Read the context that determines identity first; retries and passes keep the candidate's icon.
+  if (job.kind === "create" && job.attempt === 1 && !job.retryOf && !job.pass) lines.push(`After reading BUILDER.md, BRIEF.md, and any OWNERS_WORDS.md and OTHER_TOOLS.md, write ui/icon.svg and set "hue" in capability.json as your first implementation changes (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
+  // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
+  if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and BRIEF.md for the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }
   return lines.join("\n");
 }
 
-/** A later attempt in the resumed session: the builder has read the brief and written the candidate; only the failure is new. */
+/** For a resumed session that may not have read the brief: read it now. */
+const BRIEF_IF_NOT_READ = "If you haven't read all of BRIEF.md, read it before you change anything.";
+
+/**
+ * A later attempt in the resumed session: the builder has read the brief and written the candidate;
+ * only the failure is new. Or a pass on the candidate that validated: what the pass asks.
+ */
 export function resumePrompt(job: BuildJob): string {
-  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, and BUILDER.md still holds the request and the contract. Only change files inside this directory. When it's complete, stop.`;
+  if (job.pass && !job.feedback) return `${job.pass.request}\n\n${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
+  // The previous run stopped (crashed, timed out) before the platform could validate anything.
+  if (!job.feedback) return `Attempt ${job.attempt}. Your previous run stopped before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
+  return `Attempt ${job.attempt}. The platform validated your candidate and it FAILED:\n\n${job.feedback ?? ""}\n\nFix the candidate in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
 }
 
 /**
@@ -70,7 +82,7 @@ export const builderEnv = (env: NodeJS.ProcessEnv = process.env, also?: RegExp):
 
 function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
   const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
-  write(`===== attempt ${job.attempt}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
+  write(`===== attempt ${job.attempt}${job.pass ? `, the ${job.pass.name} pass` : ""}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
   if (job.platformRoot) {
     ({ command, args } = wrapBuilder(command, args, { workspace: job.workspace, platformRoot: job.platformRoot, ...confine }));
   }
@@ -266,6 +278,8 @@ export interface OpencodeHomeOptions {
   yours?: { config: string; data: string; cache: string };
   /** Your custom providers (`provider` in your config), carried over. Default: read from OpenCode. */
   providers?: () => Record<string, unknown> | undefined;
+  /** MCP servers the run gets (a build's `check`), with the rules (above a project config). */
+  mcp?: Record<string, unknown>;
 }
 
 /**
@@ -312,7 +326,7 @@ export async function opencodeHome(dir: string, o: OpencodeHomeOptions): Promise
       XDG_DATA_HOME: join(dir, "data"),
       XDG_CACHE_HOME: join(dir, "cache"),
       XDG_STATE_HOME: join(dir, "state"),
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: "disabled", ...o.rules }),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: "disabled", ...o.rules, ...(o.mcp ? { mcp: o.mcp } : {}) }),
       OPENCODE_DISABLE_CLAUDE_CODE: "1",
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
     },
@@ -436,7 +450,7 @@ export const codexBuilder: CapabilityBuilder = {
  * Sessions stay on disk in its own home (no --ephemeral), so a thread can be resumed. `exec`'s own
  * options (the sandbox, the project root, the directory) go before `resume`, the shared ones after.
  */
-export function codexArgs(job: BuildJob, resume?: string): string[] {
+export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): string[] {
   const shared = ["--ignore-user-config", "--skip-git-repo-check", "--json", ...codexModelArgs(job)];
   const where = [
     // Codex's own sandbox cannot nest inside ours. When the platform confines the
@@ -444,6 +458,10 @@ export function codexArgs(job: BuildJob, resume?: string): string[] {
     "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
     // The workspace is the project root: never walk up looking for other AGENTS.md files.
     "-c", 'project_root_markers=["BUILDER.md"]',
+    // Its `check` tool (no other MCP server: --ignore-user-config), waited on as long as a check takes.
+    ...(check
+      ? ["-c", `mcp_servers.${CHECK_SERVER_NAME}.command=${JSON.stringify(check.command)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.args=${JSON.stringify(check.args)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.tool_timeout_sec=${CHECK_CLIENT_TIMEOUT_MS / 1000}`]
+      : []),
     "-C", job.workspace,
   ];
   return resume ? ["exec", ...where, "resume", ...shared, resume, resumePrompt(job)] : ["exec", ...shared, ...where, builderPrompt(job)];
@@ -474,10 +492,11 @@ async function codexRun(job: BuildJob) {
   const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
   await withResume("codex", job, async (resume) => {
     const isolated = codexHome(home);
+    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "codex",
-        codexArgs(job, resume),
+        codexArgs(job, resume, check?.server),
         job,
         codexActivity,
         TIMEOUT_MS,
@@ -488,6 +507,7 @@ async function codexRun(job: BuildJob) {
         (e) => e?.type === "thread.started" && typeof e.thread_id === "string" && noteSession("codex", job.buildId, e.thread_id),
       );
     } finally {
+      check?.close();
       isolated.done();
     }
   });
@@ -512,7 +532,8 @@ async function opencodeRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
   await withResume("opencode", job, async (resume) => {
-    const isolated = await opencodeHome(home, { rules: OPENCODE_BUILDER_RULES });
+    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
+    const isolated = await opencodeHome(home, check ? opencodeCheck(check.server) : { rules: OPENCODE_BUILDER_RULES });
     try {
       // Asked from the run's own home, not the workspace (builder-written from the second attempt on).
       if (job.model && !(await opencodeHasModel(job.model, isolated.env, isolated.dir))) throw opencodeModelRejected(job.model);
@@ -530,25 +551,34 @@ async function opencodeRun(job: BuildJob) {
         OPENCODE_QUIET_START_MS,
       );
     } finally {
+      check?.close();
       isolated.done();
     }
   });
 }
 
-/** Claude Code, headless, in its own config dir. No MCP servers; file tools only, no shell. */
+/** OpenCode's rules and MCP servers with `check` offered: its one tool allowed, waited on as long as a check takes. */
+export function opencodeCheck(check: CheckServer): { rules: OpencodeRules; mcp: Record<string, unknown> } {
+  return {
+    rules: { ...OPENCODE_BUILDER_RULES, permission: { ...OPENCODE_BUILDER_RULES.permission, [`${CHECK_SERVER_NAME}_*`]: "allow" } },
+    mcp: { [CHECK_SERVER_NAME]: { type: "local", command: [check.command, ...check.args], enabled: true, timeout: CHECK_CLIENT_TIMEOUT_MS } },
+  };
+}
+
+/** Claude Code, headless, in its own config dir. File tools only, no shell; no MCP server but Hewn's `check`. */
 export const claudeBuilder: CapabilityBuilder = {
   name: "claude",
   build: (job) => withModelCheck("claude", job, claudeRun),
 };
 
 /** Claude Code's arguments for an attempt: fresh with a session id of its own, or resuming the build's earlier session with the failure. */
-export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean }): string[] {
+export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean }, check?: CheckServer): string[] {
   return [
     "-p", session.resume ? resumePrompt(job) : builderPrompt(job),
     ...(session.resume ? ["--resume", session.id] : ["--session-id", session.id]),
     "--output-format", "stream-json", "--verbose",
     ...claudeModelArgs(job),
-    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    "--strict-mcp-config", "--mcp-config", JSON.stringify({ mcpServers: check ? { [CHECK_SERVER_NAME]: { command: check.command, args: check.args } } : {} }),
     // None of your user settings, hooks, memory (CLAUDE.md) or skills; the login stays yours.
     // No project settings either: the workspace is the builder's to write, and settings there
     // (hooks, apiKeyHelper) would run commands. Hooks are off whatever loads.
@@ -556,7 +586,7 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
     "--permission-mode", "acceptEdits",
     // File tools only: no shell now, and --restricted drops every code-running tool, also ones added later.
     "--restricted",
-    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep",
+    "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", ...(check ? [`mcp__${CHECK_SERVER_NAME}__check`] : []),
     "--disallowedTools", "Bash",
   ];
 }
@@ -567,20 +597,23 @@ async function claudeRun(job: BuildJob) {
   await withResume("claude", job, async (resume) => {
     const session = { id: resume ?? randomUUID(), resume: !!resume };
     const isolated = claudeHome(home, undefined, { keepSessions: true });
+    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "claude",
-        claudeArgs(job, session),
+        claudeArgs(job, session, check?.server),
         job,
         claudeActivity,
         TIMEOUT_MS,
         // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
         { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
-        isolated.env,
+        // A check takes longer than an MCP call usually does.
+        check ? { ...isolated.env, MCP_TOOL_TIMEOUT: String(CHECK_CLIENT_TIMEOUT_MS) } : isolated.env,
         // The session it ran as (the one asked for), for the next attempt to resume.
         (e) => e?.type === "system" && e.subtype === "init" && typeof e.session_id === "string" && noteSession("claude", job.buildId, e.session_id),
       );
     } finally {
+      check?.close();
       isolated.done();
     }
   });

@@ -27,7 +27,8 @@ describe("a later attempt resumes the builder's session", () => {
   test("Claude Code: a session id of its own on the first attempt, --resume with the failure after; --restricted besides the file tools", () => {
     const first = claudeArgs(job(), { id: "11111111-1111-4111-8111-111111111111", resume: false });
     assert.equal(first[0], "-p");
-    assert.match(first[1], /Read BUILDER\.md/);
+    assert.match(first[1], /Read BUILDER\.md, the request, then BRIEF\.md, all of it \(in parts, if your reader cuts it short\), before you write anything: it is the implementation contract/);
+    assert.match(first[1], /After reading BUILDER\.md, BRIEF\.md, and any OWNERS_WORDS\.md and OTHER_TOOLS\.md, write ui\/icon\.svg[^]*as your first implementation changes \(see "Icon" in BRIEF\.md\)/);
     assert.deepEqual(first.slice(2, 4), ["--session-id", "11111111-1111-4111-8111-111111111111"]);
     assert.ok(first.includes("--restricted"));
     assert.ok(first.includes("--disallowedTools") && first[first.indexOf("--disallowedTools") + 1] === "Bash");
@@ -35,7 +36,9 @@ describe("a later attempt resumes the builder's session", () => {
     assert.deepEqual(again.slice(2, 4), ["--resume", "11111111-1111-4111-8111-111111111111"]);
     assert.equal(again[1], resumePrompt(job({ attempt: 2, feedback: "test 'x' failed" })));
     assert.match(again[1], /Attempt 2\. The platform validated your candidate and it FAILED:\n\ntest 'x' failed\n\nFix the candidate in place/);
-    assert.doesNotMatch(again[1], /Read BUILDER\.md: it holds/);
+    assert.doesNotMatch(again[1], /Read BUILDER\.md, the request/);
+    assert.match(again[1], /with the request in BUILDER\.md and the contract in BRIEF\.md\. If you haven't read all of BRIEF\.md, read it before you change anything\./, "where they still are, and to read the brief now if it skipped it");
+    assert.match(resumePrompt(job({ attempt: 2 })), /^Attempt 2\. Your previous run stopped before it finished\.[^]*with the request in BUILDER\.md and the contract in BRIEF\.md/);
     assert.ok(!again.includes("--session-id"));
   });
 

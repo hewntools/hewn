@@ -42,10 +42,13 @@ describe("remote builder and intake", () => {
 
   const workspace = () => {
     const dir = mkdtempSync(join(tmpdir(), "hewn-remote-"));
-    writeFileSync(join(dir, "BUILDER.md"), "brief");
+    writeFileSync(join(dir, "BUILDER.md"), "request");
+    writeFileSync(join(dir, "BRIEF.md"), "brief");
     writeFileSync(join(dir, "old.txt"), "gone after the build");
     mkdirSync(join(dir, "src"));
     writeFileSync(join(dir, "src", "index.ts"), "// old");
+    mkdirSync(join(dir, ".hewn-contracts"));
+    writeFileSync(join(dir, ".hewn-contracts", "running-log.md"), "# Running Log");
     return dir;
   };
   const job = (dir: string, extra: Partial<BuildJob> = {}): BuildJob & { activity: string[]; models: string[] } => {
@@ -71,7 +74,7 @@ describe("remote builder and intake", () => {
       ]);
     const dir = workspace();
     const charges: unknown[] = [];
-    const j = job(dir, { model: "fable", effort: "high", feedback: "1 test failed", onCharge: (c) => charges.push(c) });
+    const j = job(dir, { attempt: 2, model: "fable", effort: "high", feedback: "1 test failed", retryOf: "b-0", onCharge: (c) => charges.push(c) });
     await remoteBuilder(remote).build(j);
     const sent = seen.at(-1)!;
     assert.equal(sent.path, "/v1/builds");
@@ -80,8 +83,14 @@ describe("remote builder and intake", () => {
     assert.equal(sent.body.effort, "high");
     assert.equal(sent.body.feedback, "1 test failed");
     assert.equal(sent.body.session, "b-1", "one session per build, for the service to resume on a later attempt");
-    assert.match(sent.body.prompt, /builder for Hewn/);
+    assert.equal(sent.body.retryOf, "b-0", "the first build of the chain it retries");
+    assert.equal(sent.body.pause, true, "this Hewn takes a paused outcome");
+    assert.match(sent.body.prompt, /builder for Hewn[^]*Read BUILDER\.md, the request, then BRIEF\.md, all of it/, "the service's builder is told to read the brief whole too");
+    // A later attempt: what a builder that resumes its session is told, for a service that keeps one.
+    assert.match(sent.body.resumePrompt, /^Attempt 2\. The platform validated your candidate and it FAILED:\n\n1 test failed\n\nFix the candidate in place[^]*the contract in BRIEF\.md/);
+    assert.equal(Buffer.from(sent.body.files["BRIEF.md"], "base64").toString(), "brief", "the brief goes in a file of its own");
     assert.equal(Buffer.from(sent.body.files["src/index.ts"], "base64").toString(), "// old");
+    assert.equal(Buffer.from(sent.body.files[".hewn-contracts/running-log.md"], "base64").toString(), "# Running Log", "the other tools' contracts go too (a dot-folder)");
     assert.deepEqual(j.activity, ["→ Write src/index.ts"]);
     assert.deepEqual(j.models, ["claude-fable-5-5"]);
     assert.deepEqual(charges, [{ amount: 12, unit: "points" }]);
@@ -92,10 +101,75 @@ describe("remote builder and intake", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  test("check: offered in the request; a check event's workspace is checked as sent and the result posted back; a service that ignores the offer still builds", async () => {
+    let posted: (body: any) => void = () => {};
+    const result = new Promise<any>((r) => (posted = r));
+    handle = async (body, req, res) => {
+      if (req.url === "/v1/builds/b-1/checks/c1") return void (posted(body), res.writeHead(204).end());
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.write(JSON.stringify({ activity: "→ Write src/index.ts" }) + "\n");
+      // The service's builder checks: the workspace as it is now, and it waits for the answer.
+      res.write(JSON.stringify({ check: { id: "c1", files: { "BUILDER.md": b64("brief"), "src/index.ts": b64("// in progress") } } }) + "\n");
+      await result;
+      res.end(JSON.stringify({ files: { "BUILDER.md": b64("brief"), "src/index.ts": b64("// done") } }) + "\n" + JSON.stringify({ done: true }) + "\n");
+    };
+    const dir = workspace();
+    const checked: { id: string; src: string; old: boolean }[] = [];
+    const j = job(dir, {
+      check: async (id) => {
+        checked.push({ id, src: readFileSync(join(dir, "src", "index.ts"), "utf8"), old: existsSync(join(dir, "old.txt")) });
+        return { passed: false, text: "FAIL: 1 problem.", failures: ["1 of 2 test cases failed"], defects: ["Text cut short on the phone (390 px): \"Mon\""], images: [{ name: "desktop-light", png: new Uint8Array([137, 80, 78, 71]) }] };
+      },
+    });
+    await remoteBuilder(remote).build(j);
+    assert.equal(seen.find((s) => s.path === "/v1/builds" && s.body.buildId === "b-1" && s.body.check)?.body.check, true);
+    assert.deepEqual(checked, [{ id: "c1", src: "// in progress", old: false }], "the workspace as the service sent it");
+    const sent = seen.find((s) => s.path === "/v1/builds/b-1/checks/c1")!;
+    assert.equal(sent.auth, "Bearer hewn-token");
+    assert.deepEqual(sent.body, { passed: false, text: "FAIL: 1 problem.", failures: ["1 of 2 test cases failed"], defects: ['Text cut short on the phone (390 px): "Mon"'], images: [{ name: "desktop-light", png: Buffer.from([137, 80, 78, 71]).toString("base64") }] });
+    assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// done", "the final tree still decides");
+    assert.match(readFileSync(j.logPath, "utf8"), /check c1: failed/);
+    // A service that doesn't know the offer builds as before; a check that can't run is posted as an error.
+    handle = (_b, _r, res) => ndjson(res, [{ files: { "src/index.ts": b64("// plain") } }, { done: true }]);
+    let asked = 0;
+    await remoteBuilder(remote).build(job(dir, { check: async () => (asked++, { passed: true, text: "PASS", failures: [], defects: [], images: [] }) }));
+    assert.equal(asked, 0);
+    assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// plain");
+    let postedError: (body: any) => void = () => {};
+    const errored = new Promise<any>((r) => (postedError = r));
+    handle = async (_b, req, res) => {
+      if (req.url === "/v1/builds/b-1/checks/c2") return void (postedError(_b), res.writeHead(204).end());
+      res.writeHead(200, { "content-type": "application/x-ndjson" });
+      res.write(JSON.stringify({ check: { id: "c2" } }) + "\n");
+      await errored;
+      res.end(JSON.stringify({ files: {} }) + "\n" + JSON.stringify({ done: true }) + "\n");
+    };
+    await remoteBuilder(remote).build(job(dir, { check: async () => Promise.reject(new Error("no browser")) }));
+    assert.deepEqual(await errored, { error: "no browser" });
+    // The build ends (here: fails) with a check still waiting its turn: it runs nothing, and says the build ended.
+    const posts: { url: string; body: any }[] = [];
+    handle = async (b, req, res) => {
+      if (req.url!.startsWith("/v1/builds/b-1/checks/")) return void (posts.push({ url: req.url!, body: b }), res.writeHead(204).end());
+      ndjson(res, [{ check: { id: "c3", files: { "src/index.ts": b64("// first") } } }, { check: { id: "c4", files: { "src/index.ts": b64("// second") } } }, { error: "the builder crashed" }]);
+    };
+    const ran: string[] = [];
+    const slow = async (id: string) => (ran.push(id), await new Promise((r) => setTimeout(r, 100)), { passed: true, text: "PASS", failures: [], defects: [], images: [] });
+    await assert.rejects(remoteBuilder(remote).build(job(dir, { check: slow })), /crashed/);
+    assert.deepEqual(ran, ["c3"], "only the check already running ran");
+    assert.deepEqual(posts.map((p) => [p.url, p.body.error ?? p.body.text]), [["/v1/builds/b-1/checks/c3", "PASS"], ["/v1/builds/b-1/checks/c4", "the build ended"]]);
+    assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// first", "the second never touched the workspace");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("a refusal, as an event or as the status, is final and says why", async () => {
     const dir = workspace();
     handle = (_b, _r, res) => ndjson(res, [{ refused: "You've used this month's 40 builds." }]);
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { refused?: boolean }) => e.refused === true && /40 builds/.test(e.message));
+    handle = (_b, _r, res) => ndjson(res, [{ activity: "→ Edit src/index.ts" }, { paused: "This build has used 300 points and isn't finished." }]);
+    await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { paused?: boolean; refused?: boolean }) => e.paused === true && !e.refused && /300 points/.test(e.message));
+    // Paused without a note: still a pause, in Hewn's words.
+    handle = (_b, _r, res) => ndjson(res, [{ paused: "" }]);
+    await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { paused?: boolean }) => e.paused === true && e.message === "The builder's host paused it.");
     handle = (_b, _r, res) => void res.writeHead(429, { "content-type": "application/json" }).end(JSON.stringify({ refused: "Five builds are running already." }));
     await assert.rejects(remoteBuilder(remote).build(job(dir)), (e: Error & { refused?: boolean }) => e.refused === true && /Five builds/.test(e.message));
     handle = (_b, _r, res) => void res.writeHead(401).end();

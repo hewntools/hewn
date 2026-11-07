@@ -27,9 +27,9 @@ From the terminal: `hewn share <id> [--version N] [--out file]` prints the same 
 
 ## Sample data
 
-Sample data is what a tool looks like in use: a list of calls to its operations (`sample/calls.json`) that fill an empty tool with made-up entries. Whoever installs your tool can start with it instead of a blank screen, and the tool's screenshots show it: each build's, and a Hub card's. It holds made-up names and places, never yours.
+Sample data is what a tool looks like in use: a list of calls to its operations (`sample/calls.json`) that show it in use, usually by filling an empty tool with made-up entries. Whoever installs your tool can start with it instead of a blank screen, and the tool's screenshots show it: each build's, and a Hub card's. It holds made-up names and places, never yours.
 
-Builders write sample data when they create a tool, and keep it working when a change reshapes the operations. For a tool from before that, **Ask builder** in Share… adds some. **Write it yourself** opens `sample/calls.json` in an editor, with the format and what each operation takes beside it (**+ Add** puts in a call with its required fields): saving makes a new version, which goes live only if every call runs without an error on an empty tool. The calls run before the tool is allowed anything, so they're plain writes: no network, no other tools, no model. The format is in [the tool spec](../spec/tools.md#sample-data-since-25).
+Builders write sample data when they create a tool, and keep it working when a change reshapes the operations. For a tool from before that, **Ask builder** in Share… adds some. **Write it yourself** opens `sample/calls.json` in an editor, with the format and what each operation takes beside it (**+ Add** puts in a call with its required fields): saving makes a new version, which goes live only if every call runs without an error on an empty tool. The calls run before the tool is allowed anything: no keys, settings, network, other tools or model. Use local writes with made-up entries; a tool with no data of its own can use a local read showing an honest empty or unavailable state. The format is in [the tool spec](../spec/tools.md#sample-data-since-25).
 
 ## Installing a tool someone shared
 
@@ -56,7 +56,7 @@ A file can't bring a reading of its own: whatever it says about itself is ignore
 
 ## The Hub
 
-The **Hub** tab holds tools ready to install. In this release it's Hewn's own (**Official**): Habits, Plant Log, Gift Ideas, Kid Quotes, Idea Tracker, Reading List and Running Log, shipped with Hewn (`seeds/` in the repo). A tool's page shows what it does and what it keeps (Hewn's reading of its code), its operations and its **Source code**; there's no file to download. **Install** opens the same sheet as for a file, with Hewn's reading already in it, so there's no wait; **Check it yourself** has your builder read it too. Info shows "from Hub · Official", and Activity "Installed from Hub". They're yours once installed, like any tool. Tools from other people come to the same Hub later.
+The **Hub** tab holds tools ready to install. In this release it's Hewn's own (**Official**): Habits, Plant Log, Gift Ideas, Kid Quotes, Idea Tracker, Reading List, Running Log and Aurora Watch, shipped with Hewn (`seeds/` in the repo). A tool's page shows what it does and what it keeps (Hewn's reading of its code), its operations and its **Source code**; there's no file to download. **Install** opens the same sheet as for a file, with Hewn's reading already in it, so there's no wait; **Check it yourself** has your builder read it too. Info shows "from Hub · Official", and Activity "Installed from Hub". They're yours once installed, like any tool. Tools from other people come to the same Hub later.
 
 ![Install Plant Log from Hub: what it does, keeps and sends where, a warning that it sends a photo to the model when asked, Source code, what it will ask for, its name and Start with sample data](images/install.png)
 

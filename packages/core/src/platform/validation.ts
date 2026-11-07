@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Validation: a build's candidate checked step by step (manifest, bundle, contracts, migrations,
-// tests, the UI and widgets, an upgrade dry run), frozen, and promoted, or held for the owner's review.
+// tests, the UI and widgets, an upgrade dry run), then frozen and promoted, or held for the owner's
+// review. The check and the promotion are separate steps: a candidate can be checked and never promoted.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
@@ -9,17 +10,68 @@ import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
-import type { CallHandler, CodeRef, ExecutionTarget, Files, StateRef } from "../ports.ts";
+import type { CallHandler, CheckResult, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
+import { isPart, isPolish } from "../passes.ts";
 import { Domain } from "./context.ts";
 
+/** A candidate that passed validation, held in memory: nothing about the tool has changed yet. */
+export interface Candidate {
+  manifest: CapabilityManifest;
+  files: Files;
+  code: CodeRef;
+  /** The active version it was checked against. */
+  base?: { manifest: CapabilityManifest; files: Files };
+  /** Each operation's first passing result in the tests. */
+  views: Map<string, unknown>;
+  /** Its UI as the visual check rendered it (filled with the sample data when there is some): 1280 and 390 px wide, light and dark, the whole page. */
+  shots?: VisualShot[];
+  /** With `measure`: what the visual check measured for the builder to fix. */
+  defects?: string[];
+  /** Whether `shots` show the tool filled with its sample data (else empty), or, with `real`, with a copy of its own. */
+  sampled?: boolean;
+  /** `shots` show a copy of the tool's own data: a Polish the owner let see it (`realData`). */
+  real?: boolean;
+  /** The build page's screenshot of it (light, dark): written again when it's promoted, so the page shows this candidate. */
+  screenshot?: Uint8Array;
+  screenshotDark?: Uint8Array;
+  /** With `check`: what failed (validation stops at the first). Such a candidate is never promoted. */
+  failures?: string[];
+}
+
+/** How many times a builder may check its work in one attempt. */
+export const MAX_CHECKS = 10;
+/** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
+export const MAX_PARTS_BYTES = 10_000_000;
+
 export class Validation extends Domain {
+  /** Validate a build's candidate and promote it (or hold it for the owner's review). Throws with what failed. */
   async validateAndPromote(build: BuildRow, step: (message: string) => void, onTests: (passed: number, total: number) => void = () => {}): Promise<{ version: number } | { review: BuildReview }> {
+    return this.promote(build, await this.validate(build, step, { onTests }), step);
+  }
+
+  /**
+   * Steps 1 to 6: check a build's candidate (its workspace) without promoting it. The tool, its
+   * versions and its data stay as they were, and the workspace stays (only the build page's
+   * screenshot is kept), so it can be promoted later (`promote`), or not at all. `onTests` follows
+   * the tests; `measure` has the visual check measure what a builder should fix, too. Throws with
+   * what failed. `check` is a builder's check of its work in progress: it goes on after a failure
+   * (the candidate lists them all), and leaves the build page's screenshot alone.
+   */
+  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean } = {}): Promise<Candidate> {
+    const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
-      throw new Error(problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
+      throw new Error(listed(msg, problems));
+    };
+    // A failure the later steps can still run after. Validation stops at it, as at any other; a check
+    // notes it and goes on, so the builder sees every one (and its UI, when the code bundles).
+    const failures: string[] = [];
+    const softFail = (msg: string, problems: string[] = []): void => {
+      if (!opts.check) fail(msg, problems);
+      failures.push(listed(msg, problems));
     };
     const workspace = await this.workbench.read(build.id);
 
@@ -66,52 +118,65 @@ export class Validation extends Domain {
     }
     const exported = new Set(exportedKeys);
     const missing = manifest.operations.map((o) => opKey(o.name, o.version)).filter((k) => !exported.has(k));
-    if (missing.length) fail("implementation does not export declared operations", missing);
+    if (missing.length) softFail("implementation does not export declared operations", missing);
     step(`implementation exports ${[...exported].join(", ")}`);
 
     // 3. contract compatibility with the active version
     const base = build.baseVersion ? await this.loadVersion(id, build.baseVersion) : undefined;
     if (base) {
       const breaks = contractBreaks(base.row.manifest, manifest, (key) => this.d.grants.operationUsers(id, key));
-      if (breaks.length) fail("breaking change to a published operation contract (add a new operation version instead)", breaks);
-      const removed = base.row.manifest.operations.map((o) => opKey(o.name, o.version)).filter((k) => !manifest.operations.some((o) => opKey(o.name, o.version) === k));
-      step(`operation contracts compatible with active version${removed.length ? ` (removed deprecated ${removed.join(", ")})` : ""}`);
+      if (breaks.length) softFail("breaking change to a published operation contract (add a new operation version instead)", breaks);
+      else {
+        const removed = base.row.manifest.operations.map((o) => opKey(o.name, o.version)).filter((k) => !manifest.operations.some((o) => opKey(o.name, o.version) === k));
+        step(`operation contracts compatible with active version${removed.length ? ` (removed deprecated ${removed.join(", ")})` : ""}`);
+      }
     }
     // 3a. a widgets build changes widgets only: the capability's own contract, data and UI stay as they are
     if (build.kind === "widgets") {
       if (!base) fail("a widgets build needs an active version to add widgets to");
       const problems = widgetsBuildProblems({ manifest: base!.row.manifest, files: base!.files }, { manifest, files });
-      if (problems.length) fail("a widgets build changed more than widgets", problems);
-      step(`widgets only: ${manifest.widgets!.map((w) => w.name).join(", ")}`);
+      if (problems.length) softFail("a widgets build changed more than widgets", problems);
+      else step(`widgets only: ${manifest.widgets!.map((w) => w.name).join(", ")}`);
     }
 
     // 3b. declared callees exist and offer the pinned operation versions
     const deps = (manifest.requires?.capabilities ?? []).flatMap((d) => d.operations.map((op) => ({ id: d.id, op })));
     const badDeps = deps.filter((d) => d.id === id || !this.d.grants.offers(d.id, d.op)).map((d) => (d.id === id ? `${d.id}: a capability cannot call itself` : `${d.id}/${d.op} does not exist`));
-    if (badDeps.length) fail("requires.capabilities references unavailable operations", badDeps);
+    if (badDeps.length) softFail("requires.capabilities references unavailable operations", badDeps);
     if (deps.length) step(`calls ${deps.map((d) => `${d.id}/${d.op}`).join(", ")}`);
 
     // 4. migrations are append-only and non-destructive
     const migrations = migrationsOf(files);
     const migrationErrors = migrationProblems(migrations, base ? migrationsOf(base.files) : []);
-    if (migrationErrors.length) fail("migrations rejected", migrationErrors);
+    if (migrationErrors.length) softFail("migrations rejected", migrationErrors);
 
     // 5. candidate test cases against fresh state
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };
     const visualState: StateRef = { capabilityId: id, scratch: `visual:${build.id}` };
     const dryRun: StateRef = { capabilityId: id, scratch: `dryrun:${build.id}` };
     const sampleState: StateRef = { capabilityId: id, scratch: `sample:${build.id}` };
+    // A copy of the tool's own data, for a Polish the owner let see it (not a builder's check: those show sample data).
+    const realState: StateRef = { capabilityId: id, scratch: `real:${build.id}` };
     // Sample calls run as they do after an install: nothing granted (no secrets, settings, hosts, other tools or model).
     const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
+    let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean; real?: boolean } = {};
+    let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
-      const cases = readCases(workspace);
-      if (!cases.length) fail("tests/cases.json must contain at least one case");
+      let cases: TestCase[];
+      try {
+        cases = readCases(workspace);
+      } catch (e) {
+        if (!opts.check) throw e;
+        softFail(`tests/cases.json: ${(e as Error).message}`);
+        cases = [];
+      }
+      if (!cases.length) softFail("tests/cases.json must contain at least one case");
       const untested = (manifest.widgets ?? []).filter((w) => !cases.some((c) => !c.expectError && `${c.operation}@${c.version ?? manifest.operations.filter((o) => o.name === c.operation).reduce((n, o) => Math.max(n, o.version), 0)}` === w.operation));
-      if (untested.length) fail("every widget needs a test case for its operation (the case's output must match a template)", untested.map((w) => `${w.name}: no case calls ${w.operation}`));
+      if (untested.length) softFail("every widget needs a test case for its operation (the case's output must match a template)", untested.map((w) => `${w.name}: no case calls ${w.operation}`));
       // Run every case (not just up to the first failure) so the owner and the builder see the whole picture.
       const failed: string[] = [];
       onTests(0, cases.length);
@@ -125,34 +190,45 @@ export class Validation extends Domain {
         }
         onTests(i + 1 - failed.length, cases.length);
       }
-      if (failed.length) fail(`${failed.length} of ${cases.length} test cases failed`, failed);
-      step(`${cases.length} test cases passed`);
+      if (failed.length) softFail(`${failed.length} of ${cases.length} test cases failed`, failed);
+      else if (cases.length) step(`${cases.length} test cases passed`);
 
       // 5a. sample data replays on a fresh state, as installing (or starting over) with it does
       let sample;
       try {
         sample = readSample(files);
       } catch (e) {
-        fail((e as Error).message);
+        softFail((e as Error).message);
       }
+      // A new tool with a screen is seen in use (its screenshots, the passes after its build, sharing):
+      // its builder writes sample data, as a Polish's does before its passes. An install brings what it has.
+      const installing = build.builder === "bundle" || !!build.builder?.startsWith("copy:");
+      const polish = isPolish(build.request);
+      if (sample === null && (build.kind === "create" || polish) && manifest.ui?.available && !installing) softFail(`${SAMPLE_FILE} is missing: ${polish ? "a Polish shows the builder the tool filled with sample data" : "a new tool with a screen needs sample data that fills it"} (see "sample/calls.json" in BRIEF.md)`);
       if (sample) {
         await this.runtime.dropState(sampleState);
         await this.runtime.migrate(sampleState, migrations, code);
+        let replayed = true;
         for (const [i, c] of sample.entries()) {
           try {
             await this.replayCall(manifest, sampleTarget, c);
           } catch (e) {
-            fail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: plain writes only, no network, other tools or model"]);
+            softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
+            replayed = false;
+            break;
           }
         }
-        step(`sample data replays (${sample.length} calls)`);
+        // A check whose sample data doesn't replay renders the UI empty only.
+        if (replayed) step(`sample data replays (${sample.length} calls)`);
+        else sample = undefined;
       }
 
       // The screenshot the build page shows, kept whether the check passed or not (a failed one shows
       // what broke). "(screenshot attached" in the log is what tells the build page there's one.
       const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
-        if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
-        if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+        if (opts.check) return;
+        kept = { screenshot: v.screenshot, screenshotDark: v.screenshotDark };
+        await this.keepScreenshots(build, v);
       };
 
       // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
@@ -164,8 +240,9 @@ export class Validation extends Domain {
         await this.runtime.migrate(visualState, migrations, code);
         const secrets = cases.find((c) => c.secrets)?.secrets ?? Object.fromEntries((manifest.requires?.secrets ?? []).map((x) => [x.name, "visual-check"]));
         const config = cases.find((c) => c.config)?.config ?? Object.fromEntries((manifest.config ?? []).map((x) => [x.name, "visual-check"]));
-        const check = (state: StateRef) =>
+        const check = (state: StateRef, measure: boolean) =>
           visualCheck(build.id, {
+            ...(measure ? { measure } : {}),
             manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
             invoke: async (body) => {
               const { result } = await this.d.invocation.execute(
@@ -184,22 +261,38 @@ export class Validation extends Domain {
               return { result };
             },
           });
-        const empty = await check(visualState);
+        // A Polish the owner let see their data: rendered once more, filled with a copy of it, and that's what the
+        // builder is shown. A tool with none of its own (empty tables) shows its sample data instead.
+        const real = polish && build.request.realData === true && !opts.check && (await this.hasOwnData(id, base?.code ?? code));
+        const measure = !!opts.measure;
+        const empty = await check(visualState, measure && !sample && !real);
         if (empty.skipped) step(`visual check skipped: ${empty.skipped}`);
         else {
           if (empty.errors.length) {
             await keep(empty);
             if (empty.screenshot) step("UI rendered with errors (screenshot attached)");
-            fail("UI didn't render cleanly", empty.errors);
+            softFail("UI didn't render cleanly", empty.errors);
           }
-          const filled = sample ? await check(sampleState) : undefined;
-          const v = filled && !filled.skipped ? filled : empty;
+          const filled = sample ? await check(sampleState, measure && !real) : undefined;
+          let own: VisualCheckResult | undefined;
+          if (real) {
+            await this.runtime.copyState({ capabilityId: id }, realState);
+            await this.runtime.migrate(realState, migrations, code);
+            own = await check(realState, measure);
+          }
+          const v = own && !own.skipped ? own : filled && !filled.skipped ? filled : empty;
           await keep(v);
+          rendered = { shots: v.shots, defects: v.defects, sampled: v === filled || v === own, ...(v === own ? { real: true } : {}) };
           if (filled?.errors.length) {
             if (filled.screenshot) step("UI renders empty, but with errors once filled with its sample data (screenshot attached, with the sample data)");
-            fail("UI didn't render cleanly with its sample data", filled.errors);
+            softFail("UI didn't render cleanly with its sample data", filled.errors);
           }
-          step(v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
+          if (own?.errors.length) {
+            if (own.screenshot) step("UI renders with errors filled with a copy of the owner's own data (screenshot attached, with the owner's own data)");
+            softFail("UI didn't render cleanly with the owner's own data", own.errors);
+          }
+          if (!empty.errors.length && !filled?.errors.length && !own?.errors.length)
+            step(v === own ? `UI renders without errors, empty${filled ? ", with its sample data" : ""} and with a copy of the owner's own data (screenshot attached, with the owner's own data)` : v === filled ? "UI renders without errors, empty and with its sample data (screenshot attached, with the sample data)" : "UI renders without errors (screenshot attached)");
           shot = true;
         }
       }
@@ -223,29 +316,121 @@ export class Validation extends Domain {
           const filled = sampled.size ? ", with the sample data" : "";
           if (v.errors.length) {
             if (v.screenshot) step(`widgets rendered with errors (screenshot attached${filled})`);
-            fail("widgets didn't render cleanly", v.errors);
-          }
-          step(`widgets render in every size (screenshot attached${filled})`);
+            softFail("widgets didn't render cleanly", v.errors);
+          } else step(`widgets render in every size (screenshot attached${filled})`);
         }
       }
 
       // 6. dry-run migrations against a copy of real state
       if (await this.runtime.hasState({ capabilityId: id })) {
         await this.runtime.copyState({ capabilityId: id }, dryRun);
-        const applied = await this.runtime.migrate(dryRun, migrations, code);
-        step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
+        try {
+          const applied = await this.runtime.migrate(dryRun, migrations, code);
+          step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
+        } catch (e) {
+          if (!opts.check) throw e;
+          softFail(`the upgrade dry run failed: ${(e as Error).message}`);
+        }
       }
     } finally {
-      for (const s of [testState, visualState, dryRun, sampleState]) await this.runtime.dropState(s).catch(() => {});
+      for (const s of [testState, visualState, dryRun, sampleState, realState]) await this.runtime.dropState(s).catch(() => {});
     }
+    return {
+      manifest,
+      files,
+      code,
+      ...(base ? { base: { manifest: base.row.manifest, files: base.files } } : {}),
+      views,
+      ...(rendered.shots ? { shots: rendered.shots } : {}),
+      ...(rendered.defects ? { defects: rendered.defects } : {}),
+      ...(rendered.shots ? { sampled: rendered.sampled } : {}),
+      ...(rendered.real ? { real: true } : {}),
+      ...(kept.screenshot ? { screenshot: kept.screenshot } : {}),
+      ...(kept.screenshotDark ? { screenshotDark: kept.screenshotDark } : {}),
+      ...(opts.check ? { failures } : {}),
+    };
+  }
 
-    // 7. freeze; an agent's change that adds operations or changes a connection waits for the owner
+  /**
+   * A builder's check of its work in progress (its `check` tool): every step validation runs, going
+   * on after a failure, with the UI rendered filled with the sample data and what to fix measured on
+   * it. Nothing about the tool or the build page changes.
+   */
+  async check(build: BuildRow): Promise<CheckResult> {
+    const passed: string[] = [];
+    let candidate: Candidate | undefined;
+    let failures: string[];
+    // A copy of the workspace out of the builder's reach: the builder goes on writing its own while
+    // this one is checked, and bundling runs npm on it.
+    const copy: BuildRow = { ...build, id: `${build.id}-check` };
+    try {
+      await this.workbench.snapshot(build.id, copy.id);
+      candidate = await this.validate(copy, (l) => passed.push(l), { check: true, measure: true });
+      failures = candidate.failures ?? [];
+    } catch (e) {
+      // A step nothing after it can run without (the manifest, the bundle).
+      failures = [(e as Error).message];
+    } finally {
+      await this.workbench.remove(copy.id).catch(() => {});
+    }
+    const defects = candidate?.defects ?? [];
+    // The top of a long page shown, four images a call whatever its length (a session keeps every image
+    // it was shown); the rest in files beside them, to open when needed.
+    const shots = candidate?.shots ?? [];
+    const images = shots.filter((s) => !isPart(s.name));
+    // Within MAX_PARTS_BYTES (an answer crosses to the host's builder whole): what doesn't fit is left out, the phone's dark first.
+    let room = MAX_PARTS_BYTES;
+    const parts = shots.filter((s) => isPart(s.name) && (room -= s.png.length) >= 0);
+    // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
+    const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
+    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };
+  }
+
+  /**
+   * One attempt's checks: one at a time (a second waits for the first), at most MAX_CHECKS, none
+   * once the build is cancelled; `settled` when none is running.
+   */
+  checksFor(build: BuildRow, signal: AbortSignal, note: (line: string) => void): { run: (id: string) => Promise<CheckResult>; settled: () => Promise<void> } {
+    let used = 0;
+    let queue: Promise<unknown> = Promise.resolve();
+    const refused = (text: string): CheckResult => ({ passed: false, text, failures: [text], defects: [], images: [] });
+    const run = (_id: string) => {
+      const next = queue.then(async (): Promise<CheckResult> => {
+        if (signal.aborted) return refused("The build was cancelled.");
+        if (++used > MAX_CHECKS) return refused(`No checks left: this attempt has had its ${MAX_CHECKS}. Fix what the last one showed and stop; Hewn validates your work when you do.`);
+        note(`Checking its work (${used} of ${MAX_CHECKS})`);
+        const r = await this.check(build);
+        note(r.passed ? `Check passed${r.defects.length ? `, ${counted(r.defects.length, "thing")} measured on the screen to fix` : ""}` : `Check: ${counted(r.failures.length, "problem")} to fix`);
+        return r;
+      });
+      queue = next.catch(() => {});
+      return next;
+    };
+    return { run, settled: async () => void (await queue) };
+  }
+
+  /** The build page's screenshot of a build, light and dark. */
+  private async keepScreenshots(build: BuildRow, v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) {
+    if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
+    if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+  }
+
+  /**
+   * 7. freeze a validated candidate; an agent's change that adds operations or changes a connection
+   * waits for the owner, anything else is promoted (8).
+   */
+  async promote(build: BuildRow, candidate: Candidate, step: (message: string) => void): Promise<{ version: number } | { review: BuildReview }> {
+    const id = build.capabilityId;
+    const { manifest, files, code, base, views } = candidate;
+    if (candidate.failures?.length) throw new Error("a candidate that failed its check isn't promoted");
+    // A later check of the same build (another pass) may have drawn over the build page's screenshot.
+    await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
     this.loaded.set(code.hash, { files, bundle: code.js });
     // A follow-up chained to the creation of the same capability (create with widgets) is part of that creation.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
-    const review = partOfCreate || !base ? undefined : reviewFor(build, { manifest: base.row.manifest, files: base.files }, { manifest, files }, code.hash, views);
+    const review = partOfCreate || !base ? undefined : reviewFor(build, base, { manifest, files }, code.hash, views);
     if (review) {
       await this.workbench.remove(build.id);
       return { review };
@@ -445,4 +630,34 @@ function shortJson(v: unknown, max = 1200): string {
  */
 function installedFrom(build: BuildRow): ToolSource | undefined {
   return build.builder === "bundle" ? (build.request as { source?: ToolSource }).source : undefined;
+}
+
+/** A message with its list under it, as validation reports a failure. */
+const listed = (msg: string, problems: string[]) => (problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
+/** "1 problem", "3 problems". */
+const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/**
+ * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
+ * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
+ * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page, in files only.
+ */
+function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
+  const { failures, defects, images, parts, passed, ui, sampled } = c;
+  const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
+  const files = images.map((n) => `screenshots/${n}.png`);
+  const skipped = passed.find((l) => /visual check skipped/.test(l));
+  return [
+    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || images.length ? " Look at what follows before you stop." : ""}`,
+    failures.length ? `What failed:\n${list(failures)}` : "",
+    defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
+    images.length
+      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${files.join(", ")}.${parts.length ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.` : ""} Open every one and fix what looks broken, cramped, cut off or unreadable.`
+      : ui === false
+        ? ""
+        : `No screenshots: the UI wasn't rendered${skipped ? ` (${skipped})` : ui === undefined ? " (fix the failures first)" : ""}.`,
+    passed.length ? `What passed:\n${list(passed)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }

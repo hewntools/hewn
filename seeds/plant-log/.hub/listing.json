@@ -3,12 +3,17 @@
   "tags": [
     "Home"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "Polished: what needs water today, the next two weeks and the windowsill",
+      "date": "2026-11-06"
     }
   ],
   "summary": {

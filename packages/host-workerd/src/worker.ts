@@ -15,12 +15,14 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
 import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
+import { checkToJson } from "@hewntools/core/checks.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
 import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, Sql, StateRef, Workbench } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
+import { defaultPasses } from "@hewntools/core/passes.ts";
 import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 // Text modules, embedded by the supervisor's config.
@@ -230,8 +232,15 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     async visualCheck(buildId, args) {
       visualInvokers.set(buildId, args.invoke);
       try {
-        const r = await sv.json<{ skipped?: string; errors: string[]; screenshot?: string; screenshotDark?: string }>("/workbench/visual", { buildId, manifest: args.manifest, ...(args.widgets ? { widgets: args.widgets } : {}) });
-        return { skipped: r.skipped, errors: r.errors ?? [], screenshot: r.screenshot ? fromBase64(r.screenshot) : undefined, screenshotDark: r.screenshotDark ? fromBase64(r.screenshotDark) : undefined };
+        const r = await sv.json<{ skipped?: string; errors: string[]; screenshot?: string; screenshotDark?: string; shots?: { name: string; png: string }[]; defects?: string[] }>("/workbench/visual", { buildId, manifest: args.manifest, ...(args.widgets ? { widgets: args.widgets } : {}), ...(args.measure ? { measure: true } : {}) });
+        return {
+          skipped: r.skipped,
+          errors: r.errors ?? [],
+          screenshot: r.screenshot ? fromBase64(r.screenshot) : undefined,
+          screenshotDark: r.screenshotDark ? fromBase64(r.screenshotDark) : undefined,
+          ...(r.shots ? { shots: r.shots.map((s) => ({ name: s.name, png: fromBase64(s.png) })) } : {}),
+          ...(r.defects ? { defects: r.defects } : {}),
+        };
       } finally {
         visualInvokers.delete(buildId);
       }
@@ -243,21 +252,31 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
       return r.data === null ? undefined : fromBase64(r.data);
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
+    snapshot: async (buildId, to) => void (await sv.json("/workbench/snapshot", { buildId, to })),
+    writeFolder: async (buildId, folder, files) => void (await sv.json("/workbench/write-folder", { buildId, folder, files: encodeFiles(files) })),
     build: async (job: BuildJob, hooks) => {
-      let failure: { error: string; unavailable?: boolean; refused?: boolean; modelUnavailable?: boolean } | undefined;
+      let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean } | undefined;
+      // The builder's checks, run here (the core) and answered to the supervisor, where the builder waits.
+      const answer = (id: string) =>
+        hooks.onCheck!(id)
+          .then((r) => ({ result: checkToJson(r) }), (e: Error) => ({ error: e.message }))
+          .then((out) => sv.json("/workbench/check-result", { buildId: job.buildId, id, ...out }))
+          .catch(() => {});
       try {
-        await sv.stream("/workbench/build", job, (e) => {
+        await sv.stream("/workbench/build", { ...job, ...(hooks.onCheck ? { check: true } : {}) }, (e) => {
           if (e.activity) hooks.onActivity(e.activity);
           if (e.model) hooks.onModel?.(e.model);
           if (e.charge) hooks.onCharge?.(e.charge);
-          if (e.error) failure = e;
+          if (e.check && typeof e.check.id === "string" && hooks.onCheck) void answer(e.check.id);
+          // An empty message is still a failure (a pause without a note).
+          if (e.error !== undefined) failure = e;
         }, hooks.signal);
       } catch (e) {
         // The supervisor (where the builder runs) went away mid-build: Hewn is likely restarting.
         if (!hooks.signal.aborted && !(e as { unavailable?: boolean }).unavailable && !/supervisor .*HTTP/.test((e as Error).message)) throw Object.assign(e as Error, { interrupted: true });
         throw e;
       }
-      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, modelUnavailable: failure.modelUnavailable });
+      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, paused: failure.paused, modelUnavailable: failure.modelUnavailable });
     },
     bundle: (buildId) => sv.json("/workbench/bundle", { buildId }),
     note: async (buildId, line) => void (await sv.json("/workbench/note", { buildId, line })),
@@ -326,7 +345,7 @@ type CapabilityHostApi = {
 
 // ---------- HewnDO: the owner's platform ----------
 
-const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14 };
+const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses() };
 
 export class HewnDO extends DurableObject<Env> {
   private platform!: Platform;
@@ -361,6 +380,7 @@ export class HewnDO extends DurableObject<Env> {
         // From the builder's model list (the supervisor reads it and keeps it a while).
         modelEfforts: async (builder, model) => (await supervisor(env).json<ModelCatalog>("/models/catalog", { agent: builder })).models.find((m) => m.id === model)?.efforts,
         maxBuildAttempts: () => this.settings().maxBuildAttempts,
+        buildPasses: () => this.settings().buildPasses,
         logRetentionDays: () => this.settings().logRetentionDays,
         timezone: () => this.settings().timeZone || env.TIMEZONE || "UTC",
         onSchedulesChanged: () => void this.armAlarm(),
@@ -412,7 +432,7 @@ export class HewnDO extends DurableObject<Env> {
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"] as const)
+    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"] as const)
       if (k in change && next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
   }

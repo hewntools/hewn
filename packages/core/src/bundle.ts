@@ -380,9 +380,19 @@ const phoneLike = (m: string) => {
 // Bounded, and anchored where a run starts, so no line makes them backtrack for long.
 const PII: [string, RegExp, ((m: string) => boolean)?][] = [
   ["Looks like an email", /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}\b/g],
-  ["Looks like a phone number", /(?<![\w.:])\+?\d[\d ()-]{7,24}\d(?![\w.:])/g, phoneLike],
+  // Never from inside a run of numbers ("C12 68 12 80 17 90"); drawings are blanked first (DRAWING).
+  ["Looks like a phone number", /(?<![\w.:]|\d )\+?\d[\d ()-]{7,24}\d(?![\w.:])/g, phoneLike],
   ["Looks like a place (coordinates)", /\b-?\d{1,2}\.\d{3,},\s*-?\d{1,3}\.\d{3,}\b/g],
 ];
+/**
+ * Numbers that draw rather than say anything, blanked before PII is looked for: SVG geometry
+ * (d, points, viewBox, transform, or a quoted path "M20 62C12 68…") and a CSS function's numeric
+ * arguments ("rgb(255 143 112 / 0.5)", "RGB( 255 143 112 )"). Separators are required between
+ * numbers, so nothing here backtracks for long.
+ */
+const DRAWING =
+  /\b(?:d|points|viewBox|transform)\s*=\s*(["'])[^"'\n]{0,2000}\1|(["'`])\s*[Mm][\d\s.,+-]*(?:[LlHhVvCcSsQqTtAaZz][\d\s.,+-]*)*\2|\b[a-z][a-z-]{0,30}\(\s*[-+]?[\d.]+[a-z%]*(?:[\s,/]+[-+]?[\d.]+[a-z%]*){1,30}\s*\)/gi;
+const blankDrawings = (s: string) => s.replace(DRAWING, (m) => " ".repeat(m.length));
 const KEYS: [string, RegExp][] = [
   ["Looks like an API key", /\bsk-[A-Za-z0-9_-]{16,}/g],
   ["Looks like a GitHub token", /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}/g],
@@ -464,7 +474,8 @@ export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
         const piece = text.slice(at, at + SCAN_PIECE);
         for (const [label, re] of KEYS) for (const m of piece.matchAll(re)) add("key", label, m[0]);
         for (const m of piece.matchAll(LONG)) if (!seen.has(m[0]) && !/^[a-z_]+$/i.test(m[0]) && entropy(m[0]) > 3.5) add("key", "Long random string", m[0]);
-        for (const [label, re, keep] of PII) for (const m of piece.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());
+        const words = blankDrawings(piece);
+        for (const [label, re, keep] of PII) for (const m of words.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());
       }
     });
   }

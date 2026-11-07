@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The metrics endpoint: Prometheus text on HEWN_METRICS_PORT (off unless set), for a host that scrapes Hewn
-// (e.g. into a managed Prometheus). Aggregates only, never what's in the tools.
+// (e.g. into a managed Prometheus). Aggregates only, never what's in the tools: every label value is a fixed
+// category, a month or the version, never the name of a tool, a widget or an agent.
 import http from "node:http";
+import { CALLER_KINDS } from "@hewntools/core/platform/housekeeping.ts";
+import type { BuildStatus } from "@hewntools/core/registry.ts";
+import type { ScheduleStatus } from "@hewntools/core/schedules.ts";
 
 type Snapshot = {
   tools: { active: number; archived: number; unversioned: number };
@@ -9,6 +13,7 @@ type Snapshot = {
   buildSeconds7d: { count: number; sum: number };
   calls24h: Record<string, { ok: number; error: number }>;
   calls7d: Record<string, { ok: number; error: number }>;
+  toolsUsed24h: Record<string, number>;
   model: { month: string; usd: number; inputTokens: number; outputTokens: number; calls: number };
   agents: { connected: number; active7d: number };
   schedules: Record<string, number>;
@@ -17,8 +22,31 @@ type Snapshot = {
 
 const label = (v: string) => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ");
 
+// The values a label may take; anything else is counted as "other" (the escaping below is a second guard, not the
+// first). A status added in code fails the typecheck here until it's listed.
+const BUILD_STATUSES = ["waiting", "open", "building", "validating", "review", "failed", "promoted", "cancelled"] as const;
+const SCHEDULE_STATUSES = ["proposed", "active", "paused"] as const;
+const everyStatusListed: [Exclude<BuildStatus, (typeof BUILD_STATUSES)[number]> | Exclude<ScheduleStatus, (typeof SCHEDULE_STATUSES)[number]>] extends [never] ? true : never = true;
+void everyStatusListed;
+const oneOf = (allowed: readonly string[]) => (v: string) => (allowed.includes(v) ? v : "other");
+const caller = oneOf(CALLER_KINDS);
+const buildStatus = oneOf(BUILD_STATUSES);
+const scheduleStatus = oneOf(SCHEDULE_STATUSES);
+const month = (v: string) => (/^\d{4}-\d{2}$/.test(v) ? v : "other");
+const version = (v: string) => (/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(v) ? v : "other");
+/** Counts keyed by a label value, with the value made one of its allowed ones (and those that become the same, summed). */
+function allowed<T>(counts: Record<string, T>, value: (v: string) => string, add: (a: T, b: T) => T): [string, T][] {
+  const out = new Map<string, T>();
+  for (const [k, n] of Object.entries(counts)) {
+    const v = value(k);
+    out.set(v, out.has(v) ? add(out.get(v)!, n) : n);
+  }
+  return [...out];
+}
+const plus = (a: number, b: number) => a + b;
+
 /** Prometheus exposition text for a snapshot. */
-export function prometheusText(s: Snapshot, version: string): string {
+export function prometheusText(s: Snapshot, appVersion: string): string {
   const out: string[] = [];
   const metric = (name: string, help: string, type: "gauge" | "counter", rows: [Record<string, string>, number][]) => {
     out.push(`# HELP ${name} ${help}`, `# TYPE ${name} ${type}`);
@@ -28,18 +56,20 @@ export function prometheusText(s: Snapshot, version: string): string {
     }
   };
   const calls = (window: string, c: Snapshot["calls24h"]) =>
-    Object.entries(c).flatMap(([agent, t]) => [[{ window, agent, outcome: "ok" }, t.ok], [{ window, agent, outcome: "error" }, t.error]] as [Record<string, string>, number][]);
-  metric("hewn_info", "Hewn version", "gauge", [[{ version }, 1]]);
+    allowed(c, caller, (a, b) => ({ ok: a.ok + b.ok, error: a.error + b.error })).flatMap(([by, t]) => [[{ window, caller: by, outcome: "ok" }, t.ok], [{ window, caller: by, outcome: "error" }, t.error]] as [Record<string, string>, number][]);
+  const m = month(s.model.month);
+  metric("hewn_info", "Hewn version", "gauge", [[{ version: version(appVersion) }, 1]]);
   metric("hewn_tools", "Tools by state", "gauge", [[{ state: "active" }, s.tools.active], [{ state: "archived" }, s.tools.archived], [{ state: "unversioned" }, s.tools.unversioned]]);
-  metric("hewn_builds", "Builds by status, all time", "gauge", Object.entries(s.builds).map(([status, n]) => [{ status }, n]));
+  metric("hewn_builds", "Builds by status, all time", "gauge", allowed(s.builds, buildStatus, plus).map(([status, n]) => [{ status }, n]));
   metric("hewn_build_seconds_7d_sum", "Total time of builds promoted in the last 7 days", "gauge", [[{}, s.buildSeconds7d.sum]]);
   metric("hewn_build_seconds_7d_count", "Builds promoted in the last 7 days", "gauge", [[{}, s.buildSeconds7d.count]]);
-  metric("hewn_calls", "Tool calls by origin and outcome, from the call logs", "gauge", [...calls("24h", s.calls24h), ...calls("7d", s.calls7d)]);
-  metric("hewn_model_spend_usd", "Model spend this month", "gauge", [[{ month: s.model.month }, s.model.usd]]);
-  metric("hewn_model_tokens", "Model tokens this month", "gauge", [[{ month: s.model.month, direction: "input" }, s.model.inputTokens], [{ month: s.model.month, direction: "output" }, s.model.outputTokens]]);
-  metric("hewn_model_calls", "Model calls this month", "gauge", [[{ month: s.model.month }, s.model.calls]]);
+  metric("hewn_calls", "Tool calls by the kind of caller that called them directly, and outcome, from the call logs", "gauge", [...calls("24h", s.calls24h), ...calls("7d", s.calls7d)]);
+  metric("hewn_tools_used", "Different tools called, by the kind of caller that called them directly, from the call logs", "gauge", allowed(s.toolsUsed24h, caller, plus).map(([by, n]) => [{ window: "24h", caller: by }, n]));
+  metric("hewn_model_spend_usd", "Model spend this month", "gauge", [[{ month: m }, s.model.usd]]);
+  metric("hewn_model_tokens", "Model tokens this month", "gauge", [[{ month: m, direction: "input" }, s.model.inputTokens], [{ month: m, direction: "output" }, s.model.outputTokens]]);
+  metric("hewn_model_calls", "Model calls this month", "gauge", [[{ month: m }, s.model.calls]]);
   metric("hewn_agents", "Connected agents", "gauge", [[{ window: "all" }, s.agents.connected], [{ window: "7d" }, s.agents.active7d]]);
-  metric("hewn_schedules", "Schedules by status", "gauge", Object.entries(s.schedules).map(([status, n]) => [{ status }, n]));
+  metric("hewn_schedules", "Schedules by status", "gauge", allowed(s.schedules, scheduleStatus, plus).map(([status, n]) => [{ status }, n]));
   metric("hewn_schedules_failing", "Schedules with failures since their last success", "gauge", [[{}, s.schedulesFailing]]);
   return out.join("\n") + "\n";
 }

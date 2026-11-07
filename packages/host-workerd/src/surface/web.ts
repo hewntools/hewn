@@ -7,6 +7,7 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { readSummary } from "@hewntools/core/bundle.ts";
+import { explainFailure } from "@hewntools/core/failure.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
@@ -108,7 +109,7 @@ const hostedLine = (hosted: Hosted) => (hosted.signInUrl ? "Sign in from your ac
  */
 export const WEB_CODE = [
   ...["index.html", "app.js", "kit.js", "passkey.js", "app.css"],
-  ...["accounts", "activity", "add-passkey", "agents", "appearance", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "hub", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
+  ...["accounts", "activity", "add-passkey", "agents", "appearance", "brief", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "hub", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
 function webBuildOf(host: SurfaceHost): Promise<string> {
@@ -272,6 +273,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST modify": {
         const body = await readJson(req);
         return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
+      }
+      // Polish: the passes on a tool already live (owner only). `realData`: the builder sees a copy of the tool's own data.
+      case "POST polish": {
+        const body = await readJson(req);
+        return platform.polish(owner, { capabilityId: id, ...(body.note !== undefined ? { note: body.note } : {}), ...(body.realData !== undefined ? { realData: body.realData } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
       case "DELETE widgets":
         return platform.removeWidget(owner, id, arg);
@@ -530,7 +536,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "settings") {
     platform.agents(owner); // owner only
     if (method === "PUT") {
-      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels"]));
+      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
       return { ...next, ...(host.hosted ? { hosted: true } : {}) };
     }
@@ -665,7 +671,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     const started = Date.now();
     const finish = (reply?: IntakeReply, error?: string) => {
       const turn = body.messages.filter((m) => m.role === "user").length;
-      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : reply.kind === "answer" ? "answer" : "draft";
+      const outcome = !reply ? `ERROR ${error}` : reply.kind === "questions" ? `${reply.questions.length} question(s)` : reply.kind === "widgets" ? `${reply.proposals.length} widget proposal(s)` : reply.kind === "polish" ? "polish" : reply.kind === "ideas" ? `${reply.ideas.length} idea(s)` : reply.kind === "schedules" ? `${reply.schedules.length} schedule(s)` : reply.kind === "answer" ? "answer" : "draft";
       host.log(
         `web intake ${body.mode}${body.capabilityId ? ` ${body.capabilityId}` : ""} turn ${turn} → ${outcome} (${Math.round((Date.now() - started) / 1000)}s)`,
       );
@@ -841,7 +847,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder } : null,
+      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
     });
   }
@@ -932,7 +938,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const b of builds.filter((x) => x.status === "review"))
     needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} changed it: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
   for (const b of unresolvedFailures(builds))
-    needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger", action: "Show", at: b.updatedAt });
+    needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), ...(b.failure?.paused ? { detail: `Paused · ${b.failure.detail}`, severity: "warn" as const, action: "Continue…" } : { detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger" as const, action: "Show" }), at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
     needs.push({ kind: "schedule", id: x.id, capabilityId: x.capabilityId, agentId: x.createdBy, title: nameOf(x.capabilityId), detail: `${who(x.createdBy)} wants to run ${x.operation.split("@")[0]} ${x.cadence}`, severity: "warn", action: "Review", at: x.createdAt });
   // A schedule that stopped itself after failing in a row: whatever it keeps fresh goes stale quietly otherwise.

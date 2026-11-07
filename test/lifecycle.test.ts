@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { USER } from "@hewntools/core/auth.ts";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { type Agent, USER } from "@hewntools/core/auth.ts";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { editJson, editText, installSeed, setup } from "./helpers.ts";
+import { editJson, editText, installSeed, SEED, setup } from "./helpers.ts";
 
 const write = (path: string, content: string) => (mkdirSync(dirname(path), { recursive: true }), writeFileSync(path, content));
 const backups = (t: ReturnType<typeof setup>, id: string) => (existsSync(join(t.home.capabilities, id, "backups")) ? readdirSync(join(t.home.capabilities, id, "backups")) : []);
@@ -266,9 +266,80 @@ describe("creation lifecycle", () => {
     assert.deepEqual(result, { count: 1 }, "live state is separate from test state");
   });
 
-  test("duplicate id is a conflict", async () => {
+  test("duplicate id is a conflict while the first is being built or waits; the build is named only to who may see it", async () => {
     t.queue(() => new Promise(() => {}));
-    await t.platform.create(t.claude, { name: "Reading List", purpose: "x", requirements: "x" });
-    await assert.rejects(t.platform.create(t.claude, { name: "reading list!", purpose: "x", requirements: "x" }), /already exists/);
+    const first = await t.platform.create(t.claude, { name: "Reading List", purpose: "x", requirements: "x" });
+    await assert.rejects(t.platform.create(t.claude, { name: "reading list!", purpose: "x", requirements: "x" }), new RegExp(`'reading-list' is already being built \\(build ${first.buildId}\\)`));
+    const waiting = await t.platform.create(t.claude, { name: "Reading Notes", purpose: "x", requirements: "x", after: first.buildId });
+    assert.equal(waiting.status, "waiting");
+    await assert.rejects(t.platform.create(t.claude, { name: "Reading Notes", purpose: "x", requirements: "x" }), new RegExp(`'reading-notes' is already being built \\(build ${waiting.buildId}\\)`));
+    const narrow: Agent = { id: "narrow", kind: "agent", scopes: new Set(["create"]), capabilities: new Set(["something-else"]) };
+    await assert.rejects(t.platform.create(narrow, { name: "Reading List", purpose: "x", requirements: "x" }), { message: "'reading-list' is already being built; wait for it, or cancel it" });
+  });
+
+  test("a create that never promoted gives its name to the next one; one being built doesn't; the old one can't be retried over it", async () => {
+    const ask = { name: "Running Log", purpose: "runs", requirements: "record runs" };
+    const overloaded = () => {
+      throw new Error("model overloaded");
+    };
+    t.queue(() => new Promise(() => {}));
+    const first = await t.platform.create(USER, ask);
+    await assert.rejects(t.platform.create(USER, ask), new RegExp(`'running-log' is already being built \\(build ${first.buildId}\\)`));
+    await assert.rejects(t.platform.install(USER, { name: ask.name, purpose: ask.purpose, builder: `copy:${SEED}` }), /'running-log' is already being built/);
+    t.platform.cancelBuild(USER, first.buildId);
+
+    // Cancelled: the same name builds again, under the same id, which goes by the new request now.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async () => (await gate, overloaded()));
+    const second = await t.platform.create(USER, { ...ask, name: "Running log!", purpose: "runs, again" });
+    assert.equal(second.capabilityId, "running-log");
+    const { name, purpose } = t.platform.registry.getCapability("running-log")!;
+    assert.deepEqual({ name, purpose }, { name: "Running log!", purpose: "runs, again" });
+    // The old build's Retry: refused while the new one is being built, fine again once that one failed.
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), new RegExp(`'running-log' is being built again \\(build ${second.buildId}\\)`));
+    release();
+    assert.equal((await t.platform.settle(second.buildId)).status, "failed");
+    const retried = await t.build(() => t.platform.retryBuild(USER, first.buildId), overloaded);
+    assert.equal(retried.status, "failed");
+
+    // Failed: the same name builds again too; once it's live, the old build says so.
+    const third = await t.build(() => t.platform.create(USER, ask), (ws) => cpSync(SEED, ws, { recursive: true }));
+    assert.equal(third.status, "promoted", third.log.join("\n"));
+    await assert.rejects(t.platform.retryBuild(USER, retried.buildId), /has been created since/);
+    await assert.rejects(t.platform.create(USER, ask), /capability 'running-log' already exists/);
+  });
+
+  test("a paused create keeps its name until the owner continues or stops it: a new create, an install and an older build's Retry are refused", async () => {
+    const ask = { name: "Running Log", purpose: "runs", requirements: "record runs" };
+    const overloaded = () => {
+      throw new Error("model overloaded");
+    };
+    const paused = () => {
+      throw Object.assign(new Error("used its allowance; its work is kept"), { paused: true });
+    };
+    const first = await t.build(() => t.platform.create(USER, ask), overloaded);
+    assert.equal(first.status, "failed");
+    // A new create of the name takes the id over, and the builder's host pauses it.
+    const second = await t.build(() => t.platform.create(t.claude, { ...ask, purpose: "runs, again" }), paused);
+    assert.equal(second.failure?.paused, true);
+    // Taking the id over again would strand its kept work (its Continue would then be refused).
+    const owners = { message: `'running-log' is paused (build ${second.buildId}): Continue or Stop it in Hewn first` };
+    await assert.rejects(t.platform.create(USER, ask), owners);
+    await assert.rejects(t.platform.install(USER, { name: ask.name, purpose: ask.purpose, builder: `copy:${SEED}` }), owners);
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), owners);
+    await assert.rejects(t.platform.create(t.claude, ask), { message: `'running-log' is paused (build ${second.buildId}): the owner continues or stops it in Hewn first` });
+    const narrow: Agent = { id: "narrow", kind: "agent", scopes: new Set(["create"]), capabilities: new Set(["something-else"]) };
+    await assert.rejects(t.platform.create(narrow, ask), { message: "'running-log' is paused: the owner continues or stops it in Hewn first" });
+    assert.equal(t.platform.registry.getCapability("running-log")!.purpose, "runs, again", "the id is still the paused build's");
+
+    // Stopped: the name builds again. A create that pauses holds off the stopped one's Retry too, and its own Continue goes on.
+    t.platform.cancelBuild(USER, second.buildId);
+    const third = await t.build(() => t.platform.create(USER, ask), paused);
+    assert.equal(third.failure?.paused, true);
+    await assert.rejects(t.platform.retryBuild(USER, second.buildId), { message: `'running-log' is paused (build ${third.buildId}): Continue or Stop it in Hewn first` });
+    const continued = await t.build(() => t.platform.retryBuild(USER, third.buildId), (ws) => cpSync(SEED, ws, { recursive: true }));
+    assert.equal(continued.status, "promoted", continued.log.join("\n"));
+    await assert.rejects(t.platform.retryBuild(USER, first.buildId), /has been created since/);
   });
 });

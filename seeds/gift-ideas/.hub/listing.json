@@ -3,12 +3,17 @@
   "tags": [
     "Family"
   ],
-  "version": 1,
+  "version": 2,
   "versions": [
     {
       "version": 1,
       "line": "On the shelf",
       "date": "2026-10-26"
+    },
+    {
+      "version": 2,
+      "line": "Polished: the year's occasions as a ring, and a clearer list of what's coming up",
+      "date": "2026-11-06"
     }
   ],
   "summary": {

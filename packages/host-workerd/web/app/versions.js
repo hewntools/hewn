@@ -3,6 +3,7 @@
 // conversation with the intake, the spec the builder worked from, the builder's log), its files
 // in the code browser, Continue from here and Restore, under Info's top bar.
 import { actorLabel, ago, api, builderLabel, capRef, caps, confirmDialog, enc, fail, h, setWallpaper, skeleton, tintOf } from "../kit.js";
+import { changeLine } from "./brief.js";
 import { buildModelWords, installedFrom } from "./build.js";
 import { codeBrowser, versionSource } from "./files.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
@@ -13,7 +14,7 @@ import { changeHref, rollbackTo, toolActions } from "./tool-actions.js";
 export { madeBy, versionRow, versionPage, versionsPage };
 
 /** What a version changed, in one line: the request that led to it. */
-const changed = (v) => String(v.request?.request ?? v.request?.purpose ?? "").split("\n")[0].trim();
+const changed = (v) => changeLine(String(v.request?.request ?? v.request?.purpose ?? ""));
 /**
  * How a version came to be, in words: built with a builder, asked for by an agent, installed from
  * a file, Hub or files (no builder ran), or a quick change (a new tier or model, no builder either).

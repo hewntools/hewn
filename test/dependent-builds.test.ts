@@ -8,7 +8,8 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
-import { FIXTURES, type Script, setup } from "./helpers.ts";
+import { cssWithoutComments } from "@hewntools/core/platform/builds.ts";
+import { FIXTURES, OPENCODE_READ, type Script, setup } from "./helpers.ts";
 
 /** The builder writes the site-connection fixture (a connection). */
 const writeConnection: Script = (ws) => cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true });
@@ -85,8 +86,22 @@ describe("dependent builds", () => {
     });
     const done = await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
     assert.match(css, /--field/, "the real ui.css");
+    // Without its comments but the header and how to use a component (marked /*! … */), so a builder reads all of it; every rule kept.
+    const ui = readFileSync(join(import.meta.dirname, "..", "packages", "ui", "src", "ui.css"), "utf8");
+    assert.doesNotMatch(ui, /"[^"\n]*\/\*|'[^'\n]*\/\*/, "no string in ui.css holds a comment's marks");
+    const rules = (s: string) => s.replace(/\/\*[^]*?\*\//g, " ").replace(/\s+/g, " ").trim();
+    assert.equal(rules(css), rules(ui), "the same rules as ui.css");
+    assert.doesNotMatch(css, /\/\*(?!!)/, "no other comment");
+    assert.match(css, /^\/\*!\n \* Hewn UI v2[^]*Use the tokens, never raw colours\./, "the header");
+    assert.match(css, /\/\*! Chip: a pill for a thing/, "how to use a component");
+    assert.ok(Buffer.byteLength(css) < 48 * 1024 && Buffer.byteLength(css) < OPENCODE_READ, `under 48 KB, within OpenCode's read: ${Buffer.byteLength(css)} bytes (ui.css ${Buffer.byteLength(ui)})`);
     const files = Object.keys((await t.platform.loadVersion("site-connection", done.resultVersion!)).files);
     assert.ok(!files.includes("PLATFORM_UI.css") && !files.includes("BUILDER.md"));
+  });
+
+  test("cssWithoutComments: every comment goes, each as a space, and the blank lines it leaves; one marked /*! … */ stays", () => {
+    assert.equal(cssWithoutComments("/*\n * Header\n */\n.a { color: red; } /* why */\n\n\n/* B */\n.b { margin: 1px/**/2px; }\n"), ".a { color: red; }\n\n.b { margin: 1px 2px; }\n");
+    assert.equal(cssWithoutComments("/*! How to use .c */\n.c { gap: 0; } /* x */\n"), "/*! How to use .c */\n.c { gap: 0; }\n");
   });
 
   test("the connection's skeleton is a connection", async () => {
@@ -114,6 +129,36 @@ describe("dependent builds", () => {
     const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
     assert.equal(consumer2.status, "waiting", "the retry waits for the dependency's retry");
     assert.equal(consumer2.dependsOn, conn2.buildId);
+    assert.equal((await t.platform.settle(conn2.buildId)).status, "promoted");
+    assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
+  });
+
+  test("when the dependency failed and a new create of its name went live, the waiting build's retry starts at once", async () => {
+    t.queue(broken);
+    const conn = await t.platform.create(t.claude, connReq);
+    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
+    t.queue(writeConnection, writeConsumer);
+    assert.equal((await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId)).status, "promoted");
+    await assert.rejects(t.platform.retryBuild(t.claude, conn.buildId), /has been created since/);
+    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    assert.notEqual(consumer2.status, "waiting");
+    assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
+  });
+
+  test("when the dependency failed and a new create of its name is on its way, the waiting build's retry waits for that one", async () => {
+    t.queue(broken);
+    const conn = await t.platform.create(t.claude, connReq);
+    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws, job) => (await gate, writeConnection(ws, job)), writeConsumer);
+    const conn2 = await t.platform.create(t.claude, connReq);
+    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    assert.equal(consumer2.status, "waiting");
+    assert.equal(consumer2.dependsOn, conn2.buildId);
+    release();
     assert.equal((await t.platform.settle(conn2.buildId)).status, "promoted");
     assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
   });
@@ -275,6 +320,120 @@ describe("a queued change released while every build slot is taken", () => {
   });
 });
 
+/** The builder's host pauses the build part-way, its work kept. */
+const pausedBy =
+  (note: string): Script =>
+  () => {
+    throw Object.assign(new Error(note), { paused: true });
+  };
+
+describe("a paused change and what waits for it", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(() => (t = setup()));
+  afterEach(async () => {
+    await t.platform.drain();
+    t.cleanup();
+  });
+
+  test("a change queued behind it keeps its turn; the owner's Continue takes the paused one's place, and the queue follows it", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws, job) => (await gate, pausedBy("used its allowance")(ws, job)));
+    const paused = await t.platform.modify(USER, { capabilityId: "site-connection", request: "a" });
+    const next = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    assert.equal(next.queued, true);
+    release();
+    assert.equal((await t.platform.settle(paused.buildId)).failure?.paused, true);
+    const waiting = t.platform.getBuild(USER, next.buildId);
+    assert.equal(waiting.status, "waiting", "a pause doesn't release it");
+    assert.equal(waiting.dependsOn, paused.buildId);
+    t.queue(() => {}, () => {});
+    const cont = await t.platform.retryBuild(USER, paused.buildId);
+    assert.equal(cont.dependsOn, undefined, "the Continue takes the paused one's place: it waits for nothing");
+    assert.equal(t.platform.getBuild(USER, next.buildId).dependsOn, cont.buildId, "the queue follows the Continue");
+    assert.equal((await t.platform.settle(cont.buildId)).status, "promoted");
+    const done = await t.platform.settle(next.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+
+  test("Stop releases the change queued behind it; a build that waited for it with after fails, saying to continue it first", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    t.queue(writeConsumer);
+    await t.platform.settle((await t.platform.create(USER, consumerReq)).buildId);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async (ws, job) => (await gate, pausedBy("used its allowance")(ws, job)));
+    const paused = await t.platform.modify(USER, { capabilityId: "site-connection", request: "add pages@1" });
+    const queued = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    const dependent = await t.platform.modify(USER, { capabilityId: "site-report", request: "use pages@1", after: paused.buildId });
+    assert.equal(dependent.queued, undefined, "waits for the build it needs");
+    release();
+    await t.platform.settle(paused.buildId);
+    const failed = await t.platform.settle(dependent.buildId);
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.log.at(-1), `FAILED: build ${paused.buildId}, which it waited for, paused; continue that one, then retry this one`);
+    assert.equal(failed.failure?.paused, undefined, "it failed; it isn't paused itself");
+    // Its retry would wait for the paused one: refused until that one is continued.
+    await assert.rejects(t.platform.retryBuild(USER, dependent.buildId), { message: `build ${paused.buildId} (modify site-connection), which this would wait for, is paused; Continue it in Hewn first` });
+    await assert.rejects(t.platform.retryBuild(t.claude, dependent.buildId), /is paused; the owner continues it in Hewn first/);
+    assert.equal(t.platform.getBuild(USER, queued.buildId).status, "waiting");
+    t.queue(() => {});
+    assert.equal(t.platform.cancelBuild(USER, paused.buildId).status, "cancelled");
+    assert.equal((await t.platform.settle(queued.buildId)).status, "promoted", "Stop released it");
+  });
+
+  test("a change asked for once it's paused, or retried then, queues behind it too; the Continue takes its place, and the queue follows it", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    t.queue(broken);
+    const older = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-connection", request: "x" })).buildId);
+    assert.equal(older.status, "failed");
+    t.queue(pausedBy("used its allowance"));
+    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-connection", request: "a" })).buildId);
+    assert.equal(paused.failure?.paused, true);
+    // Started now, it would go live before the Continue, which carries on from work kept before it.
+    const retried = await t.platform.retryBuild(USER, older.buildId);
+    assert.deepEqual([retried.status, retried.queued, retried.dependsOn], ["waiting", true, paused.buildId]);
+    assert.match(retried.instructions!, /which the builder's host paused: it starts on its own once the owner continues that one in Hewn and it ends, or stops it/);
+    const later = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
+    assert.deepEqual([later.status, later.queued, later.dependsOn], ["waiting", true, retried.buildId]);
+    t.queue(() => {}, () => {}, () => {});
+    const cont = await t.platform.retryBuild(USER, paused.buildId);
+    assert.equal(cont.dependsOn, undefined, "the Continue waits for nothing");
+    assert.equal(t.platform.getBuild(USER, retried.buildId).dependsOn, cont.buildId, "the queue follows the Continue");
+    assert.equal((await t.platform.settle(cont.buildId)).status, "promoted");
+    assert.equal((await t.platform.settle(retried.buildId)).status, "promoted");
+    const done = await t.platform.settle(later.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+
+  test("a change whose after comes due while one is paused waits behind it; Stop releases it", async () => {
+    t.queue(writeConnection);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
+    t.queue(writeConsumer);
+    await t.platform.settle((await t.platform.create(USER, consumerReq)).buildId);
+    t.queue(pausedBy("used its allowance"));
+    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-report", request: "a" })).buildId);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    t.queue(async () => void (await gate));
+    const needed = await t.platform.modify(USER, { capabilityId: "site-connection", request: "add pages@1" });
+    const dependent = await t.platform.modify(USER, { capabilityId: "site-report", request: "use pages@1", after: needed.buildId });
+    assert.equal(dependent.dependsOn, needed.buildId, "waits for the build it needs first");
+    release();
+    assert.equal((await t.platform.settle(needed.buildId)).status, "promoted");
+    const waiting = t.platform.getBuild(USER, dependent.buildId);
+    assert.deepEqual([waiting.status, waiting.queued, waiting.dependsOn], ["waiting", true, paused.buildId]);
+    t.queue(() => {});
+    t.platform.cancelBuild(USER, paused.buildId);
+    const done = await t.platform.settle(dependent.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+});
+
 describe("dependent builds across a restart", () => {
   test("the interrupted dependency is retried, and the waiting build follows the retry", async () => {
     const t = setup();
@@ -337,9 +496,10 @@ describe("schedules approved with a build", () => {
     t.cleanup();
   });
 
-  test("the owner's approved schedules are set up when the build promotes; one that doesn't fit is skipped", async () => {
+  test("the owner's approved schedules are set up when the build promotes, one that doesn't fit skipped; the builder is told their names", async () => {
     const { USER } = await import("@hewntools/core/auth.ts");
-    t.queue(writeConnection);
+    let brief = "";
+    t.queue((ws, job) => ((brief = readFileSync(join(ws, "BUILDER.md"), "utf8")), writeConnection(ws, job)));
     const b = await t.platform.create(USER, { ...connReq, schedules: [{ operation: "site@1", cadence: "daily 07:00" }, { operation: "nope", cadence: "hourly" }] });
     assert.equal(t.platform.listSchedules(USER).length, 0, "nothing before it promotes");
     const done = await t.platform.settle(b.buildId);
@@ -351,6 +511,14 @@ describe("schedules approved with a build", () => {
     assert.equal(s.status, "active");
     assert.ok(done.log.some((l) => /schedule .* set: site daily 07:00/.test(l)));
     assert.ok(done.log.some((l) => /schedule skipped \(nope hourly\)/.test(l)));
+    // The builder is told the names: the intake's brief leaves operations to it.
+    assert.match(brief, /The owner approved schedules that Hewn sets up once the capability is live: `site` \(daily 07:00\), `nope` \(hourly\)\. Each runs the operation of that exact name with no input, so give the capability an operation by each name: read or write \(not destructive\), accepting `\{\}`\./);
+    // A change that carries schedules says so too.
+    let change = "";
+    t.queue((ws) => void (change = readFileSync(join(ws, "BUILDER.md"), "utf8")));
+    const c = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "site-connection", request: "a note", schedules: [{ operation: "site", cadence: "hourly" }] })).buildId);
+    assert.equal(c.status, "promoted", c.log.join("\n"));
+    assert.match(change, /Requested change: a note\n\nThe owner approved schedules that Hewn sets up once the change is live: `site` \(hourly\)\. [^]*the capability must have an operation by each name after this change: read or write/);
   });
 
   test("only the owner attaches schedules (agents propose them), and cadences are checked up front", async () => {
@@ -402,10 +570,24 @@ describe("intake: a connection first", () => {
     assert.deepEqual(remembered.remember, [{ scope: "global", text: "Swedish copy" }]);
     assert.equal(remembered.forget, undefined);
     // Asks until it's clear, per mode, with defaults; no cap on rounds (the owner's Draft now is the stop).
-    assert.match(prompt, /Ask until it's clear; then draft\. Before a draft you must be able to say, from the conversation: the moment[^]*each carrying the default you'd assume[^]*Just say ok if that looks good[^]*When the owner says to draft now/);
+    assert.match(prompt, /Ask until it's clear; then draft\. Before a draft you must be able to say, from the conversation: the moment[^]*each carrying the default you'd assume[^]*An "ok" from the owner means every default; don't tell them how to answer[^]*When the owner says to draft now/);
+    assert.doesNotMatch(prompt, /just say ok/i, "the owner isn't told how to answer every time");
     assert.doesNotMatch(prompt, /Round \d+ of at most|last round/);
     assert.match(ruled, /what exactly changes and where[^]*A vague one \("improve the UX"/);
     assert.doesNotMatch(ruled, /the moment \(when the owner opens/);
+  });
+
+  test("a change's draft is a lean brief too: what changes, what stays (existing contracts compatible), what's decided", async () => {
+    const { intakePrompt } = await import("@hewntools/cli/intake.ts");
+    const p = intakePrompt({ mode: "modify", capabilityId: "x", messages: [{ role: "user", content: "add a note to each run" }] });
+    assert.match(p, /Fill "request": a lean brief for the builder, not a spec\. Plain short sentences under these headings and nothing else: CHANGES \(what the owner wants different[^)]*\), STAYS \(what must keep working: always "Existing operation contracts stay backward compatible\.", then the data and anything the owner wants kept\), DECIDED \([^)]*out of scope\), PLATFORM \([^)]*"nothing new"\), UI INTENT \([^)]*leave it out when the UI doesn't change\)\./);
+    assert.match(p, /Existing operations may be named; no new operation names, inputs, outputs or test lists: the builder designs those, and it reads the owner's own words/);
+    assert.doesNotMatch(p, /builder-ready description of the change|operations added\/changed and how/);
+    assert.match(p, /A change to a connection \(the capability above is of kind "connection"\) keeps a builder-ready "request" instead/);
+    // The card's summary is what the intake expects; only a schedule's name binds the builder.
+    assert.match(p, /"operations" \(the operations you expect this change to add or change, snake_case name \+ sideEffect; the builder designs new ones, so only a schedule's operation name is binding\)[^]*The rest must match the request\./);
+    assert.doesNotMatch(p, /These must match the spec/);
+    assert.doesNotMatch(intakePrompt({ mode: "create", messages: [{ role: "user", content: "x" }] }), /CHANGES \(|STAYS \(/, "a new tool's brief is unchanged");
   });
 
   test("creating: several ideas at once, each a full draft (incomplete ones dropped, at most five)", async () => {
@@ -425,7 +607,11 @@ describe("intake: a connection first", () => {
     assert.throws(() => parseIntake(JSON.stringify({ ...base, ideas: [idea("")] }), "create"), /ideas missing/);
     // Ideas only exist when creating.
     assert.throws(() => parseIntake(JSON.stringify({ ...base, ideas: [idea("A")] }), "modify"), /missing 'request'/);
-    assert.match(intakePrompt({ mode: "create", messages: [{ role: "user", content: "suggest some tools" }] }), /reply kind "ideas"[^]*build on another idea[^]*Never a cycle/);
+    const prompt = intakePrompt({ mode: "create", messages: [{ role: "user", content: "suggest some tools" }] });
+    assert.match(prompt, /reply kind "ideas"[^]*build on another idea[^]*Never a cycle/);
+    // One idea building on another: each says under PLATFORM what passes between them; the builder finds the operation names.
+    assert.match(prompt, /in "uses" and say under PLATFORM what it needs from that one, and under that idea's PLATFORM what this one will read or do through it\. Hewn builds that one first, so this one's builder takes the real operation names from its contract/);
+    assert.doesNotMatch(prompt, /name the operations it calls/);
     assert.doesNotMatch(intakePrompt({ mode: "modify", messages: [{ role: "user", content: "x" }] }), /reply kind "ideas"/);
   });
 

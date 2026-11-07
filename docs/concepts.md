@@ -37,8 +37,9 @@ One agent can build your tools and also use them as an MCP client.
 When you (or an agent) ask for a new tool or a change, the builder writes it. Hewn then:
 1. checks the manifest and the contracts
 2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen
-4. makes it live if all of that passes
+3. renders its screen, on a desktop and a phone
+4. for a new tool with a screen, has the builder look at it again on screenshots filled with sample data: it reviews the design, then fixes the details (a tool you have already gets the same with [Polish](building-tools.md#polishing-a-tool))
+5. makes it live if all of that passes
 
 What you ask for goes live right after the checks. A change an **agent** asks for that adds operations, or touches a [connection](#connections), waits for you to approve it first (the Inbox, or `hewn review`). Either way, a tool can't reach anything new until you approve its [grants](#grants).
 
@@ -56,7 +57,7 @@ A tool is **not ready** until you've granted what it needs. You can revoke any g
 
 ## Connections
 
-A **connection** is a tool that wraps one service you have an account with (Todoist, GitHub, your bank). It's the only kind of tool that holds credentials. Other tools use the service through its operations. See [Connections](connections.md).
+A **connection** is a tool that wraps one service you have an account with (Todoist, GitHub, YNAB). It's the only kind of tool that holds credentials. Other tools use the service through its operations. See [Connections](connections.md).
 
 ## Schedules
 

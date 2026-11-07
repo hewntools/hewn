@@ -182,7 +182,7 @@ async function samplePage(id) {
       h(
         "div",
         { class: "small muted" },
-        "Calls to its operations, in order, that fill an empty tool with made-up entries: when someone installs it with sample data, and in its screenshots. Plain writes only (no network, other tools or model), and nothing of your own. ",
+        "Calls to its operations, in order, that show it in use: when someone installs it with sample data, and in its screenshots. Use local writes with made-up entries, or a local read for a tool with no data of its own. No keys, settings, network, other tools or model, and nothing of your own. ",
         h("button", { class: "link sm", onclick: () => openChange(c, { m: ASK_SAMPLE }) }, "Ask builder instead ›"),
       ),
       h(

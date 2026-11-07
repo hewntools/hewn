@@ -98,9 +98,12 @@ async function commandPalette() {
       };
       input.addEventListener("input", () => ((at = 0), render()));
       input.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowDown") (e.preventDefault(), (at = Math.min(at + 1, shown.length - 1)), render());
-        else if (e.key === "ArrowUp") (e.preventDefault(), (at = Math.max(at - 1, 0)), render());
+        // Both arrows wrap (Up on the first goes to the last), as Hewn's menus do; nothing shown, nothing moves.
+        if (e.key === "ArrowDown") (e.preventDefault(), shown.length && ((at = (at + 1) % shown.length), render()));
+        else if (e.key === "ArrowUp") (e.preventDefault(), shown.length && ((at = (at - 1 + shown.length) % shown.length), render()));
         else if (e.key === "Enter" && shown[at]) (e.preventDefault(), run(shown[at]));
+        // At once, typed or not (a search field's own Escape only clears it); not one that cancels an IME composition.
+        else if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) (e.preventDefault(), close());
       });
       render();
       return [input, list];

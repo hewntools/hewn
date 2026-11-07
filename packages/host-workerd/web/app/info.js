@@ -43,7 +43,9 @@ function statusPills(c, cap, all) {
     { class: "row tight wrap" },
     c.building
       ? h("a", { class: "pill accent with-dot", href: `#/b/${enc(c.building.buildId)}` }, buildingLabel(c.building).toLowerCase())
-      : c.lastBuild?.status === "failed"
+      : c.lastBuild?.paused
+        ? h("a", { class: "pill warn with-dot", href: `#/b/${enc(c.lastBuild.buildId)}` }, "build paused")
+        : c.lastBuild?.status === "failed"
         ? h("a", { class: "pill danger with-dot", href: `#/b/${enc(c.lastBuild.buildId)}` }, "build failed")
         : cap.status.ready
           ? h("span", { class: "pill ok with-dot" }, "ready")
@@ -168,7 +170,9 @@ async function infoPage(id) {
     notices.push(h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `You said no to letting it ${saidNo[0].label}. It won't run until you allow it or it changes.`), h("button", { class: "sm", onclick: () => withoutIt(saidNo) }, "Ask builder to work without it"), h("button", { class: "sm primary", onclick: () => authorize(saidNo[0]) }, "Authorize")));
   else if (saidNo.length > 1)
     notices.push(h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `You said no to ${plural(saidNo.length, "thing")} it asks for. It won't run until you allow them or it changes.`), h("button", { class: "sm", onclick: () => withoutIt(saidNo) }, "Ask builder to work without them")));
-  if (c.lastBuild?.status === "failed" && !c.building)
+  if (c.lastBuild?.paused && !c.building)
+    notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, "The last change is paused, its work kept. The live version is unchanged."), h("a", { class: "btn sm primary", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Continue…")));
+  else if (c.lastBuild?.status === "failed" && !c.building)
     notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), retryable(c.lastBuild) && h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
   if (cap.status.retiredModel) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `${cap.status.retiredModel.model} is no longer available.`), h("button", { class: "sm primary", onclick: () => toolModelSheet(c, { replace: true }).then((ok) => ok || route()) }, "Replace…")));
   else if (cap.status.missingModel && !pending.length) notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, cap.status.missingModel), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set a model")));

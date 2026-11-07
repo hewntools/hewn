@@ -38,6 +38,8 @@ export interface IntakeRequest {
   capabilityId?: string;
   /** Modifying with one of its widgets in mind (its name): opened from that widget's Change…. */
   widget?: string;
+  /** Modifying as a Polish (opened from the tool's Polish…): the reply is a Polish to build, its note in the owner's terms. */
+  polish?: boolean;
   messages: IntakeMessage[];
   /** Filled in by the platform: the owner's capabilities, and the current manifest when modifying. */
   catalog?: { id: string; name: string; purpose: string; operations: string[]; kind?: "connection" }[];
@@ -139,6 +141,8 @@ export type IntakeReply = (
   /** A question about Hewn itself, answered (from its docs): nothing to build. */
   | { kind: "answer"; message: string }
   | { kind: "widgets"; message: string; proposals: WidgetProposal[] }
+  /** Modifying as a Polish: the passes on the tool as it is, with a note for the builder (what to focus on; "" for none). */
+  | { kind: "polish"; message: string; polish: { note: string } }
   /** Creating: several separate new capabilities, each a full draft; the owner ticks which to build (in parallel). */
   | { kind: "ideas"; message: string; ideas: CreateDraft[] }
   /** Modifying: nothing to build, only existing operations to run on a timetable. */

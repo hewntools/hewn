@@ -12,7 +12,7 @@ import type { Server } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { serverUrl } from "@hewntools/test-host/server.ts";
-import { editJson, editText, FIXTURES, installFrom, serve, setup, TOKENS } from "./helpers.ts";
+import { editJson, editText, FIXTURES, installFrom, platformWith, type Script, serve, setup, TOKENS } from "./helpers.ts";
 
 const op = (name: string, sideEffect = "read") => ({ name, description: "d", version: 1, inputSchema: { type: "object" }, outputSchema: { type: "object" }, sideEffect });
 const manifest = (extra: Record<string, unknown> = {}, widget: Record<string, unknown> = {}) => ({
@@ -258,6 +258,15 @@ describe("widgets: running", () => {
     await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), /a change to widget-counter is on its way/);
     release();
     await t.platform.settle(change.buildId);
+    // So would a paused change's Continue (it carries on from work kept before this version): it waits until that one is stopped.
+    t.queue(() => {
+      throw Object.assign(new Error("used its allowance"), { paused: true });
+    });
+    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "widget-counter", request: "y" })).buildId);
+    await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), {
+      message: `a change to widget-counter is paused (build ${paused.buildId}); delete the widget once it's continued and done, or stopped`,
+    });
+    t.platform.cancelBuild(USER, paused.buildId);
     const b = await t.platform.settle((await t.platform.removeWidget(USER, "widget-counter", "count")).buildId);
     assert.equal(b.status, "promoted", b.log.join("\n"));
     assert.equal(b.builder, "keep");
@@ -368,11 +377,13 @@ describe("widgets builds (kind widgets)", () => {
 
   test("adds widgets without touching the capability, with a focused brief", async () => {
     let brief = "";
+    let contract = "";
     const b = await t.build(
       () => t.platform.addWidgets(t.claude, { capabilityId: "ui-counter" }),
       (ws, job) => {
         assert.equal(job.kind, "widgets");
         brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+        contract = readFileSync(join(ws, "BRIEF.md"), "utf8");
         addCountWidget(ws);
       },
     );
@@ -380,7 +391,8 @@ describe("widgets builds (kind widgets)", () => {
     assert.equal(b.kind, "widgets");
     assert.match(brief, /# Build: widgets `ui-counter`/);
     assert.match(brief, /Propose 1–3 widgets/);
-    assert.match(brief, /### Widgets \(ABI 2\.3\)/);
+    assert.match(brief, /see "Widgets \(ABI 2\.3\)" in `BRIEF\.md`/);
+    assert.match(contract, /### Widgets \(ABI 2\.3\)/, "and BRIEF.md has it");
     assert.match(b.log.join("\n"), /widgets only: count/);
     assert.equal(((await t.platform.widget(USER, "ui-counter", "count")).view as any).template, "stat");
   });
@@ -439,6 +451,30 @@ describe("create with widgets", () => {
     assert.equal(w.status, "promoted", w.log.join("\n"));
     assert.deepEqual(t.platform.activeManifest("ui-counter").widgets?.map((x) => x.name), ["count"]);
     await assert.rejects(t.platform.create(t.claude, { name: "Conn", purpose: "p", requirements: "r", kind: "connection", widgets: true }), /connection has no widgets/);
+  });
+});
+
+describe("create with widgets across a restart", () => {
+  test("the interrupted create is retried, and its widgets build follows the retry", async () => {
+    const t = setup();
+    // The first platform's builder never finishes: Hewn "stops" mid-build.
+    t.queue(() => new Promise<void>(() => {}));
+    const b = await t.platform.create(t.claude, { name: "UI Counter", purpose: "Count taps.", requirements: "A counter.", widgets: true });
+    t.platform.close();
+
+    const scripts: Script[] = [(ws) => cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true }), addCountWidget];
+    const fresh = platformWith(t.home, () => ({ name: "script", build: async (job) => scripts.shift()!(job.workspace, job) }), { attempts: 1 });
+    try {
+      const [retry] = await fresh.recoverInterruptedBuilds();
+      assert.ok(retry, "the widgets build waiting for it doesn't stop the retry");
+      assert.equal(fresh.registry.getBuild(b.widgetsBuildId!)!.dependsOn, retry, "re-pointed to the retry");
+      assert.equal((await fresh.settle(retry)).status, "promoted");
+      const w = await fresh.settle(b.widgetsBuildId!);
+      assert.equal(w.status, "promoted", w.log.join("\n"));
+    } finally {
+      await fresh.drain();
+      fresh.close();
+    }
   });
 });
 

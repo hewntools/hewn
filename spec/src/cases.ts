@@ -25,7 +25,7 @@ export interface TestCase {
 /**
  * sample/calls.json (ABI 2.5): sample data as operation calls, replayed in order on an empty tool
  * when the owner installs it with sample data (and checked the same way before a version is
- * promoted). Plain writes only: no network, other tools or model are available.
+ * promoted). Local operations only: no secrets, config values, network, other tools or model.
  */
 export interface SampleCall {
   operation: string;

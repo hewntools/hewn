@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { emptyStateMessage, hiddenClosedFooter } from "./empty-state.js";
-import { STATUSES, OPEN, CLOSED, PILL, LABEL, groupIdeas } from "./statuses.js";
+import { STATUSES, LIVE, OPEN, CLOSED, LABEL, groupIdeas } from "./statuses.js";
 import { LIMITS, checkTitle, checkPitch, checkUrl, checkNote, splitTags, checkTag, checkTags } from "./validate.js";
 import { createFakeBackend } from "./fake.js";
 
@@ -152,11 +152,31 @@ function statusSelect(value) {
 }
 
 function statusPill(status) {
-  return h("span", { class: `pill ${PILL[status] || ""}` }, LABEL[status] || status);
+  return h("span", { class: `stage-pill st-${status}` }, LABEL[status] || status);
+}
+
+// Small line icons for row facts (notes, link).
+const ICONS = {
+  note: "M3 2.5h10v8l-3 3H3z M10 13.5v-3h3",
+  link: "M6.5 9.5l3-3 M7 4.5l1.2-1.2a2.6 2.6 0 0 1 3.6 3.6L10.6 8 M9 11.5l-1.2 1.2a2.6 2.6 0 0 1-3.6-3.6L5.4 8",
+};
+function icon(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.5");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", ICONS[name]);
+  svg.append(p);
+  return svg;
 }
 
 function starsReadonly(rating) {
-  if (!rating) return h("span", { class: "muted" }, "Unrated");
+  if (!rating) return h("span", { class: "unrated" }, "Unrated");
   return h("span", { class: "stars-ro", role: "img", "aria-label": `${rating} of 5 stars` },
     h("span", { class: "on" }, "★".repeat(rating)), "☆".repeat(5 - rating));
 }
@@ -294,6 +314,9 @@ const state = {
   total: 0,
   hiddenClosed: 0,
   totalIdeas: 0,
+  openTotal: 0,
+  closedTotal: 0,
+  all: [],
   tags: [],
   loaded: false,
 };
@@ -361,16 +384,35 @@ quick.addEventListener("submit", async (ev) => {
 });
 
 // ---- filters ----
+// Stages are picked on the map; the picked stages and the tag show here as removable chips,
+// next to the list they narrow, with a way to clear everything.
 function renderStatusChips() {
-  const chips = state.view === "closed" ? CLOSED : OPEN;
-  $("#status-chips").replaceChildren(...chips.map((s) => h("button", {
-    type: "button", class: "chip plain", "aria-pressed": state.statuses.has(s) ? "true" : "false",
-    onclick: () => {
-      state.statuses.has(s) ? state.statuses.delete(s) : state.statuses.add(s);
-      syncFilters();
-      refresh();
-    },
-  }, LABEL[s])));
+  const viewStatuses = state.view === "closed" ? CLOSED : OPEN;
+  const removable = (label, onclick, cls = "") => h("button", {
+    type: "button", class: `chip plain ${cls}`, "aria-label": `Remove filter ${label}`, onclick,
+  }, label, h("span", { class: "x", "aria-hidden": "true" }, "×"));
+  const chips = viewStatuses.filter((s) => state.statuses.has(s)).map((s) => removable(LABEL[s], () => {
+    state.statuses.delete(s);
+    syncFilters();
+    refresh();
+  }));
+  if (state.tag) chips.push(removable(`#${state.tag}`, () => setTag(state.tag)));
+  if (filtersActive()) chips.push(h("button", { type: "button", class: "ghost sm", id: "f-clear", onclick: clearFilters }, "Clear filters"));
+  $("#status-chips").replaceChildren(...chips);
+}
+
+// Picking a stage on the map: toggles it as a filter, switching between the open and
+// closed views when the stage lives in the other one.
+function pickStage(s) {
+  const target = CLOSED.includes(s) ? "closed" : "open";
+  if (state.view !== target) {
+    state.view = target;
+    state.statuses.clear();
+    state.statuses.add(s);
+  } else if (state.statuses.has(s)) state.statuses.delete(s);
+  else state.statuses.add(s);
+  syncFilters();
+  refresh();
 }
 
 function renderTagOptions() {
@@ -391,7 +433,7 @@ function syncFilters() {
   $("#f-rating").value = state.minRating ? String(state.minRating) : "";
   $("#f-sort").value = state.sort;
   if ($("#search").value.trim() !== state.query) $("#search").value = state.query;
-  $("#f-clear").hidden = !filtersActive();
+  if (state.loaded) renderMap();
 }
 
 function setView(view) {
@@ -422,7 +464,6 @@ for (const b of document.querySelectorAll("#view-toggle button")) b.addEventList
 $("#f-tag").addEventListener("change", (ev) => { state.tag = ev.target.value || null; syncFilters(); refresh(); });
 $("#f-rating").addEventListener("change", (ev) => { state.minRating = ev.target.value ? Number(ev.target.value) : null; syncFilters(); refresh(); });
 $("#f-sort").addEventListener("change", (ev) => { state.sort = ev.target.value; refresh(); });
-$("#f-clear").addEventListener("click", clearFilters);
 let searchTimer = null;
 $("#search").addEventListener("input", (ev) => {
   clearTimeout(searchTimer);
@@ -455,34 +496,139 @@ async function refresh() {
     closedView ? { result: { total: 0 } } : call("list_ideas", { ...f, status: CLOSED, limit: 1 }),
     call("list_ideas", { status: OPEN, limit: 1 }),
     call("list_ideas", { status: CLOSED, limit: 1 }),
-    call("list_ideas", { status: ["active"], limit: 1 }),
-    call("list_ideas", { status: ["shipped"], limit: 1 }),
+    // Every idea, best first, for the map and the header's best bet.
+    call("list_ideas", { status: STATUSES, sort: "rating", limit: 500 }),
     call("list_tags", {}),
   ]);
   if (seq !== refreshSeq) return;
   listWrap.setAttribute("aria-busy", "false");
   const failed = results.find((r) => r.error);
   if (failed) { renderListError(failed); return; }
-  const [list, hidden, openAll, closedAll, active, shipped, tags] = results.map((r) => r.result);
+  const [list, hidden, openAll, closedAll, all, tags] = results.map((r) => r.result);
   Object.assign(state, {
     ideas: list.ideas,
     total: list.total,
     hiddenClosed: hidden.total,
     totalIdeas: openAll.total + closedAll.total,
+    openTotal: openAll.total,
+    closedTotal: closedAll.total,
+    all: all.ideas,
     tags: tags.tags,
     loaded: true,
   });
-  renderStats({ open: openAll.total, active: active.total, shipped: shipped.total });
+  renderCounts();
+  renderLead();
+  renderMap();
   renderTagOptions();
+  renderStatusChips();
   renderList();
 }
 
-function renderStats({ open, active, shipped }) {
-  const stat = (value, label) => h("div", { class: "stat" }, h("div", { class: "value" }, String(value)), h("div", { class: "label" }, label));
-  $("#stats").replaceChildren(stat(open, "Open"), stat(active, "Active"), stat(shipped, "Shipped"));
+function renderCounts() {
+  $("#n-open").textContent = String(state.openTotal);
+  $("#n-closed").textContent = String(state.closedTotal);
+}
+
+// ---- header: the best bet, and what has stalled ----
+const DOING = { raw: "still raw", exploring: "being explored", validating: "being validated", active: "in the works", parked: "parked" };
+const STALE_DAYS = 30;
+
+function renderLead() {
+  const lead = $("#lead");
+  if (!state.totalIdeas) {
+    lead.replaceChildren("Write ideas down the moment they come; sort out the good ones later.");
+    return;
+  }
+  const best = state.all.find((i) => LIVE.includes(i.status) && i.rating);
+  const parts = [];
+  if (best) {
+    parts.push("Best bet: ",
+      h("a", { href: `#idea=${encodeURIComponent(best.id)}` }, best.title),
+      ", ",
+      h("span", { class: "stars-inline", role: "img", "aria-label": `${best.rating} of 5 stars` }, "★".repeat(best.rating)),
+      ` and ${DOING[best.status]}.`);
+  } else if (state.openTotal) {
+    parts.push(`${plural(state.openTotal, "open idea")}. Give them stars to see your best bet.`);
+  } else {
+    parts.push(`Nothing open right now. ${plural(state.closedTotal, "idea")} shipped or killed.`);
+  }
+  const cutoff = Date.now() - STALE_DAYS * 86400000;
+  const stale = state.all.filter((i) => LIVE.includes(i.status) && i.status !== "active" && Date.parse(i.status_changed_at) < cutoff).length;
+  if (stale) parts.push(h("span", { class: "stale" }, `${plural(stale, "idea")} ${stale === 1 ? "hasn't" : "haven't"} moved stage in a month.`));
+  lead.replaceChildren(...parts);
+}
+
+// ---- the map: every idea as a pixel, stage down the side, gut rating across ----
+const MAP_ROWS = [
+  { s: "raw" }, { s: "exploring" }, { s: "validating" }, { s: "active" },
+  { s: "parked", gap: true, off: true }, { s: "shipped", gap: true }, { s: "killed", off: true },
+];
+const MAP_COLS = [null, 1, 2, 3, 4, 5];
+const PER_CELL = 6;
+
+function renderMap() {
+  const wrap = $("#map-wrap");
+  if (!state.totalIdeas) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const visible = filtersActive() ? new Set(state.ideas.map((i) => i.id)) : null;
+  const axis = h("div", { class: "map-axis", "aria-hidden": "true" },
+    h("span", {}, "Stars"),
+    ...MAP_COLS.map((r) => h("span", { class: r >= 4 ? "hot" : "", title: r ? plural(r, "star") : "No rating" }, r ? `${r}★` : "–")),
+  );
+  let n = 0;
+  const rows = MAP_ROWS.map(({ s, gap, off }) => {
+    const ideas = state.all.filter((i) => i.status === s);
+    const pressed = state.view === (CLOSED.includes(s) ? "closed" : "open") && state.statuses.has(s);
+    const label = h("button", {
+      type: "button", class: `stage st-${s}`, "aria-pressed": pressed ? "true" : "false",
+      "aria-label": `${LABEL[s]}, ${plural(ideas.length, "idea")}. Show only ${LABEL[s].toLowerCase()} ideas`,
+      onclick: () => pickStage(s),
+    }, h("span", { class: "sq" }), h("span", { class: "nm" }, LABEL[s]), h("span", { class: `n${ideas.length ? "" : " zero"}` }, String(ideas.length)));
+    const cells = MAP_COLS.map((r) => {
+      const here = ideas.filter((i) => (i.rating || null) === r);
+      const shown = here.slice(0, here.length > PER_CELL ? PER_CELL - 1 : PER_CELL);
+      return h("div", { class: `cell${r ? ` r${r}` : ""}` },
+        ...shown.map((i) => {
+          const a = h("a", {
+            class: `px st-${s}${i.rating === 5 ? " r5" : ""}${visible && !visible.has(i.id) ? " dim" : ""}`,
+            href: `#idea=${encodeURIComponent(i.id)}`, "data-id": i.id, style: `--i:${n++}`,
+            title: `${i.title} (${LABEL[s]}, ${i.rating ? plural(i.rating, "star") : "unrated"})`,
+            "aria-label": `${i.title}: ${LABEL[s]}, ${i.rating ? plural(i.rating, "star") : "unrated"}`,
+          });
+          a.addEventListener("mouseenter", () => highlight(i.id, true));
+          a.addEventListener("mouseleave", () => highlight(i.id, false));
+          a.addEventListener("focus", () => highlight(i.id, true));
+          a.addEventListener("blur", () => highlight(i.id, false));
+          return a;
+        }),
+        here.length > shown.length ? h("span", { class: "more", title: plural(here.length, "idea") }, `+${here.length - shown.length}`) : null,
+      );
+    });
+    return h("div", { class: `map-row${gap ? " gap" : ""}${off ? " off" : ""}` }, label, ...cells);
+  });
+  const live = state.all.filter((i) => LIVE.includes(i.status)).length;
+  const shipped = state.all.filter((i) => i.status === "shipped").length;
+  const foot = shipped
+    ? `${plural(shipped, "idea")} made it all the way. ${live} still on the way.`
+    : `${live} on the way, none shipped yet.`;
+  wrap.replaceChildren(h("div", { class: "map" },
+    h("h2", {}, "Where your ideas stand"),
+    h("p", { class: "cap" }, "Each square is an idea, placed by stage and gut rating. Pick a stage to filter the list."),
+    h("div", { class: "map-grid" }, axis, h("div", { class: "heat", "aria-hidden": "true" }), ...rows),
+    h("p", { class: "map-foot" }, `${foot} The – column holds ideas without stars.`),
+  ));
+}
+
+// Pairs a square on the map with its row in the list.
+function highlight(id, on) {
+  const sel = CSS.escape(id);
+  document.querySelector(`li.idea[data-id="${sel}"]`)?.classList.toggle("hl", on);
+  document.querySelector(`a.px[data-id="${sel}"]`)?.classList.toggle("hl", on);
 }
 
 function renderListError(res) {
+  $("#lead").replaceChildren("Your ideas couldn't be loaded just now.");
+  $("#map-wrap").hidden = true;
   listWrap.replaceChildren(h("div", { class: "notice danger stack" },
     h("strong", {}, "Couldn't load your ideas"),
     h("span", {}, res.message || "Something went wrong."),
@@ -493,9 +639,17 @@ function renderListError(res) {
 function renderList() {
   const empty = emptyStateMessage({ totalIdeas: state.totalIdeas, visibleCount: state.ideas.length, hiddenClosedCount: state.hiddenClosed, view: state.view });
   if (empty) {
+    if (!state.totalIdeas) {
+      listWrap.replaceChildren(h("div", { class: "first-run" },
+        bulbGlyph(),
+        h("strong", {}, empty.title),
+        h("p", {}, "Type it in the bar above and press Enter. A title is enough; add stars and a pitch when you know more."),
+        h("button", { type: "button", class: "primary", onclick: () => qTitle.focus() }, "Add an idea"),
+      ));
+      return;
+    }
     let action = null;
-    if (!state.totalIdeas) action = h("button", { type: "button", class: "primary", onclick: () => qTitle.focus() }, "Add an idea");
-    else if (empty.showClosedAction) action = h("button", { type: "button", onclick: () => setView("closed") }, "Show closed ideas");
+    if (empty.showClosedAction) action = h("button", { type: "button", onclick: () => setView("closed") }, "Show closed ideas");
     else if (filtersActive()) action = h("button", { type: "button", onclick: clearFilters }, "Clear filters");
     listWrap.replaceChildren(h("div", { class: "empty" },
       h("strong", {}, empty.title),
@@ -507,20 +661,39 @@ function renderList() {
   const grouped = state.sort === "rating" || state.sort === "status"
     ? groupIdeas(state.ideas, state.view)
     : [{ label: null, ideas: state.ideas }];
+  const WHY = { Parked: "On hold, still open", Shipped: "Became a real thing", Killed: "Decided against" };
   const parts = [];
   for (const group of grouped) {
-    if (group.label) parts.push(h("h2", { class: "eyebrow" }, `${group.label} · ${group.ideas.length}`));
-    parts.push(h("ul", { class: "list" }, ...group.ideas.map(renderRow)));
+    if (group.label) {
+      parts.push(h("h2", { class: "group-h" }, group.label,
+        h("span", { class: "n" }, String(group.ideas.length)),
+        WHY[group.label] ? h("span", { class: "why" }, WHY[group.label]) : null));
+    }
+    parts.push(h("ul", { class: "ideas" }, ...group.ideas.map(renderRow)));
   }
-  if (state.total > state.ideas.length) parts.push(h("p", { class: "muted" }, `Showing the first ${state.ideas.length} of ${state.total}. Narrow the filters to see the rest.`));
+  if (state.total > state.ideas.length) parts.push(h("p", { class: "list-foot" }, `Showing the first ${state.ideas.length} of ${state.total}. Narrow the filters to see the rest.`));
   const footer = hiddenClosedFooter(state.hiddenClosed);
   if (footer) {
-    parts.push(h("div", { class: "row" },
-      h("span", { class: "muted" }, footer),
+    parts.push(h("div", { class: "list-foot" },
+      h("span", {}, footer),
       h("button", { type: "button", class: "ghost sm", onclick: () => setView("closed") }, "Show"),
     ));
   }
-  listWrap.replaceChildren(h("div", { class: "stack" }, ...parts));
+  listWrap.replaceChildren(...parts);
+}
+
+function bulbGlyph() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 5 5");
+  svg.setAttribute("fill", "currentColor");
+  svg.setAttribute("shape-rendering", "crispEdges");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [x, y, w] of [[1, 0, 3], [0, 1, 5], [1, 2, 3], [1, 4, 3]]) {
+    const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", w); r.setAttribute("height", 1);
+    svg.append(r);
+  }
+  return svg;
 }
 
 const MAX_ROW_TAGS = 5;
@@ -530,25 +703,26 @@ function renderRow(idea) {
   const extra = idea.tags.length - shownTags.length;
   const meta = [
     ...shownTags.map((t) => h("button", {
-      type: "button", class: "chip plain", "aria-pressed": state.tag === t ? "true" : "false",
+      type: "button", class: "tag", "aria-pressed": state.tag === t ? "true" : "false",
       "aria-label": `Show ideas tagged ${t}`, onclick: () => setTag(t),
-    }, t)),
-    extra > 0 ? h("span", { class: "muted" }, `+${extra} more`) : null,
-    idea.url ? h("span", { class: "muted" }, "Link") : null,
-    idea.note_count ? h("span", { class: "muted" }, plural(idea.note_count, "note")) : null,
+    }, `#${t}`)),
+    extra > 0 ? h("span", { class: "meta-bit" }, `+${extra} more`) : null,
+    idea.url ? h("a", { class: "meta-bit", href: idea.url, target: "_blank", rel: "noopener noreferrer", title: idea.url }, icon("link"), linkLabel(idea.url).split("/")[0]) : null,
+    idea.note_count ? h("span", { class: "meta-bit" }, icon("note"), plural(idea.note_count, "note")) : null,
   ].filter(Boolean);
-  return h("li", { class: "idea" },
-    h("div", { class: "grow long" },
+  const li = h("li", { class: `idea st-${idea.status}`, "data-id": idea.id },
+    h("div", { class: "idea-main" },
       h("a", { class: "idea-title", href: `#idea=${encodeURIComponent(idea.id)}` }, idea.title),
-      idea.pitch ? h("div", { class: "sub muted clamp" }, idea.pitch) : null,
-      meta.length ? h("div", { class: "row sub" }, ...meta) : null,
+      idea.pitch ? h("div", { class: "pitch clamp" }, idea.pitch) : null,
+      meta.length ? h("div", { class: "idea-meta" }, ...meta) : null,
     ),
-    h("div", { class: "row meta" },
-      starsReadonly(idea.rating),
-      statusPill(idea.status),
-      h("span", { class: "muted", title: fullDate(idea.updated_at) }, ago(idea.updated_at)),
-    ),
+    h("div", { class: "idea-stage" }, statusPill(idea.status)),
+    h("div", { class: "idea-rating" }, starsReadonly(idea.rating)),
+    h("div", { class: "idea-time", title: `Changed ${fullDate(idea.updated_at)}` }, ago(idea.updated_at)),
   );
+  li.addEventListener("mouseenter", () => highlight(idea.id, true));
+  li.addEventListener("mouseleave", () => highlight(idea.id, false));
+  return li;
 }
 
 // ---- idea detail (dialog) ----
@@ -624,13 +798,24 @@ dlg.addEventListener("close", () => { if (!detail.closing && detail.id) closeDet
 
 function renderDetail(d) {
   detail.data = d;
-  const head = h("div", { class: "row" });
+  const head = h("div", { class: "stack" });
   const heading = h("h2", { id: "d-heading", class: "long" }, d.title);
-  const renderHead = () => head.replaceChildren(
-    statusPill(detail.data.status),
-    h("span", { class: "muted", title: fullDate(detail.data.status_changed_at) }, `${LABEL[detail.data.status]} since ${ago(detail.data.status_changed_at)}`),
-    h("span", { class: "muted", title: fullDate(detail.data.created_at) }, `· added ${ago(detail.data.created_at)}`),
-  );
+  // Where the idea is on its way from raw to shipped; parked and killed sit off the path.
+  const FLOW = ["raw", "exploring", "validating", "active", "shipped"];
+  const renderHead = () => {
+    const cur = detail.data.status;
+    const at = FLOW.indexOf(cur);
+    head.replaceChildren(
+      at >= 0
+        ? h("div", { class: `track st-${cur}`, role: "img", "aria-label": `Stage ${at + 1} of ${FLOW.length}: ${LABEL[cur]}` },
+            ...FLOW.map((s, i) => h("span", { class: i < at ? "done" : i === at ? "now" : "", "aria-hidden": "true" }, LABEL[s])))
+        : h("div", {}, statusPill(cur)),
+      h("div", { class: "d-sub" },
+        h("span", { title: fullDate(detail.data.status_changed_at) }, `${LABEL[cur]} since ${ago(detail.data.status_changed_at)}`),
+        h("span", { title: fullDate(detail.data.created_at) }, `Added ${ago(detail.data.created_at)}`),
+      ),
+    );
+  };
   renderHead();
 
   // Edit form
@@ -704,7 +889,7 @@ function renderDetail(d) {
   });
 
   // Notes
-  const notesWrap = h("div", { class: "stack" });
+  const notesWrap = h("div", { class: "stack d-section" });
   const fNote = makeField("New note", textArea({ rows: 3 }, { multiline: true }), { check: checkNote, hint: "Ctrl+Enter adds it" });
   const noteMsg = h("div", { "aria-live": "polite" });
   const noteBtn = h("button", { type: "submit" }, "Add note");
@@ -733,13 +918,13 @@ function renderDetail(d) {
   function renderNotes() {
     const notes = detail.data.notes;
     notesWrap.replaceChildren(
-      h("h3", { class: "eyebrow" }, notes.length ? `Notes · ${notes.length}` : "Notes"),
+      h("h3", {}, "Notes", notes.length ? h("span", { class: "n" }, String(notes.length)) : null),
       noteForm,
       notes.length
         ? h("ul", { class: "list" }, ...notes.map((n, ix) => h("li", {},
             h("div", { class: "grow long" },
               h("div", { class: "pre" }, n.body),
-              h("div", { class: "sub muted", title: fullDate(n.created_at) }, `${fullDate(n.created_at)} · ${ago(n.created_at)}`),
+              h("div", { class: "note-when" }, h("span", {}, fullDate(n.created_at)), h("span", {}, ago(n.created_at))),
             ),
             h("button", { type: "button", class: "ghost sm danger", "aria-label": `Delete note from ${fullDate(n.created_at)}`, onclick: () => deleteNote(n, ix) }, "Delete"),
           )))
@@ -794,8 +979,7 @@ function renderDetail(d) {
     h("div", { class: "row between start" }, h("div", { class: "stack long grow" }, heading, head), closeButton()),
     form,
     notesWrap,
-    h("div", { class: "stack" },
-      h("h3", { class: "eyebrow" }, "Delete"),
+    h("div", { class: "stack d-section" },
       h("div", { class: "row between" },
         h("span", { class: "muted" }, "Removes the idea, its tags and notes for good."),
         delBtn,

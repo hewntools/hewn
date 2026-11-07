@@ -18,7 +18,8 @@
     "packages/*/src",
     "spec/src",
     "test",
-    "seeds"
+    "seeds",
+    "bench"
   ],
   "exclude": [
     "packages/host-workerd"

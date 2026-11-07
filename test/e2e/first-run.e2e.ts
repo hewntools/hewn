@@ -207,6 +207,24 @@ try {
     await page.locator(".palette-item", { hasText: "Plant Log" }).waitFor();
     const groups = await page.locator(".palette-group").allTextContents();
     if (groups.at(-1) !== "Hub" || groups.indexOf("Hub") !== groups.length - 1 || groups.length < 2) throw new Error(`groups: ${groups.join(", ")}`);
+    // The arrows wrap: Up on the first item goes to the last, Down on the last back to the first.
+    const active = () => page.locator(".palette-item").evaluateAll((els: Element[]) => els.findIndex((e) => e.classList.contains("active")));
+    const last = (await page.locator(".palette-item").count()) - 1;
+    if ((await active()) !== 0) throw new Error(`starts at ${await active()}`);
+    await page.keyboard.press("ArrowUp");
+    if ((await active()) !== last) throw new Error(`Up from the first: ${await active()}, not ${last}`);
+    await page.keyboard.press("ArrowDown");
+    if ((await active()) !== 0) throw new Error(`Down from the last: ${await active()}`);
+    // Nothing shown: the arrows do nothing, and Enter still runs nothing.
+    await page.getByPlaceholder("Search tools, pages and actions").fill("zzqx");
+    await page.getByText("Nothing matches.").waitFor();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await page.getByText("Nothing matches.").waitFor();
+    await page.getByPlaceholder("Search tools, pages and actions").fill("log");
+    await page.keyboard.press("ArrowDown");
+    if ((await active()) !== 1) throw new Error(`after nothing shown, Down: ${await active()}`);
     await page.keyboard.press("Escape");
   });
 
@@ -384,6 +402,27 @@ export const operations = {
     await page.getByText(/Let Claude Code run/).waitFor();
     await page.getByText("Installed from a file · v1").waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-activity.png", fullPage: true });
+  });
+
+  await step("New: Stop puts the message back with Stopped., which goes once the next one is sent", async () => {
+    // The intake never answers here (no CLI runs): each turn waits until it's stopped.
+    await page.route("**/api/intake", () => {});
+    await page.goto(`${web}/#/new`);
+    const box = page.getByRole("textbox", { name: "Message" });
+    await box.fill("A tool to recall facts about me");
+    await box.press("Enter");
+    await page.getByRole("button", { name: "Stop" }).click();
+    await page.getByText("Stopped.").waitFor();
+    if ((await box.inputValue()) !== "A tool to recall facts about me") throw new Error(`box: ${await box.inputValue()}`);
+    await box.press("Enter");
+    await page.locator(".bubble.typing").waitFor();
+    if (await page.getByText("Stopped.").count()) throw new Error("Stopped. still shown after sending again");
+    // Stopped again: one note, not two.
+    await page.getByRole("button", { name: "Stop" }).click();
+    await page.getByText("Stopped.").waitFor();
+    const notes = await page.getByText("Stopped.").count();
+    if (notes !== 1) throw new Error(`${notes} Stopped. notes`);
+    await page.unroute("**/api/intake");
   });
 } finally {
   await browser.close();

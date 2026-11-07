@@ -13,6 +13,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CapabilityBuilder } from "../builders/types.ts";
 import { toBase64, fromBase64 } from "@hewntools/core/files.ts";
+import { checkFromJson } from "@hewntools/core/checks.ts";
+import type { CheckResult } from "@hewntools/core/ports.ts";
 import type { Home } from "../home.ts";
 import { localWorkbench } from "../workbench.ts";
 import type { Intake } from "../intake.ts";
@@ -151,7 +153,8 @@ const hewn :Workerd.Worker = (
     (name = "capability-runtime.js", text = embed "capability-runtime.js"),
   ],
   compatibilityDate = "2026-09-01",
-  compatibilityFlags = ["experimental"],
+  # enable_request_signal: a request's signal aborts when its client goes (Stop in the chat stops the intake's CLI).
+  compatibilityFlags = ["experimental", "enable_request_signal"],
   bindings = [
     (name = "HEWN", durableObjectNamespace = "HewnDO"),
     (name = "CAPS", durableObjectNamespace = "CapabilityHost"),
@@ -241,6 +244,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     res.writeHead(200, { "content-type": "application/x-ndjson" });
     return (e: unknown) => res.write(JSON.stringify(e) + "\n");
   };
+  /** Builders' checks waiting for the core's answer (`${buildId}/${id}`). */
+  const checks = new Map<string, { resolve: (r: CheckResult) => void; reject: (e: Error) => void }>();
   const routes: Record<string, (body: any, req: IncomingMessage, res: ServerResponse) => Promise<unknown>> = {
     "/workbench/open": async (b) => workbench.open(b.buildId, Object.fromEntries(Object.entries(b.files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]))),
     "/workbench/read": async (b) => ({ files: Object.fromEntries(Object.entries(await workbench.read(b.buildId)).map(([p, x]) => [p, toBase64(x)])) }),
@@ -249,6 +254,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       return { data: f ? toBase64(f) : null };
     },
     "/workbench/remove": async (b) => workbench.remove(b.buildId),
+    "/workbench/snapshot": async (b) => workbench.snapshot(String(b.buildId), String(b.to)),
+    "/workbench/write-folder": async (b) => workbench.writeFolder(String(b.buildId), String(b.folder), Object.fromEntries(Object.entries(b.files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]))),
     "/workbench/bundle": async (b) => workbench.bundle(b.buildId),
     "/workbench/note": async (b) => workbench.note(b.buildId, b.line),
     "/workbench/transcript": async (b) => ({ text: (await workbench.transcript(b.buildId)) ?? null }),
@@ -258,14 +265,43 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       const send = ndjson(res);
       const abort = new AbortController();
       res.on("close", () => abort.abort());
+      // `check`: the core answers the builder's checks. Each goes up as an event; its result comes back on /workbench/check-result.
+      const { check, ...job } = b;
+      const asked = new Set<string>();
+      const onCheck = (id: string) =>
+        new Promise<CheckResult>((resolve, reject) => {
+          const key = `${job.buildId}/${id}`;
+          asked.add(key);
+          checks.set(key, { resolve, reject });
+          send({ check: { id } });
+        });
       try {
-        await workbench.build(b, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }) });
+        await workbench.build(job, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }), ...(check === true ? { onCheck } : {}) });
         send({ done: true });
       } catch (e) {
-        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
+        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, paused: (e as { paused?: boolean }).paused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
+      }
+      // Checks still waiting when the build ends get no answer from the core: say so.
+      for (const key of asked) {
+        checks.get(key)?.reject(new Error("the build ended"));
+        checks.delete(key);
       }
       res.end();
       return STREAMED;
+    },
+    "/workbench/check-result": async (b) => {
+      const key = `${b.buildId}/${b.id}`;
+      const waiting = checks.get(key);
+      checks.delete(key);
+      if (!waiting) return;
+      if (typeof b.error === "string") waiting.reject(new Error(b.error));
+      else {
+        try {
+          waiting.resolve(checkFromJson(b.result));
+        } catch (e) {
+          waiting.reject(e as Error);
+        }
+      }
     },
     // The Official shelf (seeds/, shipped with this release): every tool's listing and files, and a card image.
     "/shelf/tools": async () => {
@@ -286,12 +322,20 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         uiDir: join(o.home.builds, String(b.buildId), "ui"),
         manifest: b.manifest,
         ...(Array.isArray(b.widgets) ? { widgets: b.widgets } : {}),
+        ...(b.measure === true ? { measure: true } : {}),
         invoke: async (body) => {
           const res = await fetch(`${url}/_admin/visual-invoke`, { method: "POST", headers: { "x-hewn-admin": adminToken, "content-type": "application/json" }, body: JSON.stringify({ buildId: b.buildId, body }) });
           return res.json();
         },
       });
-      return { skipped: r.skipped, errors: r.errors, screenshot: r.screenshot ? toBase64(new Uint8Array(r.screenshot)) : undefined, screenshotDark: r.screenshotDark ? toBase64(new Uint8Array(r.screenshotDark)) : undefined };
+      return {
+        skipped: r.skipped,
+        errors: r.errors,
+        screenshot: r.screenshot ? toBase64(new Uint8Array(r.screenshot)) : undefined,
+        screenshotDark: r.screenshotDark ? toBase64(new Uint8Array(r.screenshotDark)) : undefined,
+        ...(r.shots ? { shots: r.shots.map((s) => ({ name: s.name, png: toBase64(new Uint8Array(s.png)) })) } : {}),
+        ...(r.defects ? { defects: r.defects } : {}),
+      };
     },
     "/blobs/delete": async (b) => {
       const p = resolve(blobRoot, String(b.key));

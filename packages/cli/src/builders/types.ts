@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { BuildKind } from "@hewntools/core/registry.ts";
+import type { BuildPass, CheckResult } from "@hewntools/core/ports.ts";
 
 export interface BuildJob {
   buildId: string;
   capabilityId: string;
   kind: BuildKind;
-  /** The only directory the builder may change. Contains BUILDER.md. */
+  /** The only directory the builder may change. Contains BUILDER.md (the request) and BRIEF.md (the brief). */
   workspace: string;
   attempt: number;
+  /** The first build of the chain this one retries. Unset: not a retry. */
+  retryOf?: string;
   /** Validation log from the previous attempt, if it failed. */
   feedback?: string;
   /** Append-only, human-readable transcript for this build, outside the workspace. */
@@ -28,11 +31,16 @@ export interface BuildJob {
   onModel?: (model: string) => void;
   /** What the builder's host charged for this attempt (the remote builder). */
   onCharge?: (charge: { amount: number; unit: string }) => void;
+  /** Check the workspace as validation will, without promoting: the builder's `check` tool. Unset: not offered. */
+  check?: (id: string) => Promise<CheckResult>;
+  /** A pass on a candidate that already validated: what it asks, with its screenshots in `screenshots/`. Unset: an attempt. */
+  pass?: BuildPass;
 }
 
 /**
  * Turns a build request into a candidate implementation in the workspace.
- * A builder never validates, promotes, or talks to the platform. It writes files and returns.
+ * A builder never validates, promotes, or talks to the platform. It writes files and returns (and
+ * may check its work as it goes, through `check`).
  */
 export interface CapabilityBuilder {
   name: string;

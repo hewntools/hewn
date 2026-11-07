@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { editJson, SEED } from "./helpers.ts";
-import { parse, startTestHost, type TestHost } from "./workerd-helpers.ts";
+import { parse, startTestHost, type TestHost, waitBuild } from "./workerd-helpers.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object", properties, required });
 
@@ -84,7 +84,7 @@ describe("composition on the workerd host", () => {
   const build = async (m: Record<string, any>, ts: string, cases: unknown[]) => {
     h.queue((ws) => writeCapability(ws, m, ts, cases));
     const opened = parse(await claude.callTool({ name: "capabilities_create", arguments: { name: m.name, purpose: m.purpose, requirements: "test" } }));
-    return parse(await claude.callTool({ name: "builds_wait", arguments: { buildId: opened.buildId, timeoutSeconds: 120 } }));
+    return waitBuild(claude, opened.buildId, 120);
   };
   const call = async (client: Client, capabilityId: string, operation: string, input: unknown = {}) => {
     const r: any = await client.callTool({ name: "capabilities_invoke", arguments: { capabilityId, operation, input } });

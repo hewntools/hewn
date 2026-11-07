@@ -99,7 +99,7 @@ export interface BuildTurn {
   content: string;
   /** What the owner attached with this turn (refs into `attachments`). */
   attachments?: AttachmentRef[];
-  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform. */
+  /** An intake turn's structured reply (a draft, ideas, widgets…), so the web client can show it as the card it was. Opaque to the platform, except that OWNERS_WORDS.md names a draft or idea by its name and purpose (a drafted change by the first line of its request). */
   reply?: unknown;
 }
 
@@ -489,7 +489,7 @@ export class Registry {
     const buildTime = one<{ n: number; seconds: number | null }>(`
       SELECT count(*) AS n, sum((julianday(updated_at) - julianday(created_at)) * 86400) AS seconds
       FROM builds WHERE status = 'promoted' AND created_at >= ?`, since7d);
-    const calls = (since: string) => all<{ entry: string }>("SELECT entry FROM capability_logs WHERE at >= ?", since).map((r) => r.entry);
+    const calls = (since: string) => all<{ capability_id: string; entry: string }>("SELECT capability_id, entry FROM capability_logs WHERE at >= ?", since);
     const model = one<{ usd: number | null; input: number | null; output: number | null; calls: number }>(`
       SELECT sum(cost_usd) AS usd, sum(input_tokens) AS input, sum(output_tokens) AS output, count(*) AS calls
       FROM model_calls WHERE month = ?`, month);
@@ -648,6 +648,11 @@ export class Registry {
     this.db
       .prepare("INSERT INTO capabilities (id, name, purpose, active_version, created_by, created_at) VALUES (?, ?, ?, NULL, ?, ?)")
       .run(c.id, c.name, c.purpose, c.createdBy, now());
+  }
+
+  /** A reserved id (one that never got a version) goes to the create opened on it now: its name, purpose and requester. */
+  takeOverCapability(c: { id: string; name: string; purpose: string; createdBy: string }) {
+    this.db.prepare("UPDATE capabilities SET name = ?, purpose = ?, created_by = ? WHERE id = ? AND active_version IS NULL").run(c.name, c.purpose, c.createdBy, c.id);
   }
 
   /** The secret part of a capability's UI address, made on first use (a new capability under a purged id gets a new one). */
@@ -880,12 +885,23 @@ export class Registry {
 
   /**
    * The newest build of a capability still on its way: waiting, running or validating (not one done
-   * and waiting for the owner's review). `running`: only one running or validating now.
+   * and waiting for the owner's review). `running`: only one running or validating now. `kind`: only
+   * one of that kind.
    */
-  unfinishedBuild(capabilityId: string, { running = false, except = "" }: { running?: boolean; except?: string } = {}): BuildRow | undefined {
+  unfinishedBuild(capabilityId: string, { running = false, except = "", kind }: { running?: boolean; except?: string; kind?: BuildKind } = {}): BuildRow | undefined {
     const statuses = running ? "'open', 'building', 'validating'" : "'waiting', 'open', 'building', 'validating'";
-    const row = this.db.prepare(`SELECT * FROM builds WHERE capability_id = ? AND id != ? AND status IN (${statuses}) ORDER BY rowid DESC LIMIT 1`).get(capabilityId, except);
+    const row = this.db
+      .prepare(`SELECT * FROM builds WHERE capability_id = ? AND id != ? AND status IN (${statuses})${kind ? " AND kind = ?" : ""} ORDER BY rowid DESC LIMIT 1`)
+      .get(capabilityId, except, ...(kind ? [kind] : []));
     return row ? toBuild(row as Row) : undefined;
+  }
+
+  /** A capability's failed builds of one of `kinds` (a paused one is stored as failed), newest first. */
+  failedBuilds(capabilityId: string, kinds: BuildKind[]): BuildRow[] {
+    return this.db
+      .prepare(`SELECT * FROM builds WHERE capability_id = ? AND status = 'failed' AND kind IN (${kinds.map(() => "?").join(", ")}) ORDER BY rowid DESC`)
+      .all(capabilityId, ...kinds)
+      .map((r) => toBuild(r as Row));
   }
 
   /**

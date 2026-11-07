@@ -106,6 +106,17 @@ describe("UI as a client", () => {
     assert.doesNotMatch(bad.body, /section|script/);
   });
 
+  test("the web client's light or dark goes on in the fragment, after the section; anything but light or dark is dropped", async () => {
+    const auth = (q: string) => http("hewn.localhost", `/tools/ui-counter/auth?ticket=${t.platform.createUiTicket("ui-counter")}&${q}`);
+    assert.match((await auth("theme=light")).body, /\/tools\/ui-counter\/~[\w-]+\/#hewn_session=[^"&]+&theme=light"/);
+    assert.match((await auth("section=today&theme=dark")).body, /#hewn_session=[^"&]+&section=today&theme=dark"/);
+    for (const q of ["theme=system", "theme=sepia", `theme=${encodeURIComponent('dark"><script>')}`, "theme=Dark"]) {
+      const r = await auth(q);
+      assert.equal(r.status, 200, q);
+      assert.doesNotMatch(r.body, /theme|script/, q);
+    }
+  });
+
   test("served pages get the session shim; a sandbox (opaque origin), their own API only, framable only by Hewn", async () => {
     const r = await http("hewn.localhost", `${ui("ui-counter")}/`);
     assert.match(r.body, /<head[^>]*><script src="\/_platform\/session.js"><\/script>/);

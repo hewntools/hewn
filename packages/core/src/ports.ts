@@ -5,6 +5,7 @@ import type { Agent, Scope } from "./auth.ts";
 import type { Deadline } from "./deadline.ts";
 import type { Migration } from "./migrations.ts";
 import type { ModelHandler } from "./models.ts";
+import type { Pass } from "./passes.ts";
 
 /** Implementation files by POSIX path ("src/index.ts", "ui/index.html"). */
 export type Files = Record<string, Uint8Array>;
@@ -117,12 +118,26 @@ export interface BuildJob {
   /** Which builder ("claude", "codex", or a host-provided one such as "copy:<dir>"). */
   builder: string;
   attempt: number;
+  /** The first build of the chain this one retries (Retry or Ask builder to fix, by hand or after a restart). Unset: not a retry. */
+  retryOf?: string;
   /** Validation log from the previous attempt, if it failed. */
   feedback?: string;
   /** The model to build with: a name the builder's CLI takes (an alias or a full name). Unset: the CLI's default. */
   model?: string;
   /** Reasoning effort, as the builder's CLI names it (low, medium, high …). Unset: the model's default. */
   effort?: string;
+  /**
+   * A pass on a candidate that already validated (see passes.ts): what it asks of the builder, with
+   * screenshots of the candidate in the workspace's `screenshots/`. The builder resumes its session
+   * with `request` when it can, else starts afresh with it after the usual prompt. Unset: an attempt.
+   */
+  pass?: BuildPass;
+}
+
+/** A pass's attempt: which pass, and what it asks. */
+export interface BuildPass {
+  name: Pass;
+  request: string;
 }
 
 /**
@@ -135,6 +150,25 @@ export interface BuildHooks {
   onModel?: (model: string) => void;
   /** What the builder's host charged for this attempt, in the unit the owner sees (e.g. points). */
   onCharge?: (charge: BuildCharge) => void;
+  /**
+   * Check the work in progress as validation will, when the builder asks (its `check` tool): offered
+   * to the builder only when set. `id` is the builder's name for the call.
+   */
+  onCheck?: (id: string) => Promise<CheckResult>;
+}
+
+/** What a builder's check of its work in progress found. */
+export interface CheckResult {
+  passed: boolean;
+  /** What the builder reads: PASS or FAIL, every failure, what was measured on the UI, what passed. */
+  text: string;
+  failures: string[];
+  /** Measured on the UI: what sticks out or is cut short, page errors, controls that break the page. */
+  defects: string[];
+  /** The UI filled with its sample data: desktop-light, desktop-dark, mobile-light, mobile-dark (none when it didn't render), a long page's top part. */
+  images: VisualShot[];
+  /** The rest of a long page ("mobile-light-2" …): written to `screenshots/` beside the images, not shown with them. */
+  parts?: VisualShot[];
 }
 
 /** A host's charge for a build, as the owner sees it ("12 points"); Hewn shows it as given. */
@@ -144,17 +178,24 @@ export interface BuildCharge {
 }
 
 export interface Workbench {
-  /** Create the build's workspace with these seed files (skeleton, or a copy of the active version + BUILDER.md). */
+  /** Create the build's workspace with these seed files (skeleton, or a copy of the active version, + BUILDER.md, BRIEF.md and the rest a builder reads). */
   open(buildId: string, files: Files): Promise<void>;
   /** The candidate as it stands (build artefacts such as node_modules excluded). */
   read(buildId: string): Promise<Files>;
+  /**
+   * Copy a build's workspace into a new one (`to`) its builder can't reach: what a check of its work
+   * in progress runs on (bundling with npm included) while the builder goes on writing its own.
+   */
+  snapshot(buildId: string, to: string): Promise<void>;
   /** One workspace file, if present (e.g. the icon a builder writes first). */
   file(buildId: string, path: string): Promise<Uint8Array | undefined>;
   remove(buildId: string): Promise<void>;
   /**
    * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
    * help, `refused: true` that the builder's host declined it (e.g. over quota; the message says why),
-   * and `modelUnavailable: true` that the model asked for can't run (the owner picks another).
+   * `paused: true` that the builder's host paused it part-way with its work kept (the owner continues
+   * or stops it; the message says why), and `modelUnavailable: true` that the model asked for can't
+   * run (the owner picks another).
    */
   build(job: BuildJob, hooks: BuildHooks): Promise<void>;
   /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */
@@ -163,6 +204,8 @@ export interface Workbench {
   note(buildId: string, line: string): Promise<void>;
   transcript(buildId: string): Promise<string | undefined>;
   removeTranscript(buildId: string): Promise<void>;
+  /** Replace one folder of a build's workspace (`screenshots`) with `files`, their paths inside it: what a pass looks at. */
+  writeFolder(buildId: string, folder: string, files: Files): Promise<void>;
   /** Render the candidate's UI headlessly (optional). */
   visualCheck?(buildId: string, args: VisualCheckArgs): Promise<VisualCheckResult>;
 }
@@ -172,6 +215,8 @@ export interface VisualCheckArgs {
   /** Render these widgets (each in each size, from its test case's view) instead of the candidate's UI. */
   widgets?: VisualWidget[];
   invoke: (body: { operation: string; operationVersion?: number; input?: unknown }) => Promise<{ result: unknown }>;
+  /** Also measure what a builder should fix: what sticks out or is cut short, and controls that break the page (clicks write to the state `invoke` runs on). */
+  measure?: boolean;
 }
 export interface VisualWidget {
   name: string;
@@ -186,6 +231,17 @@ export interface VisualCheckResult {
   screenshot?: Uint8Array;
   /** The same screen in dark mode. */
   screenshotDark?: Uint8Array;
+  /**
+   * The UI whole, 1280 and 390 px wide, light and dark: "desktop-light", "desktop-dark", "mobile-light",
+   * "mobile-dark", a long page in parts a model can read ("mobile-light-2" carries on from "mobile-light").
+   */
+  shots?: VisualShot[];
+  /** With `measure`: what to fix, one line each. */
+  defects?: string[];
+}
+export interface VisualShot {
+  name: string;
+  png: Uint8Array;
 }
 
 // ---------- Secrets & agents ----------

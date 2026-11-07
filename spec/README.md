@@ -7,7 +7,7 @@ What a Hewn tool (a [capability](capability-model.md#capability)) is, and the co
 - [`tools.md`](tools.md): **Writing a tool.** The layout, the manifest, operations and their versions, the module and `ctx`, the runtime, migrations, tests and promotion, grants, connections, config, models, widgets and tool UIs, with a complete example.
 - [`agents.md`](agents.md): **Connecting an agent.** The MCP endpoint, OAuth sign-in and the owner's approval, scopes and the MCP tools each unlocks, discovery, invoking operations, builds, schedules and widgets in the chat.
 - [`capability-model.md`](capability-model.md): the concepts and invariants (capabilities, operations, versions, grants, ownership), and a summary of the manifest and the ABI.
-- [`builder-brief.md`](builder-brief.md): the build contract, exactly as Hewn hands it to every builder (Claude Code, Codex). Written to the builder, and the most compact statement of a tool's layout and rules.
+- [`builder-brief.md`](builder-brief.md): the build contract, exactly as Hewn hands it to every builder (Claude Code, Codex, OpenCode) as `BRIEF.md`, under a heading of its own. Written to the builder, and the most compact statement of a tool's layout and rules.
 - [`src/`](src): the contract as TypeScript. `ctx.ts` (`Ctx`, `Db`, `Operations`), `manifest.ts` (`CapabilityManifest` and its parts), `widgets.ts` (widget view models), `model.ts` (`ctx.model.generate`), `cases.ts` (`tests/cases.json`), `abi.ts` (the version and its history), `schemas.ts`, and `agents.ts`: the agent contract (scopes, server instructions, and the MCP tools a host offers agents).
 - [`schemas/`](schemas): JSON Schemas for `capability.json` and `tests/cases.json`, generated from `src/schemas.ts`.
 

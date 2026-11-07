@@ -11,7 +11,7 @@ Home holds your tools as icons, and the widgets you've put there. Click a tool t
 ![Home with seven tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather, Tasks Today) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
 
 Right-click a tool for its menu:
-- **Open**, **Change…** and **Info**
+- **Open**, **Change…**, **Polish…** (a tool with a screen of its own: a second look at its design, [below](#a-tools-page)) and **Info**
 - **Widgets…**, **Activity** and **Versions**
 - **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand), **Share…** (the tool as a file: [Sharing tools](sharing.md)) and **Export data**
 - **Delete…**
@@ -30,11 +30,11 @@ A widget shows a tool's data at a glance: today's habits, tonight's aurora forec
 
 New also offers it under the box: **Or start from** a tool in Hub, or a file someone shared ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
 
-![The Hub: search, Install from a file, the Official and tag filters, and Hewn's seven own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
+![The Hub: search, Install from a file, the Official and tag filters, and Hewn's eight own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
 
 ## Search and commands
 
-Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). Enter opens it. Tools on the Hub you don't have yet come last.
+Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). `↑` and `↓` move through the list, going round at either end (`↑` on the first goes to the last); Enter opens it. Tools on the Hub you don't have yet come last.
 
 ![The command palette with "run" typed: Running Log, Weekend Weather, Change Running Log… and Running Log · Info](images/command-palette.png)
 
@@ -44,7 +44,7 @@ The **Inbox** button on the right of the top bar holds everything that needs you
 - tools waiting for your approval of what they need (a host, a key, another tool, a model)
 - agents waiting to be approved
 - schedules an agent proposed
-- builds that failed
+- builds that failed, and builds a host's builder paused (**Continue** or **Stop**)
 - connections that need you to sign in again
 - model spend at 80% of your budget, or calls refused over it
 
@@ -67,7 +67,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 
 Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
-The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)).
+The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)). **Polish…** in the tool's menu, under **Change…**, opens the change panel for a second look at its design: the intake proposes a Polish (say what you'd like it to lead with), and the builder reviews the tool on screenshots and fixes what it finds, keeping what the tool does and its character. Your own data is shown to the builder only if you tick it on the proposal ([Polishing a tool](building-tools.md#polishing-a-tool)).
 
 **When something in a tool fails** (an operation in its own screen, a run from Info, a widget that can't refresh, a schedule's run), Hewn offers **Ask builder to fix this**. It opens a change to the tool with what failed in the box (the operation, the error, its input and the last log lines) and "Fix it so this works." Add anything you know, and send it. Hewn keeps a tool's last ten failed calls for this.
 
@@ -85,9 +85,23 @@ Everything that happened, newest first: builds, calls, and access changes (agent
 
 ![Activity: today's calls, builds and access changes, newest first, each with who did it and when](images/activity.png)
 
-Builds show their milestones (spec, code, tests) as they happen. Open one to see its log. A failed build keeps its log open under the reason.
+Builds show their milestones (spec, code, tests, and for a new tool or a Polish the design review and fixing details) as they happen. Open one for its steps and its log ([A build](#a-build)).
 
 Call logs are kept for two weeks by default (Settings › Data).
+
+### A build
+
+A build's page lists its steps while it runs. So does the change panel while a change you asked for there builds; the tool keeps running its current version meanwhile.
+
+- **Spec agreed:** click it for the spec the builder works from. **Conversation**, above the steps, has what you and the intake said.
+- **Writing code:** the builder at work, with its log below, where each check it runs on its own work shows ("Checking its work (1 of 10)", "Check: 2 problems to fix"). A Polish has **Sample data** here instead: written first when the tool has none, else done at once.
+- **Running tests:** how many have passed so far.
+- **Reviewing the design** and **Fixing details:** a new tool's second look, and a Polish's ([The build](building-tools.md#the-build)).
+- **Your authorization:** anything new it asks for (a host, a key, another tool, a model), once it's built.
+
+![A new tool's build page, Bike Care: the builder, its model and effort, Conversation, then the steps, with Spec agreed, Writing code and Running tests done and timed, Reviewing the design running, Fixing details and Your authorization to come, and the log below](images/build-second-look.png)
+
+Each step shows how long it took, by Hewn's clock, so it's the same whenever you open the page; the running one counts up. You can leave: it keeps building. Once it's live, the log folds under **Show log**. A failed build says why (in the second look, which step), with its log open, **Ask builder to fix** and **Retry**. A build a host's builder paused shows the host's note with **Continue** and **Stop** ([When a build fails](building-tools.md#when-a-build-fails)).
 
 ## Agents and Accounts
 
@@ -96,7 +110,7 @@ Call logs are kept for two weeks by default (Settings › Data).
 
 ## Settings
 
-- **General:** appearance (system, light or dark), your time zone, and whether the sandbox is on.
+- **General:** appearance (system, light or dark; a tool open in Hewn follows it too, if its screen uses Hewn's styles or handles light and dark itself: [Tool UIs](../spec/tools.md#tool-uis)), your time zone, and whether the sandbox is on.
 - **AI:** who does [Hewn's two jobs](concepts.md#hewns-two-jobs) (builds tools, on which model, and thinks inside tools), which models agents may ask for, your [instructions for building](building-tools.md#instructions), and the Models page ([Models](models.md)).
 - **Remote access:** the public URL, your passkeys and signed-in browsers ([Using Hewn from anywhere](remote-access.md)).
 - **Data:** backups and their folder, how long call logs are kept, and deleted tools ([Your data](data.md)).

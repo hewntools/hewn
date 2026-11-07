@@ -9,8 +9,10 @@ import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
 import { CLI_AGENTS } from "./builders/cli-agents.ts";
 import { forgetSession } from "./builders/cli.ts";
+import { CHECK_DIR, writeInside } from "./builders/check.ts";
+import { wrapBuilder } from "./builders/sandbox.ts";
 import { dependencyProblems } from "@hewntools/core/bundle.ts";
-import { isArtefact } from "@hewntools/core/files.ts";
+import { ARTEFACTS, isArtefact } from "@hewntools/core/files.ts";
 import type { BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
 import type { VisualCheck } from "./visual.ts";
 
@@ -49,13 +51,59 @@ export function writeTree(dir: string, files: Files) {
   }
 }
 
+/** Not copied for a check: its own scratch folder and the screenshots it wrote (neither is part of a version). */
+const notChecked = (rel: string) => [CHECK_DIR, "screenshots"].some((d) => rel === d || rel.startsWith(`${d}/`));
+
+/**
+ * Run inside the builder's sandbox: the workspace's files as JSON on stdout (base64), with no links,
+ * no artefacts and nothing `notChecked`. Reading with the builder's own eyes, a link swapped in
+ * mid-copy reaches only what the builder could read itself.
+ */
+const COPIER = `const fs = require("node:fs"), path = require("node:path");
+const [root, artefacts, skipped] = process.argv.slice(1).map((a, i) => (i ? new Set(JSON.parse(a)) : a));
+const out = {};
+const walk = (d) => {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    const rel = path.relative(root, p);
+    if (artefacts.has(e.name) || skipped.has(rel.split(path.sep)[0])) continue;
+    if (e.isDirectory()) walk(p);
+    else if (e.isFile()) try { out[rel] = fs.readFileSync(p).toString("base64"); } catch {}
+  }
+};
+walk(root);
+process.stdout.write(JSON.stringify(out));`;
+
+/** A confined builder's workspace, read through its sandbox (COPIER). */
+function readConfined(workspace: string, platformRoot: string): Promise<Files> {
+  const { command, args } = wrapBuilder(process.execPath, ["-e", COPIER, workspace, JSON.stringify([...ARTEFACTS]), JSON.stringify([CHECK_DIR, "screenshots"])], { workspace, platformRoot, ownState: [], denyKeychain: true });
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: workspace, stdio: ["ignore", "pipe", "pipe"] });
+    const out: Buffer[] = [];
+    let err = "";
+    child.stdout.on("data", (d: Buffer) => out.push(d));
+    child.stderr.on("data", (d) => (err = (err + d).slice(-2000)));
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code !== 0) return reject(new Error(`couldn't copy the workspace to check it${err.trim() ? `: ${err.trim().split("\n").at(-1)}` : ""}`));
+      try {
+        const files: Files = {};
+        for (const [p, b] of Object.entries(JSON.parse(Buffer.concat(out).toString("utf8")) as Record<string, string>)) if (typeof b === "string") files[p] = new Uint8Array(Buffer.from(b, "base64"));
+        resolve(files);
+      } catch (e) {
+        reject(e as Error);
+      }
+    });
+  });
+}
+
 /** A builder that copies a directory into the workspace (`hewn install <dir>`). */
 export const copyBuilder = (from: string): CapabilityBuilder => ({
   name: `copy:${from}`,
   build: async (job) => {
     if (!existsSync(join(from, "capability.json"))) throw Object.assign(new Error(`${from} has no capability.json`), { unavailable: true });
-    // Keep BUILDER.md; replace everything else with the source.
-    for (const e of readdirSync(job.workspace)) if (e !== "BUILDER.md") rmSync(join(job.workspace, e), { recursive: true, force: true });
+    // Keep BUILDER.md and BRIEF.md; replace everything else with the source.
+    for (const e of readdirSync(job.workspace)) if (e !== "BUILDER.md" && e !== "BRIEF.md") rmSync(join(job.workspace, e), { recursive: true, force: true });
     cpSync(from, job.workspace, { recursive: true, filter: (src) => !isArtefact(relative(from, src)) });
   },
 });
@@ -165,6 +213,24 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     async read(buildId) {
       return readTree(ws(buildId));
     },
+    async snapshot(buildId, to) {
+      const root = opts.confineTo?.();
+      const files = root ? await readConfined(ws(buildId), root) : readTree(ws(buildId), notChecked);
+      rmSync(ws(to), { recursive: true, force: true });
+      mkdirSync(ws(to), { recursive: true });
+      // A fresh folder only Hewn writes; writeTree keeps every path inside it.
+      writeTree(ws(to), files);
+    },
+    async writeFolder(buildId, folder, files) {
+      // One folder at the workspace's top, by its plain name: nothing else is ever removed.
+      if (!/^[A-Za-z0-9_-]+$/.test(folder)) throw new Error(`bad folder ${JSON.stringify(folder)}`);
+      // The builder may have made the folder (or put a link there): gone first, then written only inside the workspace.
+      rmSync(join(ws(buildId), folder), { recursive: true, force: true });
+      for (const [p, b] of Object.entries(files)) {
+        if (!p.startsWith(`${folder}/`)) throw new Error(`${p} isn't in ${folder}/`);
+        writeInside(ws(buildId), p, b);
+      }
+    },
     async file(buildId, path) {
       const p = join(ws(buildId), path);
       if (!p.startsWith(ws(buildId) + "/") || !existsSync(p)) return undefined;
@@ -187,6 +253,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         kind: job.kind,
         workspace: ws(job.buildId),
         attempt: job.attempt,
+        ...(job.retryOf ? { retryOf: job.retryOf } : {}),
         feedback: job.feedback,
         logPath: transcript(job.buildId),
         builderName: job.builder,
@@ -197,6 +264,8 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         ...(job.effort ? { effort: job.effort } : {}),
         onModel: hooks.onModel,
         onCharge: hooks.onCharge,
+        ...(hooks.onCheck ? { check: hooks.onCheck } : {}),
+        ...(job.pass ? { pass: job.pass } : {}),
       });
     },
     async bundle(buildId) {
@@ -214,8 +283,15 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     ...(opts.visualCheck
       ? {
           async visualCheck(buildId: string, args: VisualCheckArgs): Promise<VisualCheckResult> {
-            const r = await opts.visualCheck!({ uiDir: join(ws(buildId), "ui"), manifest: args.manifest, invoke: args.invoke, ...(args.widgets ? { widgets: args.widgets } : {}) });
-            return { skipped: r.skipped, errors: r.errors, screenshot: r.screenshot ? new Uint8Array(r.screenshot) : undefined, screenshotDark: r.screenshotDark ? new Uint8Array(r.screenshotDark) : undefined };
+            const r = await opts.visualCheck!({ uiDir: join(ws(buildId), "ui"), manifest: args.manifest, invoke: args.invoke, ...(args.widgets ? { widgets: args.widgets } : {}), ...(args.measure ? { measure: true } : {}) });
+            return {
+              skipped: r.skipped,
+              errors: r.errors,
+              screenshot: r.screenshot ? new Uint8Array(r.screenshot) : undefined,
+              screenshotDark: r.screenshotDark ? new Uint8Array(r.screenshotDark) : undefined,
+              ...(r.shots ? { shots: r.shots.map((s) => ({ name: s.name, png: new Uint8Array(s.png) })) } : {}),
+              ...(r.defects ? { defects: r.defects } : {}),
+            };
           },
         }
       : {}),

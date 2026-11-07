@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The docs screenshots that the UI changes touch, from a test host with a stub builder and intake:
-// PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/docs-shots.ts → /tmp/shots/*.png, then copy into docs/images/.
+// PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/docs-shots.ts → /tmp/shots/*.png (or SHOTS_DIR), then copy into docs/images/.
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -9,10 +9,10 @@ import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor } from "@hewntools/cli/supervisor/index.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
-import { editJson, SEED } from "../helpers.ts";
+import { editJson, FIXTURES, SEED } from "../helpers.ts";
 import { freePort } from "../workerd-helpers.ts";
 
-const OUT = "/tmp/shots";
+const OUT = process.env.SHOTS_DIR ?? "/tmp/shots";
 mkdirSync(OUT, { recursive: true });
 const pw = createRequire(process.env.PLAYWRIGHT_NODE_MODULES ?? import.meta.url)("playwright-core");
 const root = mkdtempSync(join(tmpdir(), "hewn-shots-"));
@@ -21,12 +21,29 @@ const port = await freePort();
 const TOOLS: Record<string, { name: string; purpose: string }> = {
   "running-log": { name: "Running Log", purpose: "Keep a running history that any approved agent can record into and summarize." },
   "plant-care": { name: "Plant Care", purpose: "Which plants need water today, and what each one got." },
+  "bike-care": { name: "Bike Care", purpose: "Log bike rides and remember when the chain needs oiling." },
 };
+// Bike Care's icon: a wheel and its hub.
+const WHEEL = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 5 5" fill="currentColor" shape-rendering="crispEdges">${[[1, 0], [2, 0], [3, 0], [0, 1], [4, 1], [0, 2], [2, 2], [4, 2], [0, 3], [4, 3], [1, 4], [2, 4], [3, 4]].map(([x, y]) => `<rect x="${x}" y="${y}" width="1" height="1"/>`).join("")}</svg>`;
+// Bike Care's design review waits here until its shot is taken.
+let reviewed!: () => void;
+const review = new Promise<void>((r) => (reviewed = r));
 const builds: Record<string, number> = {};
 const builder: CapabilityBuilder = {
   name: "claude",
   build: async (job) => {
     builds[job.capabilityId] = (builds[job.capabilityId] ?? 0) + 1;
+    // Bike Care, a new tool with a screen (the UI Counter fixture under its name): its second look runs on it.
+    if (job.capabilityId === "bike-care") {
+      if (job.pass?.name === "critique") await review;
+      if (job.pass) return;
+      cpSync(join(FIXTURES, "ui-counter"), job.workspace, { recursive: true });
+      writeFileSync(join(job.workspace, "ui/icon.svg"), WHEEL);
+      editJson(join(job.workspace, "capability.json"), (m) => Object.assign(m, { id: job.capabilityId, name: TOOLS["bike-care"].name, purpose: TOOLS["bike-care"].purpose, hue: 220 }));
+      return;
+    }
+    // Plant Care's second change: the builder's host pauses it part-way (as a host's builder at a build's allowance).
+    if (job.capabilityId === "plant-care" && builds[job.capabilityId] === 3) throw Object.assign(new Error("This build has used 300 points and isn't finished. Its work is kept: Continue lets it go on for up to 300 more, or Stop it."), { paused: true });
     cpSync(SEED, job.workspace, { recursive: true });
     editJson(join(job.workspace, "capability.json"), (m) => {
       m.id = job.capabilityId;
@@ -53,7 +70,7 @@ const BIKE = {
     name: "Bike Care",
     purpose: "Log bike rides and remember when the chain needs oiling.",
     requirements:
-      "Operations: log_ride (date, km, minutes; fetches that hour's weather from api.open-meteo.com for the ride's location), list_rides (newest first, with weather), mark_oiled (today, or a date), service_due (km since the last oiling against the interval), delete_ride.\nState: rides, oilings, the service interval (default 300 km).\nWidget: Since last oiling (km and days; turns amber past the interval).\nTests: the interval maths, a ride without weather, the widget's empty state.",
+      "FOR\nThe owner opens it after a ride, to log it in a few seconds, and on Sunday evenings, to see whether the chain needs oiling before the week's rides.\n\nKEEPS\nEach ride: the date, how far in km, how long, and the weather it was ridden in, looked up for that hour. When the chain was last oiled, and how often it needs it (300 km unless the owner changes it).\n\nDECIDED\nThe weather comes from api.open-meteo.com, for where and when the ride was; no key. A reminder on Sunday evenings at 18:00 when the chain is due. Rides can be deleted. Left for later: more than one bike, parts other than the chain.\n\nPLATFORM\nReaches api.open-meteo.com. One weekly schedule. No model.\n\nUI INTENT\nLogging a ride must be quick: distance and time, today by default. At a glance, the km since the last oiling against the interval, as a gauge that fills towards oil it. Recent rides with their weather. Outdoors and mechanical: a bit of grease, a lot of sky.",
     spec: {
       operations: [
         { name: "log_ride", sideEffect: "write" as const },
@@ -70,6 +87,8 @@ const BIKE = {
     schedules: [{ operation: "service_due", cadence: "weekly sun 18:00", why: "Sunday evening, before the week's rides" }],
   },
 };
+// The host's builder (as with HEWN_BUILD_URL), for the paused change: the same stub, under the name the owner sees.
+const REMOTE = { url: "http://127.0.0.1:9/", token: "t", label: "Remote builder" };
 // Both agents found on this Mac, neither connected yet (what the first run shows).
 const harness = (agentId: string, label: string) => ({ agentId, label, pointerRequired: false, pointerNote: "", detect: () => true, registered: () => false, steps: () => [], login: () => [], loginFix: () => "" });
 const sv = await startSupervisor({
@@ -77,11 +96,13 @@ const sv = await startSupervisor({
   setup: { harnesses: () => [harness("claude-code", "Claude Code"), harness("codex", "Codex")] as any, userHome: root, appInstalled: () => false },
   port,
   publicPort: await freePort(),
-  builders: { claude: builder },
+  builders: { claude: builder, remote: builder },
+  remote: REMOTE,
   intake: () => async () => BIKE as any,
   log: () => {},
   keySource: "file",
-  browser: "",
+  // Visual checks run (only Bike Care has a screen): its second look is on their screenshots.
+  browser: findBrowser() ?? "",
   tools: () => [
     { name: "claude" as const, label: "Claude Code", found: true, loggedIn: true },
     { name: "codex" as const, label: "Codex", found: true, loggedIn: true },
@@ -106,10 +127,11 @@ const settle = async (buildId: string) => {
   }
   throw new Error(`build ${buildId} didn't settle`);
 };
-const shot = async (name: string, opts: { width: number; height: number; clip?: { x: number; y: number; width: number; height: number } }) => {
+/** `fullPage`: the clip may reach below the window (in page coordinates). */
+const shot = async (name: string, opts: { width: number; height: number; clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean }) => {
   await page.setViewportSize({ width: opts.width, height: opts.height });
   await page.waitForTimeout(400);
-  await page.screenshot({ path: join(OUT, `${name}.png`), ...(opts.clip ? { clip: opts.clip } : {}) });
+  await page.screenshot({ path: join(OUT, `${name}.png`), ...(opts.clip ? { clip: opts.clip } : {}), ...(opts.fullPage ? { fullPage: true } : {}) });
   console.log("✔", name, opts.clip ? `${Math.round(opts.clip.width)}×${Math.round(opts.clip.height)}` : `${opts.width}×${opts.height}`);
 };
 
@@ -153,6 +175,8 @@ try {
   // 4. The spec proposal: Bike Care, in the create chat.
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`${web}/#/new`);
+  // The page reads the settings once as it loads, before Claude Code was chosen above (the host's builder, until then).
+  await page.reload();
   const box = page.locator(".composer textarea, .composer-input textarea, textarea").first();
   await box.waitFor();
   await box.fill("A tracker for my bike: rides, and remind me when the chain needs oiling.");
@@ -169,9 +193,10 @@ try {
   console.log("   boxes", JSON.stringify(boxes));
   const left = Math.min(boxes.thread!.left, boxes.composer!.left) - 16;
   const right = Math.max(boxes.thread!.right, boxes.composer!.right) + 16;
-  const top = Math.max(0, boxes.thread!.top - 40);
+  const top = Math.max(0, boxes.thread!.top - 16);
   const bottom = boxes.composer!.bottom + 20;
-  await shot("spec-proposal", { width: 1280, height: 1000, clip: { x: left, y: top + boxes.scrollY, width: right - left, height: bottom - top } });
+  // The conversation, the card and the box below it, which can reach past the window.
+  await shot("spec-proposal", { width: 1280, height: 1000, clip: { x: left, y: top + boxes.scrollY, width: right - left, height: bottom - top }, fullPage: true });
 
   // 5. A failed change to Plant Care: 1 of 3 tests didn't pass.
   const p1 = await post("/capabilities", { name: TOOLS["plant-care"].name, purpose: TOOLS["plant-care"].purpose, requirements: "plants and watering" });
@@ -190,6 +215,37 @@ try {
     return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
   });
   await shot("build-failed", { width: 1280, height: 1000, clip: { x: card.x - 20, y: card.y - 20, width: card.width + 40, height: card.height + 40 } });
+
+  // 5b. Another change to Plant Care, on the host's builder, which pauses it: Continue or Stop.
+  await sv.admin("settings", { builder: "remote", intake: "claude", maxBuildAttempts: 1 });
+  const p3 = await post("/capabilities/plant-care/modify", { request: "Group the plants by room.", conversation: [{ role: "user", content: "Group the plants by room." }] });
+  console.log("   plant-care paused:", (await settle(p3.buildId)).status);
+  await page.goto(`${web}/#/b/${p3.buildId}`);
+  // The page learns the host's builder's name as it loads with that builder chosen.
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(500);
+  const pausedCard = await page.evaluate(() => {
+    const el = document.querySelector(".build-head")?.closest(".card") ?? document.querySelector(".build-center > *");
+    const r = el!.getBoundingClientRect();
+    return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
+  });
+  await shot("build-paused", { width: 1280, height: 1000, clip: { x: pausedCard.x - 20, y: pausedCard.y - 20, width: pausedCard.width + 40, height: pausedCard.height + 40 } });
+  await sv.admin("settings", { builder: "claude", intake: "claude", maxBuildAttempts: 1 });
+
+  // 5c. A new tool's second look: Bike Care's build, its builder reviewing the design.
+  const bike = await post("/capabilities", { name: TOOLS["bike-care"].name, purpose: TOOLS["bike-care"].purpose, requirements: BIKE.draft.requirements, conversation: [{ role: "user", content: "A tracker for my bike: rides, and remind me when the chain needs oiling." }] });
+  await page.goto(`${web}/#/b/${bike.buildId}`);
+  await page.locator("li.step.live", { hasText: "Reviewing the design" }).waitFor({ timeout: 60_000 });
+  await page.waitForTimeout(1500);
+  const reviewCard = await page.evaluate(() => {
+    const el = document.querySelector(".build-head")?.closest(".card") ?? document.querySelector(".build-center > *");
+    const r = el!.getBoundingClientRect();
+    return { x: r.left, y: r.top + window.scrollY, width: r.width, height: r.height };
+  });
+  await shot("build-second-look", { width: 1280, height: 1000, clip: { x: reviewCard.x - 20, y: reviewCard.y - 20, width: reviewCard.width + 40, height: reviewCard.height + 40 } });
+  reviewed();
+  console.log("   bike-care:", (await settle(bike.buildId)).status);
 
   // 6. The Hub: Hewn's own tools, every card in the shot.
   await page.setViewportSize({ width: 1280, height: 1000 });

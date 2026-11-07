@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { RemoteJobs } from "@hewntools/cli/builders/remote.ts";
+import type { Intake } from "@hewntools/cli/intake.ts";
 import type { Hosted } from "@hewntools/cli/supervisor/index.ts";
+import type { Pass } from "@hewntools/core/passes.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { pkceChallenge } from "@hewntools/core/agents.ts";
 import { openHome } from "@hewntools/cli/home.ts";
@@ -23,6 +26,14 @@ export const freePort = () =>
   });
 
 export const parse = (r: any) => JSON.parse(r.content[0].text);
+
+/**
+ * `builds_wait` for up to `seconds`, the MCP client waiting a little longer than the wait: its own
+ * default gives up at 60 s, and a build with a check (bundle, npm, the renders) can take about
+ * that long on a busy CI runner.
+ */
+export const waitBuild = async (client: Client, buildId: string, seconds: number) =>
+  parse(await client.callTool({ name: "builds_wait", arguments: { buildId, timeoutSeconds: seconds } }, CallToolResultSchema, { timeout: (seconds + 15) * 1000 }));
 
 /**
  * Start a supervisor on two ports that were free a moment ago. On a busy machine another process can
@@ -77,7 +88,7 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[] } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
   const scripts: Script[] = [];
   const scripted: CapabilityBuilder = {
@@ -89,11 +100,12 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
     },
   };
   // A host that doesn't start leaves nothing behind: the suite's after() has no host to stop.
-  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, log, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" })).catch((e) => {
+  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, ...(opts.intake ? { intake: () => opts.intake! } : {}), log, watchdog: { intervalMs: 200, stallMs: 1500 }, keySource: "file" })).catch((e) => {
     rmSync(root, { recursive: true, force: true });
     throw e;
   });
-  await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1 }).catch(async (e) => {
+  // A new tool's passes only when a test asks for them (each is a builder run of its own to script).
+  await sv.admin("settings", { maxBuildAttempts: opts.attempts ?? 1, buildPasses: opts.passes ?? [] }).catch(async (e) => {
     await sv.stop();
     rmSync(root, { recursive: true, force: true });
     throw e;

@@ -3,7 +3,7 @@
 // ../schemas/*.json are generated from them (npm run spec:schemas) and published with the spec.
 // Rules a schema can't express (a feature used below its declared ABI, duplicate operations,
 // requires.model's tier-or-model) are described in capability-model.md and checked by the host.
-import { MODEL_TIERS, RUNTIME_PROFILES, WIDGET_SIZES, type JSONSchema } from "./manifest.ts";
+import { MODEL_TIERS, RUNTIME_PROFILES, SIDE_EFFECTS, WIDGET_SIZES, type JSONSchema } from "./manifest.ts";
 
 export const MANIFEST_SCHEMA: JSONSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -114,7 +114,7 @@ export const MANIFEST_SCHEMA: JSONSchema = {
           version: { type: "integer", minimum: 1 },
           inputSchema: { type: "object" },
           outputSchema: { type: "object" },
-          sideEffect: { enum: ["read", "write", "destructive"] },
+          sideEffect: { enum: [...SIDE_EFFECTS] },
           deprecated: {
             type: "object",
             additionalProperties: false,

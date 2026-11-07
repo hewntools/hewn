@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
+import { text } from "@hewntools/core/files.ts";
+import { sourceAsset } from "@hewntools/cli/assets.ts";
+import { widgetAppHtml } from "@hewntools/host-workerd/surface/widget-app.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { Home } from "@hewntools/cli/home.ts";
 import { chromiumCheck, findBrowser, type VisualCheck } from "@hewntools/cli/visual.ts";
+import type { Validation } from "@hewntools/core/platform/validation.ts";
 import { platformWith, setup } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
@@ -134,6 +138,43 @@ describe("visual validation", () => {
     assert.equal(api.status, "promoted", api.log.join("\n"));
     platform.close();
   });
+
+  test("a real headless browser: a tool's own CSS wins over ui.css, its dark tokens and a plain rule for a control too", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+    const render = async (style: string, button: string) => {
+      const uiDir = mkdtempSync(join(tmpdir(), "hewn-ui-"));
+      writeFileSync(join(uiDir, "index.html"), `<!doctype html><html><head><link rel="stylesheet" href="/_platform/ui.css"><style>${style}</style></head><body><main class="page"><button ${button}>Save</button></main></body></html>`);
+      const r = await chromiumCheck(browser)({ uiDir, manifest: {}, invoke: async () => ({}) });
+      assert.deepEqual(r.errors, []);
+      return [r.screenshot, r.screenshotDark];
+    };
+    // The tool's own tokens, light and dark, and a rule for every button (ui.css's `button.primary` is more specific).
+    const own = await render(":root { --bg: rgb(0 0 255); } @media (prefers-color-scheme: dark) { :root { --bg: rgb(255 0 0); } } button { background: rgb(0 160 0); }", `class="primary"`);
+    // The same colours, set where nothing in ui.css can outrank them.
+    const fixed = await render("body { background: rgb(0 0 255); } @media (prefers-color-scheme: dark) { body { background: rgb(255 0 0); } }", `class="primary" style="background: rgb(0 160 0)"`);
+    assert.deepEqual(own[0], fixed[0], "light: the tool's background and button");
+    assert.deepEqual(own[1], fixed[1], "dark: the tool's dark background wins over ui.css's dark tokens");
+  });
+});
+
+/** A stylesheet's top-level blocks, by what comes before their `{`, comments dropped (and anything after the last block). */
+const topLevel = (css: string) => {
+  const src = css.replace(/\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => (m.startsWith("/*") ? "" : `""`));
+  const blocks: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < src.length; i++) {
+    if (src[i] === "{" && depth++ === 0) blocks.push(src.slice(from, i).trim());
+    else if (src[i] === "}" && --depth === 0) from = i + 1;
+  }
+  const rest = src.slice(from).trim();
+  return rest ? [...blocks, rest] : blocks;
+};
+
+test("Hewn's own CSS is all in the layer hewn, so a tool's own CSS wins over it (the browser test above, without a browser)", async () => {
+  for (const path of ["platform-ui/ui.css", "web/app.css"]) assert.deepEqual(topLevel(text((await sourceAsset(path))!)), ["@layer hewn"], path);
+  const style = /<style>([\s\S]*)<\/style>/.exec(await widgetAppHtml(sourceAsset))![1];
+  assert.deepEqual(topLevel(style), ["@layer hewn", "@layer hewn"], "the widget app: ui.css, then its own CSS");
+  assert.deepEqual(topLevel("@layer hewn { a { b: c } } d { e: f }"), ["@layer hewn", "d"], "a rule after the layer shows");
 });
 
 test("a browser that won't start skips the check (with the reason) instead of failing the build", async () => {
@@ -144,6 +185,147 @@ test("a browser that won't start skips the check (with the reason) instead of fa
     assert.match(r.skipped ?? "", why);
     assert.deepEqual(r.errors, []);
   }
+});
+
+describe("the eyes: a candidate checked without promoting it, rendered whole on two screens, its defects measured", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(() => (t = setup()));
+  afterEach(() => t.cleanup());
+
+  const screenshot = (buildId: string) => readFileSync(join(t.home.root, "blobs", "screenshots", `${buildId}.png`));
+
+  /** The UI Counter, as a change to version 1 (its name changed, with sample data), in a workspace of its own. */
+  const candidateOf = async (platform: Platform, createdBy: string) => {
+    const files: Record<string, Uint8Array> = {};
+    const dir = join(FIX, "ui-counter");
+    for (const f of readdirSync(dir, { recursive: true }) as string[]) if (statSync(join(dir, f)).isFile()) files[f] = readFileSync(join(dir, f));
+    files["capability.json"] = Buffer.from(JSON.stringify({ ...JSON.parse(readFileSync(join(dir, "capability.json"), "utf8")), name: "Tap Counter" }));
+    files["sample/calls.json"] = Buffer.from(taps(2));
+    const build = { ...platform.registry.getBuild(createdBy)!, id: "eyes-check", kind: "modify" as const, baseVersion: 1, dependsOn: null };
+    await platform.workbench.open(build.id, files);
+    return build;
+  };
+
+  test("validating a candidate without promoting it leaves the tool's version as it was; promoting it later makes it live", async () => {
+    const seen: { measure?: boolean; count: unknown }[] = [];
+    // Each render's images say which state they were drawn on.
+    const fake: VisualCheck = async (req) => {
+      const { result } = (await req.invoke({ operation: "get", input: {} })) as { result: { count: number } };
+      seen.push({ measure: req.measure, count: result.count });
+      const shots = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"].map((name) => ({ name, png: Buffer.from(`${name} ${result.count}`) }));
+      return { errors: [], screenshot: Buffer.from(`png ${result.count}`), shots, ...(req.measure ? { defects: [`Sticks out on the phone (390 px): count ${result.count}`] } : {}) };
+    };
+    const platform = platformWith(t.home, () => counter(), { visualCheck: fake, attempts: 1 });
+    const created = await platform.settle((await platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" })).buildId);
+    assert.equal(created.status, "promoted", created.log.join("\n"));
+    await platform.invoke(USER, { capabilityId: "ui-counter", operation: "increment", input: {} });
+    seen.length = 0;
+
+    const validation = (platform as any).d.validation as Validation;
+    const build = await candidateOf(platform, created.buildId);
+    const log: string[] = [];
+    const candidate = await validation.validate(build, (l) => log.push(l), { measure: true });
+    assert.ok(log.some((l) => /empty and with its sample data/.test(l)), log.join("\n"));
+    assert.equal(candidate.manifest.name, "Tap Counter");
+    assert.deepEqual(candidate.shots?.map((s) => Buffer.from(s.png).toString()), ["desktop-light 2", "desktop-dark 2", "mobile-light 2", "mobile-dark 2"], "the four images, filled with the sample data");
+    assert.deepEqual(seen, [{ measure: undefined, count: 0 }, { measure: true, count: 2 }], "measured filled with the sample data, not empty");
+    assert.deepEqual(candidate.defects, ["Sticks out on the phone (390 px): count 2"]);
+    // Nothing about the tool changed: its version, its name, its data.
+    assert.equal(platform.registry.getCapability("ui-counter")?.activeVersion, 1);
+    assert.equal(platform.registry.latestVersionNumber("ui-counter"), 1);
+    assert.equal(platform.registry.getCapability("ui-counter")?.name, "UI Counter");
+    assert.deepEqual((await platform.invoke(USER, { capabilityId: "ui-counter", operation: "get", input: {} })).result, { count: 1 });
+    assert.ok(await platform.workbench.file(build.id, "capability.json"), "the workspace is still there");
+    assert.equal(screenshot(build.id).toString(), "png 2", "the build page shows it");
+
+    // Another check of the build (a later pass) draws over the build page's screenshot; promoting this candidate puts its own back.
+    writeFileSync(join(t.home.root, "blobs", "screenshots", `${build.id}.png`), "a later pass");
+    assert.deepEqual(await validation.promote(build, candidate, (l) => log.push(l)), { version: 2 });
+    assert.equal(screenshot(build.id).toString(), "png 2");
+    assert.equal(platform.registry.getCapability("ui-counter")?.activeVersion, 2);
+    assert.equal(platform.registry.getCapability("ui-counter")?.name, "Tap Counter");
+    assert.deepEqual((await platform.invoke(USER, { capabilityId: "ui-counter", operation: "get", input: {} })).result, { count: 1 }, "its data came along");
+    platform.close();
+  });
+
+  test("a candidate that fails validation says why, and the tool keeps its version", async () => {
+    let broken = false;
+    const platform = platformWith(t.home, () => counter(), { visualCheck: async () => ({ errors: broken ? ["uncaught: TypeError: x is undefined"] : [], screenshot: Buffer.from("png") }), attempts: 1 });
+    const created = await platform.settle((await platform.create(USER, { name: "UI Counter", purpose: "x", requirements: "x" })).buildId);
+    assert.equal(created.status, "promoted", created.log.join("\n"));
+    broken = true;
+    const validation = (platform as any).d.validation as Validation;
+    await assert.rejects(validation.validate(await candidateOf(platform, created.buildId), () => {}), /UI didn't render cleanly/);
+    assert.equal(platform.registry.latestVersionNumber("ui-counter"), 1);
+    platform.close();
+  });
+
+  // The visual check on Linux is P2 (#4).
+  const browser = process.platform === "darwin" ? findBrowser() : undefined;
+  /** The UI Counter's page with `extra` at the end of its <main>, in a folder of its own; its API counts. */
+  const counterPage = (extra = "") => {
+    const uiDir = mkdtempSync(join(tmpdir(), "hewn-ui-"));
+    writeFileSync(join(uiDir, "index.html"), readFileSync(join(FIX, "ui-counter", "ui", "index.html"), "utf8").replace("</main>", `${extra}</main>`));
+    let count = 3;
+    return { uiDir, manifest: {}, invoke: async (b: { operation: string }) => ({ result: { count: b.operation === "increment" ? ++count : count } }) };
+  };
+  /** A PNG's size in pixels (its IHDR). */
+  const size = (png: Uint8Array) => ({ width: Buffer.from(png).readUInt32BE(16), height: Buffer.from(png).readUInt32BE(20) });
+
+  test("a real headless browser: the render is the whole page at 1280 and 390 px wide, light and dark, a long one in parts a model can read", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+    const r = await chromiumCheck(browser)(counterPage(`<div style="height: 2400px">tall</div>`));
+    assert.deepEqual(r.errors, []);
+    const names = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
+    const parts = (name: string) => r.shots!.filter((s) => s.name === name || s.name.startsWith(`${name}-`));
+    assert.deepEqual(r.shots?.filter((s) => names.includes(s.name)).map((s) => s.name), names, "each screen and scheme starts with its plain name");
+    for (const name of names) {
+      // Top to bottom: "desktop-light", then "desktop-light-2" …
+      assert.deepEqual(parts(name).map((s) => s.name), parts(name).map((_, i) => (i ? `${name}-${i + 1}` : name)));
+      assert.ok(parts(name).length > 1, `${name} comes in parts`);
+      for (const s of parts(name)) {
+        assert.equal(Buffer.from(s.png).subarray(1, 4).toString(), "PNG", s.name);
+        const { width, height } = size(s.png);
+        assert.ok(height <= 2000 && width * height <= 1_600_000, `${s.name} is ${width}×${height}: small enough to read as it is`);
+      }
+    }
+    const whole = (name: string) => parts(name).reduce((n, s) => n + size(s.png).height, 0);
+    assert.equal(size(parts("desktop-light")[0].png).width, 1280);
+    assert.ok(whole("desktop-light") > 2400, `the whole page, not the first screen: ${whole("desktop-light")}`);
+    assert.equal(size(parts("mobile-light")[0].png).width, 390 * 2, "the phone, at 2x");
+    assert.ok(whole("mobile-light") > 2400 * 2, `${whole("mobile-light")}`);
+    assert.deepEqual([whole("desktop-dark"), whole("mobile-dark")], [whole("desktop-light"), whole("mobile-light")]);
+    assert.notDeepEqual(parts("desktop-light")[0].png, parts("desktop-dark")[0].png, "light and dark differ");
+    // The build page's screenshot is still the first screen.
+    assert.deepEqual(size(r.screenshot!), { width: 1280, height: 800 });
+    assert.equal(r.defects, undefined, "measured only when asked");
+  });
+
+  test("a real headless browser: an error only the phone shows fails the check, and says so", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+    const r = await chromiumCheck(browser)(counterPage(`<script>if (innerWidth < 500) throw new Error("too narrow")</script>`));
+    assert.deepEqual(r.errors, ["on the phone (390 px): uncaught: Error: too narrow"]);
+  });
+
+  test("a real headless browser: defects measured on a fixture page (cut off by overflow-x: hidden, an SVG control, confirm(), a button that throws)", { skip: !browser && "no Chromium-based browser on this machine", timeout: 120_000 }, async () => {
+    const page = counterPage(
+      [
+        `<div style="width: 600px; height: 20px">wide</div><style>body { overflow-x: hidden }</style>`,
+        `<svg width="40" height="40"><rect id="dot" role="button" aria-label="Dot" width="40" height="40" onclick="document.title = 'dot'"/></svg>`,
+        `<button id="stop" onclick="if (confirm('Stop counting?')) document.title = 'stopped'">Stop</button>`,
+        `<button id="oops" onclick="null.x">Oops</button>`,
+      ].join(""),
+    );
+    const r = await chromiumCheck(browser)({ ...page, measure: true });
+    assert.deepEqual(r.errors, [], "a page that renders cleanly");
+    const defects = r.defects ?? [];
+    // What sticks out: the outermost element, how far, on the phone only (1280 px holds 600).
+    const out = defects.filter((d) => d.startsWith("Sticks out"));
+    assert.equal(out.length, 1, defects.join("\n"));
+    assert.match(out[0], /^Sticks out on the phone \(390 px\): div \("wide"\): 2\d\dpx past the edge, 600px wide$/);
+    // The button that throws is a failed click; the SVG control and the confirm() (dismissed) aren't.
+    assert.ok(defects.some((d) => /^Clicking "Oops" broke the page: uncaught: TypeError/.test(d)), defects.join("\n"));
+    assert.ok(!defects.some((d) => /"(Dot|Stop|\+1)"/.test(d)), defects.join("\n"));
+    assert.deepEqual(r.shots?.filter((s) => !/-\d+$/.test(s.name)).map((s) => s.name), ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"], "the images too");
+  });
 });
 
 describe("visual validation: widgets", () => {

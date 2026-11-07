@@ -13,7 +13,7 @@ import { DOC_PAGES } from "@hewntools/core/docs.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor, type Supervisor } from "@hewntools/cli/supervisor/index.ts";
 import { editJson, editText, type Script, SEED } from "./helpers.ts";
-import { oauthToken, onFreePorts } from "./workerd-helpers.ts";
+import { oauthToken, onFreePorts, waitBuild } from "./workerd-helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 const parse = (r: any) => JSON.parse(r.content[0].text);
@@ -68,7 +68,7 @@ describe("workerd host (integration)", () => {
     });
     const opened = parse(await client.callTool({ name: "capabilities_create", arguments: { name: "Bike Log", purpose: "rides", requirements: "like running log" } }));
     assert.equal(opened.status, "building");
-    const done = parse(await client.callTool({ name: "builds_wait", arguments: { buildId: opened.buildId, timeoutSeconds: 60 } }));
+    const done = await waitBuild(client, opened.buildId, 60);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     const list = parse(await client.callTool({ name: "capabilities_list", arguments: {} }));
     assert.deepEqual(list.capabilities.map((c: any) => c.id).sort(), ["bike-log", "running-log"]);
@@ -107,6 +107,22 @@ describe("workerd host (integration)", () => {
     const r = await modify("running-log", (ws) => editText(join(ws, "src", "index.ts"), (s) => s.replace("runCount: r.n,", "runCount: r.n + 1,")));
     assert.equal(r.status, "failed");
     assert.match(r.log.join("\n"), /test 'empty summary'/);
+  });
+
+  test("a build its builder's host pauses comes through the supervisor as paused, even without a note", async () => {
+    const pause = (note: string) => () => {
+      throw Object.assign(new Error(note), { paused: true });
+    };
+    const paused = await modify("running-log", pause("This build has used 300 points and isn't finished."));
+    assert.equal(paused.status, "failed");
+    assert.deepEqual(paused.failure, { title: "Paused", detail: "This build has used 300 points and isn't finished.", paused: true });
+    // Stopped: the next change would otherwise wait behind it.
+    const stop = (buildId: string) => sv.admin("call", { method: "cancelBuild", args: [buildId] });
+    assert.equal((await stop(paused.buildId)).result.status, "cancelled");
+    // An empty message is still the builder's failure (not a finished build), and still a pause.
+    const quiet = await modify("running-log", pause(""));
+    assert.deepEqual(quiet.failure, { title: "Paused", detail: "The builder paused it.", paused: true });
+    await stop(quiet.buildId);
   });
 
   test("composition through the host: not ready until granted, then calls go through", async () => {

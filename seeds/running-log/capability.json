@@ -4,7 +4,9 @@
   "purpose": "Maintain a durable personal running history that any authorized agent can record into and summarize.",
   "description": "Records runs (date, distance, duration, optional notes) and summarizes training over a date range. Dates are local calendar dates, YYYY-MM-DD.",
   "abi": "2.0",
+  "hue": 25,
   "tags": ["running", "exercise", "training", "fitness"],
+  "ui": { "available": true },
   "operations": [
     {
       "name": "record_run",
