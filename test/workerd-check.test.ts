@@ -8,7 +8,7 @@ import { after, before, describe, test } from "node:test";
 import type { CheckResult } from "@hewntools/core/ports.ts";
 import { findBrowser } from "@hewntools/cli/visual.ts";
 import { FIXTURES } from "./helpers.ts";
-import { parse, startTestHost, type TestHost } from "./workerd-helpers.ts";
+import { parse, startTestHost, type TestHost, waitBuild } from "./workerd-helpers.ts";
 
 describe("the builder's check on the workerd host", () => {
   let h: TestHost;
@@ -23,7 +23,7 @@ describe("the builder's check on the workerd host", () => {
     });
     const claude = await h.agent("claude-code", ["discover", "invoke", "create", "modify"]);
     const opened = parse(await claude.callTool({ name: "capabilities_create", arguments: { name: "UI Counter", purpose: "count", requirements: "test" } }));
-    const done = parse(await claude.callTool({ name: "builds_wait", arguments: { buildId: opened.buildId, timeoutSeconds: 150 } }));
+    const done = await waitBuild(claude, opened.buildId, 150);
     assert.equal(done.status, "promoted", JSON.stringify(done.log));
     assert.equal(checks.length, 1);
     assert.equal(checks[0].passed, true, checks[0].text);
@@ -51,7 +51,7 @@ describe("a new tool's passes on the workerd host", () => {
     );
     const claude = await h.agent("claude-code", ["discover", "invoke", "create", "modify"]);
     const opened = parse(await claude.callTool({ name: "capabilities_create", arguments: { name: "UI Counter", purpose: "count", requirements: "test" } }));
-    const done = parse(await claude.callTool({ name: "builds_wait", arguments: { buildId: opened.buildId, timeoutSeconds: 200 } }));
+    const done = await waitBuild(claude, opened.buildId, 200);
     assert.equal(done.status, "promoted", JSON.stringify(done.log));
     assert.deepEqual(seen.map((s) => [s.attempt, s.pass ?? null]), [[1, null], [2, "critique"], [3, "craft"]]);
     assert.deepEqual(seen[0].shots, []);
