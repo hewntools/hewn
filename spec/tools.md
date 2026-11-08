@@ -93,7 +93,7 @@ The host validates every call's input against `inputSchema` before the code runs
 
 - **`read`:** changes nothing. Only read operations can back a widget, and widget runs may call only read operations of other tools.
 - **`write`:** records or changes data.
-- **`destructive`:** removes or overwrites data in a way that can't be undone. When an agent calls one, the host holds the call until the owner confirms it (see [agents.md](agents.md#invoking-operations)). Destructive operations can't be scheduled.
+- **`destructive`:** removes or overwrites data in a way that can't be undone. When an agent calls one, the host holds the call until the owner confirms it (see [agents.md](agents.md#invoking-operations)). Destructive operations can't be scheduled. Hewn checks the one it can measure: an operation that leaves a table with fewer rows (or drops one), and adds no rows to it, in the test cases or the sample replay fails validation unless it's declared `destructive`. Swapping rows for new ones (a tag set replaced by a smaller one, delete-then-insert, `INSERT OR REPLACE`) adds rows and is a write.
 
 ### Changing a published operation
 
@@ -219,7 +219,7 @@ A host validates a new version, then promotes it. Hewn does this, in order:
 3. Every operation contract is compatible with the active version (see [Changing a published operation](#changing-a-published-operation)).
 4. Every operation in `requires.capabilities` exists.
 5. Migrations are append-only and non-destructive.
-6. All test cases pass. Every widget's operation needs a case, and its output must be a view a template can draw. Since 2.5: if there's `sample/calls.json`, it replays in order on a fresh database, every call without an error.
+6. All test cases pass. Every widget's operation needs a case, and its output must be a view a template can draw. Since 2.5: if there's `sample/calls.json`, it replays in order on a fresh database, every call without an error. In both, an operation not declared `destructive` that leaves a table with fewer rows and adds none to it fails (`set_place leaves nights with fewer rows and adds none: declare it destructive`).
 7. If there's a UI, it's rendered headlessly on an empty database, in light and dark mode, on a desktop screen (1280 px wide) and a phone's (390 px), and (since 2.5, with sample data) again on a database filled with it; an uncaught error, a `console.error` or a failed request on either screen fails the version. The owner's screenshot is the filled one. Changed widgets are drawn in every size they offer, showing what they'd show with the sample data when there is some.
 8. Migrations are dry-run on a copy of the live database.
 9. The version is frozen (immutable). If an agent asked for a change to an existing tool, and the change is to a connection or adds operations, it waits for the owner's review (build status `review`); the owner approves or rejects exactly this version.

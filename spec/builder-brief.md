@@ -32,7 +32,7 @@ Keep `id` equal to the capability id in `BUILDER.md`. Each operation has `name` 
 
 - `read`: changes nothing.
 - `write`: records or changes data.
-- `destructive`: removes or irreversibly overwrites data. Agent calls require owner confirmation, including through other capabilities; these operations cannot be scheduled.
+- `destructive`: removes or irreversibly overwrites data. Agent calls require owner confirmation, including through other capabilities; these operations cannot be scheduled. An operation that deletes rows and adds none to that table (also as a side effect, like clearing a list) must be `destructive`: validation counts each table's rows around every test case and sample call. Replacing rows with new ones is a write. Don't prune caches in a write: filter old rows when you read them.
 
 Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g. 145 plants or money, 295 sleep, 240 water, 25 workouts, 75 for books). A subject without one (people, plans, words, time) takes a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues wrap: 350 and 10 are 20° apart), or, when none is that far, the middle of the widest gap, which `OTHER_TOOLS.md` names. The hue colours the icon tile and leads the UI palette; the design system derives light and dark shades from it.
 
