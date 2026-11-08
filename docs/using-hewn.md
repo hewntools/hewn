@@ -2,18 +2,18 @@
 
 `hewn open` opens Hewn in your browser, signed in. Hewn's web client runs only on the machine Hewn runs on, unless you've set up [a public URL](remote-access.md).
 
-The top bar has Search, **Home · Hub · Agents · Accounts · Settings**, and the **Inbox** on the right.
+The top bar has Search, **Home · Agents · Accounts · Settings**, and the **Inbox** on the right.
 
 ## Home
 
-Home holds your tools as icons, and the widgets you've put there. Click a tool to open it: its own screen if it has one, otherwise its operations as forms. The **New** tile asks for a new tool ([Building tools](building-tools.md)).
+Home holds your tools as icons, and the widgets you've put there. Click a tool to open it: its own screen if it has one, otherwise its operations as forms. The **New** tile asks for a new tool ([Building tools](building-tools.md)), or installs one ([below](#hewns-own-tools)).
 
 ![Home with seven tools (Running Log, Reading List, Habits, Quotes, Plant Care, Weekend Weather, Tasks Today) and four widgets: this week's running distance, the books being read, today's quote and today's habits](images/home.png)
 
 Right-click a tool for its menu:
 - **Open**, **Change…**, **Polish…** (a tool with a screen of its own: a second look at its design, [below](#a-tools-page)) and **Info**
 - **Widgets…**, **Activity** and **Versions**
-- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand), **Share…** (the tool as a file: [Sharing tools](sharing.md)) and **Export data**
+- **Rename**, **Set icon…** (draw a 5×5 glyph and pick its colour and saturation, or upload an image; saturation 0 draws it black or white on grey, for a black-and-white brand), **Share…** (the tool as a file or a link: [Sharing tools](sharing.md)) and **Export data**
 - **Delete…**
 
 Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget that takes options, such as which item to show: the same form as when you added it, with a preview), **Change…** and **Remove widget**.
@@ -24,17 +24,17 @@ Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget tha
 
 A widget shows a tool's data at a glance: today's habits, tonight's aurora forecast, a quote. It refreshes by itself. When it couldn't refresh, it keeps the last view and says how old it is.
 
-## The Hub
+## Hewn's own tools
 
-**Hub** holds tools ready to install: today Hewn's own (**Official**), which come with Hewn, so the Hub works offline. Search, or pick a tag; each card shows what the tool is for and what it needs ("reaches api.met.no", "uses a model"; nothing when it needs nothing), and **Installed** when you have it. A tool's page has its screens (click one to see it larger), what it does and keeps (Hewn's reading of its code), its operations, what it needs, its versions and its **Source code** (a version opens it too). **Install** opens the install sheet ([Sharing tools](sharing.md#installing-a-tool-someone-shared)); a tool you have already, under any name, offers **Open** and **Install a copy**. **Install from a file…** is here too.
+**New** offers, under its box, **Or install**: **One of Hewn's tools**, or **A file or a link someone shared** ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
 
-New also offers it under the box: **Or start from** a tool in Hub, or a file someone shared ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
+**Hewn's tools** are ready to install: Hewn's own (**Official**), which come with Hewn, so they work offline. Search, or pick a tag; each card shows what the tool is for and what it needs ("reaches api.met.no", "uses a model"; nothing when it needs nothing), and **Installed** when you have it. A tool's page has its screens (click one to see it larger), what it does and keeps (Hewn's reading of its code), its operations, what it needs, its versions and its **Source code** (a version opens it too). **Install** opens the install sheet ([Sharing tools](sharing.md#installing-a-tool-someone-shared)); a tool you have already, under any name, offers **Open** and **Install a copy**. **Install from a file or link…** is here too.
 
-![The Hub: search, Install from a file, the Official and tag filters, and Hewn's eight own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hub.png)
+![Hewn's tools: search, Install from a file or link, the Official and tag filters, and Hewn's eight own tools, each with a screenshot, what it needs and the Official mark (Running Log is Installed)](images/hewns-tools.png)
 
 ## Search and commands
 
-Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file…). `↑` and `↓` move through the list, going round at either end (`↑` on the first goes to the last); Enter opens it. Tools on the Hub you don't have yet come last.
+Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page (Activity, Models, Backups…) or an action (New tool, Edit Home, Back up now, Install from a file or link…). `↑` and `↓` move through the list, going round at either end (`↑` on the first goes to the last); Enter opens it. Hewn's own tools you don't have yet come last.
 
 ![The command palette with "run" typed: Running Log, Weekend Weather, Change Running Log… and Running Log · Info](images/command-palette.png)
 

@@ -25,6 +25,7 @@ import { handle, McpSessions } from "./surface/index.ts";
 import { defaultPasses } from "@hewntools/core/passes.ts";
 import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
+import { fetchLink } from "./surface/fetch-link.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
@@ -556,9 +557,10 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/web-ticket":
           return Response.json({ ticket: this.platform.createWebTicket(USER) });
         case "/_admin/install": {
-          // A shared tool's file (hewn install <file.hewn.zip>): staged, then installed under its name (or the given one), with its sample data unless told not to.
-          if (body.bundle) {
-            const preview = await this.platform.stageBundle(USER, fromBase64(body.bundle), { from: "file" });
+          // A shared tool's file or link (hewn install <file.hewn.zip | https://…>): staged, then installed under its name (or the given one), with its sample data unless told not to.
+          if (body.bundle || body.url) {
+            const fetched = body.url ? await fetchLink(String(body.url)) : null;
+            const preview = await this.platform.stageBundle(USER, fetched ? fetched.bytes : fromBase64(body.bundle), fetched ? { from: "link", host: fetched.host } : { from: "file" });
             const started = await this.platform.installBundle(USER, preview.token, { name: body.name ?? preview.suggestedName, sample: body.sample !== false });
             return Response.json(body.wait ? await this.platform.settle(started.buildId) : started);
           }

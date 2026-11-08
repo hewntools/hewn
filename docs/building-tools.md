@@ -134,7 +134,7 @@ hewn review                    agents' changes waiting for you
 hewn rollback <id> [version]   an earlier version, active again
 hewn restore <id>              bring back a deleted tool
 hewn purge <id>                delete a deleted tool forever
-hewn install <dir | file>      install a tool from a folder, or a file someone shared
+hewn install <dir | file | url>  install a tool from a folder, or a file or link someone shared
 hewn share <id>                a tool as a file to give someone (see Sharing tools)
 hewn data reset <id>           Start over: empty a tool's data, keep the tool
 ```

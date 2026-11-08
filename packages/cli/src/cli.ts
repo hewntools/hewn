@@ -54,8 +54,8 @@ Use it (as the owner; talks to the running Hewn)
   feedback [--days N] [--json]
                       how recent builds worked out: your answers to "Got what you asked for?", attempts,
                       what they ran on, and the signs in the record (a fix, a change soon after, a restore, a delete)
-  install <dir | file.hewn.zip> [--name <name>] [--no-sample]
-                      install a tool from a source dir, or from a file someone shared (with its sample data)
+  install <dir | file.hewn.zip | https://…> [--name <name>] [--no-sample]
+                      install a tool from a source dir, or from a file or link someone shared (with its sample data)
   share <id> [--version N] [--out file.hewn.zip]
                       a tool as a file to give someone: what's in it (personal data, keys, your settings) first;
                       refused if it holds one of your own keys or has no sample data
@@ -356,13 +356,16 @@ async function main() {
       return;
 
     case "install": {
-      const dir = resolve(positional()[0] ?? "");
+      const given = positional()[0] ?? "";
+      const dir = resolve(given);
       const info = supervisorInfo(home);
       if (!info) throw new Error("Hewn isn't running: start it with hewn serve (or hewn service install)");
-      // A shared tool's file (a zip): installed under its name (or --name), with its sample data unless --no-sample.
-      const zip = statSync(dir, { throwIfNoEntry: false })?.isFile();
-      const manifest = zip ? null : JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
-      const body = zip ? { bundle: readFileSync(dir).toString("base64"), ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
+      // A shared tool's file (a zip) or link (Hewn fetches it: https only, 5 MB): installed under its name (or --name), with its sample data unless --no-sample.
+      const link = /^[a-z][a-z0-9+.-]*:\/\//i.test(given);
+      const zip = !link && statSync(dir, { throwIfNoEntry: false })?.isFile();
+      const manifest = zip || link ? null : JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
+      const shared = { ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true };
+      const body = link ? { url: given, ...shared } : zip ? { bundle: readFileSync(dir).toString("base64"), ...shared } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
       const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
       if (!res.ok) throw new Error(result.message ?? result.error);

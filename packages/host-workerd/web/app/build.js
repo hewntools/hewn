@@ -25,19 +25,19 @@ const STEPS = [
 ];
 /** A new tool's passes after its tests (when it runs them): the step, and its pill in Activity. */
 const PASS_STEPS = { critique: ["Reviewing the design", "reviewing design"], craft: ["Fixing details", "fixing details"] };
-/** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hub", "from <host>" or "from a file". */
+/** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hewn's tools", "from <host>" or "from a file". */
 const installedFrom = (b) => {
   const s = b.request?.source;
-  return s?.from === "hub" ? "from Hub" : s?.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+  return s?.from === "hub" ? "from Hewn's tools" : s?.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
 };
-/** A tool installed from a file or from Hub has no builder: its milestones are the file's (R4). */
+/** A tool installed from a file, a link or Hewn's tools has no builder: its milestones are the file's (R4). */
 const installSteps = (b) => [
-  ["spec", b.request?.source?.from === "hub" ? "From Hub" : "From the file"],
+  ["spec", b.request?.source?.from === "hub" ? "From Hewn's tools" : b.request?.source?.from === "link" ? "From the link" : "From the file"],
   ["code", "Unpacked"],
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
-/** No builder runs: an install from a file, Hub or a directory, or a change that needs none. */
+/** No builder runs: an install from a file, a link, Hewn's tools or a directory, or a change that needs none. */
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";

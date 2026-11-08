@@ -88,11 +88,13 @@ export function stampSource(m: CapabilityManifest, source: ToolSource | null): C
 
 /**
  * Where an installed tool came from, in words, the same everywhere (a build's log, Activity, Info):
- * "from Hub", "from example.com" (a link), "from a file". `long` adds what it was: "from a file ·
- * Plant Log v7" (a Hub tool's is "Official").
+ * "from Hewn's tools", "from example.com" (a link), "from a file". `long` (Info's pill) adds what
+ * it was: "from a file · Plant Log v7", "from a link · example.com", "from Hewn's tools · Official".
+ * (`from: "hub"` is the ABI's value for Hewn's own tools; the word isn't shown.)
  */
 export function sourceWords(s: ToolSource, long = false): string {
-  const where = s.from === "hub" ? "from Hub" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+  if (long && s.from === "link") return `from a link · ${s.host ?? "unknown"}`;
+  const where = s.from === "hub" ? "from Hewn's tools" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
   return long ? `${where} · ${s.from === "hub" ? "Official" : `${s.name ?? s.id} v${s.version}`}` : where;
 }
 

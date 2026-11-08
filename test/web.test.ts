@@ -245,7 +245,10 @@ describe("web client (owner surface)", () => {
         assert.doesNotMatch(js, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, file);
         // Dialogs, inline edits and toasts instead of browser built-ins.
         assert.doesNotMatch(js, /(?<![\w.])(alert|confirm|prompt)\(/, file);
+        // The Hub tab folded into + New (0.4.11): no page answers to it, and the word isn't shown.
+        assert.doesNotMatch(js.replace(/^\s*\*.*$/gm, ""), /["'`][^"'`\n]*\bHub\b|#\/hub\b/, file);
       }
+      assert.doesNotMatch(readFileSync(resolve(WEB, "app/router.js"), "utf8"), /p === "hub"/);
     });
 
     test("the id 'hewn' is reserved for the web client origin", async () => {
@@ -505,7 +508,7 @@ describe("web client (owner surface)", () => {
       }
     });
 
-    test("the Hub: Hewn's own tools from the release, a tool's page, its image and code; installed from Hub with its sample data", async () => {
+    test("Hewn's own tools from the release: a tool's page, its image and code; installed from them with its sample data", async () => {
       const hub = await api("/hub");
       assert.equal(hub.status, 200, JSON.stringify(hub.json));
       const ids = hub.json.tools.map((t: any) => t.id);
@@ -528,7 +531,7 @@ describe("web client (owner surface)", () => {
       assert.equal((await http("/api/hub/plant-log/image/nope", { headers: { "x-hewn-ui": "1" } })).status, 404);
       // Only the images the tool has: a path in the name reaches nothing.
       for (const name of ["..%2F..", "..%2Fcapability.json", "..%2F..%2Fshelf.json"]) assert.equal((await http(`/api/hub/plant-log/image/${name}`, { headers: { "x-hewn-ui": "1" } })).status, 404, name);
-      // No Download: an Official tool leaves the Hub only through the install sheet.
+      // No Download: an Official tool is installed only through the install sheet.
       assert.equal((await api("/hub/plant-log/download")).status, 404);
       const code = await api("/hub/plant-log/code");
       assert.ok(code.json.files.some((f: any) => f.path === "sample/calls.json"));
@@ -540,7 +543,7 @@ describe("web client (owner surface)", () => {
       const names = ideas.json.operations.map((o: any) => o.name);
       assert.deepEqual(names, [...new Set(names)]);
       assert.ok(names.includes("add_idea") && names.includes("list_tags"), names.join());
-      // Installed from Hub under another name: still the Hub's Idea Tracker (Installed, and Open opens yours).
+      // Installed under another name: still Hewn's Idea Tracker (Installed, and Open opens yours).
       const preview = await api("/hub/idea-tracker/stage", { method: "POST" });
       assert.equal(preview.json.summaryBy, "hewn");
       assert.equal(preview.json.from, "hub");

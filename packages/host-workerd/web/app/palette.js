@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The command palette (⌘K, "/"): tools, places and actions in one search.
 import { api, appIcon, caps, enc, fail, h, modal, toast } from "../kit.js";
-import { installFromFile } from "./install.js";
+import { installFromFileOrLink } from "./install.js";
 import { addConnectionSheet } from "./accounts.js";
 import { jobPicker } from "./agents.js";
 import { applyTheme, isDark, THEME_KEY } from "./appearance.js";
 import { connectDialog } from "./connect.js";
-import { go, keyHandlers, put, settings, shortcutsDialog } from "./frame.js";
+import { go, HEWNS_TOOLS, keyHandlers, put, settings, shortcutsDialog } from "./frame.js";
 import { glyphTile, PALETTE_GLYPHS } from "./glyphs.js";
 import { closeInbox, toggleInbox } from "./inbox.js";
 import { SECTIONS } from "./settings.js";
@@ -34,7 +34,7 @@ async function paletteItems() {
     ...tools.map((c) => [`${c.name} · Info`, "Tools", () => go(`#/c/${enc(c.id)}`), appIcon(c, { size: 24 }), `${c.id} details grants schedules widgets versions`, true]),
     ...all.filter((c) => c.kind === "connection").map((c) => [c.name, "Connections", () => go(`#/c/${enc(c.id)}`), appIcon(c, { size: 24 }), `${c.id} account sign in`]),
     act("New tool", () => go("#/new"), "make create build", "plus"),
-    act("Install from a file…", () => installFromFile().catch(fail), "install share zip bundle import tool", "plus"),
+    act("Install from a file or link…", () => installFromFileOrLink().catch(fail), "install share zip bundle import tool link url", "plus"),
     act("Add a widget", () => addWidgetSheet(), "home", "widget"),
     act("Edit Home", () => (location.hash === "" || location.hash === "#/" ? keyHandlers.get("e")?.() : (go("#/"), setTimeout(() => keyHandlers.get("e")?.(), 600))), "layout arrange widgets", "edit"),
     act("Connect an agent", () => connectDialog(), "claude codex opencode chatgpt mcp", "agent"),
@@ -56,9 +56,9 @@ async function paletteItems() {
     place("Accounts", "#/accounts", "connections", "key"),
     ...SECTIONS.map(([k, label]) => place(`Settings › ${label}`, `#/settings/${k}`)),
     place("Settings › AI › Models", "#/settings/ai/models", "provider key budget spend tier", "chip"),
-    // The Hub comes last: Hewn's own tools you don't have yet, each with Install (to its Hub page; nothing installs at once).
-    place("Hub", "#/hub", "official install tools shelf", "plus"),
-    ...hub.tools.filter((t) => !t.installed).map((t) => [t.name, "Hub", () => go(`#/hub/${enc(t.id)}`), appIcon({ id: t.id, name: t.name, hue: t.icon?.hue ?? undefined, saturation: t.icon?.saturation ?? undefined }, { size: 24 }), `${t.line} ${t.tags.join(" ")} hub official install`, true, h("span", { class: "btn sm palette-tail" }, "Install")]),
+    // Hewn's tools come last: the ones you don't have yet, each with Install (to its page; nothing installs at once).
+    place("Hewn's tools", HEWNS_TOOLS, "official install tools shelf", "plus"),
+    ...hub.tools.filter((t) => !t.installed).map((t) => [t.name, "Hewn's tools", () => go(`${HEWNS_TOOLS}/${enc(t.id)}`), appIcon({ id: t.id, name: t.name, hue: t.icon?.hue ?? undefined, saturation: t.icon?.saturation ?? undefined }, { size: 24 }), `${t.line} ${t.tags.join(" ")} official install`, true, h("span", { class: "btn sm palette-tail" }, "Install")]),
   ]
     .filter(Boolean)
     .map(([label, group, run, icon, words = "", more = false, tail = null]) => ({ label, group, run: label === "Inbox" ? () => toggleInbox() : run, icon, words: `${label} ${words}`.toLowerCase(), more, tail }));
@@ -79,11 +79,11 @@ async function commandPalette() {
         const q = input.value.trim().toLowerCase();
         const words = q.split(/\s+/).filter(Boolean);
         // Names first ("run" finds Running Log before a tool whose purpose mentions a long run), then the rest;
-        // yours first, the Hub last, however well its tools match.
+        // yours first, Hewn's tools last, however well they match.
         const named = (it) => words.every((w) => it.label.toLowerCase().includes(w));
         const hits = items.filter((it) => (q ? words.every((w) => it.words.includes(w)) : !it.more));
         const ranked = q ? [...hits.filter(named), ...hits.filter((it) => !named(it))] : hits;
-        shown = [...ranked.filter((it) => it.group !== "Hub"), ...ranked.filter((it) => it.group === "Hub")].slice(0, 40);
+        shown = [...ranked.filter((it) => it.group !== "Hewn's tools"), ...ranked.filter((it) => it.group === "Hewn's tools")].slice(0, 40);
         at = Math.min(at, Math.max(0, shown.length - 1));
         let group = null;
         put(

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Hub (Q1–Q3, Q5): one tab, one mixed grid of tools to install. In 0.4.9 it holds Hewn's own
-// tools (Official), shipped with the release, so it works offline; 0.5 adds tools from others to
-// the same grid. A tool's Hub page: its screens, Hewn's reading, its operations, what it needs,
-// Source code, Install (or Open and Install a copy). Installing opens the one install sheet.
+// Hewn's tools (Q1–Q3, Q5), under + New: one grid of Hewn's own tools (Official), shipped with the
+// release, so it works offline. A tool's page: its screens, Hewn's reading, its operations, what it
+// needs, Source code, Install (or Open and Install a copy). Installing opens the one install sheet.
+// (The file keeps the name of the Hub tab it was until 0.4.11.)
 import { api, enc, fail, h, modal, setWallpaper, sheetActions, skeleton } from "../kit.js";
-import { brandTile, hues, page, put, settings, stillHere, topBar, view } from "./frame.js";
-import { bundleTile, installFromFile, installSheet, sourceSheet } from "./install.js";
+import { brandTile, HEWNS_TOOLS, hues, put, sandboxNotice, settings, stillHere, topBar, view } from "./frame.js";
+import { bundleTile, installFromFileOrLink, installSheet, sourceSheet } from "./install.js";
 import { titleCase } from "./models.js";
 import { openCapability } from "./tool-actions.js";
 
@@ -28,13 +28,13 @@ function needsLine(c, modelReady) {
 /** The Official mark: Hewn's 16px tile and the word, in the accent's ink. */
 const official = () => h("span", { class: "row tight hub-official" }, brandTile(16), h("span", { class: "small" }, "Official"));
 
-/** One card (Q2), the same on the Hub and on the hosted first run. */
+/** One card (Q2), the same in Hewn's tools and on the hosted first run. */
 function hubCard(c, { modelReady = true } = {}) {
   // The screen fills its 16:9 frame (the shots are taken at 16:9), cut at the bottom if anything.
   const shot = c.images.includes("screen") ? h("img", { src: imageUrl(c, "screen"), alt: "", loading: "lazy" }) : h("span", { class: "hub-shot-empty" }, bundleTile(c, 48));
   return h(
     "a",
-    { class: "card hub-card", href: `#/hub/${enc(c.id)}` },
+    { class: "card hub-card", href: `${HEWNS_TOOLS}/${enc(c.id)}` },
     h("div", { class: "hub-shot" }, shot),
     h(
       "div",
@@ -58,13 +58,16 @@ async function modelIsReady() {
 /** Stage an Official tool and open the install sheet (Hewn's reading ships with it; a name you have already is offered as "<name> 2"). */
 async function installFromHub(id) {
   const preview = await api(`/hub/${enc(id)}/stage`, { method: "POST" });
-  return installSheet(preview, { from: "From Hub · Official" });
+  return installSheet(preview, { from: "From Hewn's tools · Official" });
 }
 
-/** Q2 the Hub: search, Install from a file, All · Official · popular tags, one grid, paging. */
+/** A page one step into + New: its back button goes to New. */
+const newPage = (back, width, ...content) => view(topBar("", { back }), sandboxNotice(), h("main", { class: "column", style: { "--w": `${width}px` } }, content));
+
+/** Q2 Hewn's tools: search, Install from a file or link, All · Official · popular tags, one grid, paging. */
 async function hubPage(q) {
   const here = stillHere();
-  page("hub", 960, skeleton("30%", "90%", "90%"));
+  newPage(["New", "#/new"], 960, skeleton("30%", "90%", "90%"));
   const [{ tools }, modelReady] = await Promise.all([api("/hub"), modelIsReady()]);
   if (!here()) return;
   let filter = q?.get("tag") ?? "all";
@@ -77,13 +80,13 @@ async function hubPage(q) {
   const counts = new Map();
   for (const t of tools) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   const popular = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 6).map(([t]) => t);
-  const search = h("input", { type: "search", class: "grow", placeholder: `Search ${tools.length} tools`, "aria-label": "Search the Hub" });
+  const search = h("input", { type: "search", class: "grow", placeholder: `Search ${tools.length} tools`, "aria-label": "Search Hewn's tools" });
   search.addEventListener("input", () => ((text = search.value.trim().toLowerCase()), (at = 0), draw()));
   const chip = (key, label) => h("button", { class: `chip plain ${filter === key ? "selected" : ""}`, onclick: () => ((filter = key), (at = 0), draw()) }, label);
   const draw = () => {
     put(chips, chip("all", "All"), h("button", { class: `chip plain ${filter === "official" ? "selected" : ""}`, onclick: () => ((filter = "official"), (at = 0), draw()) }, brandTile(16), "Official"), popular.length > 0 && h("span", { class: "chip-divider" }), popular.map((t) => chip(t, t)));
     const shown = tools.filter((t) => (filter === "all" || filter === "official" ? true : t.tags.includes(filter)) && (!text || `${t.name} ${t.line} ${t.tags.join(" ")}`.toLowerCase().includes(text)));
-    put(grid, shown.length ? shown.slice(at, at + PER_PAGE).map((c) => hubCard(c, { modelReady })) : h("div", { class: "muted hub-none" }, "Nothing on the Hub matches that."));
+    put(grid, shown.length ? shown.slice(at, at + PER_PAGE).map((c) => hubCard(c, { modelReady })) : h("div", { class: "muted hub-none" }, "None of Hewn's tools matches that."));
     const pages = shown.length > PER_PAGE;
     put(
       paging,
@@ -92,10 +95,10 @@ async function hubPage(q) {
     );
   };
   draw();
-  page(
-    "hub",
+  newPage(
+    ["New", "#/new"],
     960,
-    h("div", { class: "row hub-head" }, h("h1", { class: "flush" }, "Hub"), search, h("button", { onclick: () => installFromFile().catch(fail) }, "Install from a file…")),
+    h("div", { class: "row hub-head" }, h("h1", { class: "flush" }, "Hewn's tools"), search, h("button", { onclick: () => installFromFileOrLink().catch(fail) }, "Install from a file or link…")),
     h("div", { class: "row" }, chips),
     grid,
     paging,
@@ -109,10 +112,10 @@ const enlarge = (src, alt) =>
 /** What it stores, from Hewn's reading, as "Keeps …" ("Plants with …" reads "Keeps plants with …"). */
 const keepsLine = (s) => (/^keeps\b/i.test(s) ? s : `Keeps ${/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s}`);
 
-/** Q3 a tool's Hub page. */
+/** Q3 one of Hewn's tools: its page. */
 async function hubToolPage(id) {
   const here = stillHere();
-  view(topBar("hub", { back: ["Hub", "#/hub"] }), h("main", { class: "column", style: { "--w": "880px" } }, skeleton("40%", "90%", "70%")));
+  view(topBar("", { back: ["Hewn's tools", HEWNS_TOOLS] }), h("main", { class: "column", style: { "--w": "880px" } }, skeleton("40%", "90%", "70%")));
   const [t, all] = await Promise.all([api(`/hub/${enc(id)}`), api("/capabilities").catch(() => [])]);
   if (!here()) return;
   setWallpaper(await hues([t.icon?.hue ?? 250]));
@@ -135,7 +138,7 @@ async function hubToolPage(id) {
     return h("button", { class: `hub-shot-btn ${n}`, "aria-label": `${alt}, larger`, onclick: () => enlarge(src, alt) }, h("img", { src, alt }));
   };
   view(
-    topBar("hub", { back: ["Hub", "#/hub"] }),
+    topBar("", { back: ["Hewn's tools", HEWNS_TOOLS] }),
     h(
       "main",
       { class: "column hub-page", style: { "--w": "880px" } },

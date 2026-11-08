@@ -17,7 +17,7 @@ export { madeBy, versionRow, versionPage, versionsPage };
 const changed = (v) => changeLine(String(v.request?.request ?? v.request?.purpose ?? ""));
 /**
  * How a version came to be, in words: built with a builder, asked for by an agent, installed from
- * a file, Hub or files (no builder ran), or a quick change (a new tier or model, no builder either).
+ * a file, a link, Hewn's tools or files (no builder ran), or a quick change (a new tier or model, no builder either).
  */
 const madeBy = (v, all) =>
   v.builder === "agent" ? `asked for by ${actorLabel(v.requestedBy, all)}` : /^copy:/.test(v.builder ?? "") ? "installed" : v.builder === "bundle" ? `installed ${installedFrom(v)}` : v.builder === "keep" ? "a quick change" : `built with ${builderLabel(v.builder)}`;

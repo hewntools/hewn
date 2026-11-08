@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The public path: what a reverse proxy or a tunnel (cloudflared, Tailscale Funnel) reaches. MCP
-// and the OAuth endpoints answer on any host; the web client and capability UIs only on the
-// public URL's hosts (the surface decides, see index.ts). Admin never answers here. Requests are
-// rate limited per client address (and in total).
+// The public path: what a reverse proxy or a tunnel (cloudflared, Tailscale Funnel) reaches. MCP,
+// the OAuth endpoints, share links (/share/<token>) and robots.txt answer on any host; the web
+// client and capability UIs only on the public URL's hosts (the surface decides, see index.ts).
+// Admin never answers here. Requests are rate limited per client address (and in total).
 import { OAUTH_PATHS } from "./oauth.ts";
 
 /** Header the public listener sets on everything it forwards (local requests never need it). */
@@ -15,6 +15,16 @@ export const CLIENT_IP_HEADER = "x-hewn-client-ip";
 export const PROXY_SECRET_HEADER = "x-hewn-proxy-secret";
 
 export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS]);
+
+/** Share links: `/share/<token>`, the bundle of one version, for anyone with the link. */
+export const SHARE_PREFIX = "/share/";
+/** What search engines are told on every share link's response, a refusal included. */
+export const SHARE_ROBOTS = { "x-robots-tag": "noindex, nofollow" };
+/** The public listener's robots.txt: share links stay out of search engines. */
+export const ROBOTS_TXT = "User-agent: *\nDisallow: /share/\n";
+const robotsFor = (path: string): Record<string, string> => (path.startsWith(SHARE_PREFIX) ? SHARE_ROBOTS : {});
+/** A path as it goes in a log: a share link's token and a capability UI's ticket left out. */
+export const loggedPath = (path: string) => path.replace(/^\/share\/.*/, "/share/…").replace(/\/~[^/]+/, "/~…");
 
 interface Rule {
   /** Requests allowed per window, per client address. */
@@ -36,11 +46,13 @@ export const RULES: Record<string, Rule> = {
   signin: { perClient: 30, total: 120, windowMs: 10 * MIN },
   /** The web client and capability UIs on the public URL. */
   web: { perClient: 1200, total: 3000, windowMs: MIN },
+  /** Share links: a person installs a tool now and then; a token can't be guessed, and this keeps anyone from trying. */
+  share: { perClient: 30, total: 300, windowMs: 10 * MIN },
 };
 
 const ruleFor = (path: string) =>
   path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
-  : path === "/auth" || path.startsWith("/passkey/") ? "signin" : PUBLIC_PATHS.has(path) ? "metadata" : "web";
+  : path === "/auth" || path.startsWith("/passkey/") ? "signin" : path.startsWith(SHARE_PREFIX) ? "share" : PUBLIC_PATHS.has(path) ? "metadata" : "web";
 
 /** Fixed-window counters, in memory (one process serves the public path). */
 export class RateLimiter {
@@ -94,8 +106,8 @@ function sameSecret(given: string, secret: string): boolean {
 export function gatePublic(req: Request, limiter: RateLimiter, log: (line: string) => void, proxySecret?: string): Response | Request {
   const url = new URL(req.url);
   if (proxySecret && !sameSecret(req.headers.get(PROXY_SECRET_HEADER) ?? "", proxySecret)) {
-    log(`[public] ? ${req.method} ${url.pathname} -> 403 (not from the trusted proxy)`);
-    return new Response(JSON.stringify({ error: "forbidden", message: "not from the trusted proxy" }), { status: 403, headers: { "content-type": "application/json" } });
+    log(`[public] ? ${req.method} ${loggedPath(url.pathname)} -> 403 (not from the trusted proxy)`);
+    return new Response(JSON.stringify({ error: "forbidden", message: "not from the trusted proxy" }), { status: 403, headers: { "content-type": "application/json", ...robotsFor(url.pathname) } });
   }
   const ip = clientAddress(req);
   if (url.pathname.startsWith("/_admin/")) {
@@ -104,10 +116,10 @@ export function gatePublic(req: Request, limiter: RateLimiter, log: (line: strin
   }
   const wait = limiter.take(ruleFor(url.pathname), ip);
   if (wait) {
-    log(`[public] ${ip} ${req.method} ${url.pathname} -> 429 (retry in ${wait}s)`);
+    log(`[public] ${ip} ${req.method} ${loggedPath(url.pathname)} -> 429 (retry in ${wait}s)`);
     return new Response(JSON.stringify({ error: "rate_limited", message: `Too many requests; retry in ${wait}s` }), {
       status: 429,
-      headers: { "content-type": "application/json", "retry-after": String(wait) },
+      headers: { "content-type": "application/json", "retry-after": String(wait), ...robotsFor(url.pathname) },
     });
   }
   const headers = new Headers(req.headers);

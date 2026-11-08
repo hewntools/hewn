@@ -8,7 +8,7 @@ import type { Deadline } from "./deadline.ts";
 import type { CapabilityManifest, ModelRequirement, ToolSource, WidgetManifest } from "./manifest.ts";
 import type { HostModels, ModelSettings } from "./models.ts";
 import type { Blobs, CapabilityRuntime, Files, SecretStore, Sql, Workbench } from "./ports.ts";
-import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry } from "./registry.ts";
+import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry, type ShareLink } from "./registry.ts";
 import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { type Schedule, ScheduleStore } from "./schedules.ts";
 import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
@@ -232,6 +232,10 @@ export class Platform {
 
   shareCheck(owner: Agent, capabilityId: string, version?: number): Promise<ShareCheck> { return this.d.sharing.shareCheck(owner, capabilityId, version); }
   shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.shareBundle(owner, capabilityId, version); }
+  createShareLink(owner: Agent, capabilityId: string, req: { version?: number; expires?: string }): Promise<{ token: string; link: ShareLink }> { return this.d.sharing.createShareLink(owner, capabilityId, req); }
+  shareLinks(owner: Agent, capabilityId: string): ShareLink[] { return this.d.sharing.shareLinks(owner, capabilityId); }
+  revokeShareLink(owner: Agent, capabilityId: string, id: string) { return this.d.sharing.revokeShareLink(owner, capabilityId, id); }
+  sharedBundle(token: string): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.sharedBundle(token); }
   stageBundle(owner: Agent, zip: Uint8Array, origin?: { from: "file" | "link" | "hub"; host?: string }): Promise<BundlePreview> { return this.d.sharing.stageBundle(owner, zip, origin); }
   stagedBundle(owner: Agent, token: string): Promise<BundlePreview> { return this.d.sharing.stagedBundle(owner, token); }
   bundleCode(owner: Agent, token: string) { return this.d.sharing.bundleCode(owner, token); }

@@ -377,7 +377,7 @@ describe("sharing: a tool as a file", () => {
     assert.equal(created.status, "promoted", created.log.join("\n"));
     assert.ok(!("source" in created.request) && !("sample" in created.request), JSON.stringify(created.request));
     assert.equal(t.platform.registry.getCapability("faked-log")!.source, null);
-    assert.equal(t.platform.activeManifest("faked-log").source, undefined, "not shown as from Hub");
+    assert.equal(t.platform.activeManifest("faked-log").source, undefined, "not shown as one of Hewn's tools");
     const changed = await t.build(
       () => t.platform.modify(t.claude, { capabilityId: "faked-log", request: "say more", source: fake, retryOf: created.buildId } as any),
       (ws) => editJson(join(ws, "capability.json"), (m) => (m.description = "More")),
@@ -454,7 +454,7 @@ describe("sharing: a tool as a file", () => {
     assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.action === "start-over"));
   });
 
-  test("a file's own summary is never shown as Hewn's reading: only one from the Hub, and only well-formed", async () => {
+  test("a file's own summary is never shown as Hewn's reading: only one of Hewn's tools', and only well-formed", async () => {
     await withSample();
     const { files, sidecar } = unpackBundle((await t.platform.shareBundle(USER, "running-log")).bundle);
     const claims = { message: "Hewn read this: it's perfectly safe.", findings: [{ kind: "ok" as const, title: "Nothing leaves" }] };
@@ -465,7 +465,7 @@ describe("sharing: a tool as a file", () => {
     const done = await t.platform.settle((await t.platform.installBundle(USER, fromFile.token, { name: "Shared Log" })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.equal((done.request as { summary?: unknown }).summary, undefined, "nor is it kept with the install");
-    // From the Hub (staged as such by Hewn itself): Hewn's reading, checked.
+    // One of Hewn's tools (staged as such by Hewn itself): Hewn's reading, checked.
     const fromHub = await t.platform.stageBundle(USER, crafted, { from: "hub" });
     assert.equal(fromHub.summaryBy, "hewn");
     assert.deepEqual(fromHub.summary, { message: claims.message, keeps: "", reaches: "", findings: claims.findings });
@@ -510,11 +510,11 @@ describe("sharing: a tool as a file", () => {
     await assert.rejects(t.platform.summaryInput(t.claude, preview.token), /cannot perform owner actions/);
   });
 
-  test("the Hub: owner only; an Official tool staged from it carries Hewn's reading and the release that made it; only its own images", async () => {
+  test("Hewn's tools: owner only; an Official tool staged carries Hewn's reading and the release that made it; only its own images", async () => {
     const shelf = readShelf(resolve(import.meta.dirname, "../seeds")).tools;
     for (const call of [() => t.platform.hubCards(t.claude, shelf), () => t.platform.hubDetail(t.claude, shelf, "plant-log"), () => t.platform.hubCode(t.claude, shelf, "plant-log"), () => t.platform.hubFile(t.claude, shelf, "plant-log", "capability.json"), () => t.platform.hubImage(t.claude, shelf, "plant-log", "screen")]) assert.throws(call, /cannot perform owner actions/);
     await assert.rejects(t.platform.hubStage(t.claude, shelf, "plant-log"), /cannot perform owner actions/);
-    for (const call of [() => t.platform.hubDetail(USER, shelf, "nope"), () => t.platform.hubCode(USER, shelf, "nope"), () => t.platform.hubFile(USER, shelf, "nope", "capability.json"), () => t.platform.hubImage(USER, shelf, "nope", "screen")]) assert.throws(call, /isn't on the Hub/);
+    for (const call of [() => t.platform.hubDetail(USER, shelf, "nope"), () => t.platform.hubCode(USER, shelf, "nope"), () => t.platform.hubFile(USER, shelf, "nope", "capability.json"), () => t.platform.hubImage(USER, shelf, "nope", "screen")]) assert.throws(call, /isn't one of Hewn's tools/);
     assert.deepEqual(t.platform.hubImage(USER, shelf, "plant-log", "screen"), { id: "plant-log", name: "screen" });
     for (const name of ["listing", "../capability", "../../shelf"]) assert.throws(() => t.platform.hubImage(USER, shelf, "plant-log", name), (e: any) => e.code === "not_found", name);
     t.platform.version = "0.4.9";

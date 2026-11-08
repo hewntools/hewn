@@ -46,7 +46,7 @@ Then:
 
 ### Without a public URL: a tunnel
 
-To try a cloud agent without setting up a domain, Hewn can open a tunnel to a separate listener. There, only MCP and the sign-in pages answer: never the web client, tool UIs or admin. Requests there are rate limited and logged.
+To try a cloud agent without setting up a domain, Hewn can open a tunnel to a separate listener. There, only MCP, the sign-in pages and [share links](sharing.md#links) answer: never the web client, tool UIs or admin. Requests there are rate limited and logged.
 
 1. Install `cloudflared` (macOS: `brew install cloudflared`; Linux: [Cloudflare's packages](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)).
 2. `hewn tunnel start --quick`. It prints an `https://….trycloudflare.com` address and the connector address, `…/mcp`.

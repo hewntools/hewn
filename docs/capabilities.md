@@ -52,7 +52,7 @@ It goes through the same validation as a built one.
 
 ## Examples
 
-Hewn's own tools, the Hub's Official shelf, are in the repo's [`seeds/`](../seeds) to be read and copied (Apache-2.0). Three to start with:
+Hewn's own tools (Official, under **+ New** in the web client) are in the repo's [`seeds/`](../seeds) to be read and copied (Apache-2.0). Three to start with:
 
 - [Running Log](../seeds/running-log): operations, a migration, test cases, sample data and a screen
 - [Reading List](../seeds/reading-list): a widget, an operation marked `destructive`, and a screen

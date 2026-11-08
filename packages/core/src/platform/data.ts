@@ -27,12 +27,14 @@ export interface DataSummary {
 export class Data extends Domain {
   /**
    * "Delete" archives: the capability disappears for the owner and every agent, its state and
-   * versions are kept, and the id stays reserved. `hewn restore <id>` brings it back.
+   * versions are kept, and the id stays reserved. `hewn restore <id>` brings it back. Its share
+   * links stop for good (a restore doesn't bring them back).
    */
   archive(owner: Agent, capabilityId: string) {
     requireOwner(owner);
     this.visibleActive(owner, capabilityId);
     this.registry.setOwnerPrefs(capabilityId, { archivedAt: new Date().toISOString() });
+    this.registry.revokeShareLinks(capabilityId);
     this.registry.addLifecycleEvent(capabilityId, "delete", "", owner.id);
     this.logger(`${capabilityId} deleted (archived, data kept) by ${owner.id}`);
   }
