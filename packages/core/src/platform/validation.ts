@@ -46,6 +46,12 @@ export const REVIEW_SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "m
 /** Where a held build keeps one of them. */
 export const reviewShotKey = (buildId: string, name: string) => `screenshots/${buildId}/${name}.png`;
 
+/**
+ * What an agent's build says when its migrations don't apply to the tool's data. The error itself may
+ * quote that data, so it goes to the build's transcript, which only the owner reads.
+ */
+export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
+
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
 /** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
@@ -63,9 +69,11 @@ export class Validation extends Domain {
    * screenshot is kept), so it can be promoted later (`promote`), or not at all. `onTests` follows
    * the tests; `measure` has the visual check measure what a builder should fix, too. Throws with
    * what failed. `check` is a builder's check of its work in progress: it goes on after a failure
-   * (the candidate lists them all), and leaves the build page's screenshot alone.
+   * (the candidate lists them all), and leaves the build page's screenshot alone. `liveData: false`
+   * leaves out the one step that runs the candidate on the tool's own data (the upgrade dry run): a
+   * client's check, whose migrations run there only once submitted.
    */
-  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean } = {}): Promise<Candidate> {
+  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean; liveData?: boolean } = {}): Promise<Candidate> {
     const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
@@ -327,14 +335,15 @@ export class Validation extends Domain {
       }
 
       // 6. dry-run migrations against a copy of real state
-      if (await this.runtime.hasState({ capabilityId: id })) {
+      if (opts.liveData !== false && (await this.runtime.hasState({ capabilityId: id }))) {
         await this.runtime.copyState({ capabilityId: id }, dryRun);
         try {
           const applied = await this.runtime.migrate(dryRun, migrations, code);
           step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
         } catch (e) {
-          if (!opts.check) throw e;
-          softFail(`the upgrade dry run failed: ${(e as Error).message}`);
+          const message = await this.ownersDetail(build, `the upgrade dry run failed: ${(e as Error).message}`, DRY_RUN_FAILED, { note: !opts.check });
+          if (!opts.check) throw new Error(message);
+          softFail(message);
         }
       }
     } finally {
@@ -359,9 +368,10 @@ export class Validation extends Domain {
   /**
    * A builder's check of its work in progress (its `check` tool): every step validation runs, going
    * on after a failure, with the UI rendered filled with the sample data and what to fix measured on
-   * it. Nothing about the tool or the build page changes.
+   * it. Nothing about the tool or the build page changes. `liveData: false`: not the upgrade dry run
+   * on the tool's own data (a client's check).
    */
-  async check(build: BuildRow): Promise<CheckResult> {
+  async check(build: BuildRow, opts: { liveData?: boolean } = {}): Promise<CheckResult> {
     const passed: string[] = [];
     let candidate: Candidate | undefined;
     let failures: string[];
@@ -370,7 +380,7 @@ export class Validation extends Domain {
     const copy: BuildRow = { ...build, id: `${build.id}-check` };
     try {
       await this.workbench.snapshot(build.id, copy.id);
-      candidate = await this.validate(copy, (l) => passed.push(l), { check: true, measure: true });
+      candidate = await this.validate(copy, (l) => passed.push(l), { check: true, measure: true, ...(opts.liveData === false ? { liveData: false } : {}) });
       failures = candidate.failures ?? [];
     } catch (e) {
       // A step nothing after it can run without (the manifest, the bundle).
@@ -412,6 +422,18 @@ export class Validation extends Domain {
       return next;
     };
     return { run, settled: async () => void (await queue) };
+  }
+
+  /**
+   * A message about the candidate's code run on the tool's own data: the error may quote that data.
+   * The owner's build says it as it is; an agent's (whose log the agent reads, and builds_wait
+   * streams) says `generic`, and the error goes to the build's transcript, which only the owner reads
+   * (`note`: a check's copy has none to keep).
+   */
+  private async ownersDetail(build: BuildRow, detail: string, generic: string, { note = true } = {}): Promise<string> {
+    if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return detail;
+    if (note) await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${detail}`).catch(() => {});
+    return generic;
   }
 
   /** The build page's screenshot of a build, light and dark. */
@@ -461,7 +483,12 @@ export class Validation extends Domain {
       for (const old of backups.slice(3)) await this.runtime.dropState({ capabilityId: id, scratch: old });
       step(`state backed up`);
     }
-    const applied = await this.runtime.migrate(live, migrations, code);
+    let applied: string[];
+    try {
+      applied = await this.runtime.migrate(live, migrations, code);
+    } catch (e) {
+      throw new Error(await this.ownersDetail(build, `migrations failed on the tool's data: ${(e as Error).message}`, "a migration failed on the tool's data as it went live (the owner's build log has the error)"));
+    }
     if (applied.length) step(`migrations applied: ${applied.join(", ")}`);
 
     const before = this.registry.getCapability(id)?.activeVersion ?? null;

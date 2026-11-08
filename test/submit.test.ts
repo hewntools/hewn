@@ -252,3 +252,58 @@ describe("approval mode: an agent's changes wait for the owner", () => {
     assert.match(b.instructions!, /agent's changes wait for the owner's approval/);
   });
 });
+
+describe("a migration that fails on the tool's data: the error is the owner's", () => {
+  let t: ReturnType<typeof setup>;
+  const NOTE = "a-note-only-the-owner-wrote";
+  // On the tests' empty tables it does nothing; on the tool's data its error quotes a row.
+  const quoting = () => [...entriesOf(SEED), { path: "migrations/002_quote.sql", content: "SELECT json_extract('{}', (SELECT 'x' || group_concat(notes, '|') FROM runs));" }];
+  beforeEach(async () => {
+    t = setup();
+    await installSeed(t.platform);
+    await t.platform.invoke(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500, notes: NOTE } });
+  });
+  afterEach(() => t.cleanup());
+
+  test("a client's check doesn't run its migrations on the tool's data: they run when it submits", async () => {
+    const r = await t.platform.checkFiles(t.claude, { files: quoting(), capabilityId: "running-log" });
+    assert.ok(!JSON.stringify(r).includes(NOTE), r.text);
+    assert.match(r.text, /Not in a check: the upgrade dry run/);
+  });
+
+  test("a submission's build tells the agent it failed on the data, not the error; the owner's transcript has it", async () => {
+    const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: quoting(), capabilityId: "running-log", request: "a migration" })).buildId);
+    assert.equal(b.status, "failed");
+    const seen = JSON.stringify(t.platform.getBuild(t.claude, b.buildId));
+    assert.ok(!seen.includes(NOTE), seen);
+    assert.match(seen, /the upgrade dry run failed on a copy of the tool's data/);
+    assert.match((await t.platform.buildTranscript(USER, b.buildId)) ?? "", new RegExp(NOTE));
+  });
+
+  test("so does a change an agent asks Hewn's builder for; the owner's own build says it as it is", async () => {
+    const write = (ws: string) => writeFileSync(join(ws, "migrations", "002_quote.sql"), quoting().at(-1)!.content);
+    t.queue(write);
+    const agents = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a migration" })).buildId);
+    assert.equal(agents.status, "failed");
+    assert.ok(!JSON.stringify(t.platform.getBuild(t.claude, agents.buildId)).includes(NOTE));
+    t.queue(write);
+    const own = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a migration" })).buildId);
+    assert.match(own.log.join("\n"), new RegExp(NOTE));
+  });
+
+  test("Hewn's builder checking an agent's change doesn't see the error either; on the owner's own build it does", async () => {
+    const seen: string[] = [];
+    const checking = async (ws: string, job: { check?: (id: string) => Promise<{ text: string; failures: string[] }> }) => {
+      writeFileSync(join(ws, "migrations", "002_quote.sql"), quoting().at(-1)!.content);
+      const r = await job.check!("1");
+      seen.push(JSON.stringify(r));
+    };
+    t.queue(checking as never);
+    await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a migration" })).buildId);
+    assert.ok(!seen[0].includes(NOTE), seen[0]);
+    assert.match(seen[0], /the upgrade dry run failed on a copy of the tool's data/);
+    t.queue(checking as never);
+    await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a migration" })).buildId);
+    assert.match(seen[1], new RegExp(NOTE));
+  });
+});

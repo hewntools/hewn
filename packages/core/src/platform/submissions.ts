@@ -163,7 +163,8 @@ export class Submissions extends Domain {
    * Check a client's files as validation will, promoting nothing: what the builder's own `check`
    * runs (the manifest, bundling, contracts against the tool when `capabilityId` is given,
    * migrations, the tests, the sample data, the screen at 1280 and 390 px in light and dark with
-   * what to fix measured on it). At most `CHECKS_PER_HOUR` a client, one at a time.
+   * what to fix measured on it), but for the upgrade dry run on the tool's own data, which runs when
+   * it's submitted. At most `CHECKS_PER_HOUR` a client, one at a time.
    */
   async check(agent: Agent, req: { files?: unknown; capabilityId?: unknown }): Promise<ClientCheck> {
     const change = req.capabilityId !== undefined;
@@ -182,7 +183,8 @@ export class Submissions extends Domain {
       await this.workbench.open(build.id, files);
       let r: CheckResult;
       try {
-        r = await this.d.validation.check(build);
+        // Not the upgrade dry run: a client's migrations run on a copy of the owner's data only once submitted.
+        r = await this.d.validation.check(build, { liveData: false });
       } finally {
         await this.workbench.remove(build.id).catch(() => {});
       }
@@ -190,7 +192,8 @@ export class Submissions extends Domain {
       // The renders as files too, for a client that drops images (a long page's parts only there).
       let room = MAX_PARTS_BYTES;
       const parts = (r.parts ?? []).filter((s) => (room -= s.png.length) >= 0);
-      return { passed: r.passed, text: r.text, failures: r.failures, defects: r.defects, images: r.images, files: [...r.images, ...parts].map((s) => ({ path: `screenshots/${s.name}.png`, content: toBase64(s.png), encoding: "base64" as const })) };
+      const later = cap && (await this.runtime.hasState({ capabilityId: cap.id })) ? `\n\nNot in a check: the upgrade dry run, your migrations on a copy of ${cap.id}'s data. It runs when you submit.` : "";
+      return { passed: r.passed, text: r.text + later, failures: r.failures, defects: r.defects, images: r.images, files: [...r.images, ...parts].map((s) => ({ path: `screenshots/${s.name}.png`, content: toBase64(s.png), encoding: "base64" as const })) };
     };
     const prev = this.checking.get(agent.id) ?? Promise.resolve();
     const next = prev.then(run, run);
