@@ -80,7 +80,10 @@ export interface BundlePreview {
   /** The version it was exported from. */
   version: number;
   from: ToolSource["from"];
+  /** A link's: the host the file came from (where the link's redirects ended). */
   host: string | null;
+  /** A link that redirected to another host: the host the link itself was on. */
+  linkHost: string | null;
   summary: BundleSummary | null;
   /** Whose reading `summary` is: Hewn's, shipped with one of Hewn's tools, or the owner's own builder's. */
   summaryBy: "hewn" | "yours" | null;
@@ -100,6 +103,7 @@ interface Staged {
   at: number;
   from: ToolSource["from"];
   host?: string;
+  linkHost?: string;
   /** The owner's own reading of it (the intake's summary), once asked for. */
   summary?: BundleSummary;
 }
@@ -242,12 +246,12 @@ export class Sharing extends Domain {
   // ---------- Install from a file ----------
 
   /** Stage an uploaded bundle: checked (format, size, ABI), kept until installed or a day old. */
-  async stageBundle(owner: Agent, zip: Uint8Array, origin: { from: ToolSource["from"]; host?: string } = { from: "file" }): Promise<BundlePreview> {
+  async stageBundle(owner: Agent, zip: Uint8Array, origin: { from: ToolSource["from"]; host?: string; linkHost?: string } = { from: "file" }): Promise<BundlePreview> {
     requireOwner(owner);
     const { files, sidecar, manifest } = refuseUnreadable(zip);
     await this.dropOldStaged();
     const token = randomToken(24);
-    const entry: Staged = { at: Date.now(), from: origin.from, ...(origin.host ? { host: origin.host } : {}) };
+    const entry: Staged = { at: Date.now(), from: origin.from, ...(origin.host ? { host: origin.host } : {}), ...(origin.linkHost ? { linkHost: origin.linkHost } : {}) };
     // The preview first: nothing is kept of a file that can't be shown.
     const preview = this.preview(token, files, sidecar, manifest, entry);
     await this.blobs.put(`bundles/${token}.zip`, zip);
@@ -363,6 +367,7 @@ export class Sharing extends Domain {
       version: sidecar.tool?.version ?? 1,
       from: staged.from,
       host: staged.host ?? null,
+      linkHost: staged.linkHost ?? null,
       summary: staged.summary ?? hewn,
       summaryBy: staged.summary ? "yours" : hewn ? "hewn" : null,
       asks: {

@@ -12,12 +12,12 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const refuse = (message: string) => new PlatformError("invalid_request", message, { refusal: "link" });
 
 /**
- * Fetch a tool's file from `raw`: its bytes, and the host the owner gave (what "From <host>" and
- * the tool's `source` say, wherever a redirect led).
+ * Fetch a tool's file from `raw`: its bytes, `host` where they came from (the last redirect's host:
+ * what "From <host>" and the tool's `source` say), and `linkHost`, the host of the link as given.
  */
-export async function fetchLink(raw: string, fetchFn: typeof fetch = fetch): Promise<{ bytes: Uint8Array; host: string }> {
+export async function fetchLink(raw: string, fetchFn: typeof fetch = fetch): Promise<{ bytes: Uint8Array; host: string; linkHost: string }> {
   let url = linkUrl(raw, "The link");
-  const host = url.host;
+  const linkHost = url.host;
   const signal = AbortSignal.timeout(TIMEOUT_MS);
   for (let hop = 0; ; hop++) {
     let res: Response;
@@ -37,7 +37,7 @@ export async function fetchLink(raw: string, fetchFn: typeof fetch = fetch): Pro
       await res.body?.cancel();
       throw refuse(res.status === 404 || res.status === 410 ? `There's nothing at that link (${res.status}): it may have expired or been revoked.` : `${url.host} answered ${res.status}.`);
     }
-    return { bytes: await capped(res), host };
+    return { bytes: await capped(res), host: url.host, linkHost };
   }
 }
 

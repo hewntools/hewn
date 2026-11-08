@@ -437,8 +437,13 @@ export const operations = {
   await step("Share… › Link: a link to one version, Never in red, served on the public listener with the robots header, counted, then revoked", async () => {
     await sv.admin("call", { method: "setPublicUrl", args: ["https://hewn.example.com"] });
     await page.goto(`${web}/#/c/shared-log`);
+    // The router holds the version page (with its own Share…) until Info is ready: wait for Info.
+    await page.locator("main.version-layout").waitFor({ state: "detached" });
+    await page.locator(".pill", { hasText: "from a file · Running Log v1" }).waitFor();
     await page.getByRole("button", { name: "Share…" }).click();
     const sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
+    await sheet.getByText(/sample\/calls\.json · \d+ calls? · /).waitFor();
+    if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Share… isn't on the live version");
     await sheet.locator("li", { hasText: "Anyone with it can install this version" }).getByRole("button", { name: "Create…" }).click();
     const link = page.locator("dialog[open]", { hasText: "Link to Shared Log v2" });
     await link.getByRole("button", { name: "7 days" }).and(link.locator("[aria-pressed=true]")).waitFor();

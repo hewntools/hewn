@@ -37,7 +37,7 @@ From the terminal: `hewn share <id> [--version N] [--out file]` prints the same 
 
 A link needs your Hewn to be reachable from the internet: a [public URL](remote-access.md), or a [tunnel](agents.md) that's up. Without one, the Link row says "Links need a public address" and links to Settings › Remote access. A quick tunnel (`hewn tunnel start --quick`) gets a new address each time it starts, so its links stop working then; a named tunnel or a public URL keeps them.
 
-The code in a link is long and random (192 bits), so it can't be guessed, and requests for links are rate limited. Search engines are told to keep out (`X-Robots-Tag: noindex, nofollow` on every answer, and `robots.txt`), so a link is found only where someone posts it. Anyone it's passed on to can use it, though, until it expires or you revoke it: share it as you would the file. See [what the public address exposes](remote-access.md#what-the-public-address-exposes).
+The code in a link is long and random (192 bits), so it can't be guessed, and requests for links are rate limited, per address and per link: someone who has a link can use up that link's share for up to 10 minutes, and the people you sent it to wait that long. Search engines are told to keep out (`X-Robots-Tag: noindex, nofollow` on every answer, and `robots.txt`), so a link is found only where someone posts it. Anyone it's passed on to can use it, though, until it expires or you revoke it: share it as you would the file. See [what the public address exposes](remote-access.md#what-the-public-address-exposes).
 
 ## Sample data
 
@@ -60,7 +60,7 @@ Then one sheet shows:
 
 Installing runs the tool's own tests, as for any build, but no builder: the code is the file's. Then the tool opens and asks for what it needs.
 
-Info shows where it came from ("from a file · Plant Log v7", or "from a link · anna.example.com" with the link's host), and Activity and the build say "Installed from a file" (or from the host). Change it like any of your tools: it's yours now, and nothing pulls updates from where it came from.
+Info shows where it came from ("from a file · Plant Log v7", or "from a link · anna.example.com" with the host the file came from), and Activity and the build say "Installed from a file" (or from the host). For a link that redirected, that's the host the redirects ended on, where the file really came from; the install sheet also says where the link itself was ("From files.example, linked from short.example"). Change it like any of your tools: it's yours now, and nothing pulls updates from where it came from.
 
 A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB or holds more than 1,000 files, it names one file twice (`src/index.ts` and `SRC/index.ts` are one file on many disks), its npm dependencies aren't all registry versions or it carries npm settings (`.npmrc`), or it needs a newer Hewn (a newer file format or tool spec: then `hewn upgrade` and try again). Code that imports anything outside the tool fails to install, saying which import.
 

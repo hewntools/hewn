@@ -66,7 +66,9 @@ async function installFromFileOrLink() {
   );
   if (!picked) return;
   if (picked.error) return refusal(picked.error);
-  if (picked.preview) return readThenInstall(picked.preview, { from: `From ${picked.preview.host ?? "a link"}` });
+  // Where the file came from; a link that redirected elsewhere says where the link was too.
+  const p = picked.preview;
+  if (p) return readThenInstall(p, { from: `From ${p.host ?? "a link"}${p.linkHost ? `, linked from ${p.linkHost}` : ""}` });
   const file = picked;
   if (file.size > MAX_BYTES) return refusal({ message: `${file.name} is ${Math.round(file.size / 104857.6) / 10} MB; a tool's file may be at most 5 MB.` });
   const data = await new Promise((ok, no) => {

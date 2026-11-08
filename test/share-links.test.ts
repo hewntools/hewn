@@ -147,7 +147,7 @@ describe("share links and install from a link, over HTTP", () => {
     return answer();
   }) as typeof fetch;
 
-  const http = (to: Server, path: string, o: { method?: string; host?: string; body?: unknown; api?: boolean } = {}) =>
+  const http = (to: Server, path: string, o: { method?: string; host?: string; body?: unknown; api?: boolean; from?: string } = {}) =>
     new Promise<Res>((resolve, reject) => {
       const port = (to.address() as AddressInfo).port;
       const data = o.body === undefined ? undefined : JSON.stringify(o.body);
@@ -161,6 +161,7 @@ describe("share links and install from a link, over HTTP", () => {
             host: o.host ?? `hewn.localhost:${(server.address() as AddressInfo).port}`,
             ...(cookie ? { cookie } : {}),
             ...(o.api ? { "x-hewn-ui": "1" } : {}),
+            ...(o.from ? { "x-forwarded-for": o.from } : {}),
             ...(data ? { "content-type": "application/json", "content-length": String(Buffer.byteLength(data)) } : {}),
           },
         },
@@ -267,6 +268,23 @@ describe("share links and install from a link, over HTTP", () => {
     assert.ok(!logs.some((l) => l.includes("c".repeat(32))), "nor in the rate limit's log line");
   });
 
+  test("the limit is per address and per link: busy addresses don't use it up for everyone, and one link fetched too often waits on its own", async () => {
+    const limited = await startPublicServer(server, 0, () => {}, new RateLimiter({ ...RULES, share: { perClient: 4, total: 1000, windowMs: 60_000 }, shareLink: { perClient: 3, total: 1000, windowMs: 60_000 } }));
+    try {
+      const link = (c: string) => `/share/${c.repeat(32)}`;
+      // One link from three addresses: the fourth address waits for that link, not for another.
+      for (const from of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from })).status, 404, from);
+      assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from: "198.51.100.4" })).status, 429);
+      assert.equal((await http(limited, link("e"), { host: "hewn.example.com", from: "198.51.100.4" })).status, 404);
+      // One address trying many links waits on its own; another address doesn't.
+      for (const c of ["f", "g", "h", "i"]) assert.equal((await http(limited, link(c), { host: "hewn.example.com", from: "198.51.100.5" })).status, 404, c);
+      assert.equal((await http(limited, link("j"), { host: "hewn.example.com", from: "198.51.100.5" })).status, 429);
+      assert.equal((await http(limited, link("j"), { host: "hewn.example.com", from: "198.51.100.6" })).status, 404);
+    } finally {
+      await new Promise((r) => limited.close(r));
+    }
+  });
+
   test("install from a link: fetched, staged with its host, installed with its source; http and private addresses refused before any fetch", async () => {
     const { bundle } = await t.platform.shareBundle(USER, "running-log");
     net.set("https://friend.example/share/abc", () => new Response(Buffer.from(bundle), { status: 200, headers: { "content-type": "application/zip" } }));
@@ -294,6 +312,24 @@ describe("share links and install from a link, over HTTP", () => {
       assert.equal(r.json.details.refusal, "link");
     }
     assert.deepEqual(asked, [], "nothing was fetched");
+  });
+
+  test("a link that redirects: the file's own host is what Hewn records and shows, with where the link was", async () => {
+    const { bundle } = await t.platform.shareBundle(USER, "running-log");
+    net.set("https://short.example/abc", () => new Response(null, { status: 302, headers: { location: "https://files.example/plant.hewn.zip" } }));
+    net.set("https://files.example/plant.hewn.zip", () => new Response(Buffer.from(bundle), { status: 200 }));
+    const staged = await api("/bundles", { method: "POST", body: { url: "https://short.example/abc" } });
+    assert.equal(staged.status, 200, JSON.stringify(staged.json));
+    assert.equal(staged.json.host, "files.example", "where the file came from");
+    assert.equal(staged.json.linkHost, "short.example", "where the link was");
+    const done = await t.platform.settle((await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Redirected Log" } })).json.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    const info = await api("/capabilities/redirected-log");
+    assert.equal(info.json.source.host, "files.example");
+    assert.equal(info.json.origin, "from a link · files.example");
+    // No redirect: no link host to show.
+    net.set("https://files.example/direct.hewn.zip", () => new Response(Buffer.from(bundle), { status: 200 }));
+    assert.equal((await api("/bundles", { method: "POST", body: { url: "https://files.example/direct.hewn.zip" } })).json.linkHost, null);
   });
 });
 
@@ -324,7 +360,8 @@ describe("fetchLink: what Hewn fetches when it installs from a link", () => {
     const ok = stub({ "https://a.example/x": redirect("/y"), "https://a.example/y": redirect("https://cdn.example/z", 307), "https://cdn.example/z": () => new Response(zip) });
     const got = await fetchLink("https://a.example/x", ok.f);
     assert.deepEqual([...got.bytes], [...zip]);
-    assert.equal(got.host, "a.example", "the host the owner gave");
+    assert.equal(got.host, "cdn.example", "where the file came from: the last redirect's host");
+    assert.equal(got.linkHost, "a.example", "the link's own host");
     assert.deepEqual(ok.asked, ["https://a.example/x", "https://a.example/y", "https://cdn.example/z"]);
     await assert.rejects(fetchLink("https://a.example/x", stub({ "https://a.example/x": redirect("http://a.example/x") }).f), /redirects to a link that isn't https/);
     const inside = stub({ "https://a.example/x": redirect("https://169.254.169.254/latest/meta-data") });

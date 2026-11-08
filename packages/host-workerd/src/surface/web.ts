@@ -450,7 +450,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       if (b.url === undefined) return platform.stageBundle(owner, fromBase64(String(b.data ?? "")), { from: "file" });
       platform.agents(owner); // owner only, before anything is fetched
       const fetched = await fetchLink(String(b.url), host.fetch);
-      return platform.stageBundle(owner, fetched.bytes, { from: "link", host: fetched.host });
+      return platform.stageBundle(owner, fetched.bytes, { from: "link", host: fetched.host, ...(fetched.linkHost !== fetched.host ? { linkHost: fetched.linkHost } : {}) });
     }
     if (id && !sub && method === "GET") return platform.stagedBundle(owner, id);
     if (id && sub === "code" && method === "GET") {

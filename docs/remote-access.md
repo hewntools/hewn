@@ -124,7 +124,7 @@ New device, or lost the passkey? `hewn open --print` again.
 
 On the public URL itself: the web client, tool apps, passkey sign-in, MCP and the OAuth sign-in agents use. On any other name that reaches the public listener (a tunnel's, say), only MCP, OAuth, share links and `robots.txt`. Admin never answers there. Everything is rate limited per address, and logged.
 
-**Share links** (`/share/<code>`, [Sharing tools](sharing.md#links)) are the one thing there that needs no sign-in: each serves one version of one tool as a file, to whoever has the link, until it expires or you revoke it. Nothing else answers under `/share/`: a code that isn't a working link gets the same 404 as one that never existed. The code is 192 random bits and never written to Hewn's log (it shows as `/share/…`), and links have a rate limit of their own. Every answer under `/share/` carries `X-Robots-Tag: noindex, nofollow`, and `robots.txt` disallows `/share/`, so search engines keep out.
+**Share links** (`/share/<code>`, [Sharing tools](sharing.md#links)) are the one thing there that needs no sign-in: each serves one version of one tool as a file, to whoever has the link, until it expires or you revoke it. Nothing else answers under `/share/`: a code that isn't a working link gets the same 404 as one that never existed. The code is 192 random bits and never written to Hewn's log (it shows as `/share/…`), and links are rate limited per address and per link. Every answer under `/share/` carries `X-Robots-Tag: noindex, nofollow`, and `robots.txt` disallows `/share/`, so search engines keep out.
 
 ## How it's protected
 
