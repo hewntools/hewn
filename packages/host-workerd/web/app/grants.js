@@ -161,7 +161,8 @@ async function grantsSheet(capId) {
         }
       });
       const configRow = (x) => {
-        const input = h("input", { type: "text", autocomplete: "off", placeholder: x.description, oninput: check });
+        // A suggested value is in the field, not a placeholder: Save takes it as it is (nothing is stored until then).
+        const input = h("input", { type: "text", autocomplete: "off", value: x.suggested ?? "", placeholder: x.description, oninput: check });
         config.set(x.name, input);
         return { pill: kindTag("setting"), main: h("span", { class: "mono" }, x.name), sub: x.description, extra: input };
       };

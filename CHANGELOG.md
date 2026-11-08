@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.11 (unreleased)
+
+- **A setting can come suggested.** A tool's setting with an obvious answer (the repository almost everyone keeps, a name you told the builder) now opens in the setup form with that value already in the field: check it, change it if you like, and save. Nothing is filled in until you save, so the tool stays not ready until then. Builders write it as `"suggested"` on the config entry; `"default"` is refused with a pointer to it, since Hewn never fills in a setting by itself. This is ABI 2.6, `@hewntools/spec` 2.6.0 (hewntools/hewn#66). See [Config](spec/tools.md#config-since-21).
+
 ## 0.4.10 (2026-11-07)
 
 - **New tools get a design of their own.** The builder treats the screen as the product. It works out when you'll open the tool and what you want to see first, and draws that big at the top. It plans a real palette from the subject (green for plants or money, purple for sleep) on a plain white or grey page, chooses its own type, and draws your data (a timeline, a ring, a calendar) instead of laying it out as `Label: value` lines. It's told how your other tools look (each one's colour and the look its builder recorded in `ui/look.json`), so a new one looks clearly different, and a subject with no colour of its own (people, plans, words, time) gets a hue at least 40° from your others on Home. It steers clear of named generic looks (cream with a serif and terracotta, near-black with acid green, all-caps labels, every section in the same card), writes its colours with `light-dark()` so they follow Hewn's Light or Dark, and records its look in `ui/look.json`. A change keeps a tool's look unless you ask for a new one. See [The build](docs/building-tools.md#the-build).

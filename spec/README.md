@@ -31,7 +31,7 @@ export const operations = {
 The spec is versioned by the **ABI**, never by Hewn's releases. One version covers the whole contract: the manifest format, `ctx` and [grant](capability-model.md#grant) kinds. The agent tools ([`agents.md`](agents.md)) aren't part of it: a tool never sees them, and a host offers the list in the `@hewntools/spec` it ships with.
 
 - A tool declares the lowest ABI it needs in `capability.json` (`"abi": "2.2"`; none means 2.0). A host implements one major and runs every minor up to its own; it refuses a manifest that uses something newer than it declares.
-- **Minor versions only add.** So this document, at 2.5, describes all of 2.x: every addition is marked with the minor that introduced it ("since 2.2"), here, in the types, and in `src/abi.ts` (`ABI_HISTORY`, `CTX_MEMBERS`).
+- **Minor versions only add.** So this document, at 2.6, describes all of 2.x: every addition is marked with the minor that introduced it ("since 2.2"), here, in the types, and in `src/abi.ts` (`ABI_HISTORY`, `CTX_MEMBERS`).
 - **A new major** is a breaking change. When ABI 3 arrives, the 2.x spec is frozen in `v2/` and stays published as `@hewntools/spec@2.x`; the current major lives here.
 - `@hewntools/spec`'s version is the ABI: `2.5.x` describes ABI 2.5; the patch number is for fixes to the text, types or schemas that change nothing in the contract.
 
@@ -43,6 +43,7 @@ The spec is versioned by the **ABI**, never by Hewn's releases. One version cove
 | 2.3 | Manifest `widgets`, and the widget view models their operations return |
 | 2.4 | Manifest `saturation` |
 | 2.5 | Manifest `source` (where an installed tool came from; the host's to write), `requires.capabilities[]` `hub` and `minVersion`; `sample/calls.json` |
+| 2.6 | Manifest `config[].suggested` (the value a setting's field opens with; the owner confirms it) |
 
 2.0 replaced the pre-release 1.x, which no Hewn runs.
 

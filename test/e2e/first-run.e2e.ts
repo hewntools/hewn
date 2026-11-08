@@ -299,6 +299,26 @@ try {
     await page.locator(".pill.ok", { hasText: /^ready$/ }).waitFor();
   });
 
+  await step("a setting with a suggested value: the form opens with it in the field, and the tool is ready only after Save", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-suggested-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "repo-counter", name: "Repo Counter", abi: "2.6", config: [{ name: "REPO", description: "The repository, owner/name", suggested: "hewntools/hewn" }] }));
+    const installed = await sv.admin("install", { name: "Repo Counter", purpose: "Counts, for a repository", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    if ((await sv.admin("readiness", { capabilityId: "repo-counter" })).ready) throw new Error("ready before the owner saved");
+    await page.goto(`${web}/#/c/repo-counter`);
+    await page.getByRole("button", { name: "Set…" }).first().click();
+    const field = page.locator("dialog input[type=text]");
+    await field.waitFor();
+    if ((await field.inputValue()) !== "hewntools/hewn") throw new Error(`the field opened with "${await field.inputValue()}"`);
+    if ((await sv.admin("readiness", { capabilityId: "repo-counter" })).ready) throw new Error("ready while the form is open");
+    await page.getByRole("button", { name: "Authorize" }).click();
+    await page.locator(".pill.ok", { hasText: /^ready$/ }).waitFor();
+    const r = await sv.admin("readiness", { capabilityId: "repo-counter" });
+    if (!r.ready) throw new Error(`not ready after Save: ${JSON.stringify(r)}`);
+  });
+
   await step("Versions › Details › Restore… asks first, and Cancel keeps the live version", async () => {
     const v2 = await sv.admin("modify", { capabilityId: "reading-list", request: "a second version", wait: true });
     if (v2.status !== "promoted") throw new Error(v2.log?.join("\n"));

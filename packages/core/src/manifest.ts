@@ -29,6 +29,7 @@ export const ABI_FEATURES: AbiFeature[] = [
   { name: '"saturation"', since: "2.4", used: (m) => m.saturation !== undefined },
   { name: '"source"', since: "2.5", used: (m) => m.source !== undefined },
   { name: '"hub" and "minVersion" in requires.capabilities', since: "2.5", used: (m) => (m.requires?.capabilities ?? []).some((c) => c.hub !== undefined || c.minVersion !== undefined) },
+  { name: '"suggested" in config', since: "2.6", used: (m) => (m.config ?? []).some((c) => c.suggested !== undefined) },
 ];
 
 /** ctx members added after 2.0, each exposed only to code whose manifest declares at least `since`. */
@@ -143,9 +144,12 @@ export function schemaErrors(check: SchemaCheck): string[] {
 const validateManifestShape = compileSchema(MANIFEST_SCHEMA);
 
 export function validateManifest(m: unknown, expectedId: string): string[] {
-  if (!validateManifestShape(m)) return schemaErrors(validateManifestShape).map((e) => `manifest ${e}`);
+  // A config entry has no default (Hewn never fills a setting in): say what it has instead.
+  if (!validateManifestShape(m)) return schemaErrors(validateManifestShape).map((e) => `manifest ${/^\/config\/\d+ unexpected property "default"$/.test(e) ? `${e}: use "suggested" (prefilled in the setup form; the owner confirms it)` : e}`);
   const manifest = m as CapabilityManifest;
   const errors: string[] = [];
+  // Secrets are never suggested: the owner pastes each one.
+  for (const s of manifest.requires?.secrets ?? []) if ("suggested" in s) errors.push(`requires.secrets ${s.name}: a secret can't carry "suggested" (only a config entry can)`);
   if (manifest.id !== expectedId) errors.push(`manifest id '${manifest.id}' must be '${expectedId}'`);
   errors.push(...abiErrors(manifest));
   errors.push(...kindErrors(manifest));
