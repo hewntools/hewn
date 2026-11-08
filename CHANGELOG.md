@@ -26,6 +26,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Fixed:** a change waiting for you showed as "Building…" in Activity; it says it waits for you. An install from a file whose checks fail no longer runs them three times over.
 - **Fixed:** a tool with a long test suite (hundreds of cases, some of them slow) couldn't be built or installed since 0.4.10: Hewn didn't answer its own health check while the cases ran, so it was restarted partway through, and the retry stopped in the same place. Hewn now answers between cases.
 - **Fixed:** installing a tool that needs a newer Hewn now says "This tool needs a newer Hewn", with how to upgrade, instead of "This file can't be installed".
+- **The visual check reaches only the page it checks.** The browser Hewn uses to check a build's screen loads the page's own files and calls its own tool, and nothing else: no other site, no address on your machine or network, no popup or WebRTC elsewhere. See [the threat model](docs/threat-model.md).
 
 ## 0.4.10 (2026-11-07)
 
