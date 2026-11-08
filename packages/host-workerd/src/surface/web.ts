@@ -12,6 +12,7 @@ import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
@@ -150,11 +151,16 @@ function recentCalls(platform: Platform, owner: Agent, limit: number, perCapabil
   return calls.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
 
+/** The Agent Skill "build a Hewn tool" (SKILL_URL), public like the design system: any agent may load it, here or where it reaches MCP. */
+export const skillResponse = (platform: Platform) =>
+  new Response(platform.skill(), { status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "x-content-type-options": "nosniff", "cache-control": "no-cache", "access-control-allow-origin": "*" } });
+
 export async function handleWeb(platform: Platform, host: SurfaceHost, site: Site, req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const asset = await platformAsset(host, path);
   if (asset) return asset;
+  if (path === SKILL_URL && req.method === "GET") return skillResponse(platform);
   const command = site.kind === "public" ? "hewn open --print" : "hewn open";
   /** Signed out: the command to run, or (hosted) the host's sign-in, after `hostedLead`. */
   const signIn = (status: number, title: string, line: string, cmd: string, hostedLead = "") =>

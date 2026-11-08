@@ -16,7 +16,8 @@ When the user asks about their own data, activities or tools, check capabilities
 Use capabilities_get to read operation schemas, then capabilities_invoke. Raw storage is not
 accessible. Everything goes through operations.
 For how Hewn itself works (concepts, building tools, connections, grants, the manifest and the ABI),
-read hewn_docs instead of guessing.`;
+read hewn_docs instead of guessing. To write a capability yourself, read the Skill "build a Hewn tool":
+hewn_docs page skills/build-a-hewn-tool/SKILL.md.`;
 
 /** The MCP Apps resource that draws a widget in the chat (`widgets_show`). */
 export const WIDGET_APP_URI = "ui://hewn/widget";
@@ -137,7 +138,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_pack",
     scopes: ["create", "modify"],
     description:
-      "To write a capability yourself instead of asking the platform's builder: first fetch what its builder finds in its workspace, and write these files into your folder. kind create: the user's other capabilities' contracts (CONTRACTS.md, .hewn-contracts/<id>.md), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. How to build one: hewn_docs (building tools, the manifest, the ABI). Then capabilities_check while you work, and capabilities_submit when the check passes.",
+      "To write a capability yourself instead of asking the platform's builder: first fetch what its builder finds in its workspace, and write these files into your folder. kind create: the user's other capabilities' contracts (CONTRACTS.md, .hewn-contracts/<id>.md), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. How to build one: the Skill \"build a Hewn tool\" (hewn_docs page skills/build-a-hewn-tool/SKILL.md). Then capabilities_check while you work, and capabilities_submit when the check passes.",
     inputSchema: obj({ kind: { type: "string", enum: ["create", "modify"] }, capabilityId: str("The capability to change (kind modify)") }, ["kind"]),
   },
   {

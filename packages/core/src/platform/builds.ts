@@ -23,6 +23,7 @@ import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
 import { type Candidate, reviewShotKey } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
+import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
 import spec from "@hewntools/spec/package.json" with { type: "json" };
 
@@ -1692,6 +1693,11 @@ export class Builds extends Domain {
   }
 
   // ---------- helpers ----------
+
+  /** The Agent Skill "build a Hewn tool": this Hewn's brief for a client that writes a tool itself (`skillText`). */
+  skill(): string {
+    return skillText(this.brief);
+  }
 
   /**
    * The owner's other capabilities a build may compose with, from their active manifests; for a change,

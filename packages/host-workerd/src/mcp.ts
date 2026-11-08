@@ -9,6 +9,7 @@ import type { JSONSchema } from "@hewntools/core/manifest.ts";
 import type { CapabilitySummary, ClientCheck, Platform } from "@hewntools/core/platform.ts";
 import { toBase64 } from "@hewntools/core/files.ts";
 import { viewText } from "@hewntools/core/widgets.ts";
+import { SKILL_PATH } from "@hewntools/core/skill.ts";
 import { AGENT_TOOLS, SERVER_INSTRUCTIONS } from "@hewntools/spec/agents.ts";
 import { WIDGET_APP_MIME, WIDGET_APP_URI } from "./surface/widget-app.ts";
 
@@ -119,7 +120,12 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     },
     capabilities_submit: { handler: (a) => platform.submitFiles(agent, a) },
     hewn_docs: {
-      handler: async (a) => docsText(docs ? await docs() : [], { query: a.query, page: a.page }),
+      // The Skill is a page of its own (listed, and read by name), out of the search: its text is the brief's, which is searched already.
+      handler: async (a) => {
+        const pages = docs ? await docs() : [];
+        const skill = { name: SKILL_PATH, text: platform.skill() };
+        return docsText(a.query && !a.page ? pages : [...pages, ...(pages.length ? [skill] : [])], { query: a.query, page: a.page });
+      },
       format: (text: string) => ({ content: [{ type: "text", text }] }),
     },
   };

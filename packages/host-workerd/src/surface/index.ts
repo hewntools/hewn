@@ -12,7 +12,8 @@ import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
 import { CLIENT_IP_HEADER, PUBLIC_HEADER, PUBLIC_PATHS } from "./public.ts";
 import { localSite, publicSite, requestHost, type Site, uiPath } from "./site.ts";
 import { handleUi } from "./ui.ts";
-import { handleWeb } from "./web.ts";
+import { handleWeb, skillResponse } from "./web.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 
 export type { SurfaceHost } from "./host.ts";
 export { McpSessions } from "./mcp-sessions.ts";
@@ -68,6 +69,8 @@ function browser(platform: Platform, host: SurfaceHost, site: Site, req: Request
 
 async function route(platform: Platform, sessions: McpSessions, host: SurfaceHost, req: Request, url: URL, isPublic: boolean, site?: Site): Promise<Response> {
   const origin = originOf(req, isPublic);
+  // Where an agent reaches MCP, it finds the Skill too.
+  if (url.pathname === SKILL_URL) return req.method === "GET" ? skillResponse(platform) : json(405, { error: "method_not_allowed" });
   if (OAUTH_PATHS.has(url.pathname)) return handleOAuth(platform, req, origin, { webUrl: (site ?? localSite(host.port)).web, hosted: !!host.hosted, log: host.log });
   if (url.pathname !== "/mcp") return json(404, { error: "not_found" });
   const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];

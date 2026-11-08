@@ -110,7 +110,7 @@ A promoted tool may still be not ready: if it asks for hosts, secrets, other too
 
 ### A tool the agent writes itself
 
-An agent may also write a tool and hand it over. The host's builder doesn't run; the host validates the files as it validates its builder's, and the gate is the same. Files travel as `files: [{ path, content, encoding? }]`: `path` relative to the tool's folder, `content` UTF-8 text, or base64 with `encoding: "base64"`; at most 1,000 files and 5 MB.
+An agent may also write a tool and hand it over; the Skill **build a Hewn tool** ([below](#hewns-docs)) says how. The host's builder doesn't run; the host validates the files as it validates its builder's, and the gate is the same. Files travel as `files: [{ path, content, encoding? }]`: `path` relative to the tool's folder, `content` UTF-8 text, or base64 with `encoding: "base64"`; at most 1,000 files and 5 MB.
 
 - **`capabilities_pack`** `{ kind: "create" | "modify", capabilityId? }` (scope `create` or `modify`, as for the build it prepares) returns `{ files, next }`: what the host's builder finds in its workspace besides the request. `CONTRACTS.md` and `.hewn-contracts/<id>.md` (the other tools' contracts), `OTHER_TOOLS.md` (their looks) and `PLATFORM_UI.css` (the design system), only for the tools the agent may see. For `modify`, also the tool's active version's files, `baseVersion` and `schedules` (`operation`, `cadence`, `status`): a change should keep an operation by each scheduled name, or that schedule stops working. Never the owner's conversation or another build's request.
 - **`capabilities_check`** `{ files, capabilityId? }` runs validation on the files without promoting anything (contract compatibility against the tool when `capabilityId` is given), all but the upgrade dry run on a copy of the tool's own data, which runs on submit: the content is the check's text (PASS or FAIL, every failure, what was measured on the UI, what passed) and the four renders as `image/png` (`desktop-light`, `desktop-dark`, `mobile-light`, `mobile-dark`); `structuredContent` has `passed`, `failures`, `defects` and `files`, every render as `screenshots/<name>.png` (base64), a long page's further parts included. 30 calls per agent per hour; the next is a `conflict` ("No checks left this hour (30)").
@@ -148,6 +148,8 @@ An agent with `invoke` can propose running an operation on a timetable: `schedul
 - **`page`:** that page's markdown, or with `page#section` (the anchor, as links write it, or the heading) one section and the ones under it. With `query` too: the search, within that page.
 
 An unknown page or section is `not_found`, naming the ones there are.
+
+One more page is listed and read by name, but left out of the search (its text is the builder brief's, which the search covers): `skills/build-a-hewn-tool/SKILL.md`, the Agent Skill **build a Hewn tool**. It is the brief Hewn's own builder reads, with the three calls of [a tool the agent writes itself](#a-tool-the-agent-writes-itself) where the builder has its workspace, so the two never differ. The server instructions name it. A host also serves it as `text/markdown` to anyone at `/_platform/skills/build-a-hewn-tool/SKILL.md`, on its web address and where agents reach `/mcp`, and the npm package carries it in `dist/skills/`.
 
 ## For host implementers
 

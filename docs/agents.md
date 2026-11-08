@@ -95,6 +95,8 @@ An agent with **Make** or **Change** can write a tool in its own folder instead 
 2. **The check** (`capabilities_check`), as often as it likes while it works, up to 30 an hour: the checks a build gets, with what failed and its screen at 1280 and 390 px, light and dark. Nothing goes live. Its migrations run on a copy of your data only once it submits.
 3. **The submission** (`capabilities_submit`): a build like any other, with "submitted by" and the agent's name on its page, in Activity and on the version. A new tool goes live once it passes; a change waits for your approval (above).
 
+Agents learn how from the Skill **build a Hewn tool**: the brief Hewn's own builder works from, with these three steps in place of its folder. An agent connected to Hewn finds it through `hewn_docs`; one that loads skills from files can take it from `<your Hewn>/_platform/skills/build-a-hewn-tool/SKILL.md`, or from the npm package (`dist/skills/`).
+
 A submission carries the tool's own files only. Files Hewn never keeps in a tool (a builder's settings such as `.claude/` or `CLAUDE.md`, `AGENTS.md`, other dotfiles, the pack's own files, screenshots) are refused with the rule named, never dropped quietly, and so is anything over 5 MB. A change is refused while another change to the tool is on its way, or when the tool has moved on since the agent's pack.
 
 ## CLI reference
