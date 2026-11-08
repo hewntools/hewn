@@ -5,11 +5,13 @@
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 
 /** Why Hewn isn't idle (each reason a fixed word, never a name). */
-export const BUSY_REASONS = ["request", "call", "build", "intake", "stream", "backup", "alarm-soon"] as const;
+export const BUSY_REASONS = ["starting", "request", "call", "build", "intake", "stream", "backup", "alarm-soon"] as const;
 export type BusyReason = (typeof BUSY_REASONS)[number];
 
 /** Quiet this long (no request, call or stream write) before Hewn says it's idle, unless the host asks for another time. */
 export const IDLE_AFTER_SECONDS = 600;
+/** After a start or a resume, Hewn stays awake this long whatever the host's quiet time: a woken Hewn isn't put back to sleep at once. */
+export const GRACE_MS = 600_000;
 /** A schedule due this soon keeps Hewn awake. */
 export const ALARM_SOON_MS = 120_000;
 
@@ -28,14 +30,17 @@ export interface IdleStatus {
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 
 /**
- * Idle means every reason is clear: no request, tool call or stream write for `afterSeconds`, no build running, no
- * intake turn in flight, no change waiting for today's backup, and no schedule due within 2 minutes.
+ * Idle means every reason is clear: 10 minutes since Hewn started or resumed (`resumedAt`, the supervisor's), no
+ * request, tool call or stream write for `afterSeconds`, no build running, no intake turn in flight, no change waiting
+ * for today's backup, and no schedule due within 2 minutes.
  * `backup.lastAt` is the newest backup's time (any backup), `backedUpToday` whether one was made today.
  */
-export function idleStatus(a: ActivityView, backup: { lastAt: number | null; backedUpToday: boolean }, now = Date.now(), afterSeconds = IDLE_AFTER_SECONDS): IdleStatus {
+export function idleStatus(a: ActivityView, backup: { lastAt: number | null; backedUpToday: boolean }, now = Date.now(), afterSeconds = IDLE_AFTER_SECONDS, resumedAt: number | null = null): IdleStatus {
+  const woke = Math.max(a.startedAt, resumedAt ?? 0);
   const recent = (t: number | null) => t !== null && now - t < afterSeconds * 1000;
   const changedSince = a.changedAt !== null && (backup.lastAt === null || a.changedAt > backup.lastAt);
   const reasons: Record<BusyReason, boolean> = {
+    starting: now - woke < GRACE_MS,
     request: recent(a.lastRequestAt),
     call: recent(a.lastCallAt),
     build: a.building,
@@ -45,7 +50,7 @@ export function idleStatus(a: ActivityView, backup: { lastAt: number | null; bac
     "alarm-soon": a.nextAlarmAt !== null && a.nextAlarmAt - now <= ALARM_SOON_MS,
   };
   const busy = BUSY_REASONS.filter((r) => reasons[r]);
-  const ended = Math.max(a.startedAt, ...[a.lastRequestAt, a.lastCallAt, a.lastStreamAt, a.lastIntakeAt, a.lastBuildAt].filter((t): t is number => t !== null));
+  const ended = Math.max(woke, ...[a.lastRequestAt, a.lastCallAt, a.lastStreamAt, a.lastIntakeAt, a.lastBuildAt].filter((t): t is number => t !== null));
   return {
     idle: busy.length === 0,
     since: a.building || a.intakes > 0 ? null : iso(ended),

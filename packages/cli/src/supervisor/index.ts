@@ -587,6 +587,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // by the wall clock and the alarm is re-armed (whether workerd's own alarm fires after such a jump isn't assumed),
   // the backup check runs, and all of it once more a little later: after a wake the clock may lag until NTP catches up.
   let resumeTimer: ReturnType<typeof setInterval> | undefined;
+  /** When the last resume was noticed: the idle report's grace starts again from it. */
+  let resumedAt: number | null = null;
   const recheckTimers = new Set<ReturnType<typeof setTimeout>>();
   if (o.resume !== false) {
     const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now } = o.resume ?? {};
@@ -606,6 +608,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       last = now;
       if (jump <= jumpMs) return;
       log(`the clock jumped ${Math.round(jump / 1000)}s ahead (resumed); catching up`);
+      resumedAt = Date.now();
       void caughtUp();
       const t = setTimeout(() => (recheckTimers.delete(t), void caughtUp()), recheckMs);
       t.unref();
@@ -618,7 +621,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const { result } = (await admin("call", { method: "idleActivity" })) as { result: ActivityView };
     const backups = listBackups(backupDir());
     const lastAt = backups.length ? Math.max(...backups.map((b) => Date.parse(b.at))) : null;
-    return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, Date.now(), afterSeconds);
+    return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, Date.now(), afterSeconds, resumedAt);
   };
 
   const admin = async (path: string, body?: unknown) => {

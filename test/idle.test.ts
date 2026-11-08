@@ -46,6 +46,16 @@ describe("the idle rules", () => {
     assert.equal(idleStatus({ ...quiet, nextAlarmAt: NOW + 3 * min }, backedUp, NOW).idle, true);
   });
 
+  test("ten minutes' grace after a start or a resume, whatever the host's quiet time", () => {
+    const min = 60_000;
+    assert.deepEqual(idleStatus(quiet, backedUp, T0 + 9 * min, 0).busy, ["starting"]);
+    assert.equal(idleStatus(quiet, backedUp, T0 + 10 * min, 0).idle, true);
+    const resumed = NOW - 5 * min;
+    assert.deepEqual(idleStatus(quiet, backedUp, NOW, 0, resumed).busy, ["starting"], "a resume starts it again");
+    assert.equal(idleStatus(quiet, backedUp, NOW, 0, resumed).since, new Date(resumed).toISOString());
+    assert.equal(idleStatus(quiet, backedUp, NOW + 6 * min, 600, resumed).idle, true);
+  });
+
   test("since: when the last activity ended (null while a build or an intake turn runs); a host can apply its own idle time", () => {
     const at = NOW - 20 * 60_000;
     assert.equal(idleStatus({ ...quiet, lastRequestAt: at - 1000, lastCallAt: at, lastBuildAt: at - 5000 }, backedUp, NOW).since, new Date(at).toISOString());
@@ -78,7 +88,7 @@ describe("the idle rules", () => {
       assert.match(text, /^hewn_idle 0$/m);
       assert.match(text, /^hewn_busy\{reason="build"\} 1$/m);
       assert.match(text, /^hewn_busy\{reason="request"\} 0$/m);
-      assert.equal(text.split("\n").filter((l) => l.startsWith("hewn_busy{")).length, 7);
+      assert.equal(text.split("\n").filter((l) => l.startsWith("hewn_busy{")).length, 8);
       assert.match(text, new RegExp(`^hewn_next_alarm_seconds ${Math.floor((NOW + 7200_000) / 1000)}$`, "m"));
       assert.match(text, /^hewn_backup_changed_since 1$/m);
       assert.match(prometheusText(t.platform.metrics(USER), "1.2.3", idleStatus(quiet, backedUp, NOW)), /^hewn_next_alarm_seconds 0$/m);
@@ -254,6 +264,7 @@ describe("the idle report on the workerd host", () => {
     assert.deepEqual(Object.keys(s.backup), ["lastAt", "changedSince"]);
     assert.equal(s.backup.changedSince, true, "installed, never backed up");
     assert.ok(s.busy.includes("backup"));
+    assert.ok(s.busy.includes("starting"), "just started");
     const text = (await get("/metrics")).text;
     assert.match(text, /^hewn_idle 0$/m);
     assert.match(text, /^hewn_busy\{reason="backup"\} 1$/m);
@@ -285,7 +296,7 @@ describe("the idle report on the workerd host", () => {
     assert.ok(moved.lastCallAt > (at.lastCallAt ?? ""));
     assert.ok(moved.busy.includes("request") && moved.busy.includes("call"));
     assert.equal(moved.backup.changedSince, false, "a read changes nothing");
-    assert.equal((await status("?after=0")).idle, true, "with no quiet time asked for, idle at once");
+    assert.deepEqual((await status("?after=0")).busy, ["starting"], "with no quiet time asked for, only the grace after the start is left");
   });
 
   test("after a resume: a schedule that came due while suspended runs once, the alarm is re-armed, and the second look finds nothing more", async () => {
