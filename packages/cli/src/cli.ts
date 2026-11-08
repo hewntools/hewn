@@ -407,7 +407,7 @@ async function main() {
         const verb: Record<string, string> = { read: "READ", write: "CHANGE", destructive: "DELETE" };
         for (const b of list) {
           const r = b.review;
-          console.log(`${b.buildId}  ${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"} ${b.capabilityId}`);
+          console.log(`${b.buildId}  ${b.submittedBy ? `${b.submittedBy} wrote and submitted a change to` : `${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"}`} ${b.capabilityId}`);
           if (r.connection) console.log("    it's a connection: this code holds your sign-in for that service");
           for (const o of r.newOperations) {
             console.log(`    + ${o.key}: agents can then ${verb[o.sideEffect] ?? o.sideEffect}: ${o.description}`);
@@ -418,7 +418,7 @@ async function main() {
             const also = [c.ui && "the screen", c.migrations.length && `data (${c.migrations.join(", ")})`, c.newGrants.length && `new access (${c.newGrants.join(", ")})`, c.changedOperations.length && `updates ${c.changedOperations.join(", ")}`, c.removedOperations.length && `removes ${c.removedOperations.join(", ")}`].filter(Boolean);
             console.log(`    ${also.length ? `also changes: ${also.join("; ")}` : "nothing else changes"}`);
           }
-          console.log(`    asked: "${String(b.request.request ?? "").slice(0, 160)}"`);
+          console.log(`    ${b.submittedBy ? "says" : "asked"}: "${String(b.request.request ?? "").slice(0, 160)}"`);
         }
         console.log("\nAllow: hewn review approve <buildId>   Don't allow: hewn review reject <buildId>");
       });

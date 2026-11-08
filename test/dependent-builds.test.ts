@@ -9,7 +9,7 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { cssWithoutComments } from "@hewntools/core/platform/builds.ts";
-import { FIXTURES, OPENCODE_READ, type Script, setup } from "./helpers.ts";
+import { FIXTURES, OPENCODE_READ, type Script, settled, setup } from "./helpers.ts";
 
 /** The builder writes the site-connection fixture (a connection). */
 const writeConnection: Script = (ws) => cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true });
@@ -204,7 +204,7 @@ describe("dependent builds", () => {
     assert.equal((await t.platform.settle(connChange.buildId)).status, "review");
     assert.equal(t.platform.getBuild(t.claude, change.buildId).status, "waiting");
     assert.equal((await t.platform.approveBuild(USER, connChange.buildId)).status, "promoted");
-    const done = await t.platform.settle(change.buildId);
+    const done = await settled(t.platform, change.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(done.log.some((l) => /site-connection\/pages@1/.test(l)));
   });
@@ -224,7 +224,8 @@ describe("dependent builds", () => {
       async () => void (await connGate),
       () => {},
     );
-    const running = await t.platform.modify(t.claude, { capabilityId: "site-report", request: "reword" });
+    // The owner's: an agent's change would wait for the owner, and a change held for review holds nothing up.
+    const running = await t.platform.modify(USER, { capabilityId: "site-report", request: "reword" });
     const connChange = await t.platform.modify(USER, { capabilityId: "site-connection", request: "tidy" });
     const change = await t.platform.modify(t.claude, { capabilityId: "site-report", request: "after the connection", after: connChange.buildId });
     assert.equal(change.dependsOn, connChange.buildId);
@@ -237,7 +238,7 @@ describe("dependent builds", () => {
     assert.equal(queued.queued, true);
     release();
     assert.equal((await t.platform.settle(running.buildId)).status, "promoted");
-    const done = await t.platform.settle(change.buildId);
+    const done = await settled(t.platform, change.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
   });
 

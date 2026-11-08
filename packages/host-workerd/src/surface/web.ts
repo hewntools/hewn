@@ -494,6 +494,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
+    // A held build's review card: its files against the version it was built on (or one file, ?path=), and its four renders.
+    if (sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.reviewFile(owner, id, path) : platform.reviewCode(owner, id);
+    }
+    if (sub === "shots" && arg && method === "GET") return new Response(body(await platform.reviewShot(owner, id, arg)), { status: 200, headers: { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" } });
     if (sub === "screenshot") {
       platform.getBuild(owner, id);
       // ?scheme=dark: the dark-mode render, if the build has one (older builds have only light).
@@ -653,7 +659,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     }
     if (method === "PUT") {
       const b = await readJson(req);
-      return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}) });
+      return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}), ...(b.approvalMode !== undefined ? { approvalMode: b.approvalMode } : {}) });
     }
     if (method === "DELETE") return platform.updateAgent(owner, id, "revoke");
   }
@@ -1048,6 +1054,8 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       builder: b.builder,
       // An install from a file: "from a file", "from Hub" (Activity says "Installed from a file · v1").
       ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
+      // A client's submission: "submitted by Claude Code".
+      ...(b.submittedBy ? { submittedBy: b.submittedBy } : {}),
       ...(b.model ? { buildModel: b.model } : {}),
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,

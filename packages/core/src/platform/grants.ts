@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Authority: whether a capability is ready, the grants it asks for and the owner approves, its
 // secrets and config, delegated agents, and the owner's confirmation of agents' destructive calls.
-import type { AgentDetails, PendingRequest } from "../agents.ts";
+import type { AgentDetails, ApprovalMode, PendingRequest } from "../agents.ts";
 import { type Agent, requireOwner, requireScope, type Scope } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { abiOf, abiUnsupported, type CapabilityManifest, connectOperation, isConnection, modelGrant, opKey } from "../manifest.ts";
@@ -250,15 +250,17 @@ export class Grants extends Domain {
     return this.agentStore.list();
   }
 
-  updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[] } | "revoke") {
+  updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke") {
     requireOwner(owner);
+    const before = change !== "revoke" && change.approvalMode ? this.agentStore.approvalMode(id) : undefined;
     this.agentStore.update(id, change);
     if (change === "revoke") this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_revoked", subject: id });
     else {
       if (change.scopes) this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_scopes", subject: id, detail: change.scopes.join(" ") });
       if (change.capabilities) this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_capabilities", subject: id, detail: change.capabilities === "*" ? "*" : change.capabilities.join(" ") });
+      if (change.approvalMode && change.approvalMode !== before) this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_approval_mode", subject: id, detail: change.approvalMode });
     }
-    const what = change === "revoke" ? "revoked" : [change.scopes && `scopes set to ${change.scopes.join(", ") || "none"}`, change.capabilities && `capabilities set to ${change.capabilities === "*" ? "all" : change.capabilities.join(", ") || "none"}`].filter(Boolean).join(", ");
+    const what = change === "revoke" ? "revoked" : [change.scopes && `scopes set to ${change.scopes.join(", ") || "none"}`, change.capabilities && `capabilities set to ${change.capabilities === "*" ? "all" : change.capabilities.join(", ") || "none"}`, change.approvalMode && `approval mode ${change.approvalMode}`].filter(Boolean).join(", ");
     this.logger(`agent ${id} ${what} by ${owner.id}`);
   }
 

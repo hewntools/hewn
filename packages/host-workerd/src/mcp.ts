@@ -6,7 +6,8 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { type DocPage, docsText } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { JSONSchema } from "@hewntools/core/manifest.ts";
-import type { CapabilitySummary, Platform } from "@hewntools/core/platform.ts";
+import type { CapabilitySummary, ClientCheck, Platform } from "@hewntools/core/platform.ts";
+import { toBase64 } from "@hewntools/core/files.ts";
 import { viewText } from "@hewntools/core/widgets.ts";
 import { AGENT_TOOLS, SERVER_INSTRUCTIONS } from "@hewntools/spec/agents.ts";
 import { WIDGET_APP_MIME, WIDGET_APP_URI } from "./surface/widget-app.ts";
@@ -26,8 +27,12 @@ interface Tool {
   /** Tool `_meta` (MCP Apps: the UI resource that renders the result). */
   meta?: Record<string, unknown>;
   /** Shape the result (default: its JSON as text). */
-  format?: (result: any) => { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown> };
+  format?: (result: any) => { content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[]; structuredContent?: Record<string, unknown> };
 }
+
+/** A call's arguments for the log: a file list as its count and size, never the files. */
+const logArgs = (args: Record<string, unknown>) =>
+  JSON.stringify(Array.isArray(args.files) ? { ...args, files: `${args.files.length} files, ${Math.round(args.files.reduce((n: number, f: { content?: unknown }) => n + (typeof f?.content === "string" ? f.content.length : 0), 0) / 1024)} KB` } : args);
 
 
 /**
@@ -103,6 +108,16 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     },
     builds_retry: { handler: (a) => platform.retryBuild(agent, a.buildId) },
     builds_cancel: { handler: (a) => platform.cancelBuild(agent, a.buildId) },
+    capabilities_pack: { handler: (a) => platform.pack(agent, a) },
+    capabilities_check: {
+      handler: (a) => platform.checkFiles(agent, a),
+      // The check's text first (what passed and failed, what to fix), then its four renders as images; every render as a file too, for a client that drops images.
+      format: (r: ClientCheck) => ({
+        content: [{ type: "text", text: r.text }, ...r.images.map((i) => ({ type: "image" as const, data: toBase64(i.png), mimeType: "image/png" }))],
+        structuredContent: { passed: r.passed, failures: r.failures, defects: r.defects, files: r.files },
+      }),
+    },
+    capabilities_submit: { handler: (a) => platform.submitFiles(agent, a) },
     hewn_docs: {
       handler: async (a) => docsText(docs ? await docs() : [], { query: a.query, page: a.page }),
       format: (text: string) => ({ content: [{ type: "text", text }] }),
@@ -166,7 +181,7 @@ export function createMcpServer(platform: Platform, agent: () => Agent, log: (li
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const { name, arguments: args = {} } = req.params;
     const who = agent();
-    log(`[${new Date().toISOString()}] ${who.id} ${name} ${JSON.stringify(args)}`);
+    log(`[${new Date().toISOString()}] ${who.id} ${name} ${logArgs(args)}`);
     const tool = toolsFor(platform, who, opts.docs).find((t) => t.name === name);
     try {
       if (!tool) throw new PlatformError("not_found", `unknown tool ${name}`);

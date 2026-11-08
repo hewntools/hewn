@@ -41,6 +41,11 @@ export interface Candidate {
   failures?: string[];
 }
 
+/** The four renders of a candidate's screen a held build's review card shows (and a check returns): 1280 and 390 px, light and dark. */
+export const REVIEW_SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
+/** Where a held build keeps one of them. */
+export const reviewShotKey = (buildId: string, name: string) => `screenshots/${buildId}/${name}.png`;
+
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
 /** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
@@ -416,8 +421,9 @@ export class Validation extends Domain {
   }
 
   /**
-   * 7. freeze a validated candidate; an agent's change that adds operations or changes a connection
-   * waits for the owner, anything else is promoted (8).
+   * 7. freeze a validated candidate; an agent's change to an existing tool waits for the owner while its
+   * approval mode says so (in 0.4.11, always), as does one that adds operations or changes a
+   * connection; anything else is promoted (8). A held one keeps its four renders for the review card.
    */
   async promote(build: BuildRow, candidate: Candidate, step: (message: string) => void): Promise<{ version: number } | { review: BuildReview }> {
     const id = build.capabilityId;
@@ -430,10 +436,14 @@ export class Validation extends Domain {
     // A follow-up chained to the creation of the same capability (create with widgets) is part of that creation.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
-    const review = partOfCreate || !base ? undefined : reviewFor(build, base, { manifest, files }, code.hash, views);
+    const owners = build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
+    const held = !owners && this.agentStore.approvalMode(build.requestedBy) === "wait";
+    const review = partOfCreate || !base ? undefined : reviewFor(build, base, { manifest, files }, code.hash, views, held);
     if (review) {
+      const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
+      for (const s of shots) await this.blobs.put(reviewShotKey(build.id, s.name), s.png);
       await this.workbench.remove(build.id);
-      return { review };
+      return { review: shots.length ? { ...review, shots: shots.map((s) => s.name) } : review };
     }
     return { version: await this.promoteVersion(build, manifest, files, code, step) };
   }
@@ -580,10 +590,11 @@ export function matches(expected: unknown, actual: unknown): boolean {
 
 /**
  * Whether a candidate waits for the owner: an agent's change (not the owner's, and not a new
- * capability, which has no data yet) to a connection, or one that adds operations. An agent with
- * `modify` otherwise decides what the code does with the capability's data and credentials.
+ * capability, which has no data yet) while its approval mode says to wait (`held`), and whatever its
+ * mode, one to a connection or one that adds operations. An agent with `modify` otherwise decides what
+ * the code does with the capability's data and credentials.
  */
-function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>): BuildReview | undefined {
+function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>, held: boolean): BuildReview | undefined {
   if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return undefined;
   const key = (o: OperationManifest) => opKey(o.name, o.version);
   const had = new Map(base.manifest.operations.map((o) => [key(o), o]));
@@ -591,7 +602,7 @@ function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files:
     .filter((o) => !had.has(key(o)))
     .map((o) => ({ key: key(o), description: o.description, sideEffect: o.sideEffect, inputs: Object.keys((o.inputSchema as { properties?: object }).properties ?? {}), ...(views.has(key(o)) ? { example: shortJson(views.get(key(o))) } : {}) }));
   const connection = isConnection(candidate.manifest);
-  if (!connection && !newOperations.length) return undefined;
+  if (!connection && !newOperations.length && !held) return undefined;
   const ui = (f: Files) => Object.keys(f).filter((p) => p.startsWith("ui/")).sort();
   const sameBytes = (a?: Uint8Array, b?: Uint8Array) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
   const uiChanged = JSON.stringify(ui(base.files)) !== JSON.stringify(ui(candidate.files)) || ui(candidate.files).some((p) => !sameBytes(base.files[p], candidate.files[p]));
@@ -610,6 +621,7 @@ function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files:
       changedOperations: candidate.manifest.operations.filter((o) => had.has(key(o)) && strip(had.get(key(o))!) !== strip(o)).map(key),
       removedOperations: [...had.keys()].filter((k) => !now.has(k)),
     },
+    ...(held ? { approval: "wait" as const } : {}),
   };
 }
 

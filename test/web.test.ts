@@ -305,6 +305,28 @@ describe("web client (owner surface)", () => {
       assert.ok(!(await api("/agents")).json.some((a: any) => a.id === "outsider"));
     });
 
+    test("an agent's approval mode: wait, shown on its row; go live can't be chosen yet", async () => {
+      assert.equal((await api("/agents")).json.find((a: any) => a.id === "claude-code").approvalMode, "wait");
+      const live = await api("/agents/claude-code", { method: "PUT", body: { approvalMode: "live" } });
+      assert.equal(live.status, 400);
+      assert.match(live.json.message, /0\.4\.12/);
+      assert.equal((await api("/agents/claude-code", { method: "PUT", body: { approvalMode: "wait" } })).status, 200);
+    });
+
+    test("a held build's review card: its files against the version it's built on; its renders when it has a screen", async () => {
+      const claude = platform.agentStore.authenticate(TOKENS.claude)!;
+      const held = await platform.settle((await platform.modify(claude, { capabilityId: "running-log", request: "anything" })).buildId);
+      assert.equal(held.status, "review", held.log.join("\n"));
+      const code = (await api(`/builds/${held.buildId}/code`)).json;
+      assert.equal(code.base, platform.registry.getCapability("running-log")!.activeVersion, "the live version it's built on");
+      assert.ok(code.files.some((f: any) => f.path === "src/index.ts"));
+      assert.equal((await api(`/builds/${held.buildId}/code?path=src/index.ts`)).json.path, "src/index.ts");
+      assert.equal((await api(`/builds/${held.buildId}/shots/desktop-light`)).status, 404, "Running Log has no screen");
+      assert.equal((await api(`/builds/${held.buildId}/code`, { cookie: "", headers: { authorization: `Bearer ${TOKENS.claude}` } })).status, 401, "the owner's only");
+      await api(`/builds/${held.buildId}/reject`, { method: "POST" });
+      assert.equal((await api(`/builds/${held.buildId}/code`)).status, 404, "once decided, no card");
+    });
+
     test("open a capability UI: returns a single-use link under /tools/<id>/", async () => {
       const { json } = await api("/capabilities/ui-counter/open", { method: "POST" });
       assert.match(json.url, new RegExp(`^http://hewn\\.localhost:${port}/tools/ui-counter/auth\\?ticket=`));

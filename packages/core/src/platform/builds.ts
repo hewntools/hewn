@@ -3,12 +3,13 @@
 // run in, the builder's attempts with their live steps, retries and cancels, the owner's review, and
 // what a build shows and keeps.
 import { type Agent, canSee, requireOwner, requireScope, type Scope } from "../auth.ts";
+import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
 import type { BundleSummary } from "../bundle.ts";
-import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, type ToolSource } from "../manifest.ts";
+import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, stampSource, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { BuildPass, Files } from "../ports.ts";
@@ -20,7 +21,8 @@ import { MAX_SATURATION } from "./presentation.ts";
 import { attachmentRefs } from "./attachments.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import type { Candidate } from "./validation.ts";
+import { type Candidate, reviewShotKey } from "./validation.ts";
+import { candidateFiles } from "./submissions.ts";
 import type { PlatformOptions } from "../platform.ts";
 import spec from "@hewntools/spec/package.json" with { type: "json" };
 
@@ -31,8 +33,10 @@ export interface BuildView {
   status: BuildRow["status"];
   request: Record<string, unknown>;
   requestedBy: string;
-  /** The platform builder that implements it (never the requesting agent). */
+  /** The platform builder that implements it (never the requesting agent); "submitted" when a client handed the files over. */
   builder: string;
+  /** Builder "submitted": the client that wrote it, by the name the owner knows it by ("Claude Code"). */
+  submittedBy?: string;
   log: string[];
   createdAt: string;
   /** Last status change (when it finished, for a finished build). */
@@ -109,8 +113,39 @@ type CreateRequest = {
   sample?: boolean;
   /** What the intake read in it before it was installed (Hewn's, or the owner's builder's). */
   summary?: BundleSummary;
+  /** Submitted (builder "submitted"): the client that wrote it, by its name in Hewn. Hewn writes it, never the client. */
+  submittedBy?: string;
 } & ModelAsk &
   RetryMarks;
+
+/**
+ * A candidate handed to Hewn ready-made (`Builds.submit`): a client's, through `capabilities_submit`
+ * (builder "submitted"), or an install from a file, a link or Hewn's own tools (builder "bundle", the
+ * owner's). No builder runs; the files go through validation as any build's.
+ */
+export interface SubmitEntry {
+  /** The candidate: a tool's files, nothing Hewn never keeps (`candidateFiles` refuses the rest, naming the rule). */
+  files: Files;
+  /** A change to this tool, on its active version; absent: a new tool. */
+  capabilityId?: string;
+  /** A new tool's id and name (an install takes them from the name the owner typed). Default: capability.json's. */
+  id?: string;
+  name?: string;
+  builder: "submitted" | "bundle";
+  /** Builder "submitted": the client's name in Hewn, for Activity and the build. */
+  submittedBy?: string;
+  /** What it is or changes, in the requester's words: kept with the build. */
+  request: string;
+  /** Installs only: where it came from (stamped into capability.json), its sample data to replay once live, the reading kept with it. */
+  source?: ToolSource;
+  sample?: boolean;
+  summary?: BundleSummary;
+  /** The version the files were written on: a change while the tool is at another one is refused. */
+  baseVersion?: number;
+}
+
+/** The longest request text a submission keeps. */
+const MAX_SUBMIT_REQUEST = 20_000;
 
 /** What only Hewn writes on a build's request, never its requester: the build it retries. */
 type RetryMarks = { retryOf?: string; autoRetryOf?: string };
@@ -203,8 +238,8 @@ export class Builds extends Domain {
     for (const id of this.registry.failInterruptedBuilds()) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
-      // An install from a file has no builder to run again: the owner installs the file again.
-      if (!b.builder || b.builder === "bundle" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
+      // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
+      if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
       const requester: Agent = { id: b.requestedBy, kind: owner ? "user" : "agent", scopes: new Set([scopeOf(b.kind)]), capabilities: "*" };
       try {
@@ -710,24 +745,30 @@ export class Builds extends Domain {
     const connection = req.kind === "connection";
     // kind is an ABI 2.1 field.
     const skeleton: CapabilityManifest = { id, name: req.name, purpose: req.purpose, abi: connection ? "2.1" : DEFAULT_ABI, ...(connection ? { kind: "connection" as const } : {}), operations: [] };
-    const attached = await this.d.attachments.attachmentsForBuild(buildId);
+    // No builder runs (an install, a submission): the workspace is the candidate, with nothing for a builder to read.
+    const reads = !noBuilderRuns(b.builder!);
+    const attached = reads ? await this.d.attachments.attachmentsForBuild(buildId) : { note: "", files: {} };
     await this.workbench.open(buildId, {
       ...(seed ? versionFiles(seed) : {
         "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
         "src/index.ts": bytes("// See BRIEF.md for the implementation contract.\nexport const operations = {};\n"),
         "tests/cases.json": bytes("[]\n"),
       }),
-      "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
-      ...this.briefFile(),
-      ...this.ownersWordsFile(buildId),
-      ...this.contractFiles(id),
-      ...(connection ? {} : await this.looksFile(id, "create")),
-      ...attached.files,
-      ...this.agentsFile(buildId),
-      ...(await this.designSystemFile()),
+      ...(reads
+        ? {
+            "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+            ...this.briefFile(),
+            ...this.ownersWordsFile(buildId),
+            ...this.contractFiles(id),
+            ...(connection ? {} : await this.looksFile(id, "create")),
+            ...attached.files,
+            ...this.agentsFile(buildId),
+            ...(await this.designSystemFile()),
+          }
+        : {}),
     });
     if (this.cancelledWhileOpening(buildId)) return;
-    this.buildEvent(buildId, `opened${req.retryOf ? ` (retry of ${req.retryOf})` : ""}, builder: ${b.builder}`, `build ${buildId} [create ${id} by ${b.requestedBy}]`);
+    this.buildEvent(buildId, `opened${req.retryOf ? ` (retry of ${req.retryOf})` : ""}, ${b.builder === "submitted" ? `submitted by ${req.submittedBy ?? b.requestedBy}` : `builder: ${b.builder}`}`, `build ${buildId} [create ${id} by ${b.requestedBy}]`);
     this.setStep(buildId, id, "spec");
     this.startBuilder(buildId, b.builder!);
   }
@@ -745,6 +786,85 @@ export class Builds extends Domain {
     if (existing) this.oneCreateAtATime(owner, id);
     const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };
     return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
+  }
+
+  /**
+   * A candidate handed over ready-made (`SubmitEntry`): no builder runs, and the files go through
+   * validation as any build's, then promote or wait (the owner's approval, grants) as any build does.
+   * A client's (builder "submitted", scope `create` or `modify`), or an install's (builder "bundle",
+   * the owner's). A change is written on the tool's active version, so one is refused while another
+   * change is on its way, or when the files were written on another version (`baseVersion`).
+   */
+  async submit(actor: Agent, entry: SubmitEntry): Promise<BuildView> {
+    const change = entry.capabilityId !== undefined;
+    requireScope(actor, change ? "modify" : "create");
+    if (entry.builder === "bundle") requireOwner(actor);
+    else if (entry.builder !== "submitted") throw new PlatformError("invalid_request", 'builder must be "submitted" or "bundle"');
+    if (entry.builder === "submitted" && (entry.source || entry.sample || entry.summary)) throw new PlatformError("invalid_request", "only an install has a source, sample data to replay, or a reading");
+    if (typeof entry.request !== "string" || !entry.request.trim()) throw new PlatformError("invalid_request", "request: what the tool is, or what the change does, in a sentence or two (kept with the build)");
+    if (entry.request.length > MAX_SUBMIT_REQUEST) throw new PlatformError("invalid_request", `request: at most ${MAX_SUBMIT_REQUEST.toLocaleString("en")} characters`);
+    if (entry.baseVersion !== undefined && (!Number.isInteger(entry.baseVersion) || entry.baseVersion < 1)) throw new PlatformError("invalid_request", "baseVersion must be a version number");
+    const files = candidateFiles(entry.files);
+    const request = entry.request.trim();
+    const submittedBy = entry.builder === "submitted" ? (entry.submittedBy ?? actor.id) : undefined;
+    if (change) return this.submitChange(actor, entry.capabilityId!, files, { request, builder: entry.builder, submittedBy, baseVersion: entry.baseVersion, source: entry.source });
+
+    const manifest = manifestIn(files);
+    const id = entry.id ?? manifest.id;
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new PlatformError("invalid_request", `capability.json's id: lowercase letters, digits and dashes${typeof manifest.name === "string" && slugify(manifest.name) ? ` ("${slugify(manifest.name)}", from its name)` : ""}`);
+    if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another id`);
+    const name = entry.name ?? manifest.name;
+    if (typeof name !== "string" || !name.trim()) throw new PlatformError("invalid_request", "capability.json needs a name");
+    const existing = this.registry.getCapability(id);
+    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn, or pick another id`);
+    if (existing?.activeVersion) throw new PlatformError("conflict", entry.builder === "submitted" ? `'${id}' already exists; to change it, submit with capabilityId '${id}' (and its files from capabilities_pack)` : `capability '${id}' already exists`);
+    // A create that never promoted keeps its id for a retry; this takes it over, unless one is being built (as a create does).
+    if (existing) this.oneCreateAtATime(actor, id);
+    const renamed = id !== manifest.id || name !== manifest.name || entry.source;
+    const seed = renamed ? { ...files, "capability.json": bytes(JSON.stringify(stampSource({ ...manifest, id, name } as CapabilityManifest, entry.source ?? null), null, 2) + "\n") } : files;
+    const req: CreateRequest = {
+      name,
+      purpose: typeof manifest.purpose === "string" ? manifest.purpose : "",
+      requirements: request,
+      ...(entry.source ? { source: entry.source } : {}),
+      ...(entry.sample ? { sample: true } : {}),
+      ...(entry.summary ? { summary: entry.summary } : {}),
+      ...(submittedBy ? { submittedBy } : {}),
+    };
+    return this.openCreateBuild(actor, id, req, !existing, entry.builder, seed);
+  }
+
+  /** A submitted change to a tool (`submit`): written on its active version, so nothing else may be on its way. */
+  private async submitChange(actor: Agent, capabilityId: string, files: Files, o: { request: string; builder: SubmitEntry["builder"]; submittedBy?: string; baseVersion?: number; source?: ToolSource }): Promise<BuildView> {
+    const cap = this.visibleActive(actor, capabilityId);
+    if (o.baseVersion !== undefined && o.baseVersion !== cap.activeVersion) throw new PlatformError("conflict", `${cap.id} is at v${cap.activeVersion} now and your files are from v${o.baseVersion}: fetch capabilities_pack again and make the change on that`);
+    this.noChangeOnItsWay(cap.id, "fetch capabilities_pack again and submit once it's done");
+    const request = { capabilityId: cap.id, request: o.request, ...(o.source ? { source: o.source } : {}), ...(o.submittedBy ? { submittedBy: o.submittedBy } : {}) };
+    const buildId = newBuildId();
+    this.registry.transaction(() => {
+      this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: actor.id, baseVersion: cap.activeVersion, builder: o.builder });
+      this.recordContext(buildId, cap.id);
+    });
+    await this.workbench.open(buildId, files);
+    if (this.cancelledWhileOpening(buildId)) return this.buildView(this.mustBuild(buildId));
+    this.buildEvent(buildId, `opened from v${cap.activeVersion}, ${o.submittedBy ? `submitted by ${o.submittedBy}` : `builder: ${o.builder}`}`, `build ${buildId} [modify ${cap.id} by ${actor.id}]`);
+    this.setStep(buildId, cap.id, "spec");
+    this.startBuilder(buildId, o.builder);
+    return this.buildView(this.mustBuild(buildId));
+  }
+
+  /**
+   * What `capabilities_pack` hands a client: what Hewn's builder finds in its workspace besides the
+   * brief, the request and the owner's words. The other tools' contracts and looks (only those
+   * `visible` lets the client see) and the design system; for a change (`capabilityId`), the tool's
+   * active version's files too.
+   */
+  async packFiles(capabilityId: string | undefined, visible: (id: string) => boolean): Promise<Files> {
+    const cap = capabilityId ? this.registry.getCapability(capabilityId) : undefined;
+    const base = cap?.activeVersion ? versionFiles((await this.loadVersion(cap.id, cap.activeVersion, { keep: false })).files) : {};
+    const connection = cap?.activeVersion ? isConnection(this.activeManifest(cap.id)) : false;
+    const exclude = capabilityId ?? "";
+    return { ...base, ...this.contractFiles(exclude, visible), ...(connection ? {} : await this.looksFile(exclude, cap ? "modify" : "create", visible)), ...(await this.designSystemFile()) };
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). `marks`: a retry's, from `retryBuild`. */
@@ -921,6 +1041,7 @@ export class Builds extends Domain {
     if (isPaused(old) && agent.kind !== "user") throw new PlatformError("forbidden", "the owner continues a paused build in Hewn");
     // No builder ran, so none can run again: an install from a file is installed again, the owner's own edit saved again.
     if (old.builder === "bundle") throw new PlatformError("conflict", "this was an install from a file; install the file again instead of retrying");
+    if (old.builder === "submitted") throw new PlatformError("conflict", `${old.request.submittedBy ?? old.requestedBy} wrote this one; it submits its files again instead of retrying`);
     if (old.request.filesOnly) throw new PlatformError("conflict", "this saved files you wrote; save them again instead of retrying");
     const req: Record<string, any> = { ...old.request };
     delete req.retryOf;
@@ -1228,7 +1349,8 @@ export class Builds extends Domain {
    */
   private async runBuilder(buildId: string, builder: string, signal: AbortSignal) {
     const build = this.mustBuild(buildId);
-    const max = Math.max(1, this.platform.maxBuildAttempts());
+    // No builder runs: the same files again would fail the same way.
+    const max = noBuilderRuns(builder) ? 1 : Math.max(1, this.platform.maxBuildAttempts());
     // The first build of the chain this one retries, so a host can count the chain as one build.
     let retryOf: string | undefined;
     for (let id = build.request.retryOf; typeof id === "string"; id = this.registry.getBuild(id)?.request.retryOf) retryOf = id;
@@ -1485,6 +1607,7 @@ export class Builds extends Domain {
       const manifest = JSON.parse(text(v.files["capability.json"])) as CapabilityManifest;
       step(`approved by ${owner.id}`);
       const version = await this.d.validation.promoteVersion(build, manifest, v.files, { hash: build.review.contentHash, js: v.bundle }, step);
+      await this.dropReviewShots(build);
       step(`promoted: implementation v${version} is now active`);
       this.d.schedules.applyApprovedSchedules(build, step);
       this.registry.updateBuild(buildId, { status: "promoted", resultVersion: version, review: null, log });
@@ -1510,9 +1633,44 @@ export class Builds extends Domain {
       this.loaded.delete(build.review.contentHash);
       await this.blobs.delete(`versions/${build.review.contentHash}.json`);
     }
+    await this.dropReviewShots(build);
     await this.keepTranscript(buildId);
     this.buildEnded(buildId);
     return this.buildView(this.mustBuild(buildId));
+  }
+
+  /** The review card's renders go once the owner has decided. */
+  private async dropReviewShots(build: BuildRow) {
+    for (const name of build.review?.shots ?? []) await this.blobs.delete(reviewShotKey(build.id, name)).catch(() => {});
+  }
+
+  /** A held build, for the owner's review card; else not found. */
+  private heldBuild(owner: Agent, buildId: string): BuildRow & { review: BuildReview; baseVersion: number } {
+    requireOwner(owner);
+    const b = this.mustBuild(buildId);
+    if (b.status !== "review" || !b.review || b.baseVersion === null) throw new PlatformError("not_found", `build ${buildId} isn't waiting for your review`);
+    return b as BuildRow & { review: BuildReview; baseVersion: number };
+  }
+
+  /** The review card's diff: a held build's files against the version it was built on, or one file of them (`path`). Owner only. */
+  async reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number; files: CodeFile[] }> {
+    const b = this.heldBuild(owner, buildId);
+    const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.loadVersion(b.capabilityId, b.baseVersion, { keep: false })]);
+    return { version: b.baseVersion + 1, base: b.baseVersion, files: codeFiles(candidate.files, base.files) };
+  }
+
+  async reviewFile(owner: Agent, buildId: string, path: string): Promise<CodeText> {
+    const b = this.heldBuild(owner, buildId);
+    const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.loadVersion(b.capabilityId, b.baseVersion, { keep: false })]);
+    return codeText(path, candidate.files, base.files);
+  }
+
+  /** One of the review card's four renders (`REVIEW_SHOTS`). Owner only. */
+  async reviewShot(owner: Agent, buildId: string, name: string): Promise<Uint8Array> {
+    const b = this.heldBuild(owner, buildId);
+    const png = b.review.shots?.includes(name) ? await this.blobs.get(reviewShotKey(b.id, name)) : undefined;
+    if (!png) throw new PlatformError("not_found", `build ${buildId} has no ${name} render`);
+    return png;
   }
 
   /** A frozen candidate, checked against its hash. */
@@ -1539,11 +1697,11 @@ export class Builds extends Domain {
    * The owner's other capabilities a build may compose with, from their active manifests; for a change,
    * with the operations the tool calls on each today (an older version than the newest, perhaps).
    */
-  private callees(exclude: string): Callee[] {
+  private callees(exclude: string, visible: (id: string) => boolean = () => true): Callee[] {
     const own = this.registry.getCapability(exclude)?.activeVersion ? (this.activeManifest(exclude).requires?.capabilities ?? []) : [];
     return this.registry
       .listActiveCapabilities()
-      .filter((c) => c.id !== exclude)
+      .filter((c) => c.id !== exclude && visible(c.id))
       .map((c) => ({ id: c.id, manifest: this.activeManifest(c.id), calls: own.filter((d) => d.id === c.id).flatMap((d) => d.operations) }));
   }
 
@@ -1559,8 +1717,8 @@ export class Builds extends Domain {
    * together can run to hundreds of KB. None without other capabilities. Never part of a version
    * (`isWorkspaceOnly`; the folder is a dot-folder, `isBuilderConfig`, so it never shadows one of a tool's own).
    */
-  private contractFiles(exclude: string): Files {
-    const callees = this.callees(exclude);
+  private contractFiles(exclude: string, visible?: (id: string) => boolean): Files {
+    const callees = this.callees(exclude, visible);
     if (!callees.length) return {};
     return { "CONTRACTS.md": bytes(contractsIndex(callees)), ...Object.fromEntries(callees.map((c) => [`${CONTRACTS_DIR}/${c.id}.md`, bytes(contractText(c))])) };
   }
@@ -1570,8 +1728,8 @@ export class Builds extends Domain {
    * builder may not read BUILDER.md to its end (OpenCode reads 50 KB of a file). None when there are
    * no other tools; the callers leave it out of a connection's build (no UI). Never part of a version (`isWorkspaceOnly`).
    */
-  private async looksFile(exclude: string, kind: BuildKind): Promise<Files> {
-    const looks = await this.othersLooks(exclude, kind);
+  private async looksFile(exclude: string, kind: BuildKind, visible?: (id: string) => boolean): Promise<Files> {
+    const looks = await this.othersLooks(exclude, kind, visible);
     return looks ? { "OTHER_TOOLS.md": bytes(looks) } : {};
   }
 
@@ -1581,8 +1739,8 @@ export class Builds extends Domain {
    * workspace's OTHER_TOOLS.md. Connections (no UI) are left out;
    * a version that can't be read is listed without its look. Empty when there are none.
    */
-  async othersLooks(exclude: string, kind: BuildKind = "create"): Promise<string> {
-    const caps = this.registry.listActiveCapabilities().filter((c) => c.id !== exclude && !isConnection(this.activeManifest(c.id)));
+  async othersLooks(exclude: string, kind: BuildKind = "create", visible: (id: string) => boolean = () => true): Promise<string> {
+    const caps = this.registry.listActiveCapabilities().filter((c) => c.id !== exclude && visible(c.id) && !isConnection(this.activeManifest(c.id)));
     const tools = await Promise.all(
       caps.map(async (c): Promise<ToolLook> => {
         const raw = await this.loadVersion(c.id, c.activeVersion!, { keep: false }).then((v) => v.files["ui/look.json"], () => undefined);
@@ -1689,6 +1847,7 @@ export class Builds extends Domain {
       createdAt: b.createdAt,
       updatedAt: b.updatedAt,
     };
+    if (b.builder === "submitted" && typeof b.request.submittedBy === "string") view.submittedBy = b.request.submittedBy;
     if (b.resultVersion) view.resultVersion = b.resultVersion;
     if (b.dependsOn) view.dependsOn = b.dependsOn;
     // Builds made on a 0.4.9 pre-release logged "(screenshot with the sample data)", and their logs keep it.
@@ -1733,6 +1892,18 @@ export class Builds extends Domain {
   }
 }
 
+/** A candidate's capability.json, as far as a submission needs it before validation reads it whole. */
+function manifestIn(files: Files): Partial<CapabilityManifest> {
+  if (!files["capability.json"]) throw new PlatformError("invalid_request", "capability.json is missing");
+  try {
+    const m = JSON.parse(text(files["capability.json"]));
+    if (m && typeof m === "object" && !Array.isArray(m)) return m;
+  } catch {
+    // said below
+  }
+  throw new PlatformError("invalid_request", "capability.json isn't a JSON object");
+}
+
 export const slugify = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
@@ -1768,8 +1939,8 @@ const fmtDuration = (s: number) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${
 /** Ids that would collide with platform origins (e.g. http://hewn.localhost). */
 export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
 
-/** No builder runs: the workspace is the candidate as given (an owner's edit), or it's installed from a file or a directory. */
-const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bundle" || builder.startsWith("copy:");
+/** No builder runs: the workspace is the candidate as given (an owner's edit, a client's submission), or it's installed from a file or a directory. */
+const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bundle" || builder === "submitted" || builder.startsWith("copy:");
 
 /** The scope a kind of build needs: a widgets build changes an existing capability. */
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
@@ -2146,4 +2317,4 @@ const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKin
 const FIX_MARK = "--- Fix request ---";
 
 const reviewReason = (r: BuildReview) =>
-  [r.connection && "it changes a connection", r.newOperations.length && `it adds ${r.newOperations.map((o) => `${o.key} (${o.sideEffect})`).join(", ")}`].filter(Boolean).join("; ");
+  [r.approval === "wait" && "the agent's changes wait for the owner's approval", r.connection && "it changes a connection", r.newOperations.length && `it adds ${r.newOperations.map((o) => `${o.key} (${o.sideEffect})`).join(", ")}`].filter(Boolean).join("; ");

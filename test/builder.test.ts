@@ -10,7 +10,7 @@ import { decodeVersion } from "@hewntools/core/files.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { Home } from "@hewntools/cli/home.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
-import { editText, installSeed, platformWith, SEED, setup } from "./helpers.ts";
+import { editText, installSeed, platformWith, SEED, settled, setup } from "./helpers.ts";
 
 /** Test double: a builder that writes a candidate per attempt. */
 function fakeBuilder(name: string, write: (job: BuildJob) => void | Promise<void>): CapabilityBuilder & { jobs: BuildJob[] } {
@@ -73,7 +73,7 @@ describe("platform-assigned builder", () => {
     );
     const created = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
     assert.equal(created.status, "promoted", created.log.join("\n"));
-    const modified = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
+    const modified = await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
     assert.equal(modified.status, "promoted", modified.log.join("\n"));
     assert.deepEqual(seen, [[], []], "the modify build's workspace starts without them");
   });
@@ -88,7 +88,7 @@ describe("platform-assigned builder", () => {
     );
     const created = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
     assert.equal(created.status, "promoted", created.log.join("\n"));
-    const modified = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
+    const modified = await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
     assert.equal(modified.status, "promoted", modified.log.join("\n"));
     assert.equal(agents.length, 2);
     for (const a of agents) assert.match(a, /Read `BUILDER.md` first/);
@@ -278,7 +278,7 @@ describe("platform-assigned builder", () => {
       }),
     );
     const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index recorded_at" });
-    const done = await platform.settle(opened.buildId);
+    const done = await settled(platform, opened.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(sawManifest);
   });
@@ -364,7 +364,7 @@ describe("platform-assigned builder", () => {
     }));
     const failed = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "index" })).buildId);
     fail = false;
-    const r = await platform.settle((await platform.retryBuild(t.claude, failed.buildId)).buildId);
+    const r = await settled(platform, (await platform.retryBuild(t.claude, failed.buildId)).buildId);
     assert.equal(r.status, "promoted", r.log.join("\n"));
     assert.equal((r.request as any).request, "index");
   });

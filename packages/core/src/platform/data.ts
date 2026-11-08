@@ -9,6 +9,7 @@ import { sampleOrNull } from "../bundle.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
 import { Domain, type Domains } from "./context.ts";
+import { REVIEW_SHOTS, reviewShotKey } from "./validation.ts";
 
 /** How many of a capability's latest calls Info › Data looks through for its last write. */
 const WRITE_LOOKBACK = 500;
@@ -90,6 +91,7 @@ export class Data extends Domain {
       await this.blobs.delete(`transcripts/${b}.log`);
       await this.blobs.delete(`screenshots/${b}.png`);
       await this.blobs.delete(`screenshots/${b}-dark.png`);
+      for (const name of REVIEW_SHOTS) await this.blobs.delete(reviewShotKey(b, name));
     }
     for (const h of hashes) await this.blobs.delete(`versions/${h}.json`);
     await this.blobs.delete(`icons/${capabilityId}`);

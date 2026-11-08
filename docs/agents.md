@@ -79,11 +79,23 @@ When you approve an agent, you choose its scopes. You can narrow what it asked f
 
 You can also limit it to **some tools**. Later, click the agent on **Agents** to turn scopes off and back on, within what you approved, or to disconnect it. To give it more, disconnect it and let it ask again.
 
+**Its changes to your tools** (its approval mode, on the same sheet): a change an agent makes to a tool you have waits for your approval once it passes its checks, whether Hewn's builder wrote it or the agent did. The Inbox shows it with what it adds, what else changes, the files it changes and the screen after the change, on a desktop and a phone, light and dark. **Go live after the checks** is shown but can't be chosen yet: it comes once Hewn's own tests guard your data. A new tool an agent asks for goes live after its checks; its grants still wait for you.
+
 Whatever their scopes, agents can't approve grants or secrets, enable schedules, or manage other agents. Those are yours. When an agent calls an operation marked **destructive**, it waits until you allow it (once) in Hewn: a banner shows on every page until you answer.
 
 ## What agents see
 
-Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, follow a build, propose a schedule, ask for access, and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, write one itself (below), follow a build, propose a schedule, ask for access, and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+
+## Tools an agent writes itself
+
+An agent with **Make** or **Change** can write a tool in its own folder instead of asking Hewn's builder, and hand it to Hewn. Claude Code in a repo of yours, say, or an agent on another computer. Hewn checks it exactly as it checks its own builder's work, so the agent writing it never decides what goes live:
+
+1. **The pack** (`capabilities_pack`): what Hewn's builder would find in its folder. Your other tools' contracts (only the tools the agent may see), their looks, so the new one looks different, and Hewn's design system; for a change, the tool's files as they are now and its schedules. Never your conversations with Hewn or your data.
+2. **The check** (`capabilities_check`), as often as it likes while it works, up to 30 an hour: the same checks a build gets, with what failed and its screen at 1280 and 390 px, light and dark. Nothing goes live.
+3. **The submission** (`capabilities_submit`): a build like any other, with "submitted by" and the agent's name on its page, in Activity and on the version. A new tool goes live once it passes; a change waits for your approval (above).
+
+A submission carries the tool's own files only. Files Hewn never keeps in a tool (a builder's settings such as `.claude/` or `CLAUDE.md`, `AGENTS.md`, other dotfiles, the pack's own files, screenshots) are refused with the rule named, never dropped quietly, and so is anything over 5 MB. A change is refused while another change to the tool is on its way, or when the tool has moved on since the agent's pack.
 
 ## CLI reference
 

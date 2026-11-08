@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { serverUrl } from "@hewntools/test-host/server.ts";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { FIXTURES, installFrom, installSeed, serve, setup, TOKENS } from "./helpers.ts";
 
 async function connect(url: string, token: string) {
@@ -50,12 +51,15 @@ describe("Hewn over MCP", () => {
       "builds_retry",
       "builds_wait",
       "capabilities_add_widgets",
+      "capabilities_check",
       "capabilities_create",
       "capabilities_get",
       "capabilities_invoke",
       "capabilities_list",
       "capabilities_modify",
+      "capabilities_pack",
       "capabilities_request_access",
+      "capabilities_submit",
       "hewn_docs",
       "schedules_list",
       "schedules_propose",
@@ -145,5 +149,64 @@ describe("Hewn over MCP", () => {
       assert.match(instructions, /Connections \(external services[^]*login-connection/);
       await c.close();
     });
+  });
+});
+
+describe("a client writes a tool over MCP: pack, check, submit", () => {
+  let t: ReturnType<typeof setup>;
+  let server: Server;
+  let url: string;
+  const lines: string[] = [];
+  const SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
+
+  before(async () => {
+    t = setup({ visualCheck: async () => ({ errors: [], screenshot: Buffer.from("png"), shots: SHOTS.map((name) => ({ name, png: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0]) })) }) });
+    await installSeed(t.platform);
+    server = await serve(t.platform, t.home, { log: (l) => lines.push(l) });
+    url = serverUrl(server);
+  });
+  after(async () => {
+    await new Promise((r) => server.close(r));
+    t.cleanup();
+  });
+
+  test("the pack as files, the check's renders as images, the submission as a build; the log never carries the files", async () => {
+    const claude = await connect(url, TOKENS.claude);
+    const pack = parse(await claude.callTool({ name: "capabilities_pack", arguments: { kind: "modify", capabilityId: "running-log" } }));
+    assert.equal(pack.baseVersion, 1);
+    const own = pack.files.filter((f: { path: string }) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path));
+    const files = own.map((f: { path: string; content: string }) => (f.path === "capability.json" ? { ...f, content: f.content.replace(/"purpose": "([^"]*)"/, '"purpose": "$1 (reworded)"') } : f));
+
+    const checked = await claude.callTool({ name: "capabilities_check", arguments: { files, capabilityId: "running-log" } });
+    assert.ok(!checked.isError, JSON.stringify(checked));
+    const content = checked.content as { type: string; text?: string; mimeType?: string }[];
+    assert.match(content[0].text!, /^PASS/);
+    assert.equal(content.filter((c) => c.type === "image" && c.mimeType === "image/png").length, 0, "Running Log has no screen to render");
+    assert.equal((checked.structuredContent as { passed: boolean }).passed, true);
+
+    const refused = await claude.callTool({ name: "capabilities_submit", arguments: { files: pack.files, capabilityId: "running-log", request: "reword" } });
+    assert.equal(refused.isError, true);
+    assert.match(parse(refused).message, /PLATFORM_UI\.css: Hewn writes these for builders/);
+
+    const b = parse(await claude.callTool({ name: "capabilities_submit", arguments: { files, capabilityId: "running-log", request: "reword the purpose", baseVersion: 1 } }));
+    assert.equal(b.builder, "submitted");
+    const done = parse(await claude.callTool({ name: "builds_wait", arguments: { buildId: b.buildId, timeoutSeconds: 60 } }));
+    assert.equal(done.status, "review", done.log.join("\n"));
+    assert.equal(done.review.approval, "wait");
+    const logged = lines.filter((l) => / capabilities_(check|submit) /.test(l));
+    assert.ok(logged.length >= 3 && logged.every((l) => /"files":"\d+ files, \d+ KB"/.test(l) && !l.includes("record_run@1")), logged.join("\n"));
+    await claude.close();
+  });
+
+  test("a new tool with a screen: four images in the check's content, and the same as files", async () => {
+    const claude = await connect(url, TOKENS.claude);
+    const dir = join(FIXTURES, "ui-counter");
+    const files = ["capability.json", "ui/index.html", "migrations/001_init.sql", "tests/cases.json", "sample/calls.json", "src/index.ts"].map((path) => ({ path, content: readFileSync(join(dir, path), "utf8") }));
+    const checked = await claude.callTool({ name: "capabilities_check", arguments: { files } });
+    const content = checked.content as { type: string; data?: string; mimeType?: string }[];
+    assert.equal(content.filter((c) => c.type === "image" && c.mimeType === "image/png").length, 4, JSON.stringify(content[0]));
+    const shots = (checked.structuredContent as { files: { path: string; encoding: string }[] }).files;
+    assert.deepEqual(shots.map((f) => [f.path, f.encoding]), SHOTS.map((n) => [`screenshots/${n}.png`, "base64"]));
+    await claude.close();
   });
 });

@@ -36,6 +36,13 @@ export interface AgentTool {
 
 const obj = (properties: Record<string, JSONSchema>, required: string[] = []): JSONSchema => ({ type: "object", properties, required, additionalProperties: false });
 const str = (description?: string): JSONSchema => ({ type: "string", ...(description ? { description } : {}) });
+/** Files as they travel to and from the host: UTF-8 text, or base64 for anything that isn't (images, fonts). */
+const files: JSONSchema = {
+  type: "array",
+  maxItems: 1000,
+  description: "The tool's files, each { path, content, encoding? }: path relative to the tool's folder (capability.json, src/index.ts, tests/cases.json, ui/index.html …); content as UTF-8 text, or base64 with encoding \"base64\". 5 MB in all. Only the tool's own files: not the pack's CONTRACTS.md, .hewn-contracts/, OTHER_TOOLS.md or PLATFORM_UI.css, no screenshots/, no dotfiles, CLAUDE.md or AGENTS.md (refused, naming the rule).",
+  items: obj({ path: str(), content: str(), encoding: { type: "string", enum: ["utf-8", "base64"] } }, ["path", "content"]),
+};
 /** What a build runs on. The host appends the names this agent may ask for to the tool's description. */
 const buildModel = {
   model: str("The model to build it with, by name (e.g. 'fable', or 'default' for the builder's own). Leave it out to use the owner's choice; only names the owner allows are accepted."),
@@ -116,7 +123,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_modify",
     scopes: ["modify"],
     description:
-      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Changes to one capability take turns: one asked for while another is queued or building waits for it (status waiting) and is built on the version it makes. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
+      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. Once it passes validation it waits for the owner's review (status review) while your approval mode is wait, which the owner sets in Hewn (always, for now), and a change to a connection or one that adds operations always does: tell the owner. Changes to one capability take turns: one asked for while another is queued or building waits for it (status waiting) and is built on the version it makes. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
     inputSchema: obj({ capabilityId: str(), request: str("Desired change"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId", "request"]),
   },
   {
@@ -125,6 +132,35 @@ export const AGENT_TOOLS: AgentTool[] = [
     description:
       "Add widgets to an existing capability: glanceable cards (a number, a short list, a chart…) the owner can place on Hewn's Home and agents can show with widgets_show. A focused follow-up build that changes nothing but widgets, so it can't break the capability. Its new operations wait for the owner's review (status review), unless it follows the capability's own creation. Say what to show in request, or leave it out to let the builder propose 1–3. Follow it with builds_wait.",
     inputSchema: obj({ capabilityId: str(), request: str("What the widgets should show (optional)"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId"]),
+  },
+  {
+    name: "capabilities_pack",
+    scopes: ["create", "modify"],
+    description:
+      "To write a capability yourself instead of asking the platform's builder: first fetch what its builder finds in its workspace, and write these files into your folder. kind create: the user's other capabilities' contracts (CONTRACTS.md, .hewn-contracts/<id>.md), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. How to build one: hewn_docs (building tools, the manifest, the ABI). Then capabilities_check while you work, and capabilities_submit when the check passes.",
+    inputSchema: obj({ kind: { type: "string", enum: ["create", "modify"] }, capabilityId: str("The capability to change (kind modify)") }, ["kind"]),
+  },
+  {
+    name: "capabilities_check",
+    scopes: ["create", "modify"],
+    description:
+      "Check a capability you wrote as validation will, without submitting it: the manifest, bundling, contract compatibility (with capabilityId), migrations, tests/cases.json, sample/calls.json, and the UI rendered at 1280 and 390 px wide in light and dark with what to fix measured on it. Returns PASS or FAIL with every failure, and the four screenshots as images (also as files for screenshots/). Fix what it shows and check again; 30 checks an hour. Promotes nothing.",
+    inputSchema: obj({ files, capabilityId: str("The capability these files change; leave it out for a new one") }, ["files"]),
+  },
+  {
+    name: "capabilities_submit",
+    scopes: ["create", "modify"],
+    description:
+      "Hand over a capability you wrote (create scope for a new one, modify with capabilityId for a change). The platform validates it as any build (the contracts, the tests and migrations on a copy of the user's data, the UI) and returns a build: follow it with builds_wait. A new capability goes live once it passes (its grants wait for the owner); a change waits for the owner's review (status review) while your approval mode is wait (always, for now): tell the owner. A change is refused while another change to it is on its way, or if baseVersion (from capabilities_pack) is no longer its version. No builder runs, so builds_retry doesn't apply: submit again.",
+    inputSchema: obj(
+      {
+        files,
+        capabilityId: str("The capability these files change; leave it out for a new one"),
+        request: str("What the capability is, or what the change does, in a sentence or two (kept with the build, shown to the owner)"),
+        baseVersion: { type: "integer", minimum: 1, description: "The version your files are a change of (capabilities_pack's baseVersion)" },
+      },
+      ["files", "request"],
+    ),
   },
   {
     name: "capabilities_request_access",
