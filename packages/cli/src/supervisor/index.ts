@@ -34,6 +34,8 @@ import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
+import { idleStatus, type IdleStatus } from "./idle.ts";
+import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import { workerdBinary } from "../app-dir.ts";
 
 export interface SupervisorOptions {
@@ -59,6 +61,11 @@ export interface SupervisorOptions {
   log?: (line: string) => void;
   /** Health check cadence and the stall that triggers a restart. */
   watchdog?: { intervalMs: number; stallMs: number } | false;
+  /**
+   * The resume check: the wall clock jumping ahead of the time this process ran by more than `jumpMs` (a suspended
+   * machine woke, a laptop's lid opened) runs what became due, then once more `recheckMs` later. Tests move `wall`.
+   */
+  resume?: { intervalMs?: number; jumpMs?: number; recheckMs?: number; wall?: () => number } | false;
   /** Where the secrets master key lives (default: Keychain on macOS, libsecret or a file on Linux). */
   keySource?: KeySource;
   /** Builder / intake CLI status (default: checked on this machine). Tests stub it. */
@@ -108,6 +115,8 @@ export interface Supervisor {
   publicNetwork?: string;
   tunnel: Tunnel;
   restarts: () => number;
+  /** The idle report: whether Hewn is idle, and when it next needs to be awake (`afterSeconds`: the host's quiet time). */
+  status(afterSeconds?: number): Promise<IdleStatus>;
   /** Restart workerd (state is on disk; in-memory caches go). */
   restart(): Promise<void>;
   stop(): Promise<void>;
@@ -399,7 +408,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       if (b.action === "stop") return tunnel.stop();
       return tunnel.current();
     },
-    "/control/status": async () => ({
+    "/control/status": async (b) => ({
       pid: process.pid,
       workerdPid: child?.pid ?? null,
       restarts,
@@ -407,6 +416,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       keySource: secretsKey.source,
       sandbox: !!o.sandbox,
       backups: { dir: backupDir(), last: listBackups(backupDir())[0] ?? null },
+      idle: await (async () => status(typeof b.after === "number" ? b.after : undefined))().catch(() => null),
     }),
     "/control/backup": async () => backupNow(o.home, backupDir()),
     "/control/backups": async () => ({ dir: backupDir(), backups: listBackups(backupDir()) }),
@@ -418,6 +428,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       } finally {
         start();
         await waitHealthy();
+        // What's live now may not be the newest backup: the idle report asks for one today.
+        await admin("changed", {}).catch(() => {});
       }
     },
   };
@@ -571,6 +583,44 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     timer.unref();
   }
 
+  // The resume check: the wall clock ran ahead of this process (the machine was suspended, or asleep). Due schedules run
+  // by the wall clock and the alarm is re-armed (whether workerd's own alarm fires after such a jump isn't assumed),
+  // the backup check runs, and all of it once more a little later: after a wake the clock may lag until NTP catches up.
+  let resumeTimer: ReturnType<typeof setInterval> | undefined;
+  const recheckTimers = new Set<ReturnType<typeof setTimeout>>();
+  if (o.resume !== false) {
+    const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now } = o.resume ?? {};
+    const caughtUp = async () => {
+      try {
+        const r = await admin("resumed", {});
+        log(`caught up after a resume${r.nextAlarmAt ? `; next alarm ${new Date(r.nextAlarmAt).toISOString()}` : ""}`);
+      } catch (e) {
+        log(`catching up after a resume failed: ${(e as Error).message}`);
+      }
+      nightly();
+    };
+    let last = { wall: wall(), mono: performance.now() };
+    resumeTimer = setInterval(() => {
+      const now = { wall: wall(), mono: performance.now() };
+      const jump = now.wall - last.wall - (now.mono - last.mono);
+      last = now;
+      if (jump <= jumpMs) return;
+      log(`the clock jumped ${Math.round(jump / 1000)}s ahead (resumed); catching up`);
+      void caughtUp();
+      const t = setTimeout(() => (recheckTimers.delete(t), void caughtUp()), recheckMs);
+      t.unref();
+      recheckTimers.add(t);
+    }, intervalMs);
+    resumeTimer.unref();
+  }
+
+  const status = async (afterSeconds?: number) => {
+    const { result } = (await admin("call", { method: "idleActivity" })) as { result: ActivityView };
+    const backups = listBackups(backupDir());
+    const lastAt = backups.length ? Math.max(...backups.map((b) => Date.parse(b.at))) : null;
+    return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, Date.now(), afterSeconds);
+  };
+
   const admin = async (path: string, body?: unknown) => {
     const res = await fetch(`${url}/_admin/${path}`, {
       method: body === undefined ? "GET" : "POST",
@@ -591,6 +641,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     tunnel,
     admin,
     restarts: () => restarts,
+    status,
     async restart() {
       const before = restarts;
       child?.kill("SIGTERM");
@@ -602,6 +653,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     },
     async stop() {
       if (timer) clearInterval(timer);
+      if (resumeTimer) clearInterval(resumeTimer);
+      for (const t of recheckTimers) clearTimeout(t);
       for (const t of backupTimers) clearTimeout(t as ReturnType<typeof setTimeout>);
       await shutdown();
     },

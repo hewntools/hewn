@@ -10,6 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { backupLocation, backupNow, findBackup, listBackups, restoreBackup } from "./backup.ts";
 import { BUILDERS, cliIntake, isCliAgent } from "./builders/cli-agents.ts";
 import { startMetrics } from "./supervisor/metrics.ts";
+import { idleLine } from "./supervisor/idle.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
 import { initConfig, readConfig, writeConfig } from "./config.ts";
 import { formatChecks, runDoctor } from "./doctor.ts";
@@ -50,7 +51,7 @@ Use it (as the owner; talks to the running Hewn)
                       --print: print a sign-in link instead (on the public URL, with a QR code; --local for this machine's)
   url [<https://…> | --clear] [--listen <address> | --listen off]
                       the public URL: use Hewn from your phone or anywhere (prints the DNS records and proxy setup)
-  status              tools and recent builds
+  status [--json]     tools, the supervisor, and whether Hewn is idle (and its next alarm)
   feedback [--days N] [--json]
                       how recent builds worked out: your answers to "Got what you asked for?", attempts,
                       what they ran on, and the signs in the record (a fix, a change soon after, a restore, a delete)
@@ -168,7 +169,7 @@ async function main() {
       writeFileAtomic(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", 0o600);
       // Off unless set: a host that scrapes Hewn turns it on.
       const metricsPort = Number(process.env.HEWN_METRICS_PORT ?? 0);
-      if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log });
+      if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log, status: sv.status });
       log(`Hewn on ${webOrigin(port)} · MCP ${sv.url}/mcp · tunnels point at ${sv.publicUrl}${sv.publicNetwork ? ` · public listener also on ${sv.publicNetwork}` : ""} · home ${home.root}${flag("no-sandbox") ? " · workerd sandbox OFF" : ""}`);
       log(`Sign in: hewn open`);
       const stop = async () => {
@@ -334,12 +335,15 @@ async function main() {
 
     case "status":
       await owner(async (c) => {
-        console.log(`Hewn at ${c.url}`);
         const caps = await c.call("list");
+        const st = c.control ? await c.control("/control/status") : undefined;
+        // --json: the same, for a script or a host's loop (`idle` is the idle report GET /status gives on the metrics port).
+        if (flag("json")) return void console.log(JSON.stringify({ url: c.url, tools: caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })), ...(st ? { supervisor: st, idle: st.idle } : {}) }, null, 2));
+        console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
-        if (c.control) {
-          const st = await c.control("/control/status");
+        if (st) {
           console.log(`up ${st.upSeconds}s · workerd restarts ${st.restarts} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
+          if (st.idle) console.log(idleLine(st.idle));
         }
       });
       return;

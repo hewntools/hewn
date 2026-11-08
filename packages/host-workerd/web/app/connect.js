@@ -157,7 +157,7 @@ function connectDialog(agentId) {
         const watch = () => {
           if (poll) return;
           poll = setInterval(async () => {
-            const fresh = (await api("/agents/pending").catch(() => [])).filter((p) => !seen.has(p.id));
+            const fresh = (await api("/agents/pending", { refresh: true }).catch(() => [])).filter((p) => !seen.has(p.id));
             if (!fresh.length) return;
             fresh.forEach((p) => seen.add(p.id));
             put(waiting, await agentRequestSheet(fresh[0], { inline: () => put(waiting) }));

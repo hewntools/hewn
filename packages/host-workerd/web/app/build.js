@@ -423,7 +423,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       // Agent-built and still open: the agent submits when it's done.
       step = b.step ?? step;
       live();
-      const t = setTimeout(() => api(`/builds/${enc(id)}`).then(settle).catch(() => {}), 5000);
+      const t = setTimeout(() => api(`/builds/${enc(id)}`, { refresh: true }).then(settle).catch(() => {}), 5000);
       onLeave(() => clearTimeout(t));
     };
 
@@ -463,8 +463,11 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     });
     if (finished) return;
     // Pick up the icon as soon as the builder has written it (it does that first), and the attempt clock.
+    let ticking = false;
     const tick = setInterval(async () => {
-      const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`).catch(() => null), caps(true).catch(() => null)]);
+      if (ticking) return;
+      ticking = true;
+      const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`, { refresh: true }).catch(() => null), caps(true, { poll: true }).catch(() => null)]).finally(() => (ticking = false));
       if (fresh) for (const [k, x] of fresh) all.set(k, x);
       if (v?.progress) startedAt = Date.now() - v.progress.elapsedSeconds * 1000;
       if (v && b.status === "waiting" && v.status !== "waiting") b = v;
