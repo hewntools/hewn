@@ -411,10 +411,17 @@ export class HewnDO extends DurableObject<Env> {
     else await this.ctx.storage.setAlarm(Math.max(next, Date.now()));
   }
 
+  /** The alarm's work, one pass at a time (the alarm and a resume can both ask for it). */
+  private catchingUp: Promise<void> = Promise.resolve();
+
   async alarm() {
-    await this.platform.runDueSchedules();
-    await this.secrets.flush();
-    await this.armAlarm();
+    const pass = this.catchingUp.then(async () => {
+      await this.platform.runDueSchedules();
+      await this.secrets.flush();
+      await this.armAlarm();
+    });
+    this.catchingUp = pass.catch(() => {});
+    return pass;
   }
 
   private settings(): Settings {
@@ -534,7 +541,7 @@ export class HewnDO extends DurableObject<Env> {
     if (!sameDigest(request.headers.get("x-hewn-admin") ?? "", this.env.ADMIN_TOKEN)) return Response.json({ error: "unauthorized" }, { status: 401 });
     const body: any = request.method === "POST" ? await request.json() : {};
     // The idle report: what the CLI changes, a backup should keep (a tool call counts itself).
-    if (request.method === "POST" && (url.pathname === "/_admin/call" ? ADMIN_CALLS[body.method]?.changes : !ADMIN_READS.has(url.pathname))) this.platform.activity.changed();
+    if (request.method === "POST" && adminChanges(url.pathname, body)) this.platform.activity.changed();
     try {
       switch (url.pathname) {
         case "/_admin/resumed":
@@ -542,7 +549,7 @@ export class HewnDO extends DurableObject<Env> {
           await this.alarm();
           return Response.json({ ok: true, nextAlarmAt: this.platform.nextScheduleAt() });
         case "/_admin/changed":
-          // A restore swapped the data in (counted above).
+          // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.
@@ -646,6 +653,14 @@ export class HewnDO extends DurableObject<Env> {
 
 /** Admin routes that change nothing a backup keeps (`/_admin/invoke` counts its own writes). */
 const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed"]);
+
+/** Whether an admin request changes what a backup keeps (the idle report's backup reason). */
+function adminChanges(path: string, body: any): boolean {
+  if (path === "/_admin/call") return !!ADMIN_CALLS[body.method]?.changes;
+  // Without an id or a new schedule's capability and cadence, it lists them.
+  if (path === "/_admin/schedules") return !!(body.id || (body.capabilityId && body.cadence));
+  return !ADMIN_READS.has(path);
+}
 
 /**
  * Core methods the CLI may call over the admin channel; `owner`: the first argument is the owner; `changes`: it

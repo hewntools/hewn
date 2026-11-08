@@ -34,7 +34,7 @@ import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
-import { idleStatus, type IdleStatus } from "./idle.ts";
+import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import { workerdBinary } from "../app-dir.ts";
 
@@ -416,7 +416,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       keySource: secretsKey.source,
       sandbox: !!o.sandbox,
       backups: { dir: backupDir(), last: listBackups(backupDir())[0] ?? null },
-      idle: await (async () => status(typeof b.after === "number" ? b.after : undefined))().catch(() => null),
+      // Wrapped: a call during startup, before `status` is defined, is a rejection here, not a thrown route.
+      idle: await (async () => status(afterParam(b.after === undefined ? null : String(b.after))))().catch(() => null),
     }),
     "/control/backup": async () => backupNow(o.home, backupDir()),
     "/control/backups": async () => ({ dir: backupDir(), backups: listBackups(backupDir()) }),
@@ -621,7 +622,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const { result } = (await admin("call", { method: "idleActivity" })) as { result: ActivityView };
     const backups = listBackups(backupDir());
     const lastAt = backups.length ? Math.max(...backups.map((b) => Date.parse(b.at))) : null;
-    return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, Date.now(), afterSeconds, resumedAt);
+    return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, { afterSeconds, resumedAt });
   };
 
   const admin = async (path: string, body?: unknown) => {

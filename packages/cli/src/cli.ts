@@ -338,7 +338,7 @@ async function main() {
         const caps = await c.call("list");
         const st = c.control ? await c.control("/control/status") : undefined;
         // --json: the same, for a script or a host's loop (`idle` is the idle report GET /status gives on the metrics port).
-        if (flag("json")) return void console.log(JSON.stringify({ url: c.url, tools: caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })), ...(st ? { supervisor: st, idle: st.idle } : {}) }, null, 2));
+        if (flag("json")) return void console.log(JSON.stringify({ url: c.url, tools: caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })), ...(st ? (({ idle, ...supervisor }) => ({ supervisor, idle }))(st) : {}) }, null, 2));
         console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
         if (st) {

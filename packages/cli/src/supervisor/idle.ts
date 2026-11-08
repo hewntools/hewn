@@ -17,7 +17,11 @@ export const ALARM_SOON_MS = 120_000;
 
 export interface IdleStatus {
   idle: boolean;
-  /** When the last activity ended (null while a build or an intake turn runs): a host may apply its own idle time. */
+  /**
+   * When the last activity ended (a request, a call, a stream's write, a build or intake turn ending, the start or a
+   * resume): a host may apply its own idle time. Null while a reason that isn't a clock holds (build, intake, backup,
+   * alarm-soon).
+   */
   since: string | null;
   busy: BusyReason[];
   /** The next schedule's run, or null. The backup is never an alarm. */
@@ -35,7 +39,7 @@ const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOStrin
  * for today's backup, and no schedule due within 2 minutes.
  * `backup.lastAt` is the newest backup's time (any backup), `backedUpToday` whether one was made today.
  */
-export function idleStatus(a: ActivityView, backup: { lastAt: number | null; backedUpToday: boolean }, now = Date.now(), afterSeconds = IDLE_AFTER_SECONDS, resumedAt: number | null = null): IdleStatus {
+export function idleStatus(a: ActivityView, backup: { lastAt: number | null; backedUpToday: boolean }, { now = Date.now(), afterSeconds = IDLE_AFTER_SECONDS, resumedAt = null }: { now?: number; afterSeconds?: number; resumedAt?: number | null } = {}): IdleStatus {
   const woke = Math.max(a.startedAt, resumedAt ?? 0);
   const recent = (t: number | null) => t !== null && now - t < afterSeconds * 1000;
   const changedSince = a.changedAt !== null && (backup.lastAt === null || a.changedAt > backup.lastAt);
@@ -45,7 +49,7 @@ export function idleStatus(a: ActivityView, backup: { lastAt: number | null; bac
     call: recent(a.lastCallAt),
     build: a.building,
     intake: a.intakes > 0,
-    stream: recent(a.openStreamAt),
+    stream: recent(a.lastStreamAt),
     backup: changedSince && !backup.backedUpToday,
     "alarm-soon": a.nextAlarmAt !== null && a.nextAlarmAt - now <= ALARM_SOON_MS,
   };
@@ -53,7 +57,8 @@ export function idleStatus(a: ActivityView, backup: { lastAt: number | null; bac
   const ended = Math.max(woke, ...[a.lastRequestAt, a.lastCallAt, a.lastStreamAt, a.lastIntakeAt, a.lastBuildAt].filter((t): t is number => t !== null));
   return {
     idle: busy.length === 0,
-    since: a.building || a.intakes > 0 ? null : iso(ended),
+    // Only the clocks' reasons clear by themselves; while another holds, there's no "since".
+    since: reasons.build || reasons.intake || reasons.backup || reasons["alarm-soon"] ? null : iso(ended),
     busy,
     nextAlarmAt: iso(a.nextAlarmAt),
     backup: { lastAt: iso(backup.lastAt), changedSince },

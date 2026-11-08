@@ -17,73 +17,73 @@ import { freePort, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 const T0 = Date.parse("2026-11-09T08:00:00Z");
 const NOW = T0 + 3600_000;
-const quiet: ActivityView = { startedAt: T0, lastRequestAt: null, lastCallAt: null, lastStreamAt: null, openStreamAt: null, intakes: 0, lastIntakeAt: null, building: false, lastBuildAt: null, changedAt: null, nextAlarmAt: null };
+const quiet: ActivityView = { startedAt: T0, lastRequestAt: null, lastCallAt: null, lastStreamAt: null, intakes: 0, lastIntakeAt: null, building: false, lastBuildAt: null, changedAt: null, nextAlarmAt: null };
 const backedUp = { lastAt: T0, backedUpToday: true };
 
 describe("the idle rules", () => {
   test("idle only when every reason is clear; each one flips it, by name", () => {
-    assert.deepEqual(idleStatus(quiet, backedUp, NOW), { idle: true, since: new Date(T0).toISOString(), busy: [], nextAlarmAt: null, backup: { lastAt: new Date(T0).toISOString(), changedSince: false }, lastRequestAt: null, lastCallAt: null });
+    assert.deepEqual(idleStatus(quiet, backedUp, { now: NOW }), { idle: true, since: new Date(T0).toISOString(), busy: [], nextAlarmAt: null, backup: { lastAt: new Date(T0).toISOString(), changedSince: false }, lastRequestAt: null, lastCallAt: null });
     const min = 60_000;
     const cases: [Partial<ActivityView>, string][] = [
       [{ lastRequestAt: NOW - 9 * min }, "request"],
       [{ lastCallAt: NOW - 9 * min }, "call"],
       [{ building: true }, "build"],
       [{ intakes: 1 }, "intake"],
-      [{ openStreamAt: NOW - 9 * min, lastStreamAt: NOW - 9 * min }, "stream"],
+      [{ lastStreamAt: NOW - 9 * min }, "stream"],
       [{ changedAt: T0 + min }, "backup"],
       [{ nextAlarmAt: NOW + 2 * min }, "alarm-soon"],
     ];
     for (const [a, reason] of cases) {
-      const s = idleStatus({ ...quiet, ...a }, reason === "backup" ? { lastAt: T0, backedUpToday: false } : backedUp, NOW);
+      const s = idleStatus({ ...quiet, ...a }, reason === "backup" ? { lastAt: T0, backedUpToday: false } : backedUp, { now: NOW });
       assert.equal(s.idle, false, reason);
       assert.deepEqual(s.busy, [reason]);
     }
-    // Ten quiet minutes clear the clocks; a stream that closed, or stayed open writing nothing, doesn't count.
-    assert.equal(idleStatus({ ...quiet, lastRequestAt: NOW - 10 * min, lastCallAt: NOW - 11 * min, lastStreamAt: NOW - min }, backedUp, NOW).idle, true);
-    assert.equal(idleStatus({ ...quiet, openStreamAt: NOW - 30 * min }, backedUp, NOW).idle, true);
+    // Ten quiet minutes clear the clocks; a stream that wrote nothing for ten minutes (open or not) doesn't count.
+    assert.equal(idleStatus({ ...quiet, lastRequestAt: NOW - 10 * min, lastCallAt: NOW - 11 * min, lastStreamAt: NOW - 10 * min }, backedUp, { now: NOW }).idle, true);
     // The host's own quiet time instead of ten minutes.
-    assert.equal(idleStatus({ ...quiet, lastRequestAt: NOW - 2 * min }, backedUp, NOW, 60).idle, true);
-    assert.equal(idleStatus({ ...quiet, nextAlarmAt: NOW + 3 * min }, backedUp, NOW).idle, true);
+    assert.equal(idleStatus({ ...quiet, lastRequestAt: NOW - 2 * min }, backedUp, { now: NOW, afterSeconds: 60 }).idle, true);
+    assert.equal(idleStatus({ ...quiet, nextAlarmAt: NOW + 3 * min }, backedUp, { now: NOW }).idle, true);
   });
 
   test("ten minutes' grace after a start or a resume, whatever the host's quiet time", () => {
     const min = 60_000;
-    assert.deepEqual(idleStatus(quiet, backedUp, T0 + 9 * min, 0).busy, ["starting"]);
-    assert.equal(idleStatus(quiet, backedUp, T0 + 10 * min, 0).idle, true);
+    assert.deepEqual(idleStatus(quiet, backedUp, { now: T0 + 9 * min, afterSeconds: 0 }).busy, ["starting"]);
+    assert.equal(idleStatus(quiet, backedUp, { now: T0 + 10 * min, afterSeconds: 0 }).idle, true);
     const resumed = NOW - 5 * min;
-    assert.deepEqual(idleStatus(quiet, backedUp, NOW, 0, resumed).busy, ["starting"], "a resume starts it again");
-    assert.equal(idleStatus(quiet, backedUp, NOW, 0, resumed).since, new Date(resumed).toISOString());
-    assert.equal(idleStatus(quiet, backedUp, NOW + 6 * min, 600, resumed).idle, true);
+    assert.deepEqual(idleStatus(quiet, backedUp, { now: NOW, afterSeconds: 0, resumedAt: resumed }).busy, ["starting"], "a resume starts it again");
+    assert.equal(idleStatus(quiet, backedUp, { now: NOW, afterSeconds: 0, resumedAt: resumed }).since, new Date(resumed).toISOString());
+    assert.equal(idleStatus(quiet, backedUp, { now: NOW + 6 * min, afterSeconds: 600, resumedAt: resumed }).idle, true);
   });
 
   test("since: when the last activity ended (null while a build or an intake turn runs); a host can apply its own idle time", () => {
     const at = NOW - 20 * 60_000;
-    assert.equal(idleStatus({ ...quiet, lastRequestAt: at - 1000, lastCallAt: at, lastBuildAt: at - 5000 }, backedUp, NOW).since, new Date(at).toISOString());
-    assert.equal(idleStatus({ ...quiet, building: true }, backedUp, NOW).since, null);
-    assert.equal(idleStatus({ ...quiet, intakes: 1 }, backedUp, NOW).since, null);
+    assert.equal(idleStatus({ ...quiet, lastRequestAt: at - 1000, lastCallAt: at, lastBuildAt: at - 5000 }, backedUp, { now: NOW }).since, new Date(at).toISOString());
+    for (const busy of [{ building: true }, { intakes: 1 }, { nextAlarmAt: NOW + 60_000 }]) assert.equal(idleStatus({ ...quiet, ...busy }, backedUp, { now: NOW }).since, null, JSON.stringify(busy));
+    assert.equal(idleStatus({ ...quiet, changedAt: T0 + 1 }, { lastAt: T0, backedUpToday: false }, { now: NOW }).since, null, "the backup reason");
+    assert.ok(idleStatus({ ...quiet, lastRequestAt: NOW - 60_000 }, backedUp, { now: NOW }).since, "the clocks' reasons keep it");
   });
 
   test("the backup: never an alarm; the reason only with a change since the newest backup and none made today", () => {
     const changed = { ...quiet, changedAt: T0 + 1000 };
-    assert.equal(idleStatus(changed, backedUp, NOW).nextAlarmAt, null, "the backup is not an alarm");
-    assert.deepEqual(idleStatus(changed, { lastAt: T0, backedUpToday: true }, NOW).busy, [], "a backup today: no reason, though a change came after it");
-    assert.equal(idleStatus(changed, { lastAt: T0, backedUpToday: true }, NOW).backup.changedSince, true);
-    assert.deepEqual(idleStatus(changed, { lastAt: T0 + 2000, backedUpToday: false }, NOW).busy, [], "nothing changed since the newest backup");
-    assert.deepEqual(idleStatus(changed, { lastAt: null, backedUpToday: false }, NOW).busy, ["backup"], "never backed up");
-    assert.deepEqual(idleStatus(quiet, { lastAt: null, backedUpToday: false }, NOW).busy, [], "nothing changed, no backup wanted");
+    assert.equal(idleStatus(changed, backedUp, { now: NOW }).nextAlarmAt, null, "the backup is not an alarm");
+    assert.deepEqual(idleStatus(changed, { lastAt: T0, backedUpToday: true }, { now: NOW }).busy, [], "a backup today: no reason, though a change came after it");
+    assert.equal(idleStatus(changed, { lastAt: T0, backedUpToday: true }, { now: NOW }).backup.changedSince, true);
+    assert.deepEqual(idleStatus(changed, { lastAt: T0 + 2000, backedUpToday: false }, { now: NOW }).busy, [], "nothing changed since the newest backup");
+    assert.deepEqual(idleStatus(changed, { lastAt: null, backedUpToday: false }, { now: NOW }).busy, ["backup"], "never backed up");
+    assert.deepEqual(idleStatus(quiet, { lastAt: null, backedUpToday: false }, { now: NOW }).busy, [], "nothing changed, no backup wanted");
   });
 
   test("?after: whole seconds up to a day, else the default; the status line", () => {
     assert.deepEqual([afterParam("60"), afterParam(null), afterParam(""), afterParam("-1"), afterParam("1.5"), afterParam("90000"), afterParam("x")], [60, 600, 600, 600, 600, 600, 600]);
     const time = (t: string) => t.slice(11, 16);
-    assert.equal(idleLine(idleStatus({ ...quiet, nextAlarmAt: NOW + 7200_000 }, backedUp, NOW), time), "Idle since 08:00 · next alarm 11:00");
-    assert.equal(idleLine(idleStatus({ ...quiet, building: true, changedAt: T0 + 1 }, { lastAt: T0, backedUpToday: false }, NOW), time), "Busy: build, backup · no alarm · changes since the last backup");
+    assert.equal(idleLine(idleStatus({ ...quiet, nextAlarmAt: NOW + 7200_000 }, backedUp, { now: NOW }), time), "Idle since 08:00 · next alarm 11:00");
+    assert.equal(idleLine(idleStatus({ ...quiet, building: true, changedAt: T0 + 1 }, { lastAt: T0, backedUpToday: false }, { now: NOW }), time), "Busy: build, backup · no alarm · changes since the last backup");
   });
 
   test("gauges: idle, each reason, the next alarm and changes since the backup; counts and times, never names", () => {
     const t = setup();
     try {
-      const s = idleStatus({ ...quiet, building: true, nextAlarmAt: NOW + 7200_000, changedAt: T0 + 1 }, { lastAt: T0, backedUpToday: true }, NOW);
+      const s = idleStatus({ ...quiet, building: true, nextAlarmAt: NOW + 7200_000, changedAt: T0 + 1 }, { lastAt: T0, backedUpToday: true }, { now: NOW });
       const text = prometheusText(t.platform.metrics(USER), "1.2.3", s);
       assert.match(text, /^hewn_idle 0$/m);
       assert.match(text, /^hewn_busy\{reason="build"\} 1$/m);
@@ -91,7 +91,7 @@ describe("the idle rules", () => {
       assert.equal(text.split("\n").filter((l) => l.startsWith("hewn_busy{")).length, 8);
       assert.match(text, new RegExp(`^hewn_next_alarm_seconds ${Math.floor((NOW + 7200_000) / 1000)}$`, "m"));
       assert.match(text, /^hewn_backup_changed_since 1$/m);
-      assert.match(prometheusText(t.platform.metrics(USER), "1.2.3", idleStatus(quiet, backedUp, NOW)), /^hewn_next_alarm_seconds 0$/m);
+      assert.match(prometheusText(t.platform.metrics(USER), "1.2.3", idleStatus(quiet, backedUp, { now: NOW })), /^hewn_next_alarm_seconds 0$/m);
     } finally {
       t.cleanup();
     }
@@ -127,6 +127,15 @@ describe("what counts as activity", () => {
     await new Promise((r) => setTimeout(r, 5));
     await t.platform.runScheduleNow(USER, s.id);
     assert.ok(view().lastCallAt! > before, "a schedule's run is a call");
+  });
+
+  test("two passes at once (the alarm and a resume) run a due schedule once", async () => {
+    const s = t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 1, durationSeconds: 300 }, cadence: "daily 06:00" });
+    const other = t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 2, durationSeconds: 600 }, cadence: "daily 07:00" });
+    for (const x of [s, other]) t.platform.schedules.update(x.id, { nextRunAt: Date.now() - 1000 });
+    const ran = (await Promise.all([t.platform.runDueSchedules(), t.platform.runDueSchedules()])).flat();
+    assert.deepEqual(ran.map((r) => r.id).sort(), [s.id, other.id].sort());
+    assert.equal(((await t.platform.invoke(USER, { capabilityId: "running-log", operation: "list_runs" })).result as { runs: unknown[] }).runs.length, 2);
   });
 
   test("a build is busy while it's queued or running, and its end is activity", async () => {
@@ -201,6 +210,9 @@ describe("requests: the owner and agents count; refreshes, /health and refused r
     cookie = "";
     assert.equal((await api("/capabilities")).status, 401);
     assert.equal((await http("/mcp", { host: "127.0.0.1", method: "POST", body: {} })).status, 401);
+    // What anyone may load: the sign-in page's files, the OAuth metadata (a scanner on a public address).
+    assert.equal((await http("/app.css")).status, 200);
+    assert.equal((await http("/.well-known/oauth-authorization-server", { host: "127.0.0.1" })).status, 200);
     cookie = saved;
     assert.equal(platform.idleActivity().lastRequestAt, at);
     await tick();
@@ -225,13 +237,12 @@ describe("requests: the owner and agents count; refreshes, /health and refused r
     await progressed;
     const during = platform.idleActivity();
     assert.equal(during.intakes, 1);
-    assert.ok(during.openStreamAt, "an open stream that wrote");
+    assert.ok(during.lastStreamAt, "its stream wrote");
     intakeDone();
     assert.equal((await turn).status, 200);
     const done = platform.idleActivity();
     assert.equal(done.intakes, 0);
-    assert.equal(done.openStreamAt, null, "closed");
-    assert.ok(done.lastIntakeAt && done.lastStreamAt);
+    assert.ok(done.lastIntakeAt);
   });
 });
 
@@ -282,6 +293,7 @@ describe("the idle report on the workerd host", () => {
     await get("/metrics");
     await status();
     await h.sv.admin("call", { method: "list", args: [] });
+    await h.sv.admin("schedules", { capabilityId: "running-log" });
     await control("/control/backup");
     await control("/control/status");
     const later = await status();
@@ -317,5 +329,15 @@ describe("the idle report on the workerd host", () => {
     assert.equal((await status()).nextAlarmAt, new Date(ran.nextRunAt).toISOString());
     await new Promise((r) => setTimeout(r, 2000));
     assert.equal((await h.invoke("running-log", "list_runs")).result.runs.length, before + 1, "once, also after the second look");
+  });
+
+  test("a resume while the alarm also fires: the schedule runs once", async () => {
+    const before = (await h.invoke("running-log", "list_runs")).result.runs.length;
+    const s = await h.sv.admin("schedules", { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 3, durationSeconds: 900 }, cadence: "daily 05:00" });
+    // The alarm armed for now fires, and the clock jumps at the same moment.
+    await h.sv.admin("schedules/fire", { id: s.id });
+    wallOffset += 120_000;
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.equal((await h.invoke("running-log", "list_runs")).result.runs.length, before + 1);
   });
 });

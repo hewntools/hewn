@@ -12,10 +12,8 @@ export interface ActivityView {
   lastRequestAt: number | null;
   /** Now while a tool call runs. */
   lastCallAt: number | null;
-  /** The newest write of any stream. */
+  /** A stream's newest write (one that stays open and quiet doesn't count again). */
   lastStreamAt: number | null;
-  /** The newest write of a stream still open (null when none is open). */
-  openStreamAt: number | null;
   intakes: number;
   lastIntakeAt: number | null;
   building: boolean;
@@ -31,7 +29,6 @@ export class Activity {
   private lastCallAt: number | null = null;
   private calls = 0;
   private lastStreamAt: number | null = null;
-  private streams = new Map<symbol, number | null>();
   private intakes = 0;
   private lastIntakeAt: number | null = null;
   private lastBuildAt: number | null = null;
@@ -50,13 +47,10 @@ export class Activity {
   call(): () => void {
     this.calls++;
     this.lastCallAt = Date.now();
-    let ended = false;
-    return () => {
-      if (ended) return;
-      ended = true;
+    return once(() => {
       this.calls--;
       this.lastCallAt = Date.now();
-    };
+    });
   }
 
   /** Something changed that a backup should keep: a write, a promote, a restore, a setting. */
@@ -68,30 +62,18 @@ export class Activity {
     }
   }
 
-  /** A response stream opened: `write` on every chunk, `close` when it ends. */
-  stream(): { write: () => void; close: () => void } {
-    const key = Symbol();
-    this.streams.set(key, null);
-    return {
-      write: () => {
-        const now = Date.now();
-        this.lastStreamAt = now;
-        if (this.streams.has(key)) this.streams.set(key, now);
-      },
-      close: () => void this.streams.delete(key),
-    };
+  /** A response stream wrote. */
+  streamWrote() {
+    this.lastStreamAt = Date.now();
   }
 
   /** An intake turn starts (the owner talking to it, or a reading); the returned function ends it. */
   intake(): () => void {
     this.intakes++;
-    let ended = false;
-    return () => {
-      if (ended) return;
-      ended = true;
+    return once(() => {
       this.intakes--;
       this.lastIntakeAt = Date.now();
-    };
+    });
   }
 
   /** A build finished, failed, paused or was cancelled. */
@@ -100,13 +82,11 @@ export class Activity {
   }
 
   view(o: { building: boolean; nextAlarmAt: number | null }): ActivityView {
-    const open = [...this.streams.values()].filter((t): t is number => t !== null);
     return {
       startedAt: this.startedAt,
       lastRequestAt: this.lastRequestAt,
       lastCallAt: this.calls > 0 ? Date.now() : this.lastCallAt,
       lastStreamAt: this.lastStreamAt,
-      openStreamAt: open.length ? Math.max(...open) : null,
       intakes: this.intakes,
       lastIntakeAt: this.lastIntakeAt,
       building: o.building,
@@ -116,3 +96,9 @@ export class Activity {
     };
   }
 }
+
+/** `fn`, run the first time only (an end that may be called twice). */
+const once = (fn: () => void) => {
+  let done = false;
+  return () => void (done || ((done = true), fn()));
+};

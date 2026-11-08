@@ -12,7 +12,7 @@ import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
 import { CLIENT_IP_HEADER, PUBLIC_HEADER, PUBLIC_PATHS } from "./public.ts";
 import { localSite, publicSite, requestHost, type Site, uiPath } from "./site.ts";
 import { handleUi } from "./ui.ts";
-import { handleWeb } from "./web.ts";
+import { handleWeb, PUBLIC_FILES } from "./web.ts";
 
 export type { SurfaceHost } from "./host.ts";
 export { McpSessions } from "./mcp-sessions.ts";
@@ -32,27 +32,25 @@ export const REFRESH_HEADER = "x-hewn-refresh";
 
 /**
  * The idle report (core platform/activity.ts) counts the owner and their agents: a request once answered, unless it
- * was refused (a scanner on a public address gets a 401 or a 404); a stream each time it writes; and a change made
- * in the web client (any request that isn't a GET) as one a backup should keep. A tool call counts itself.
+ * was refused (anyone not signed in gets a 401 or a 404) or is one anyone may make (the files the sign-in page loads,
+ * the OAuth endpoints and their metadata: what a scanner on a public address reaches); a stream each time it writes;
+ * and a change made in the web client (any request that isn't a GET) as one a backup should keep. A tool call counts
+ * itself.
  */
 function counted(activity: Platform["activity"], req: Request, url: URL, res: Response): Response {
-  if (res.status >= 400) return res;
+  if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
   activity.request();
   if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") activity.changed();
   if (!res.body || !/^(text\/event-stream|application\/x-ndjson)/.test(res.headers.get("content-type") ?? "")) return res;
-  const s = activity.stream();
   const reader = res.body.getReader();
   const body = new ReadableStream<Uint8Array>({
     async pull(c) {
       const { value, done } = await reader.read();
-      if (done) return void (s.close(), c.close());
-      s.write();
+      if (done) return void c.close();
+      activity.streamWrote();
       c.enqueue(value);
     },
-    cancel(reason) {
-      s.close();
-      return reader.cancel(reason);
-    },
+    cancel: (reason) => reader.cancel(reason),
   });
   return new Response(body, res);
 }

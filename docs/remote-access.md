@@ -83,6 +83,23 @@ If you run Hewn for its owner and they have no terminal on the machine (a hostin
 
 Then the web client and its pages never send the owner to a command: signed out, they get a **Sign in** button to `HEWN_HOST_SIGNIN_URL` (or passkey sign-in, once they've added one); an agent's sign-in page links to Hewn to approve it; the first run has no "who builds" step; and Settings hides what you manage (the address, the sandbox, the backup folder, upgrades, and which agent builds). Connecting agents is through the public address only. Tools that think (`ctx.model`) run on your models, through your builder's service (`/v1/generate`), so the owner needs no API key; Settings › AI › Models shows what each tier runs on and what you charged this month. Unset (the default): nothing changes.
 
+#### Suspending Hewn when idle
+
+If you run Hewn on a machine you can suspend and wake (a VM that sleeps when unused), Hewn tells you when it's safe to: `GET /status` on the [metrics port](#metrics-hewn_metrics_port) answers with JSON, and `hewn status --json` gives the same under `idle`. Hewn never suspends itself and sends nothing; you read it, and you decide.
+
+```json
+{ "idle": false, "since": null, "busy": ["build"], "nextAlarmAt": "2026-11-10T05:00:00.000Z",
+  "backup": { "lastAt": "2026-11-09T03:12:44.000Z", "changedSince": true },
+  "lastRequestAt": "2026-11-09T14:02:10.000Z", "lastCallAt": "2026-11-09T14:02:11.000Z" }
+```
+
+- **`idle`** is true when every reason is clear. **`busy`** names each one that isn't: `starting` (Hewn started or woke less than 10 minutes ago, whatever quiet time you ask for, so a Hewn you just woke isn't put back to sleep at once), `request` (you or an agent used Hewn in the last 10 minutes), `call` (a tool call, a schedule's run too), `build` (one queued or running; one paused for the owner isn't), `intake` (a reply on its way), `stream` (an open stream that wrote in the last 10 minutes), `backup` (something changed since the newest backup and none was made today) and `alarm-soon` (a schedule due within 2 minutes).
+- **`since`** is when the last activity ended (a request, a call, a stream's last write, a build or reply finishing, the start or a wake), so you can apply your own idle time; or ask with `?after=<seconds>` instead of the 10 minutes. It's null while a reason that isn't a clock holds (`build`, `intake`, `backup`, `alarm-soon`).
+- **`nextAlarmAt`** is when the next schedule runs, or null: wake Hewn before it. The daily backup isn't an alarm: **`backup`** says when the newest backup was made (any backup: the nightly one or `hewn backup now`) and whether anything changed since, and you choose whether to wake Hewn for one.
+- Your own traffic doesn't count: reading `/status` or `/metrics`, the `hewn` commands' own calls to Hewn (`hewn backup now`, `hewn status`), and Hewn's health checks. A page's own refreshes don't either (an open Home refreshing its widgets), and a hidden browser tab makes no requests at all. A request Hewn refuses, or one anyone may make (the files the sign-in page loads, the OAuth endpoints), doesn't count: a scanner on your public address doesn't keep Hewn awake.
+- A request to a suspended Hewn wakes it if your platform starts the machine on traffic. After a wake, Hewn catches up by itself: when its clock jumps ahead it runs every schedule that came due while it slept (once, however many times it was missed), and makes the day's backup if it's due; once more 15 seconds later, while the clock settles.
+- `hewn status` shows the same in a line: `Idle since 14:02 · next alarm 06:00`.
+
 ### Metrics (`HEWN_METRICS_PORT`)
 
 Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text at `GET /metrics` on that port, for whoever runs Hewn to scrape. It listens on all interfaces, so let only your scraper reach it. Off unless set, and pulled only: Hewn sends it nowhere. It has counts and sums, never what's in your tools, and its labels are fixed categories: no tool, widget or agent is ever named, so what you called your tools stays with you, also in whatever stores the scraped series:
@@ -93,24 +110,9 @@ Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text a
 - Model spend, tokens and calls this month; connected agents (and those active in the last 7 days); schedules by status, and those failing.
 - The idle report ([below](#suspending-hewn-when-idle)): `hewn_idle` (1 when idle), `hewn_busy` (1 for each reason it isn't, by `reason`), `hewn_next_alarm_seconds` (when the next schedule runs, in epoch seconds; 0 if none) and `hewn_backup_changed_since` (1 when something changed since the newest backup).
 
+`/status` on the same port is the one place with times rather than counts: when Hewn was last used (`lastRequestAt`, `lastCallAt`) and when its next schedule runs. Still no names, but keep the port private.
+
 Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)). A build or schedule status Hewn doesn't know shows as `other`. For calls per tool or per agent, look in [Activity](using-hewn.md#activity), which filters by both.
-
-### Suspending Hewn when idle
-
-If you run Hewn on a machine you can suspend and wake (a VM that sleeps when unused), Hewn tells you when it's safe to: `GET /status` on the metrics port answers with JSON, and `hewn status --json` gives the same under `idle`. Hewn never suspends itself and sends nothing; you read it, and you decide.
-
-```json
-{ "idle": false, "since": null, "busy": ["build"], "nextAlarmAt": "2026-11-10T05:00:00.000Z",
-  "backup": { "lastAt": "2026-11-09T03:12:44.000Z", "changedSince": true },
-  "lastRequestAt": "2026-11-09T14:02:10.000Z", "lastCallAt": "2026-11-09T14:02:11.000Z" }
-```
-
-- **`idle`** is true when every reason is clear. **`busy`** names each one that isn't: `starting` (Hewn started or woke less than 10 minutes ago, whatever quiet time you ask for, so a Hewn you just woke isn't put back to sleep at once), `request` (you or an agent used Hewn in the last 10 minutes), `call` (a tool call, a schedule's run too), `build` (one queued or running; one paused for the owner isn't), `intake` (a reply on its way), `stream` (an open stream that wrote in the last 10 minutes), `backup` (something changed since the newest backup and none was made today) and `alarm-soon` (a schedule due within 2 minutes).
-- **`since`** is when the last activity ended (null while a build or a reply runs), so you can apply your own idle time; or ask with `?after=<seconds>` instead of the 10 minutes.
-- **`nextAlarmAt`** is when the next schedule runs, or null: wake Hewn before it. The daily backup isn't an alarm: **`backup`** says when the newest backup was made (any backup: the nightly one or `hewn backup now`) and whether anything changed since, and you choose whether to wake Hewn for one.
-- Your own traffic doesn't count: reading `/status` or `/metrics`, the `hewn` commands' own calls to Hewn (`hewn backup now`, `hewn status`), and Hewn's health checks. A page's own refreshes don't either (an open Home refreshing its widgets), and a hidden browser tab makes no requests at all. A request Hewn refuses (a scanner on your public address) doesn't count.
-- A request to a suspended Hewn wakes it if your platform starts the machine on traffic. After a wake, Hewn catches up by itself: when its clock jumps ahead it runs every schedule that came due while it slept (once, however many times it was missed), and makes the day's backup if it's due; once more 15 seconds later, while the clock settles.
-- `hewn status` shows the same in a line: `Idle since 14:02 · next alarm 06:00`.
 
 ### Other reverse proxies
 
