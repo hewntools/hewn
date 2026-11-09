@@ -145,7 +145,7 @@ let inboxTimer = null;
 async function pollInbox(withRecent = false) {
   clearTimeout(inboxTimer);
   if (!document.hidden) {
-    const next = await api(`/inbox${inboxPanel.isConnected || withRecent ? "?recent=1" : ""}`).catch(() => null);
+    const next = await api(`/inbox${inboxPanel.isConnected || withRecent ? "?recent=1" : ""}`, { refresh: true }).catch(() => null);
     if (next) {
       inboxData = { ...next, recent: next.recent ?? inboxData.recent };
       const n = next.needs.length;

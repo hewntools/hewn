@@ -500,6 +500,7 @@ export class Validation extends Domain {
       // Installed from a file: where it came from becomes the record every later version is stamped from.
       if (installed && !this.registry.getCapability(id)?.source) this.registry.setSource(id, installed);
     });
+    this.platform.activity.changed();
     // Grants this version no longer asks for go: asking again later means asking the owner again.
     const wanted = new Set(wantedGrants(manifest));
     for (const g of this.registry.grants(id)) {

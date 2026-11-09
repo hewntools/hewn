@@ -97,7 +97,7 @@ async function home({ editing = false } = {}) {
   const timers = widgets.flatMap((w, i) => {
     if (w.entry.missing) return [];
     const stale = !w.entry.at || Date.now() - Date.parse(w.entry.at) > 60_000;
-    return [stale ? setTimeout(w.refresh, i * 150) : 0, setInterval(w.refresh, Math.max(w.entry.refreshMs ?? 1_800_000, 300_000))];
+    return [stale ? setTimeout(() => w.refresh({ auto: true }), i * 150) : 0, setInterval(() => w.refresh({ auto: true }), Math.max(w.entry.refreshMs ?? 1_800_000, 300_000))];
   });
   onLeave(() => timers.forEach((t) => (clearTimeout(t), clearInterval(t))));
 
@@ -162,7 +162,7 @@ async function home({ editing = false } = {}) {
   let last = signature(list);
   const poll = async () => {
     if (!document.body.contains(grid)) return;
-    const next = onHome(await caps(true).catch(() => new Map()));
+    const next = onHome(await caps(true, { poll: true }).catch(() => new Map()));
     const busy = grid.querySelector("input.rename") || document.querySelector(".menu.context") || grid.classList.contains("editing");
     if (signature(next) !== last && !busy) return home();
     for (const c of next) if (c.building) tiles.get(c.id)?.update(c);
