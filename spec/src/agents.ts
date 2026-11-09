@@ -144,8 +144,15 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_check",
     scopes: ["create", "modify"],
     description:
-      "Check a capability you wrote as validation will, without submitting it: the manifest, bundling, contract compatibility (with capabilityId), migrations (on empty tables: on a copy of the capability's own data they run when you submit), tests/cases.json, sample/calls.json, and the UI rendered at 1280 and 390 px wide in light and dark with what to fix measured on it. Returns PASS or FAIL with every failure, and the four screenshots as images (also as files for screenshots/). Fix what it shows and check again; 30 checks an hour. Promotes nothing.",
-    inputSchema: obj({ files, capabilityId: str("The capability these files change; leave it out for a new one") }, ["files"]),
+      "Check a capability you wrote as validation will, without submitting it: the manifest, bundling, contract compatibility (with capabilityId), migrations (on empty tables: on a copy of the capability's own data they run when you submit), tests/cases.json, sample/calls.json, and the UI rendered at 1280 and 390 px wide in light and dark with what to fix measured on it. Returns PASS or FAIL with every failure, and the four screenshots as images (a long page's further parts after them; their names in structuredContent.screenshots). Fix what it shows and check again; 30 checks an hour. Promotes nothing.",
+    inputSchema: obj(
+      {
+        files,
+        capabilityId: str("The capability these files change; leave it out for a new one"),
+        screenshots: { type: "boolean", description: "false: no images back (the UI is still rendered and measured). Default true" },
+      },
+      ["files"],
+    ),
   },
   {
     name: "capabilities_submit",

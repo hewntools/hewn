@@ -394,7 +394,7 @@ export class Platform {
   // ---------- builds from anywhere: pack, check, submit for a client (platform/submissions.ts) ----------
 
   pack(agent: Agent, req: { kind?: unknown; capabilityId?: unknown }): Promise<Pack> { return this.d.submissions.pack(agent, req); }
-  checkFiles(agent: Agent, req: { files?: unknown; capabilityId?: unknown }): Promise<ClientCheck> { return this.d.submissions.check(agent, req); }
+  checkFiles(agent: Agent, req: { files?: unknown; capabilityId?: unknown; screenshots?: unknown }): Promise<ClientCheck> { return this.d.submissions.check(agent, req); }
   submitFiles(agent: Agent, req: { files?: unknown; capabilityId?: unknown; request?: unknown; baseVersion?: unknown }): Promise<BuildView> { return this.d.submissions.submit(agent, req); }
 
   // ---------- attachments (platform/attachments.ts) ----------

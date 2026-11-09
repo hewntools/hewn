@@ -111,10 +111,10 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     capabilities_pack: { handler: (a) => platform.pack(agent, a) },
     capabilities_check: {
       handler: (a) => platform.checkFiles(agent, a),
-      // The check's text first (what passed and failed, what to fix), then its four renders as images; every render as a file too, for a client that drops images.
+      // The check's text first (what passed and failed, what to fix), then its renders as images; their names, in that order, in structuredContent (no image data there: a client may show it to the model as text).
       format: (r: ClientCheck) => ({
         content: [{ type: "text", text: r.text }, ...r.images.map((i) => ({ type: "image" as const, data: toBase64(i.png), mimeType: "image/png" }))],
-        structuredContent: { passed: r.passed, failures: r.failures, defects: r.defects, files: r.files },
+        structuredContent: { passed: r.passed, failures: r.failures, defects: r.defects, screenshots: r.images.map((i) => i.name) },
       }),
     },
     capabilities_submit: { handler: (a) => platform.submitFiles(agent, a) },
