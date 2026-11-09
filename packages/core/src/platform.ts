@@ -28,6 +28,7 @@ import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type M
 import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
+import { Activity, type ActivityView } from "./platform/activity.ts";
 import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
@@ -137,6 +138,8 @@ export class Platform {
   heartbeatMs = 10_000;
   /** How long a build waits after losing its builder connection before counting the attempt. */
   interruptWaitMs = 10_000;
+  /** What the owner and their agents are doing, for a host's idle report (platform/activity.ts). */
+  activity: Activity;
   /** Per-build live events: `${buildId}` → line; `${buildId}:done` → final view. */
   private events = new Events();
   /** The domains (platform/) the methods below hand their calls to. */
@@ -148,6 +151,7 @@ export class Platform {
     this.runtime = opts.runtime;
     this.workbench = opts.workbench;
     this.agentStore = new AgentStore(opts.sql);
+    this.activity = new Activity(this.registry);
     this.agentStore.onChange = () => this.events.emit("changed");
     // Everything worth a log line may change what agents see (catalog, readiness): open MCP
     // sessions re-check their tool lists (debounced, and only notified when it differs).
@@ -340,6 +344,8 @@ export class Platform {
   // ---------- housekeeping (platform/housekeeping.ts) ----------
 
   metrics(owner: Agent) { return this.d.housekeeping.metrics(owner); }
+  /** For the host's idle report: activity times, whether a build runs, and the next schedule's time. */
+  idleActivity(): ActivityView { return this.activity.view({ building: this.d.builds.busy(), nextAlarmAt: this.nextScheduleAt() }); }
   cleanup(now?: number): Promise<{ workspaces: number; transcripts: number; releasedIds: string[]; logs: number }> { return this.d.housekeeping.cleanup(now); }
 
   // ---------- schedules (platform/schedules.ts) ----------

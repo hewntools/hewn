@@ -412,10 +412,17 @@ export class HewnDO extends DurableObject<Env> {
     else await this.ctx.storage.setAlarm(Math.max(next, Date.now()));
   }
 
+  /** The alarm's work, one pass at a time (the alarm and a resume can both ask for it). */
+  private catchingUp: Promise<void> = Promise.resolve();
+
   async alarm() {
-    await this.platform.runDueSchedules();
-    await this.secrets.flush();
-    await this.armAlarm();
+    const pass = this.catchingUp.then(async () => {
+      await this.platform.runDueSchedules();
+      await this.secrets.flush();
+      await this.armAlarm();
+    });
+    this.catchingUp = pass.catch(() => {});
+    return pass;
   }
 
   private settings(): Settings {
@@ -534,8 +541,17 @@ export class HewnDO extends DurableObject<Env> {
   private async admin(request: Request, url: URL): Promise<Response> {
     if (!sameDigest(request.headers.get("x-hewn-admin") ?? "", this.env.ADMIN_TOKEN)) return Response.json({ error: "unauthorized" }, { status: 401 });
     const body: any = request.method === "POST" ? await request.json() : {};
+    // The idle report: what the CLI changes, a backup should keep (a tool call counts itself).
+    if (request.method === "POST" && adminChanges(url.pathname, body)) this.platform.activity.changed();
     try {
       switch (url.pathname) {
+        case "/_admin/resumed":
+          // The supervisor saw the wall clock jump (a suspended machine woke): run what became due, re-arm the alarm.
+          await this.alarm();
+          return Response.json({ ok: true, nextAlarmAt: this.platform.nextScheduleAt() });
+        case "/_admin/changed":
+          // A restore swapped the data in (adminChanges counts it).
+          return Response.json({ ok: true });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.
           const invoke = this.visualInvokers.get(body.buildId);
@@ -587,9 +603,9 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/schedules":
           return Response.json(body.id ? this.platform.updateSchedule(USER, body.id, body.change) : body.capabilityId && body.cadence ? this.platform.createSchedule(USER, body) : this.platform.listSchedules(USER, body.capabilityId));
         case "/_admin/schedules/fire": {
-          // Test hook: make a schedule due now (the alarm fires it).
+          // Test hook: make a schedule due now (the alarm fires it; `arm: false`, as if the alarm didn't: a resume runs it).
           this.platform.schedules.update(body.id, { nextRunAt: Date.now() });
-          await this.armAlarm();
+          if (body.arm !== false) await this.armAlarm();
           return Response.json({ ok: true });
         }
         case "/_admin/import":
@@ -637,21 +653,35 @@ export class HewnDO extends DurableObject<Env> {
   }
 }
 
-/** Core methods the CLI may call over the admin channel; `owner`: the first argument is the owner. */
-const ADMIN_CALLS: Record<string, { owner: boolean }> = {
+/** Admin routes that change nothing a backup keeps (`/_admin/invoke` counts its own writes). */
+const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed"]);
+
+/** Whether an admin request changes what a backup keeps (the idle report's backup reason). */
+function adminChanges(path: string, body: any): boolean {
+  if (path === "/_admin/call") return !!ADMIN_CALLS[body.method]?.changes;
+  // Without an id or a new schedule's capability and cadence, it lists them.
+  if (path === "/_admin/schedules") return !!(body.id || (body.capabilityId && body.cadence));
+  return !ADMIN_READS.has(path);
+}
+
+/**
+ * Core methods the CLI may call over the admin channel; `owner`: the first argument is the owner; `changes`: it
+ * changes what a backup keeps (the idle report's backup reason).
+ */
+const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
-  setSecret: { owner: true }, deleteSecret: { owner: true }, setConfig: { owner: true }, connect: { owner: true }, accounts: { owner: true }, approveGrants: { owner: true }, approveGrant: { owner: true }, revokeGrant: { owner: true }, declineGrant: { owner: true },
-  archive: { owner: true }, restore: { owner: true }, archived: { owner: true }, rollback: { owner: true }, exportData: { owner: true }, importData: { owner: true }, purge: { owner: true }, startOver: { owner: true },
+  setSecret: { owner: true, changes: true }, deleteSecret: { owner: true, changes: true }, setConfig: { owner: true, changes: true }, connect: { owner: true, changes: true }, accounts: { owner: true }, approveGrants: { owner: true, changes: true }, approveGrant: { owner: true, changes: true }, revokeGrant: { owner: true, changes: true }, declineGrant: { owner: true, changes: true },
+  archive: { owner: true, changes: true }, restore: { owner: true, changes: true }, archived: { owner: true }, rollback: { owner: true, changes: true }, exportData: { owner: true }, importData: { owner: true, changes: true }, purge: { owner: true, changes: true }, startOver: { owner: true, changes: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
   buildReport: { owner: true },
   cleanup: { owner: false },
-  listSchedules: { owner: true }, createSchedule: { owner: true }, updateSchedule: { owner: true }, deleteSchedule: { owner: true },
-  createWebTicket: { owner: true }, createUiTicket: { owner: false }, publicUrl: { owner: false }, setPublicUrl: { owner: true }, passkeys: { owner: true }, removePasskey: { owner: true },
-  agents: { owner: true }, updateAgent: { owner: true }, pendingAgents: { owner: true }, decideAgent: { owner: true }, unreadableSecrets: { owner: true },
+  listSchedules: { owner: true }, createSchedule: { owner: true, changes: true }, updateSchedule: { owner: true, changes: true }, deleteSchedule: { owner: true, changes: true },
+  createWebTicket: { owner: true }, createUiTicket: { owner: false }, publicUrl: { owner: false }, setPublicUrl: { owner: true, changes: true }, passkeys: { owner: true }, removePasskey: { owner: true, changes: true },
+  agents: { owner: true }, updateAgent: { owner: true, changes: true }, pendingAgents: { owner: true }, decideAgent: { owner: true, changes: true }, unreadableSecrets: { owner: true },
   confirmations: { owner: true }, decideConfirmation: { owner: true },
-  models: { owner: true }, setModelSettings: { owner: true }, setModelKey: { owner: true }, checkModelProvider: { owner: true }, replacePinnedModel: { owner: true }, setCapabilityModel: { owner: true }, modelSpend: { owner: true }, refreshModelCatalog: { owner: false },
-  metrics: { owner: true },
+  models: { owner: true }, setModelSettings: { owner: true, changes: true }, setModelKey: { owner: true, changes: true }, checkModelProvider: { owner: true }, replacePinnedModel: { owner: true }, setCapabilityModel: { owner: true }, modelSpend: { owner: true }, refreshModelCatalog: { owner: false },
+  metrics: { owner: true }, idleActivity: { owner: false },
 };
 
 // ---------- CapabilityHost: one per capability ----------
