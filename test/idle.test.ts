@@ -10,6 +10,7 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 import { USER } from "@hewntools/core/auth.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import { afterParam, idleLine, idleStatus } from "@hewntools/cli/supervisor/idle.ts";
 import { prometheusText, startMetrics } from "@hewntools/cli/supervisor/metrics.ts";
 import { FIXTURES, installFrom, installSeed, SEED, serve, setup } from "./helpers.ts";
@@ -218,6 +219,18 @@ describe("requests: the owner and agents count; refreshes, /health and refused r
     await tick();
     await http("/");
     assert.ok(platform.idleActivity().lastRequestAt! > at, "loading the app counts");
+  });
+
+  test("the Agent Skill is one anyone may fetch: it leaves the clocks alone", async () => {
+    await api("/capabilities");
+    const at = platform.idleActivity();
+    await tick();
+    // Where agents reach MCP, and the web client's host (signed in, here).
+    for (const host of ["127.0.0.1", "hewn.localhost"]) assert.equal((await http(SKILL_URL, { host })).status, 200, host);
+    assert.deepEqual(platform.idleActivity(), at, "lastRequestAt, and so since, unchanged");
+    await tick();
+    await api("/capabilities");
+    assert.ok(platform.idleActivity().lastRequestAt! > at.lastRequestAt!, "a web request still moves it");
   });
 
   test("a change in the web client wants a backup; a read or a refresh doesn't", async () => {
