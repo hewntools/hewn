@@ -260,6 +260,23 @@ describe("share links and install from a link, over HTTP", () => {
     }
   });
 
+  test("the idle report: robots.txt (what anyone's scanner asks for) leaves the clock alone; a link's download moves it", async () => {
+    t.platform.setPublicUrl(USER, "https://hewn.example.com");
+    try {
+      const made = await api("/capabilities/running-log/links", { method: "POST", body: { expires: "1d" } });
+      const token = String(made.json.url).split("/share/")[1];
+      const at = t.platform.idleActivity().lastRequestAt!;
+      assert.ok(at);
+      await new Promise((r) => setTimeout(r, 5));
+      assert.equal((await http(pub, "/robots.txt", { host: "hewn.example.com" })).status, 200);
+      assert.equal(t.platform.idleActivity().lastRequestAt, at);
+      assert.equal((await http(pub, `/share/${token}`, { host: "hewn.example.com" })).status, 200);
+      assert.ok(t.platform.idleActivity().lastRequestAt! > at, "someone fetched the link: that counts");
+    } finally {
+      t.platform.setPublicUrl(USER, null);
+    }
+  });
+
   test("share links have their own rate limit, and its refusal keeps robots out too", async () => {
     let last: Res | undefined;
     for (let i = 0; i < 25 && last?.status !== 429; i++) last = await http(pub, `/share/${"c".repeat(32)}`, { host: "hewn.example.com" });
