@@ -37,11 +37,17 @@ function widgetTile(e, c, { remove, options }) {
     staleNote.title = e.error ? `Couldn't refresh: ${e.error}` : "";
     el.classList.toggle("stale", !!e.error);
   };
-  const refresh = async () => {
+  // `auto`: Home's own timer (one at a time: a hidden tab's ticks don't pile up), not the owner's Refresh.
+  let waiting = false;
+  const refresh = async ({ auto = false } = {}) => {
+    if (auto && waiting) return;
+    waiting = auto;
     try {
-      Object.assign(e, await api(`/home/widgets/${enc(e.key)}/refresh`, { method: "POST" }));
+      Object.assign(e, await api(`/home/widgets/${enc(e.key)}/refresh`, { method: "POST", refresh: auto }));
     } catch (err) {
       e.error = err.message;
+    } finally {
+      if (auto) waiting = false;
     }
     mark();
     await draw();

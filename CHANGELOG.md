@@ -5,6 +5,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ## 0.4.11 (unreleased)
 
 - **A tool's packages come from the npm registry, and so do theirs.** When Hewn installs a tool's npm dependencies, npm never runs git, asks your registry for every package wherever a lockfile points, and a package it would take from your disk fails the build. A tool's own `package.json` already had to name registry versions. See [the tool spec](spec/tools.md).
+- **Hewn says when it's idle.** For whoever runs Hewn on a machine that can sleep: `GET /status` on the metrics port says whether Hewn is idle, why not (it started or woke less than 10 minutes ago, a request, a tool call, a build, a reply on its way, an open stream, a backup it wants, a schedule due soon) and when its next schedule runs; `hewn status` shows it in a line and `hewn status --json` carries it, and `/metrics` has it as gauges. You read it and decide: Hewn never suspends itself and sends nothing. Your own traffic (`/status`, `/metrics`, the `hewn` commands) doesn't count, and neither do a page's own refreshes: a hidden browser tab makes no requests, and an open Home refreshing its widgets doesn't keep Hewn awake. After a wake, Hewn runs what came due while it slept. See [Suspending Hewn when idle](docs/remote-access.md#suspending-hewn-when-idle).
 
 ## 0.4.10 (2026-11-07)
 

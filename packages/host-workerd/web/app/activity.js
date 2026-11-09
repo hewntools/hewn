@@ -211,7 +211,7 @@ async function activityPage(q) {
  */
 async function buildsView(head, only, all0) {
   const here = stillHere();
-  const load = () => Promise.all([api("/builds?n=200&brief=1"), caps(true).catch(() => all0)]);
+  const load = (poll = false) => Promise.all([api("/builds?n=200&brief=1", { refresh: poll }), caps(true, { poll }).catch(() => all0)]);
   const root = h("div", { class: "card timeline builds" });
   const render = (builds, all) => {
     const list = only ? builds.filter((b) => b.capabilityId === only) : builds;
@@ -268,7 +268,7 @@ async function buildsView(head, only, all0) {
   let timer;
   const poll = async () => {
     if (!document.body.contains(root)) return;
-    const next = await load().catch(() => null);
+    const next = await load(true).catch(() => null);
     if (!document.body.contains(root)) return;
     timer = setTimeout(poll, !next || render(...next) ? 2500 : 15000);
   };
