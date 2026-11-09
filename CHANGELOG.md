@@ -31,6 +31,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - A tool's file whose paths have a `.` segment (`src/./index.ts`) is refused, as one with `..` already was. See [Sharing](docs/sharing.md).
 - **Hosts say what they reach.** A tool that asks for `*.example.com` shows as reaching "any site ending in .example.com", and a wildcard over a whole top-level domain (`*.com`) is refused. A host that comes from a setting shows on the install sheet, and the grant card names the host the setting holds. See [the tool spec](spec/tools.md#grants).
 - **The reading says what it didn't read.** When your builder reads a tool before you install it, the sheet names the files it left out or cut short (too long, or not text), and the reader is told it can't see the code of the npm packages the tool uses. **Show** on a finding opens only a place that's in the tool. See [Sharing](docs/sharing.md).
+- **An agent's widgets for a tool you're creating wait for you.** Widgets an agent adds to a new tool someone else asked for are that agent's own change: if they add operations, they wait for your review, as any agent's change does. Widgets that come with the agent's own new tool (`widgets: true`) still go live with it. See [the agent spec](spec/agents.md).
 
 ## 0.4.10 (2026-11-07)
 

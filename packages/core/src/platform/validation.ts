@@ -475,9 +475,10 @@ export class Validation extends Domain {
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
     this.loaded.set(code.hash, { files, bundle: code.js });
     // A follow-up chained to the creation of the same capability (create with widgets) is part of that
-    // creation; an agent's waits for the owner all the same while its approval mode says so.
+    // creation, when whoever asked for the creation asked for it (another agent's is its own change);
+    // an agent's waits for the owner all the same while its approval mode says so.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
-    const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
+    const partOfCreate = dep?.kind === "create" && dep.capabilityId === id && dep.requestedBy === build.requestedBy;
     const held = !byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait";
     const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? newToolReview(manifest, code.hash, views) : undefined;
     if (review) {
