@@ -4,6 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.11 (unreleased)
 
+- **A tool's packages come from the npm registry, and so do theirs.** When Hewn installs a tool's npm dependencies, npm never runs git, asks your registry for every package wherever a lockfile points, and a package it would take from your disk fails the build. A tool's own `package.json` already had to name registry versions. See [the tool spec](spec/tools.md).
 - **A tool that deletes says so.** Validation counts each table's rows before and after every test case and sample call: an operation that leaves a table with fewer rows and adds none to it, and isn't declared `destructive`, fails the build (`set_place leaves nights with fewer rows and adds none: declare it destructive`). A destructive operation is one an agent needs your OK to run, and that can't be scheduled, so a tool that deleted under a `write` skipped both. Hewn checks this itself, whatever the tool's own tests expect. Replacing rows with new ones (a smaller tag set) is fine. Gift Ideas no longer prunes past suggestions when it prepares new ones; it leaves them out when it reads. See [Tests and promotion](spec/tools.md#tests-and-promotion).
 
 ## 0.4.10 (2026-11-07)
