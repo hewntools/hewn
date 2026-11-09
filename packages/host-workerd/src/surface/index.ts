@@ -12,12 +12,50 @@ import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
 import { CLIENT_IP_HEADER, PUBLIC_HEADER, PUBLIC_PATHS } from "./public.ts";
 import { localSite, publicSite, requestHost, type Site, uiPath } from "./site.ts";
 import { handleUi } from "./ui.ts";
-import { handleWeb } from "./web.ts";
+import { handleWeb, PUBLIC_FILES } from "./web.ts";
 
 export type { SurfaceHost } from "./host.ts";
 export { McpSessions } from "./mcp-sessions.ts";
 
 export async function handle(platform: Platform, sessions: McpSessions, host: SurfaceHost, req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  // The host's /health and a page's own refreshes (Home's widgets, a poll) leave the idle report alone.
+  if (url.pathname === "/health" || req.headers.get(REFRESH_HEADER) === "1") return answer(platform, sessions, host, req);
+  const activity = platform.activity;
+  const intake = host.intake;
+  const res = await answer(platform, sessions, intake ? { ...host, intake: (r, onProgress, signal) => intake(r, onProgress, signal).finally(activity.intake()) } : host, req);
+  return counted(activity, req, url, res);
+}
+
+/** A page's own refresh (Home's widgets, a poll): the web client marks it, and the idle report ignores it. */
+export const REFRESH_HEADER = "x-hewn-refresh";
+
+/**
+ * The idle report (core platform/activity.ts) counts the owner and their agents: a request once answered, unless it
+ * was refused (anyone not signed in gets a 401 or a 404) or is one anyone may make (the files the sign-in page loads,
+ * the OAuth endpoints and their metadata: what a scanner on a public address reaches); a stream each time it writes;
+ * and a change made in the web client (any request that isn't a GET) as one a backup should keep. A tool call counts
+ * itself.
+ */
+function counted(activity: Platform["activity"], req: Request, url: URL, res: Response): Response {
+  if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
+  activity.request();
+  if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") activity.changed();
+  if (!res.body || !/^(text\/event-stream|application\/x-ndjson)/.test(res.headers.get("content-type") ?? "")) return res;
+  const reader = res.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      const { value, done } = await reader.read();
+      if (done) return void c.close();
+      activity.streamWrote();
+      c.enqueue(value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return new Response(body, res);
+}
+
+async function answer(platform: Platform, sessions: McpSessions, host: SurfaceHost, req: Request): Promise<Response> {
   const isPublic = req.headers.get(PUBLIC_HEADER) === "1";
   const url = new URL(req.url);
   try {

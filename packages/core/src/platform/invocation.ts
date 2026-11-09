@@ -109,6 +109,10 @@ export class Invocation extends Domain {
     const leaks = (s: string) => secretValues.some((v) => s.includes(v));
     const redact = (s: string) => secretValues.reduce((acc, v) => acc.split(v).join("[secret]"), s);
     let executed: Awaited<ReturnType<Invocation["execute"]>>;
+    // The idle report: a call keeps Hewn awake while it runs, and a write wants a backup. A widget's reads don't count:
+    // the page that asked for them does, unless it was the page's own refresh.
+    const sideEffect = readChain ? "read" : sideEffectOf(manifest, req);
+    const endCall = readChain ? undefined : this.platform.activity.call();
     try {
       executed = await this.execute(manifest, target, req, onCall, onModel);
     } catch (e) {
@@ -129,6 +133,9 @@ export class Invocation extends Domain {
         err.details = Object.keys(rest).length ? rest : undefined; // capability logs are for the user, not agents
       }
       throw e;
+    } finally {
+      endCall?.();
+      if (sideEffect !== "read") this.platform.activity.changed();
     }
     // `inserted` is validation's, not the caller's.
     const { secretUpdates, logs: rawLogs, inserted: _inserted, ...rest } = executed;
@@ -211,6 +218,15 @@ export class Invocation extends Domain {
     return this.registry.capabilityLogLines(capabilityId, n);
   }
 }
+
+/** The operation's side effect, or "read" for one that doesn't resolve (execute reports that). */
+const sideEffectOf = (m: CapabilityManifest, req: InvokeRequest) => {
+  try {
+    return resolveOperation(m, req.operation, req.operationVersion).sideEffect;
+  } catch {
+    return "read";
+  }
+};
 
 export function resolveOperation(m: CapabilityManifest, name: string, version?: number): OperationManifest {
   const candidates = m.operations.filter((o) => o.name === name);

@@ -19,7 +19,7 @@ import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
 
 /** Served without a session: branding and install metadata only (browsers fetch manifests without cookies). */
-const PUBLIC_FILES = new Set(["app.css", "passkey.js", "hewn-mark.svg", "hewn-glyph.svg", "manifest.webmanifest", "icons/hewn-180.png", "icons/hewn-192.png", "icons/hewn-512.png"]);
+export const PUBLIC_FILES = new Set(["app.css", "passkey.js", "hewn-mark.svg", "hewn-glyph.svg", "manifest.webmanifest", "icons/hewn-180.png", "icons/hewn-192.png", "icons/hewn-512.png"]);
 const SESSION_MAX_AGE = 30 * 86400;
 // On the public URL the cookie is __Host- (Secure, this exact host, Path=/). Capability UIs under
 // /tools/ run on opaque origins: they can neither read it nor send it (their requests are cross-site).
