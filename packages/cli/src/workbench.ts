@@ -115,6 +115,12 @@ const NPM_READS = [".npmrc", "package.json", "package-lock.json", "npm-shrinkwra
  * npm runs on the machine itself, not in the builder's sandbox: it doesn't start unless every
  * dependency comes from the npm registry and the tool carries no npm settings (an `.npmrc` could
  * name the `git` npm runs). Validation refuses these first, with the reason; this is the last line.
+ *
+ * That check reads only the tool's own package.json and lockfile, so npm itself is held to the
+ * registry too: a tarball URL (a lockfile's, or a dependency's own dependency) goes to the
+ * registry whatever host it names (`--replace-registry-host=always`), git never runs
+ * (`--git=false`: a dependency's own `git+ssh:` dependency would be cloned with the owner's keys,
+ * into the folder the bundle reads), and a package npm took from this machine's disk fails the install.
  */
 function npmInstall(cwd: string): Promise<string[]> {
   const files: Files = {};
@@ -123,12 +129,40 @@ function npmInstall(cwd: string): Promise<string[]> {
   if (problems.length) return Promise.reject(new Error(`npm won't run for this tool: ${problems.join("; ")}`));
   return new Promise((resolve, reject) => {
     const out: string[] = [];
-    const child = spawn("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", "--git=false", "--replace-registry-host=always"], { cwd, stdio: ["ignore", "pipe", "pipe"] });
     child.stdout.on("data", (d) => out.push(String(d)));
     child.stderr.on("data", (d) => out.push(String(d)));
     child.once("error", reject);
-    child.once("close", (code) => (code === 0 ? resolve(["dependencies installed (npm)"]) : reject(new Error(`npm install failed: ${out.join("").slice(-800)}`))));
+    child.once("close", (code) => {
+      if (code !== 0) return reject(new Error(`npm install failed: ${out.join("").slice(-800)}`));
+      const local = fromDisk(cwd);
+      if (!local.length) return resolve(["dependencies installed (npm)"]);
+      rmSync(join(cwd, "node_modules"), { recursive: true, force: true });
+      reject(new Error(`npm took ${local.join(", ")} from this machine's disk; a tool's dependencies (and theirs) come from the npm registry only`));
+    });
   });
+}
+
+/**
+ * What npm just installed from this machine's disk rather than fetched: a dependency's own
+ * `file:` dependency (a tarball unpacked into node_modules, where the bundle reads) or a link.
+ * Read from the lockfile npm keeps in node_modules; one that doesn't read counts as all of it. An
+ * entry without `resolved` was fetched (npm can be set to leave registry URLs out).
+ */
+function fromDisk(cwd: string): string[] {
+  let lock: { packages?: Record<string, { resolved?: string; link?: boolean; inBundle?: boolean }> };
+  try {
+    lock = JSON.parse(readFileSync(join(cwd, "node_modules", ".package-lock.json"), "utf8"));
+  } catch {
+    return ["its dependencies (npm's own lockfile didn't read)"];
+  }
+  const out: string[] = [];
+  for (const [path, e] of Object.entries(lock.packages ?? {})) {
+    // Bundled inside a fetched package's tarball, it came with that package.
+    if (!path || e.inBundle) continue;
+    if (e.link || (e.resolved !== undefined && !/^https?:\/\//.test(e.resolved))) out.push(`${path.replace(/^.*node_modules\//, "")}${e.resolved ? ` (${e.resolved})` : ""}`);
+  }
+  return out;
 }
 
 /** Marks the resolve call `insideWorkspace` makes itself, so it doesn't check its own lookup. */
