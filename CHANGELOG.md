@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.11 (unreleased)
+
+- **A tool's packages come from the npm registry, and so do theirs.** When Hewn installs a tool's npm dependencies, npm never runs git, asks your registry for every package wherever a lockfile points, and a package it would take from your disk fails the build. A tool's own `package.json` already had to name registry versions. See [the tool spec](spec/tools.md).
+
 ## 0.4.10 (2026-11-07)
 
 - **New tools get a design of their own.** The builder treats the screen as the product. It works out when you'll open the tool and what you want to see first, and draws that big at the top. It plans a real palette from the subject (green for plants or money, purple for sleep) on a plain white or grey page, chooses its own type, and draws your data (a timeline, a ring, a calendar) instead of laying it out as `Label: value` lines. It's told how your other tools look (each one's colour and the look its builder recorded in `ui/look.json`), so a new one looks clearly different, and a subject with no colour of its own (people, plans, words, time) gets a hue at least 40° from your others on Home. It steers clear of named generic looks (cream with a serif and terracotta, near-black with acid green, all-caps labels, every section in the same card), writes its colours with `light-dark()` so they follow Hewn's Light or Dark, and records its look in `ui/look.json`. A change keeps a tool's look unless you ask for a new one. See [The build](docs/building-tools.md#the-build).
