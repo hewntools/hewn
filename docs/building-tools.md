@@ -127,7 +127,7 @@ Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@
 ## From the terminal
 
 ```
-hewn status                    tools and recent builds
+hewn status [--json]           tools, and whether Hewn is idle
 hewn watch [buildId]           follow a build live
 hewn feedback [--days N]       how recent builds worked out (--json for the data)
 hewn review                    agents' changes waiting for you

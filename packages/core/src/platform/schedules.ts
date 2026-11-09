@@ -120,7 +120,10 @@ export class Schedules extends Domain {
    */
   async runDueSchedules(now = Date.now()): Promise<{ id: string; ok: boolean }[]> {
     const ran: { id: string; ok: boolean }[] = [];
-    for (const s of this.schedules.due(now)) {
+    for (const listed of this.schedules.due(now)) {
+      // Another pass (the alarm, a resume) may have claimed it while this one awaited an earlier run.
+      const s = this.schedules.get(listed.id);
+      if (!s || s.status !== "active" || s.nextRunAt === null || s.nextRunAt > now) continue;
       const cron = parseCron(toCron(s.cadence));
       // Claim the slot first, so a slow run can't be started twice.
       this.schedules.update(s.id, { nextRunAt: nextRun(cron, s.timezone, Math.max(now, Date.now())) });

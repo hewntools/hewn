@@ -424,6 +424,31 @@ export const operations = {
     await page.screenshot({ path: "/tmp/e2e-fr-activity.png", fullPage: true });
   });
 
+  await step("a hidden tab makes no requests: its refreshes wait, then go when it's shown, marked as refreshes", async () => {
+    await page.goto(`${web}/#/`);
+    await page.locator(".home-grid").waitFor();
+    const seen: string[] = [];
+    const watch = (r: { url(): string }) => r.url().includes("/api/") && seen.push(r.url());
+    page.on("request", watch);
+    await page.evaluate(() => {
+      let hidden = true;
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+      (window as any).__show = () => ((hidden = false), document.dispatchEvent(new Event("visibilitychange")));
+      document.dispatchEvent(new Event("visibilitychange"));
+      // A page's own refresh, as Home's poll makes it.
+      const kit = "/kit.js";
+      void import(kit).then((k) => k.api("/capabilities", { refresh: true }));
+    });
+    await page.waitForTimeout(1500);
+    if (seen.length) throw new Error(`a hidden tab asked for ${seen.join(", ")}`);
+    const asked = page.waitForRequest((r: { url(): string }) => r.url().endsWith("/api/capabilities"));
+    await page.evaluate(() => (window as any).__show());
+    const r = await asked;
+    if (r.headers()["x-hewn-refresh"] !== "1") throw new Error("a refresh without the x-hewn-refresh header");
+    page.off("request", watch);
+  });
+
   await step("New: Stop puts the message back with Stopped., which goes once the next one is sent", async () => {
     // The intake never answers here (no CLI runs): each turn waits until it's stopped.
     await page.route("**/api/intake", () => {});

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A build: its page, or the panel in the change drawer.
-import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, skeleton, stepRow, tintOf } from "../kit.js";
+import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf } from "../kit.js";
 import { AGENT_CATALOG, agentTile, catalogOf } from "./agents.js";
 import { shotUrl } from "./appearance.js";
 import { go, hues, moment, onLeave, put, sandboxNotice, topBar, view } from "./frame.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { modelWords } from "./home.js";
 import { pollInbox } from "./inbox.js";
+import { route } from "./router.js";
 import { conversationThread } from "./intake.js";
 import { titleCase } from "./models.js";
 import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from "./review.js";
@@ -423,7 +424,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       // Agent-built and still open: the agent submits when it's done.
       step = b.step ?? step;
       live();
-      const t = setTimeout(() => api(`/builds/${enc(id)}`).then(settle).catch(() => {}), 5000);
+      const t = setTimeout(() => api(`/builds/${enc(id)}`, { refresh: true }).then(settle).catch(() => {}), 5000);
       onLeave(() => clearTimeout(t));
     };
 
@@ -441,6 +442,16 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     if (!finished) live();
     const es = new EventSource(`/api/builds/${enc(id)}/events`);
     onLeave(() => es.close());
+    // A hidden tab makes no requests: the stream closes (else the browser reconnects it, hidden or not), and the page
+    // draws itself again once the tab is shown.
+    const hidden = () => {
+      if (!document.hidden) return;
+      es.close();
+      document.removeEventListener("visibilitychange", hidden);
+      shown().then(() => document.body.contains(card) && route());
+    };
+    document.addEventListener("visibilitychange", hidden);
+    onLeave(() => document.removeEventListener("visibilitychange", hidden));
     es.addEventListener("line", (e) => {
       logLine(JSON.parse(e.data));
       if (follow) logPre.scrollTop = logPre.scrollHeight;
@@ -463,8 +474,11 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     });
     if (finished) return;
     // Pick up the icon as soon as the builder has written it (it does that first), and the attempt clock.
+    let ticking = false;
     const tick = setInterval(async () => {
-      const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`).catch(() => null), caps(true).catch(() => null)]);
+      if (ticking) return;
+      ticking = true;
+      const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`, { refresh: true }).catch(() => null), caps(true, { poll: true }).catch(() => null)]).finally(() => (ticking = false));
       if (fresh) for (const [k, x] of fresh) all.set(k, x);
       if (v?.progress) startedAt = Date.now() - v.progress.elapsedSeconds * 1000;
       if (v && b.status === "waiting" && v.status !== "waiting") b = v;

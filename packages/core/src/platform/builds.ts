@@ -288,6 +288,11 @@ export class Builds extends Domain {
     return this.running.has(buildId);
   }
 
+  /** Any build queued or running (its builder, a pass, a check, the remote builder): not one paused for the owner. */
+  busy(): boolean {
+    return this.running.size > 0;
+  }
+
   private setStep(buildId: string, capabilityId: string, step: BuildStep, tests?: { passed: number; total: number }) {
     const prev = this.steps.get(buildId);
     const now = Date.now();
@@ -1175,6 +1180,7 @@ export class Builds extends Domain {
         await this.keepTranscript(buildId);
         release();
         this.running.delete(buildId);
+        this.platform.activity.buildEnded();
         this.aborts.delete(buildId);
         this.progress.delete(buildId);
         this.steps.delete(buildId);
