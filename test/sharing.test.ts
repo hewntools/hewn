@@ -541,6 +541,21 @@ describe("sharing: a tool as a file", () => {
     const left = Object.keys(extra).filter((p) => p.startsWith("tests/") && !read[p]);
     assert.ok(left.length > 0 && left.every((p) => input.cut.includes(p)), "no room left: named");
     await assert.rejects(t.platform.summaryInput(t.claude, preview.token), /cannot perform owner actions/);
+
+    // The sheet says what the reading left out, and a finding's place is one in the file.
+    assert.equal(preview.unread, null, "no reading yet");
+    const kept = await t.platform.keepSummary(USER, preview.token, {
+      message: "Counts things.",
+      findings: [
+        { kind: "warn", title: "Posts your notes", file: "src/index.ts", line: 1 },
+        { kind: "ok", title: "Calls nothing", file: "src/elsewhere.ts", line: 3 },
+        { kind: "ok", title: "Nothing past the end", file: "src/index.ts", line: 100_000 },
+      ],
+    });
+    assert.deepEqual(kept.findings, [{ kind: "warn", title: "Posts your notes", file: "src/index.ts", line: 1 }, { kind: "ok", title: "Calls nothing" }, { kind: "ok", title: "Nothing past the end" }]);
+    const again = await t.platform.stagedBundle(USER, preview.token);
+    assert.deepEqual(again.summary?.findings, kept.findings);
+    assert.deepEqual(again.unread, input.cut, "what wasn't read, on the sheet");
   });
 
   test("Hewn's tools: owner only; an Official tool staged carries Hewn's reading and the release that made it; only its own images", async () => {

@@ -111,6 +111,10 @@ const sourceLink = (p) => h("button", { class: "link self-start install-source",
 
 /** Where a finding is in the code ("src/index.ts:14"). */
 const findingAt = (f) => `${f.file}${f.line ? `:${f.line}` : ""}`;
+/** What your builder's reading left out or cut short (too long, or not text): it read the rest. */
+const unreadNote = (unread) =>
+  unread?.length > 0 &&
+  h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `Not read: ${unread.slice(0, 5).join(", ")}${unread.length > 5 ? ` and ${unread.length - 5} more` : ""}. The reading covers the rest; open Source code for these.`));
 
 /** What it does: the reading's message, then what it keeps and where data goes (or the tool's own description, unread). */
 const whatItDoes = (p, summary) =>
@@ -147,9 +151,10 @@ function readingSheet(p, { from }) {
           body,
           h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), h("span", { class: "small faint" }, `${r.by && r.by !== "remote" ? `Read by ${builderLabel(r.by)}` : "Read"} · ${mmss(r.seconds)}`)), whatItDoes(p, r.summary)),
           r.summary.findings.length > 0 && h("div", {}, h("div", { class: "eyebrow share-eyebrow" }, "What it found"), h("ul", { class: "list" }, r.summary.findings.map(row))),
+          unreadNote(r.unread),
           sourceLink(p),
         );
-        put(actions, h("span", {}), h("span", { class: "row tight" }, h("button", { onclick: () => close(null) }, "Cancel"), h("button", { class: "primary", onclick: () => close({ ...p, summary: r.summary, summaryBy: "yours" }) }, "Continue")));
+        put(actions, h("span", {}), h("span", { class: "row tight" }, h("button", { onclick: () => close(null) }, "Cancel"), h("button", { class: "primary", onclick: () => close({ ...p, summary: r.summary, summaryBy: "yours", unread: r.unread ?? [] }) }, "Continue")));
       };
       let read = null;
       let failure = null;
@@ -256,6 +261,7 @@ function installSheet(p, { from }) {
         installHead(p, from),
         h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), check), whatItDoes(p, p.summary)),
         flags.map((f) => h("div", { class: "notice warn" }, h("span", { class: "grow" }, f.title, f.file && h("span", { class: "mono faint" }, ` · ${findingAt(f)}`)))),
+        p.summaryBy === "yours" && unreadNote(p.unread),
         sourceLink(p),
         h("div", {}, h("div", { class: "eyebrow share-eyebrow" }, "It will ask for"), h("ul", { class: "list" }, asksRows(p.asks))),
         h("label", { class: "field flush" }, h("span", { class: "label" }, "Name"), name),

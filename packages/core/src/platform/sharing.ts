@@ -90,6 +90,8 @@ export interface BundlePreview {
   summary: BundleSummary | null;
   /** Whose reading `summary` is: Hewn's, shipped with one of Hewn's tools, or the owner's own builder's. */
   summaryBy: "hewn" | "yours" | null;
+  /** With the owner's own reading: what it left out or cut short (`SummaryInput.cut`); otherwise null. */
+  unread: string[] | null;
   /** What it will ask for once installed (grants still happen then). */
   asks: { hosts: string[]; model: { tier?: string; model?: string; images: boolean } | null; tools: { id: string; operations: string[] }[]; secrets: string[]; config: string[] };
   /** Sample calls it ships with. */
@@ -125,6 +127,35 @@ export interface SummaryInput {
 /** What the intake reads, at most, counted as it's sent (numbered): 40 KB of a file, 200 KB in all. */
 const SUMMARY_FILE_BYTES = 40_000;
 const SUMMARY_TOTAL_BYTES = 200_000;
+
+/**
+ * A tool's files as the intake reads them: each line numbered, migrations and code first, at most
+ * 40 KB of each and 200 KB in all as sent; `cut` names what was left out (a file that isn't text, or
+ * no room left) or cut short (and where).
+ */
+function readable(all: Files): Omit<SummaryInput, "manifest"> {
+  const rank = (p: string) => ["capability.json", "migrations/", "src/", "sample/", "tests/", "ui/"].findIndex((d) => p.startsWith(d)) + 1 || 9;
+  const paths = Object.keys(all).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const files: SummaryInput["files"] = [];
+  const cut: string[] = [];
+  let total = 0;
+  for (const path of paths) {
+    const b = all[path];
+    if (b.includes(0)) {
+      cut.push(`${path} (not text)`);
+      continue;
+    }
+    const n = numbered(text(b), Math.min(SUMMARY_FILE_BYTES, SUMMARY_TOTAL_BYTES - total));
+    if (!n.lines) {
+      cut.push(path);
+      continue;
+    }
+    files.push({ path, text: n.text });
+    if (n.short) cut.push(`${path} (cut at line ${n.lines})`);
+    total += n.bytes;
+  }
+  return { files, cut };
+}
 
 export class Sharing extends Domain {
   // ---------- Share… ----------
@@ -299,44 +330,28 @@ export class Sharing extends Domain {
     return codeText(path, (await this.loadStaged(token)).files, null);
   }
 
-  /**
-   * What the intake reads to summarize a staged tool: its manifest and its text files, each line
-   * numbered, migrations and code first, at most 40 KB of each and 200 KB in all as sent; `cut`
-   * names what was left out (a file that isn't text, or no room left) or cut short (and where).
-   */
+  /** What the intake reads to summarize a staged tool: its manifest and its files as `readable` gives them. */
   async summaryInput(owner: Agent, token: string): Promise<SummaryInput> {
     requireOwner(owner);
     const s = await this.loadStaged(token);
-    const rank = (p: string) => ["capability.json", "migrations/", "src/", "sample/", "tests/", "ui/"].findIndex((d) => p.startsWith(d)) + 1 || 9;
-    const paths = Object.keys(s.files).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-    const files: SummaryInput["files"] = [];
-    const cut: string[] = [];
-    let total = 0;
-    for (const path of paths) {
-      const b = s.files[path];
-      if (b.includes(0)) {
-        cut.push(`${path} (not text)`);
-        continue;
-      }
-      const n = numbered(text(b), Math.min(SUMMARY_FILE_BYTES, SUMMARY_TOTAL_BYTES - total));
-      if (!n.lines) {
-        cut.push(path);
-        continue;
-      }
-      files.push({ path, text: n.text });
-      if (n.short) cut.push(`${path} (cut at line ${n.lines})`);
-      total += n.bytes;
-    }
-    return { manifest: s.manifest, files, cut };
+    return { manifest: s.manifest, ...readable(s.files) };
   }
 
-  /** Keep the owner's reading of a staged tool: the sheet shows it, and the install keeps it with its build. */
-  async keepSummary(owner: Agent, token: string, summary: BundleSummary) {
+  /**
+   * Keep the owner's reading of a staged tool: the sheet shows it, and the install keeps it with its
+   * build. A finding's place is kept only when it's in the tool (a file it has, a line that file has):
+   * Show never opens somewhere the reading made up. Returns the reading as kept.
+   */
+  async keepSummary(owner: Agent, token: string, summary: BundleSummary): Promise<BundleSummary> {
     requireOwner(owner);
-    await this.loadStaged(token);
+    const s = await this.loadStaged(token);
+    const lines = (path: string) => (s.files[path] ? text(s.files[path]).split("\n").length : 0);
+    const findings = summary.findings?.map(({ file, line, ...f }) => (file && lines(file) >= (line ?? 1) ? { ...f, file, ...(line ? { line } : {}) } : f));
+    const kept = { ...summary, ...(findings ? { findings } : {}) };
     const staged = this.registry.getKv<Record<string, Staged>>("bundles:staged") ?? {};
-    if (staged[token]) staged[token].summary = summary;
+    if (staged[token]) staged[token].summary = kept;
     this.registry.setKv("bundles:staged", staged);
+    return kept;
   }
 
   /** Forget a staged bundle (the sheet was cancelled). */
@@ -391,6 +406,7 @@ export class Sharing extends Domain {
       linkHost: staged.linkHost ?? null,
       summary: staged.summary ?? hewn,
       summaryBy: staged.summary ? "yours" : hewn ? "hewn" : null,
+      unread: staged.summary ? readable(files).cut : null,
       asks: {
         hosts: m.requires?.hosts ?? [],
         model: model ? { ...(model.tier ? { tier: model.tier } : {}), ...(model.model ? { model: model.model } : {}), images: !!model.input?.includes("image") } : null,

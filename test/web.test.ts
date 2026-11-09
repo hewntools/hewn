@@ -482,6 +482,8 @@ describe("web client (owner surface)", () => {
       assert.equal(asked.bundle!.files[0].path, "capability.json", "the manifest first");
       assert.match(asked.bundle!.files.find((f) => f.path === "src/index.ts")!.text, /^ {3}1\| /, "lines numbered");
       assert.equal((await api(`/bundles/${staged.json.token}`)).json.summaryBy, "yours");
+      assert.deepEqual(read.json.unread, asked.bundle!.cut, "what it didn't read, for the sheet");
+      assert.deepEqual((await api(`/bundles/${staged.json.token}`)).json.unread, asked.bundle!.cut);
       const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Read Log", sample: true } });
       const done = await platform.settle(started.json.buildId);
       assert.equal(done.status, "promoted", done.log.join("\n"));

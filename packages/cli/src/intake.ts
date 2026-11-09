@@ -251,6 +251,8 @@ ${JSON.stringify(SUMMARY_SCHEMA)}
   No warnings when there's nothing to warn about: don't invent concerns.
 ${cut.length ? `
 Left out or shortened (too long to include, or not text): ${cut.join(", ")}${b.cut.length > cut.length ? ` and ${b.cut.length - cut.length} more` : ""}. Say so in a finding if it matters.
+` : ""}${b.files.some((f) => f.path === "package.json") ? `
+Its npm dependencies (package.json) aren't here: you read only its own code. If it depends on packages, say in a finding that their code wasn't read.
 ` : ""}
 Its files, capability.json (the manifest) first: each starts with a line "=== ${fence} <path>", every line of it is numbered, and the last file ends with "=== ${fence} end".
 ${b.files.map((f) => `=== ${fence} ${plain(f.path, 200)}\n${f.text}`).join("\n\n")}

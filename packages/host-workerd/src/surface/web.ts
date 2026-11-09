@@ -791,9 +791,9 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
       if (!summary) throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
       // The owner moved on (Install anyway, Cancel, closed the sheet): a reading that ends now isn't theirs to keep.
       if (signal.aborted) throw new PlatformError("operation_failed", "stopped");
-      await platform.keepSummary(owner, token, summary);
+      const kept = await platform.keepSummary(owner, token, summary);
       log(`${summary.findings.filter((f) => f.kind === "warn").length} warning(s)`);
-      return { summary, seconds: Math.round((Date.now() - started) / 1000), by };
+      return { summary: kept, unread: bundle.cut, seconds: Math.round((Date.now() - started) / 1000), by };
     } catch (e) {
       log(`ERROR ${(e as Error).message}`);
       throw NO_READER.test((e as Error).message) && !signal.aborted ? new PlatformError("not_found", NO_BUILDER) : e;
