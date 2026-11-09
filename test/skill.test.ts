@@ -26,6 +26,8 @@ describe("the Skill: build a Hewn tool", () => {
     const s = skillText(brief());
     assert.match(s, /^---\nname: build-a-hewn-tool\ndescription: .+\n---\n/);
     for (const call of ["capabilities_pack", "capabilities_check", "capabilities_submit", "builds_wait", "baseVersion"]) assert.ok(s.includes(call), call);
+    // How to read the pack's schedules, and what the check sends back.
+    for (const how of ["`schedules`", "`name@version`", "`structuredContent.screenshots`", "`screenshots: false`"]) assert.ok(s.includes(how), how);
     // What the pack gives the client, the Skill may name; what only a builder's workspace has, it may not.
     for (const word of ["BUILDER.md", "BRIEF.md", "OWNERS_WORDS.md", "attachments/", "`check` tool", "{{"]) assert.ok(!s.includes(word), `the Skill says ${word}`);
     for (const file of ["CONTRACTS.md", "OTHER_TOOLS.md", "PLATFORM_UI.css", ".hewn-contracts/"]) assert.ok(s.includes(file), file);
