@@ -25,6 +25,12 @@ describe("a suggested value on a config entry", () => {
     assert.deepEqual(validateManifest(manifest({ config: [{ name: "REPO", description: "r", default: "hewntools/hewn" }] }), "x"), ['manifest /config/0 unexpected property "default": use "suggested" (prefilled in the setup form; the owner confirms it)']);
   });
 
+  test("a setting a host comes from can't carry one: the owner types the host", () => {
+    const site = { name: "SITE_URL", description: "The site", suggested: "https://example.com" };
+    assert.deepEqual(validateManifest(manifest({ config: [site], requires: { hosts: ["config:SITE_URL"] } }), "x"), ['config SITE_URL: a setting a host comes from can\'t carry "suggested": the owner types the host']);
+    assert.deepEqual(validateManifest(manifest({ config: [site] }), "x"), [], "one no host comes from may");
+  });
+
   test("a secret can't carry one", () => {
     const errors = validateManifest(manifest({ kind: "connection", operations: [{ ...op, name: "health", outputSchema: { type: "object", required: ["status"], properties: { status: { type: "string", enum: ["connected", "expired", "broken"] } } } }], requires: { secrets: [{ name: "API_TOKEN", description: "t", suggested: "x" }] } }), "x");
     assert.deepEqual(errors, ['requires.secrets API_TOKEN: a secret can\'t carry "suggested" (only a config entry can)']);

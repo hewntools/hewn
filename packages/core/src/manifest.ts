@@ -150,6 +150,9 @@ export function validateManifest(m: unknown, expectedId: string): string[] {
   const errors: string[] = [];
   // Secrets are never suggested: the owner pastes each one.
   for (const s of manifest.requires?.secrets ?? []) if ("suggested" in s) errors.push(`requires.secrets ${s.name}: a secret can't carry "suggested" (only a config entry can)`);
+  // Nor a setting a host comes from (`config:NAME`): the owner types the host.
+  const hostSettings = new Set((manifest.requires?.hosts ?? []).filter((h) => h.startsWith("config:")).map((h) => h.slice(7)));
+  for (const c of manifest.config ?? []) if (c.suggested !== undefined && hostSettings.has(c.name)) errors.push(`config ${c.name}: a setting a host comes from can't carry "suggested": the owner types the host`);
   if (manifest.id !== expectedId) errors.push(`manifest id '${manifest.id}' must be '${expectedId}'`);
   errors.push(...abiErrors(manifest));
   errors.push(...kindErrors(manifest));
