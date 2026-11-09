@@ -27,6 +27,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Fixed:** a tool with a long test suite (hundreds of cases, some of them slow) couldn't be built or installed since 0.4.10: Hewn didn't answer its own health check while the cases ran, so it was restarted partway through, and the retry stopped in the same place. Hewn now answers between cases.
 - **Fixed:** installing a tool that needs a newer Hewn now says "This tool needs a newer Hewn", with how to upgrade, instead of "This file can't be installed".
 - **The visual check reaches only the page it checks.** The browser Hewn uses to check a build's screen loads the page's own files and calls its own tool, and nothing else: no other site, no address on your machine or network, no popup or WebRTC elsewhere. See [the threat model](docs/threat-model.md).
+- A tool's file whose paths have a `.` segment (`src/./index.ts`) is refused, as one with `..` already was. See [Sharing](docs/sharing.md).
 
 ## 0.4.10 (2026-11-07)
 

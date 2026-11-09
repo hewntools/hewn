@@ -121,6 +121,8 @@ describe("bundles: the zip and the scan", () => {
     assert.throws(() => readZip(writeZip({ "src/index.ts": one, "SRC/index.ts": one })), /SRC\/index\.ts and src\/index\.ts are in the zip: on many disks they're the same file/);
     assert.throws(() => readZip(writeZip({ "src/caf\u00e9.ts": one, "src/cafe\u0301.ts": one })), /the same file/);
     assert.throws(() => readZip(rawZip([{ path: "a.ts", data: one }, { path: "a.ts", data: one }])), /a\.ts is in the zip twice/);
+    assert.throws(() => readZip(rawZip([{ path: "src/index.ts", data: one }, { path: "src/./index.ts", data: one }])), /"src\/\.\/index\.ts" isn't a path Hewn accepts/);
+    assert.throws(() => readZip(rawZip([{ path: "./capability.json", data: one }])), /"\.\/capability\.json" isn't a path Hewn accepts/);
     assert.throws(() => readZip(writeZip({ "src/a\nb.ts": one })), /"src\/a\\nb\.ts" isn't a path Hewn accepts/);
   });
 
