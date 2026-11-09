@@ -77,6 +77,8 @@ Then point the proxy at `192.168.1.50:7718`. Only the public listener goes on th
 
 If the public listener can be reached without going through your proxy (a host with its own public address), set `HEWN_PROXY_SECRET` in `hewn serve`'s environment and have the proxy send it on every request as the `x-hewn-proxy-secret` header. Requests without it, or with another value, get 403; the header is removed before anything else sees it, and `X-Forwarded-Host` / `X-Forwarded-For` only count on requests that had it. A tunnel (`hewn tunnel`) doesn't send the header, so don't combine the two. The local port is not affected. Unset (the default): no check.
 
+Behind such a trusted reverse proxy, have it also send the visitor's address as `x-hewn-proxy-client-ip` (and drop any copy a client sent). Hewn's limits per visitor (sign-in, agents registering, …) then count each visitor rather than the proxy; an IPv6 visitor counts by its /64. Hewn reads that header only on requests carrying the right secret, and removes it either way; without it, Hewn uses the last `X-Forwarded-For` hop as before.
+
 ### Running Hewn for someone else (`HEWN_HOSTED`)
 
 If you run Hewn for its owner and they have no terminal on the machine (a hosting service), set `HEWN_HOSTED=1` in `hewn serve`'s environment, together with `HEWN_BUILD_URL` (your builder: there are no agents on the machine to build with). `HEWN_HOST_SIGNIN_URL`, an https link where you sign the owner in and send them back with a sign-in link, is optional. Hewn sends your builder's service each build as `POST /v1/builds` ([the request](internal/remote-builder.md)); a retry says which build it retries (`retryOf`, the first of the chain), so you can count the chain as one build.

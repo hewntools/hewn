@@ -24,7 +24,7 @@ import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
 import { defaultPasses } from "@hewntools/core/passes.ts";
 import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
-import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
+import { CLIENT_IP_HEADER, gatePublic, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 import { fetchLink } from "./surface/fetch-link.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
@@ -72,11 +72,12 @@ const CALL_TIMEOUT_MS = 30_000;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only the Public entrypoint may mark a request public (and say who sent it).
-    if (request.headers.has(PUBLIC_HEADER) || request.headers.has(CLIENT_IP_HEADER) || request.headers.has(PROXY_SECRET_HEADER)) {
+    if ([PUBLIC_HEADER, CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PROXY_CLIENT_IP_HEADER].some((h) => request.headers.has(h))) {
       const headers = new Headers(request.headers);
       headers.delete(PUBLIC_HEADER);
       headers.delete(CLIENT_IP_HEADER);
       headers.delete(PROXY_SECRET_HEADER);
+      headers.delete(PROXY_CLIENT_IP_HEADER);
       request = new Request(request, { headers });
     }
     return env.HEWN.get(env.HEWN.idFromName("owner")).fetch(request);

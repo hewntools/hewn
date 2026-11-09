@@ -16,6 +16,11 @@ export const CLIENT_IP_HEADER = "x-hewn-client-ip";
  * every request here, whether or not a secret is set, so it never reaches the surface or logs.
  */
 export const PROXY_SECRET_HEADER = "x-hewn-proxy-secret";
+/**
+ * The visitor's address, from a trusted reverse proxy: read only on a request that carried the proxy secret, and
+ * removed from every request here, like the secret.
+ */
+export const PROXY_CLIENT_IP_HEADER = "x-hewn-proxy-client-ip";
 
 export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS, SKILL_URL]);
 
@@ -80,6 +85,7 @@ export class RateLimiter {
   take(rule: string, client: string, now = Date.now()): number {
     const r = this.rules[rule];
     if (this.counts.size > 50_000) this.counts.clear();
+    client = rateKey(client);
     for (const [key, limit] of [[`${rule}|${client}`, r.perClient], [`${rule}|*`, r.total]] as const) {
       const c = this.counts.get(key);
       if (c && now - c.start < r.windowMs && c.n >= limit) return Math.ceil((c.start + r.windowMs - now) / 1000);
@@ -94,12 +100,34 @@ export class RateLimiter {
 }
 
 /**
- * The client's address: the last X-Forwarded-For hop, the one the proxy in front of Hewn added
- * (Caddy, nginx's proxy_add_x_forwarded_for, Cloudflare in front of cloudflared). Earlier hops and
- * CF-Connecting-IP are whatever the client sent when Hewn isn't behind Cloudflare.
+ * The client's address: behind a trusted reverse proxy (`trusted`: the request carried the proxy secret), the
+ * visitor's address it sends in x-hewn-proxy-client-ip; otherwise, or without a valid one, the last X-Forwarded-For
+ * hop, the one the proxy in front of Hewn added (Caddy, nginx's proxy_add_x_forwarded_for, Cloudflare in front of
+ * cloudflared). Earlier hops and CF-Connecting-IP are whatever the client sent when Hewn isn't behind Cloudflare.
  */
-export function clientAddress(req: Request): string {
+export function clientAddress(req: Request, trusted = false): string {
+  const sent = trusted ? req.headers.get(PROXY_CLIENT_IP_HEADER)?.trim() : undefined;
+  if (sent && /^[0-9A-Fa-f:.]{2,45}$/.test(sent) && (sent.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(sent))) return sent;
   return req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() || "unknown";
+}
+
+/**
+ * What a per-client limit counts by: an IPv4 address as it is, an IPv6 one by its /64 (one visitor usually has a whole
+ * /64, and could otherwise step past a limit by changing addresses inside it); an IPv4-mapped IPv6 address as IPv4.
+ */
+export function rateKey(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const bare = ip.toLowerCase().replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(bare);
+  if (mapped) return mapped[1];
+  const halves = bare.split("::");
+  if (halves.length > 2) return ip;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const groups = halves.length === 2 ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right] : left;
+  const head = groups.slice(0, 4);
+  if (head.length < 4 || head.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return ip;
+  return `${head.map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
 }
 
 /** Constant-time string comparison (only the secret's length shows in timing). */
@@ -115,7 +143,8 @@ function sameSecret(given: string, secret: string): boolean {
  *
  * With a proxy secret (HEWN_PROXY_SECRET, for a host whose public listener is reachable directly
  * as well as through its proxy), only requests carrying it in x-hewn-proxy-secret get through;
- * the rest get 403 before their X-Forwarded-For or X-Forwarded-Host is looked at.
+ * the rest get 403 before their X-Forwarded-For or X-Forwarded-Host is looked at. The proxy's x-hewn-proxy-client-ip
+ * (the visitor's address) counts only then; it's removed either way.
  */
 export function gatePublic(req: Request, limiter: RateLimiter, log: (line: string) => void, proxySecret?: string): Response | Request {
   const url = new URL(req.url);
@@ -123,7 +152,8 @@ export function gatePublic(req: Request, limiter: RateLimiter, log: (line: strin
     log(`[public] ? ${req.method} ${loggedPath(url.pathname)} -> 403 (not from the trusted proxy)`);
     return new Response(JSON.stringify({ error: "forbidden", message: "not from the trusted proxy" }), { status: 403, headers: { "content-type": "application/json", ...robotsFor(url.pathname) } });
   }
-  const ip = clientAddress(req);
+  // Past the check above, a set secret means the trusted proxy sent this request.
+  const ip = clientAddress(req, !!proxySecret);
   if (url.pathname.startsWith("/_admin/")) {
     log(`[public] ${ip} ${req.method} ${url.pathname} -> 404 (not exposed)`);
     return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
@@ -138,6 +168,7 @@ export function gatePublic(req: Request, limiter: RateLimiter, log: (line: strin
   }
   const headers = new Headers(req.headers);
   headers.delete(PROXY_SECRET_HEADER);
+  headers.delete(PROXY_CLIENT_IP_HEADER);
   headers.set(PUBLIC_HEADER, "1");
   headers.set(CLIENT_IP_HEADER, ip);
   return new Request(req, { headers });

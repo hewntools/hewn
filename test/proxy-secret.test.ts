@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import { after, before, describe, test } from "node:test";
-import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "@hewntools/host-workerd/surface/public.ts";
+import { CLIENT_IP_HEADER, gatePublic, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter, rateKey } from "@hewntools/host-workerd/surface/public.ts";
 import { startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 const SECRET = "s3cret-from-the-router";
@@ -44,6 +44,38 @@ describe("the public gate with a proxy secret", () => {
       assert.match(logs[0], /^\[public\] .* -> 403/);
       assert.doesNotMatch(logs[0], /s3cret|203\.0\.113\.5/);
     }
+  });
+
+  test("the visitor's address: the trusted proxy's x-hewn-proxy-client-ip with the secret; never without it; removed either way", () => {
+    const withSecret = gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "203.0.113.5" }), SECRET).out as Request;
+    assert.equal(withSecret.headers.get(CLIENT_IP_HEADER), "198.51.100.7");
+    assert.equal(withSecret.headers.has(PROXY_CLIENT_IP_HEADER), false, "not passed on");
+    // No secret set: a client's own header is ignored and dropped.
+    const spoofed = gate(req({ [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "203.0.113.5" })).out as Request;
+    assert.equal(spoofed.headers.get(CLIENT_IP_HEADER), "203.0.113.5");
+    assert.equal(spoofed.headers.has(PROXY_CLIENT_IP_HEADER), false);
+    // A secret set but not sent: refused before the header is looked at.
+    assert.equal((gate(req({ [PROXY_CLIENT_IP_HEADER]: "198.51.100.7" }), SECRET).out as Response).status, 403);
+    // A value that isn't an address: the X-Forwarded-For hop instead.
+    for (const odd of ["a b|c", "999", "x".repeat(50)]) assert.equal((gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: odd, "x-forwarded-for": "203.0.113.5" }), SECRET).out as Request).headers.get(CLIENT_IP_HEADER), "203.0.113.5", odd);
+  });
+
+  test("per-visitor limits behind the trusted proxy: one visitor's limit doesn't stop another; IPv6 by its /64", () => {
+    const limiter = new RateLimiter({ register: { perClient: 1, total: 10, windowMs: 60_000 } } as any);
+    const register = (ip: string) => gatePublic(new Request("http://127.0.0.1:7718/register", { method: "POST", headers: { [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: ip, "x-forwarded-for": "10.0.0.1" }, body: "{}" }), limiter, () => {}, SECRET);
+    assert.ok(register("198.51.100.7") instanceof Request);
+    assert.equal((register("198.51.100.7") as Response).status, 429);
+    assert.ok(register("198.51.100.8") instanceof Request, "another visitor through the same proxy");
+    assert.ok(register("2001:db8:1:2::5") instanceof Request);
+    assert.equal((register("2001:db8:1:2:aaaa:bbbb:cccc:dddd") as Response).status, 429, "another address in the same /64");
+    assert.ok(register("2001:db8:1:3::5") instanceof Request, "another /64");
+  });
+
+  test("rate keys: IPv4 as is, IPv6 by its /64, IPv4-mapped as IPv4, anything else as is", () => {
+    assert.deepEqual(
+      ["203.0.113.5", "2001:db8:1:2::5", "2001:0DB8:0001:0002:ffff:0:0:1", "::1", "fe80::1%en0", "::ffff:203.0.113.5", "unknown", "1:2:3"].map(rateKey),
+      ["203.0.113.5", "2001:db8:1:2::/64", "2001:db8:1:2::/64", "0:0:0:0::/64", "fe80:0:0:0::/64", "203.0.113.5", "unknown", "1:2:3"],
+    );
   });
 
   test("refused before the rate limit: direct traffic doesn't use up the proxy's budget", () => {
@@ -90,6 +122,15 @@ describe("workerd: the public socket with HEWN_PROXY_SECRET", () => {
     } finally {
       await h.sv.admin("call", { method: "setPublicUrl", args: [null] });
     }
+  });
+
+  test("limits count each visitor the proxy vouches for; a client's own header doesn't", async () => {
+    const register = (visitor: string, secret = true) => fetch(`${h.sv.publicUrl}/register`, { method: "POST", headers: { "content-type": "application/json", ...(secret ? { [PROXY_SECRET_HEADER]: SECRET } : {}), [PROXY_CLIENT_IP_HEADER]: visitor, "x-forwarded-for": "10.9.9.9" }, body: "{}" });
+    // register: 10 an hour per client.
+    for (let i = 0; i < 10; i++) assert.notEqual((await register("198.51.100.20")).status, 429, `call ${i + 1}`);
+    assert.equal((await register("198.51.100.20")).status, 429);
+    assert.notEqual((await register("198.51.100.21")).status, 429, "another visitor through the same proxy");
+    assert.equal((await register("198.51.100.22", false)).status, 403, "without the secret: refused, header and all");
   });
 
   test("the local socket is not affected", async () => {
