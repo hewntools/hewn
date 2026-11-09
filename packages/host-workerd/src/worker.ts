@@ -54,6 +54,8 @@ interface Env {
   PORT: string;
   /** HEWN_PROXY_SECRET: when set, the public sockets take only requests carrying it ("" = off). */
   PROXY_SECRET?: string;
+  /** HEWN_PROXY_CLIENT_IP: "1" takes the visitor's address from the trusted proxy's x-hewn-proxy-client-ip. */
+  PROXY_CLIENT_IP?: string;
   /** "1" when the host runs Hewn's builder and intake (HEWN_BUILD_URL): "remote" is a choice, and the default. */
   REMOTE_JOBS?: string;
   /** "1" when a host runs this Hewn for its owner (HEWN_HOSTED): no terminal, no local agents. */
@@ -89,7 +91,7 @@ const limiter = new RateLimiter();
 
 export class Public extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    const gated = gatePublic(request, limiter, (l) => console.log(`[${new Date().toISOString()}] ${l}`), this.env.PROXY_SECRET);
+    const gated = gatePublic(request, limiter, (l) => console.log(`[${new Date().toISOString()}] ${l}`), this.env.PROXY_SECRET, this.env.PROXY_CLIENT_IP === "1");
     if (gated instanceof Response) return gated;
     return this.env.HEWN.get(this.env.HEWN.idFromName("owner")).fetch(gated);
   }

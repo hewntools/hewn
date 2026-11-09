@@ -17,8 +17,9 @@ export const CLIENT_IP_HEADER = "x-hewn-client-ip";
  */
 export const PROXY_SECRET_HEADER = "x-hewn-proxy-secret";
 /**
- * The visitor's address, from a trusted reverse proxy: read only on a request that carried the proxy secret, and
- * removed from every request here, like the secret.
+ * The visitor's address, from a trusted reverse proxy: read only when the host opted in (HEWN_PROXY_CLIENT_IP: its
+ * proxy sets the header itself, replacing any copy a client sent) and the request carried the proxy secret; removed
+ * from every request here, like the secret.
  */
 export const PROXY_CLIENT_IP_HEADER = "x-hewn-proxy-client-ip";
 
@@ -144,16 +145,17 @@ function sameSecret(given: string, secret: string): boolean {
  * With a proxy secret (HEWN_PROXY_SECRET, for a host whose public listener is reachable directly
  * as well as through its proxy), only requests carrying it in x-hewn-proxy-secret get through;
  * the rest get 403 before their X-Forwarded-For or X-Forwarded-Host is looked at. The proxy's x-hewn-proxy-client-ip
- * (the visitor's address) counts only then; it's removed either way.
+ * (the visitor's address) counts only then, and only with `proxyClientIp` (the host opted in: a proxy that forwards
+ * client headers as they are would let a visitor choose it); it's removed either way.
  */
-export function gatePublic(req: Request, limiter: RateLimiter, log: (line: string) => void, proxySecret?: string): Response | Request {
+export function gatePublic(req: Request, limiter: RateLimiter, log: (line: string) => void, proxySecret?: string, proxyClientIp = false): Response | Request {
   const url = new URL(req.url);
   if (proxySecret && !sameSecret(req.headers.get(PROXY_SECRET_HEADER) ?? "", proxySecret)) {
     log(`[public] ? ${req.method} ${loggedPath(url.pathname)} -> 403 (not from the trusted proxy)`);
     return new Response(JSON.stringify({ error: "forbidden", message: "not from the trusted proxy" }), { status: 403, headers: { "content-type": "application/json", ...robotsFor(url.pathname) } });
   }
   // Past the check above, a set secret means the trusted proxy sent this request.
-  const ip = clientAddress(req, !!proxySecret);
+  const ip = clientAddress(req, !!proxySecret && proxyClientIp);
   if (url.pathname.startsWith("/_admin/")) {
     log(`[public] ${ip} ${req.method} ${url.pathname} -> 404 (not exposed)`);
     return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });

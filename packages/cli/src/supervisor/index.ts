@@ -50,6 +50,11 @@ export interface SupervisorOptions {
    * own proxy). Default: HEWN_PROXY_SECRET; unset or "" = off.
    */
   proxySecret?: string;
+  /**
+   * Take the visitor's address from the trusted proxy's x-hewn-proxy-client-ip (only with a proxy secret, and only
+   * for a proxy that sets the header itself, replacing any copy a client sent). Default: HEWN_PROXY_CLIENT_IP=1.
+   */
+  proxyClientIp?: boolean;
   builders: Record<string, CapabilityBuilder>;
   /** The intake on agent `which`, running on `run` (the owner's model and effort for building). */
   intake?: (which: string, run: JobModel) => Intake;
@@ -179,6 +184,7 @@ const hewn :Workerd.Worker = (
     (name = "SECRETS_KEY", fromEnvironment = "HEWN_SECRETS_KEY"),
     (name = "TIMEZONE", fromEnvironment = "HEWN_TIMEZONE"),
     (name = "PROXY_SECRET", fromEnvironment = "HEWN_PROXY_SECRET"),
+    (name = "PROXY_CLIENT_IP", fromEnvironment = "HEWN_PROXY_CLIENT_IP"),
     (name = "REMOTE_JOBS", fromEnvironment = "HEWN_REMOTE_JOBS"),
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
@@ -241,6 +247,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // Never logged: only whether it's on.
   const proxySecret = o.proxySecret ?? process.env.HEWN_PROXY_SECRET ?? "";
   if (proxySecret) log("public listener: only requests from the trusted proxy (HEWN_PROXY_SECRET)");
+  const proxyClientIp = !!proxySecret && (o.proxyClientIp ?? process.env.HEWN_PROXY_CLIENT_IP === "1");
+  if (proxyClientIp) log("public listener: the visitor's address from the trusted proxy (HEWN_PROXY_CLIENT_IP)");
   const controlToken = randomBytes(24).toString("hex");
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
@@ -485,7 +493,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     child = spawn(command[0], command.slice(1), {
       // Run in its own data dir: workerd opens its working directory, and the sandbox only allows that.
       cwd: data,
-      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" },
+      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (child.pid) writeFileSync(pidFile, String(child.pid));

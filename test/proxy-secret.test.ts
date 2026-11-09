@@ -11,9 +11,9 @@ const SECRET = "s3cret-from-the-router";
 
 describe("the public gate with a proxy secret", () => {
   const req = (headers: Record<string, string> = {}) => new Request("http://127.0.0.1:7718/mcp", { method: "POST", headers, body: "{}" });
-  const gate = (r: Request, secret?: string) => {
+  const gate = (r: Request, secret?: string, clientIp = false) => {
     const logs: string[] = [];
-    return { out: gatePublic(r, new RateLimiter(), (l) => void logs.push(l), secret), logs };
+    return { out: gatePublic(r, new RateLimiter(), (l) => void logs.push(l), secret, clientIp), logs };
   };
 
   test("unset or empty: unchanged, and a stray secret header is still removed", () => {
@@ -46,23 +46,27 @@ describe("the public gate with a proxy secret", () => {
     }
   });
 
-  test("the visitor's address: the trusted proxy's x-hewn-proxy-client-ip with the secret; never without it; removed either way", () => {
-    const withSecret = gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "203.0.113.5" }), SECRET).out as Request;
+  test("the visitor's address: the trusted proxy's x-hewn-proxy-client-ip with the secret and the host's opt-in; never without either; removed either way", () => {
+    const withSecret = gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "203.0.113.5" }), SECRET, true).out as Request;
     assert.equal(withSecret.headers.get(CLIENT_IP_HEADER), "198.51.100.7");
     assert.equal(withSecret.headers.has(PROXY_CLIENT_IP_HEADER), false, "not passed on");
-    // No secret set: a client's own header is ignored and dropped.
-    const spoofed = gate(req({ [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "203.0.113.5" })).out as Request;
+    // The secret matched but the host didn't opt in (its proxy may pass a client's copy through): ignored and dropped.
+    const notOptedIn = gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "198.51.100.1, 203.0.113.5" }), SECRET).out as Request;
+    assert.equal(notOptedIn.headers.get(CLIENT_IP_HEADER), "203.0.113.5", "the last X-Forwarded-For hop");
+    assert.equal(notOptedIn.headers.has(PROXY_CLIENT_IP_HEADER), false);
+    // No secret set (opted in or not): a client's own header is ignored and dropped.
+    const spoofed = gate(req({ [PROXY_CLIENT_IP_HEADER]: "198.51.100.7", "x-forwarded-for": "203.0.113.5" }), undefined, true).out as Request;
     assert.equal(spoofed.headers.get(CLIENT_IP_HEADER), "203.0.113.5");
     assert.equal(spoofed.headers.has(PROXY_CLIENT_IP_HEADER), false);
     // A secret set but not sent: refused before the header is looked at.
-    assert.equal((gate(req({ [PROXY_CLIENT_IP_HEADER]: "198.51.100.7" }), SECRET).out as Response).status, 403);
+    assert.equal((gate(req({ [PROXY_CLIENT_IP_HEADER]: "198.51.100.7" }), SECRET, true).out as Response).status, 403);
     // A value that isn't an address: the X-Forwarded-For hop instead.
-    for (const odd of ["a b|c", "999", "x".repeat(50)]) assert.equal((gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: odd, "x-forwarded-for": "203.0.113.5" }), SECRET).out as Request).headers.get(CLIENT_IP_HEADER), "203.0.113.5", odd);
+    for (const odd of ["a b|c", "999", "x".repeat(50)]) assert.equal((gate(req({ [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: odd, "x-forwarded-for": "203.0.113.5" }), SECRET, true).out as Request).headers.get(CLIENT_IP_HEADER), "203.0.113.5", odd);
   });
 
   test("per-visitor limits behind the trusted proxy: one visitor's limit doesn't stop another; IPv6 by its /64", () => {
     const limiter = new RateLimiter({ register: { perClient: 1, total: 10, windowMs: 60_000 } } as any);
-    const register = (ip: string) => gatePublic(new Request("http://127.0.0.1:7718/register", { method: "POST", headers: { [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: ip, "x-forwarded-for": "10.0.0.1" }, body: "{}" }), limiter, () => {}, SECRET);
+    const register = (ip: string) => gatePublic(new Request("http://127.0.0.1:7718/register", { method: "POST", headers: { [PROXY_SECRET_HEADER]: SECRET, [PROXY_CLIENT_IP_HEADER]: ip, "x-forwarded-for": "10.0.0.1" }, body: "{}" }), limiter, () => {}, SECRET, true);
     assert.ok(register("198.51.100.7") instanceof Request);
     assert.equal((register("198.51.100.7") as Response).status, 429);
     assert.ok(register("198.51.100.8") instanceof Request, "another visitor through the same proxy");
@@ -88,7 +92,7 @@ describe("the public gate with a proxy secret", () => {
 describe("workerd: the public socket with HEWN_PROXY_SECRET", () => {
   let h: TestHost;
   before(async () => {
-    h = await startTestHost({ proxySecret: SECRET });
+    h = await startTestHost({ proxySecret: SECRET, proxyClientIp: true });
   });
   after(() => h?.stop());
   /** With a real Host header (fetch won't send one). */
