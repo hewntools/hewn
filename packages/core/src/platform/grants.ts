@@ -116,7 +116,7 @@ export class Grants extends Domain {
     const manifest = this.activeManifest(capabilityId);
     const req = manifest.requires ?? {};
     const granted = this.registry.grants(capabilityId);
-    const items: { grant: string; kind: "capability" | "host" | "secret" | "model"; approved: boolean; label: string; sideEffect?: string; target?: string; description?: string }[] = [];
+    const items: { grant: string; kind: "capability" | "host" | "secret" | "model"; approved: boolean; label: string; sideEffect?: string; target?: string; description?: string; host?: string | null }[] = [];
     for (const c of req.capabilities ?? []) {
       const callee = this.registry.getCapability(c.id);
       const calleeName = callee?.displayName ?? callee?.name ?? c.id;
@@ -137,8 +137,9 @@ export class Grants extends Domain {
     const values = this.registry.config(capabilityId);
     for (const h of req.hosts ?? []) {
       const derived = h.startsWith("config:") ? h.slice(7) : undefined;
-      const label = derived ? `connect to the host in ${derived} (${hostOf(values[derived] ?? "") ?? "not set yet"})` : `connect to ${h}`;
-      items.push({ grant: `host:${h}`, kind: "host", approved: granted.has(`host:${h}`), label });
+      const host = derived ? (hostOf(values[derived] ?? "") ?? null) : h;
+      const label = derived ? `connect to the host in ${derived} (${host ?? "not set yet"})` : `connect to ${hostWords(h)}`;
+      items.push({ grant: `host:${h}`, kind: "host", approved: granted.has(`host:${h}`), label, host });
     }
     for (const s of req.secrets ?? []) {
       items.push({ grant: `secret:${s.name}`, kind: "secret", approved: granted.has(`secret:${s.name}`), label: `use secret ${s.name}`, description: s.description });
@@ -370,6 +371,9 @@ export class Grants extends Domain {
     return { ok: true };
   }
 }
+
+/** A declared host as the owner reads it: "*.example.com" is any site ending in .example.com. */
+export const hostWords = (h: string) => (h.startsWith("*.") ? `any site ending in ${h.slice(1)}` : h);
 
 /** The host name in a URL or bare host ("https://example.com/blog" → "example.com"), if valid. */
 export function hostOf(value: string): string | undefined {

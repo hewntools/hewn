@@ -38,7 +38,7 @@ import { Events, type Shared, type Domains, type LoadedVersion } from "./platfor
 export { type CapabilitySummary } from "./platform/discovery.ts";
 export { type DataSummary } from "./platform/data.ts";
 export { MAX_SATURATION } from "./platform/presentation.ts";
-export { type Readiness, hostOf, resolveHosts } from "./platform/grants.ts";
+export { type Readiness, hostOf, hostWords, resolveHosts } from "./platform/grants.ts";
 export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
 export { MODEL_KEYS } from "./platform/models.ts";
 export { type ConnectionHealth, HEALTH_DEADLINE_MS, HEALTH_CACHE_MS } from "./platform/connections.ts";

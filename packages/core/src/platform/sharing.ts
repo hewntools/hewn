@@ -392,7 +392,7 @@ export class Sharing extends Domain {
       summary: staged.summary ?? hewn,
       summaryBy: staged.summary ? "yours" : hewn ? "hewn" : null,
       asks: {
-        hosts: (m.requires?.hosts ?? []).filter((x) => !x.startsWith("config:")),
+        hosts: m.requires?.hosts ?? [],
         model: model ? { ...(model.tier ? { tier: model.tier } : {}), ...(model.model ? { model: model.model } : {}), images: !!model.input?.includes("image") } : null,
         tools: (m.requires?.capabilities ?? []).map((c) => ({ id: c.id, operations: c.operations })),
         secrets: (m.requires?.secrets ?? []).map((x) => x.name),

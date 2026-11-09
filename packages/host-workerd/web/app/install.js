@@ -7,6 +7,7 @@
 import { api, appIcon, builderLabel, commandBlock, enc, fail, h, hueOf, kindTag, modal, pixelGlyph, postStream, satOf, sheetActions, sheetHead } from "../kit.js";
 import { go, put, settings } from "./frame.js";
 import { codeBrowser } from "./files.js";
+import { reachText } from "./grants.js";
 import { titleCase } from "./models.js";
 
 export { bundleTile, installFromFileOrLink, installSheet, sourceSheet };
@@ -191,7 +192,7 @@ function refusal(e) {
 function asksRows(a) {
   const row = (tag, main, sub) => h("li", {}, kindTag(tag, tag === "model" ? "accent" : ""), h("div", { class: "grow" }, h("span", {}, main), sub && h("span", { class: "sub" }, sub)));
   const rows = [
-    ...a.hosts.map((x) => row("host", `Reach ${x}`)),
+    ...a.hosts.map((x) => row("host", `Reach ${reachText(x)}`)),
     a.model && row("model", "Use a model", [a.model.tier ? `${titleCase(a.model.tier)} tier` : a.model.model, a.model.images && "with images", "asked on first use"].filter(Boolean).join(", ").replace(/, asked/, " · asked")),
     ...a.tools.map((x) => row("write", `Use ${x.id}`, x.operations.join(", "))),
     ...a.secrets.map((x) => row("key", x)),

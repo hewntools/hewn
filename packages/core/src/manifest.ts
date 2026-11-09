@@ -247,6 +247,7 @@ function kindErrors(m: CapabilityManifest): string[] {
   const config = new Set((m.config ?? []).map((c) => c.name));
   if (config.size !== (m.config ?? []).length) errors.push("config names must be unique");
   for (const h of m.requires?.hosts ?? []) if (h.startsWith("config:") && !config.has(h.slice(7))) errors.push(`requires.hosts '${h}': no config named ${h.slice(7)}`);
+  for (const h of m.requires?.hosts ?? []) if (/^\*\.[^.]+$/.test(h)) errors.push(`requires.hosts '${h}': a wildcard covers one site's subdomains (*.example.com), not every site ending in ${h.slice(1)}`);
   const secrets = m.requires?.secrets ?? [];
   if (!isConnection(m)) {
     if (secrets.length) errors.push(`only connections hold credentials: ${secrets.map((s) => s.name).join(", ")} must live in a connection (a capability with "kind": "connection") that wraps the service; call its operations instead`);

@@ -328,6 +328,7 @@ describe("sharing: a tool as a file", () => {
     other = setup();
     const preview = await other.platform.stageBundle(USER, bundle);
     assert.equal(preview.kind, "connection");
+    assert.deepEqual(preview.asks.hosts, ["config:SITE_URL"], "a host from a setting is on the sheet");
     const done = await other.platform.settle((await other.platform.installBundle(USER, preview.token, { name: preview.suggestedName, sample: true })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     const st = other.platform.readiness("site-connection");

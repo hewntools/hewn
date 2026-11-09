@@ -52,6 +52,7 @@ Some rules can't be expressed in the schema. The host also checks that:
 - each `name@version` appears once, and every `inputSchema` is `"type": "object"` and both schemas compile.
 - only a connection declares `requires.secrets`, and every connection follows the [connection rules](#connections-since-21).
 - `config` names are unique, and every `config:NAME` host names a declared config.
+- a wildcard host covers one site's subdomains: `*.example.com`, not `*.com`.
 - `requires.model` has exactly one of `tier` and `model`.
 - widgets follow the [widget rules](#widgets-since-23).
 - `ui/index.html` exists when `ui.available` is true.
@@ -163,7 +164,7 @@ Each handler gets `(input, ctx)`. The types are [`src/ctx.ts`](src/ctx.ts); `CTX
 - **An isolate, not a process.** Code runs as JavaScript in a V8 isolate (like a Cloudflare Worker). The host bundles `src/index.ts` and its imports, including npm packages from `package.json`, into one ES module. Pick packages that run in browsers or Workers, at versions from the npm registry: a git, `file:`, `link:` or URL dependency, or an `.npmrc` (npm settings), fails the build, and so does one among your packages' own dependencies (npm asks the registry for every package, whatever a lockfile says). Code imports only the tool's own files and its packages.
 - **Available:** standard web APIs (`fetch`, `crypto`, `URL`, `TextEncoder`, `Date`, …) and Node built-ins that need no host (`node:crypto`, `node:buffer`, `node:util`, …).
 - **Not available:** a filesystem (`node:fs` sees an empty, throwaway disk), child processes, raw sockets, environment variables.
-- **Network:** `fetch` reaches only the hosts in `requires.hosts` that the owner approved; any other request gets a `403` response. `*.example.com` matches subdomains of `example.com`, not `example.com` itself.
+- **Network:** `fetch` reaches only the hosts in `requires.hosts` that the owner approved; any other request gets a `403` response. `*.example.com` matches subdomains of `example.com`, not `example.com` itself; the owner sees it as "any site ending in .example.com". A wildcard over a single label (`*.com`) is refused.
 - **Logs:** `console.log`, `warn` and `error` are the tool's log, which the owner sees: up to 200 lines per call, 500 characters each. Agents don't see them.
 - **Time:** a call chain (an agent's call and every `ctx.call` it causes) has 30 seconds. Time spent waiting on `ctx.model` doesn't count, up to 120 seconds per chain. A widget's run has 15 seconds. When time runs out the call fails with `operation_failed`. Long work suits an operation that does what fits and reports what's left (`{ "done": 5, "remaining": 12 }`), called again or [scheduled](agents.md#schedules).
 

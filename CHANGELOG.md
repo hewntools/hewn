@@ -28,6 +28,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Fixed:** installing a tool that needs a newer Hewn now says "This tool needs a newer Hewn", with how to upgrade, instead of "This file can't be installed".
 - **The visual check reaches only the page it checks.** The browser Hewn uses to check a build's screen loads the page's own files and calls its own tool, and nothing else: no other site, no address on your machine or network, no popup or WebRTC elsewhere. See [the threat model](docs/threat-model.md).
 - A tool's file whose paths have a `.` segment (`src/./index.ts`) is refused, as one with `..` already was. See [Sharing](docs/sharing.md).
+- **Hosts say what they reach.** A tool that asks for `*.example.com` shows as reaching "any site ending in .example.com", and a wildcard over a whole top-level domain (`*.com`) is refused. A host that comes from a setting shows on the install sheet, and the grant card names the host the setting holds. See [the tool spec](spec/tools.md#grants).
 
 ## 0.4.10 (2026-11-07)
 
