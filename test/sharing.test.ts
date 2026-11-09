@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -669,6 +670,109 @@ describe("npm, which runs outside the builder's sandbox, gets registry versions 
       for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
       server.close();
     }
+  });
+
+  /**
+   * A registry on this machine serving tiny-dep 1.0.0 with `deps` as its own dependencies, set as npm's
+   * registry for `run`; `seen` is every path asked of it. The workspace imports tiny-dep.
+   */
+  const withRegistry = async (deps: Record<string, string>, run: (ws: string, seen: string[]) => Promise<void>) => {
+    const pkg = { name: "tiny-dep", version: "1.0.0", main: "index.js", dependencies: deps };
+    const tgz = gzipSync(tar({ "package/package.json": JSON.stringify(pkg), "package/index.js": "module.exports = 42;\n" }));
+    const seen: string[] = [];
+    const server = createServer((req, res) => {
+      seen.push(req.url ?? "");
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const dist = { tarball: `${base}/tiny-dep/-/tiny-dep-1.0.0.tgz`, integrity: `sha512-${createHash("sha512").update(tgz).digest("base64")}` };
+      if (req.url === "/tiny-dep") res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ name: "tiny-dep", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": { ...pkg, dist } } }));
+      else if (req.url === "/tiny-dep/-/tiny-dep-1.0.0.tgz") res.writeHead(200, { "content-type": "application/octet-stream" }).end(tgz);
+      else res.writeHead(404).end("{}");
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const env = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    process.env.npm_config_cache = join(t.home.root, "npm-cache");
+    const ws = mkdtempSync(join(tmpdir(), "hewn-npm-"));
+    try {
+      mkdirSync(join(ws, "src"));
+      writeFileSync(join(ws, "src/index.ts"), 'import tiny from "tiny-dep";\nexport const operations = { n: () => tiny };\n');
+      writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": "^1.0.0" } }));
+      await run(ws, seen);
+    } finally {
+      for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
+      server.close();
+      rmSync(ws, { recursive: true, force: true });
+    }
+  };
+
+  test("a dependency's own git dependency is never cloned (it would be, with the owner's keys)", async () => {
+    // A repository of the owner's that a dependency names: npm would clone it into node_modules, where the bundle reads.
+    const repo = join(t.home.root, "private-repo");
+    mkdirSync(repo);
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "private-repo", version: "1.0.0", main: "index.js" }));
+    writeFileSync(join(repo, "index.js"), 'module.exports = "the owner\'s code";\n');
+    for (const args of [["init", "-q"], ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"]]) assert.equal(spawnSync("git", args, { cwd: repo }).status, 0);
+    await withRegistry({ "private-repo": `git+file://${repo}` }, async (ws) => {
+      await assert.rejects(bundleWorkspace(ws), /npm install failed/);
+      assert.ok(!existsSync(join(ws, "node_modules/private-repo")));
+    });
+  });
+
+  test("a lockfile's git URL (https, so the tool's own check passes it) never runs git", async () => {
+    // A git that leaves a mark: npm finds it on PATH as it would the owner's (with their keys and helpers).
+    const bin = join(t.home.root, "fakebin"), mark = join(t.home.root, "git-ran");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "git"), `#!/bin/sh\ntouch ${mark}\nexit 1\n`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      await withRegistry({}, async (ws) => {
+        const lock = { name: "t", lockfileVersion: 3, requires: true, packages: { "": { dependencies: { "tiny-dep": "^1.0.0" } }, "node_modules/tiny-dep": { version: "1.0.0", resolved: "https://github.com/someone/tiny-dep.git" } } };
+        writeFileSync(join(ws, "package-lock.json"), JSON.stringify(lock));
+        await assert.rejects(bundleWorkspace(ws), /npm install failed/);
+        assert.ok(!existsSync(mark));
+      });
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+
+  test("a lockfile's tarball on another host is fetched from the registry instead", async () => {
+    await withRegistry({}, async (ws, seen) => {
+      // https, so the tool's own check passes it; nothing listens there, so npm going there would fail.
+      const lock = { name: "t", lockfileVersion: 3, requires: true, packages: { "": { dependencies: { "tiny-dep": "^1.0.0" } }, "node_modules/tiny-dep": { version: "1.0.0", resolved: "https://127.0.0.1:9/tiny-dep/-/tiny-dep-1.0.0.tgz" } } };
+      writeFileSync(join(ws, "package-lock.json"), JSON.stringify(lock));
+      const { js } = await bundleWorkspace(ws);
+      assert.match(js, /module\.exports = 42/);
+      assert.ok(seen.includes("/tiny-dep/-/tiny-dep-1.0.0.tgz"), seen.join(", "));
+    });
+  });
+
+  const far = gzipSync(tar({ "package/package.json": JSON.stringify({ name: "far", version: "1.0.0", main: "index.js" }), "package/index.js": "module.exports = 'far';\n" }));
+
+  test("a dependency's own dependency on a tarball URL is asked of the registry, never its host", async () => {
+    let asked = 0;
+    const elsewhere = createServer((_req, res) => (asked++, res.writeHead(200, { "content-type": "application/octet-stream" }).end(far)));
+    await new Promise<void>((ok) => elsewhere.listen(0, "127.0.0.1", ok));
+    try {
+      await withRegistry({ far: `http://127.0.0.1:${(elsewhere.address() as AddressInfo).port}/far.tgz` }, async (ws, seen) => {
+        await assert.rejects(bundleWorkspace(ws), /npm install failed/);
+        assert.ok(seen.includes("/far.tgz"), seen.join(", "));
+        assert.equal(asked, 0);
+      });
+    } finally {
+      elsewhere.close();
+    }
+  });
+
+  test("a dependency's own file: dependency fails the install, and nothing of it is kept", async () => {
+    // A tarball on the owner's disk, unpacked into node_modules where the bundle would read it.
+    const path = join(t.home.root, "far-1.0.0.tgz");
+    writeFileSync(path, far);
+    await withRegistry({ far: `file:${path}` }, async (ws) => {
+      await assert.rejects(bundleWorkspace(ws), /npm took far \(file:[^)]*far-1\.0\.0\.tgz\) from this machine's disk/);
+      assert.ok(!existsSync(join(ws, "node_modules")));
+    });
   });
 });
 

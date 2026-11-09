@@ -4,6 +4,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.11 (unreleased)
 
+- **A tool's packages come from the npm registry, and so do theirs.** When Hewn installs a tool's npm dependencies, npm never runs git, asks your registry for every package wherever a lockfile points, and a package it would take from your disk fails the build. A tool's own `package.json` already had to name registry versions. See [the tool spec](spec/tools.md).
 - **A setting can come suggested.** A tool's setting with an obvious answer (the repository almost everyone keeps, a name you told the builder) now opens in the setup form with that value already in the field: check it, change it if you like, and save. Nothing is filled in until you save, so the tool stays not ready until then. Builders write it as `"suggested"` on the config entry; `"default"` is refused with a pointer to it, since Hewn never fills in a setting by itself. This is ABI 2.6, `@hewntools/spec` 2.6.0 (hewntools/hewn#66). See [Config](spec/tools.md#config-since-21).
 
 ## 0.4.10 (2026-11-07)
