@@ -247,8 +247,10 @@ try {
     await page.waitForURL(/#\/b\//);
     const until = Date.now() + 120_000;
     let st: any;
-    while (Date.now() < until && !(st = await sv.admin("status", {})).capabilities.find((c: any) => c.id === "kid-quotes")?.version) await new Promise((r) => setTimeout(r, 500));
-    if (!st.capabilities.find((c: any) => c.id === "kid-quotes")?.version) throw new Error(`Kid Quotes didn't go live: ${JSON.stringify(st.builds[0]?.log?.slice(-5))}`);
+    // Its sample data replays after it goes live: wait for the build to say so.
+    const replayed = (s: any) => s.builds.find((b: any) => b.capabilityId === "kid-quotes")?.log?.some((l: string) => /sample data(:| stopped)/.test(l));
+    while (Date.now() < until && !replayed((st = await sv.admin("status", {})))) await new Promise((r) => setTimeout(r, 500));
+    if (!st.capabilities.find((c: any) => c.id === "kid-quotes")?.version || !replayed(st)) throw new Error(`Kid Quotes didn't go live with its sample data: ${JSON.stringify(st.builds[0]?.log?.slice(-5))}`);
     const quotes = await sv.admin("invoke", { capabilityId: "kid-quotes", operation: "list_quotes", input: {} });
     if (!(JSON.stringify(quotes.result ?? {}).length > 200)) throw new Error(`no sample data: ${JSON.stringify(quotes)}`);
     const src = (await sv.admin("call", { method: "get", args: ["kid-quotes"] })).result.source;
