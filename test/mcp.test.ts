@@ -198,15 +198,18 @@ describe("a client writes a tool over MCP: pack, check, submit", () => {
     await claude.close();
   });
 
-  test("a new tool with a screen: four images in the check's content, and the same as files", async () => {
+  test("a new tool with a screen: four images in the check's content, their names (no image data) in structuredContent", async () => {
     const claude = await connect(url, TOKENS.claude);
     const dir = join(FIXTURES, "ui-counter");
     const files = ["capability.json", "ui/index.html", "migrations/001_init.sql", "tests/cases.json", "sample/calls.json", "src/index.ts"].map((path) => ({ path, content: readFileSync(join(dir, path), "utf8") }));
     const checked = await claude.callTool({ name: "capabilities_check", arguments: { files } });
     const content = checked.content as { type: string; data?: string; mimeType?: string }[];
     assert.equal(content.filter((c) => c.type === "image" && c.mimeType === "image/png").length, 4, JSON.stringify(content[0]));
-    const shots = (checked.structuredContent as { files: { path: string; encoding: string }[] }).files;
-    assert.deepEqual(shots.map((f) => [f.path, f.encoding]), SHOTS.map((n) => [`screenshots/${n}.png`, "base64"]));
+    assert.deepEqual((checked.structuredContent as { screenshots: string[] }).screenshots, SHOTS);
+    assert.ok(JSON.stringify(checked.structuredContent).length < 2000, "no base64 in structuredContent");
+    const bare = await claude.callTool({ name: "capabilities_check", arguments: { files, screenshots: false } });
+    assert.deepEqual((bare.content as { type: string }[]).map((c) => c.type), ["text"]);
+    assert.deepEqual((bare.structuredContent as { screenshots: string[] }).screenshots, []);
     await claude.close();
   });
 });

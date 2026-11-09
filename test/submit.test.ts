@@ -15,6 +15,8 @@ import { FIXTURES, installFrom, installSeed, SEED, setup } from "./helpers.ts";
 const SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
 /** A visual check that renders nothing: four images named for the render. */
 const fakeVisual: VisualCheck = async () => ({ errors: [], screenshot: Buffer.from("png"), shots: SHOTS.map((name) => ({ name, png: Buffer.from(name) })) });
+/** The same, with the phone's light page long enough for a second part. */
+const longPage: VisualCheck = async (...a) => ({ ...(await fakeVisual(...a)), shots: [...SHOTS, "mobile-light-2"].map((name) => ({ name, png: Buffer.from(name) })) });
 const code = (c: string, message?: RegExp) => (e: unknown) => e instanceof PlatformError && e.code === c && (!message || message.test(e.message));
 
 /** A folder's files as a client sends them. */
@@ -103,19 +105,24 @@ describe("a client's files: what Hewn takes", () => {
 describe("check: validation on request, promoting nothing", () => {
   let t: ReturnType<typeof setup>;
   beforeEach(async () => {
-    t = setup({ visualCheck: fakeVisual });
+    t = setup({ visualCheck: longPage });
     await installSeed(t.platform);
   });
   afterEach(() => t.cleanup());
   const counter = () => entriesOf(join(FIXTURES, "ui-counter")).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace('"ui-counter"', '"my-counter"').replace("UI Counter", "My Counter") } : f));
 
-  test("a passing new tool: PASS, the four renders as images and as files, nothing installed", async () => {
+  test("a passing new tool: PASS, the renders as images (a long page's part after the four), nothing installed; screenshots: false leaves them out", async () => {
     const r = await t.platform.checkFiles(t.claude, { files: counter() });
     assert.equal(r.passed, true, r.text);
     assert.match(r.text, /^PASS/);
-    assert.deepEqual(r.images.map((i) => i.name), SHOTS);
-    assert.deepEqual(r.files.map((f) => f.path), SHOTS.map((n) => `screenshots/${n}.png`));
-    assert.equal(r.files[0].encoding, "base64");
+    assert.deepEqual(r.images.map((i) => i.name), [...SHOTS, "mobile-light-2"]);
+    assert.match(r.text, /attached \(desktop-light, desktop-dark, mobile-light, mobile-dark\)\. A long page shows its top part; the rest follows it \(mobile-light-2, top to bottom\)/);
+    assert.ok(!r.text.includes("screenshots/"), "no files to open: a client has the images only");
+    const bare = await t.platform.checkFiles(t.claude, { files: counter(), screenshots: false });
+    assert.equal(bare.passed, true, bare.text);
+    assert.deepEqual(bare.images, []);
+    assert.match(bare.text, /rendered and measured, the screenshots left out \(screenshots: false\)/);
+    await assert.rejects(t.platform.checkFiles(t.claude, { files: counter(), screenshots: "no" }), code("invalid_request", /screenshots/));
     assert.equal(t.platform.registry.getCapability("my-counter"), undefined, "nothing installed");
   });
 
@@ -199,7 +206,8 @@ describe("submit: the same gate as any build", () => {
       writeFileSync(p, JSON.stringify({ ...JSON.parse(readFileSync(p, "utf8")), purpose: "Changed by the owner meanwhile." }));
     });
     const other = await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "anything" });
-    await assert.rejects(t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: "reword" }), code("conflict", /on its way/));
+    // It names the build in the way, for the client to follow with builds_wait.
+    await assert.rejects(t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: "reword" }), (e) => code("conflict", new RegExp(`on its way \\(build ${other.buildId}\\)`))(e) && (e as { details?: { buildId?: string } }).details?.buildId === other.buildId);
     await t.platform.settle(other.buildId);
     await assert.rejects(t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: "reword", baseVersion: 1 }), code("conflict", /at v2 now and your files are from v1/));
     await assert.rejects(t.platform.submitFiles(t.claude, { files: entriesOf(SEED), request: "again" }), code("conflict", /submit with capabilityId 'running-log'/));

@@ -396,9 +396,9 @@ export class Builds extends Domain {
    */
   noChangeOnItsWay(capabilityId: string, what: string) {
     const ahead = this.registry.unfinishedBuild(capabilityId);
-    if (ahead) throw new PlatformError("conflict", `a change to ${capabilityId} is on its way (build ${ahead.id}); ${what} once it's done`);
+    if (ahead) throw new PlatformError("conflict", `a change to ${capabilityId} is on its way (build ${ahead.id}); ${what} once it's done`, { buildId: ahead.id });
     const paused = this.pausedBuild(capabilityId, "change");
-    if (paused) throw new PlatformError("conflict", `a change to ${capabilityId} is paused (build ${paused.id}); ${what} once it's continued and done, or stopped`);
+    if (paused) throw new PlatformError("conflict", `a change to ${capabilityId} is paused (build ${paused.id}); ${what} once it's continued and done, or stopped`, { buildId: paused.id });
   }
 
   /**

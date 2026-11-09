@@ -369,9 +369,10 @@ export class Validation extends Domain {
    * A builder's check of its work in progress (its `check` tool): every step validation runs, going
    * on after a failure, with the UI rendered filled with the sample data and what to fix measured on
    * it. Nothing about the tool or the build page changes. `liveData: false`: not the upgrade dry run
-   * on the tool's own data (a client's check).
+   * on the tool's own data (a client's check). `shots`: where the text says the renders are (`files`,
+   * a builder's `screenshots/`; `attached`, all of them as images; `none`, left out).
    */
-  async check(build: BuildRow, opts: { liveData?: boolean } = {}): Promise<CheckResult> {
+  async check(build: BuildRow, opts: { liveData?: boolean; shots?: ShotsShown } = {}): Promise<CheckResult> {
     const passed: string[] = [];
     let candidate: Candidate | undefined;
     let failures: string[];
@@ -398,7 +399,7 @@ export class Validation extends Domain {
     const parts = shots.filter((s) => isPart(s.name) && (room -= s.png.length) >= 0);
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
-    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };
+    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled, shown: opts.shots ?? "files" }), failures, defects, images, ...(parts.length ? { parts } : {}) };
   }
 
   /**
@@ -676,22 +677,37 @@ const listed = (msg: string, problems: string[]) => (problems.length ? `${msg}:\
 /** "1 problem", "3 problems". */
 const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
+/** Where a check's renders go: a builder's `screenshots/` (the four shown too), all shown as images (a client's), or nowhere. */
+export type ShotsShown = "files" | "attached" | "none";
+
+/** What the text says of the renders: `images`, the top of each; `parts`, the rest of a long page. */
+function shotsText(images: string[], parts: string[], shown: ShotsShown): string {
+  if (shown === "none") return "rendered and measured, the screenshots left out (screenshots: false).";
+  const where = shown === "files" ? `attached, and in ${images.map((n) => `screenshots/${n}.png`).join(", ")}.` : `attached (${images.join(", ")}).`;
+  const rest = !parts.length
+    ? ""
+    : shown === "files"
+      ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.`
+      : ` A long page shows its top part; the rest follows it (${parts.join(", ")}, top to bottom).`;
+  return `${where}${rest} Open every one and fix what looks broken, cramped, cut off or unreadable.`;
+}
+
 /**
  * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
  * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
- * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page, in files only.
+ * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page; `shown`:
+ * where the renders are.
  */
-function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
-  const { failures, defects, images, parts, passed, ui, sampled } = c;
+function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean; shown: ShotsShown }): string {
+  const { failures, defects, images, parts, passed, ui, sampled, shown } = c;
   const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
-  const files = images.map((n) => `screenshots/${n}.png`);
   const skipped = passed.find((l) => /visual check skipped/.test(l));
   return [
-    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || images.length ? " Look at what follows before you stop." : ""}`,
+    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || (images.length && shown !== "none") ? " Look at what follows before you stop." : ""}`,
     failures.length ? `What failed:\n${list(failures)}` : "",
     defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
     images.length
-      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${files.join(", ")}.${parts.length ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.` : ""} Open every one and fix what looks broken, cramped, cut off or unreadable.`
+      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: ${shotsText(images, parts, shown)}`
       : ui === false
         ? ""
         : `No screenshots: the UI wasn't rendered${skipped ? ` (${skipped})` : ui === undefined ? " (fix the failures first)" : ""}.`,

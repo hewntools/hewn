@@ -11,7 +11,6 @@ import type { CheckResult, Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
 import type { BuildView } from "./builds.ts";
 import { Domain } from "./context.ts";
-import { MAX_PARTS_BYTES } from "./validation.ts";
 
 /** A file as it travels over MCP: UTF-8 text, or base64 for anything that isn't. */
 export interface FileEntry {
@@ -37,14 +36,13 @@ export interface Pack {
   next: string;
 }
 
-/** What `capabilities_check` returns: the check's result, its four renders as images, and every render as a file for `screenshots/`. */
+/** What `capabilities_check` returns: the check's result and its renders as images (the four, then a long page's further parts), none with `screenshots: false`. */
 export interface ClientCheck {
   passed: boolean;
   text: string;
   failures: string[];
   defects: string[];
   images: { name: string; png: Uint8Array }[];
-  files: FileEntry[];
 }
 
 /** Each refused path with the rule it breaks, so a client learns the rule. */
@@ -155,7 +153,7 @@ export class Submissions extends Domain {
       baseVersion: cap.activeVersion!,
       files: entries(files),
       ...(schedules.length ? { schedules } : {}),
-      next: `These are v${cap.activeVersion}'s files. Change them here, keep every operation a schedule runs, then capabilities_check with capabilityId while you work and capabilities_submit with capabilityId and baseVersion ${cap.activeVersion} when the check passes. Send the tool's files only, not the contracts, looks or design system.`,
+      next: `These are v${cap.activeVersion}'s files. Change them here, keep every operation version in schedules (each runs exactly that one), then capabilities_check with capabilityId while you work and capabilities_submit with capabilityId and baseVersion ${cap.activeVersion} when the check passes. Send the tool's files only, not the contracts, looks or design system.`,
     };
   }
 
@@ -164,12 +162,15 @@ export class Submissions extends Domain {
    * runs (the manifest, bundling, contracts against the tool when `capabilityId` is given,
    * migrations, the tests, the sample data, the screen at 1280 and 390 px in light and dark with
    * what to fix measured on it), but for the upgrade dry run on the tool's own data, which runs when
-   * it's submitted. At most `CHECKS_PER_HOUR` a client, one at a time.
+   * it's submitted. At most `CHECKS_PER_HOUR` a client (counted in memory: a restart starts afresh),
+   * one at a time. `screenshots: false`: the UI still renders and is measured, but no images come back.
    */
-  async check(agent: Agent, req: { files?: unknown; capabilityId?: unknown }): Promise<ClientCheck> {
+  async check(agent: Agent, req: { files?: unknown; capabilityId?: unknown; screenshots?: unknown }): Promise<ClientCheck> {
     const change = req.capabilityId !== undefined;
     requireScope(agent, change ? "modify" : "create");
     if (change && typeof req.capabilityId !== "string") throw new PlatformError("invalid_request", "capabilityId: the tool your files change");
+    if (req.screenshots !== undefined && typeof req.screenshots !== "boolean") throw new PlatformError("invalid_request", "screenshots: true or false");
+    const shots = req.screenshots === false ? "none" : "attached";
     const files = candidateFiles(filesFromEntries(req.files));
     const cap = change ? this.visibleActive(agent, req.capabilityId as string) : undefined;
     const id = cap?.id ?? this.newToolId(files);
@@ -184,16 +185,13 @@ export class Submissions extends Domain {
       let r: CheckResult;
       try {
         // Not the upgrade dry run: a client's migrations run on a copy of the owner's data only once submitted.
-        r = await this.d.validation.check(build, { liveData: false });
+        r = await this.d.validation.check(build, { liveData: false, shots });
       } finally {
         await this.workbench.remove(build.id).catch(() => {});
       }
       this.logger(`check by ${agent.id} of ${cap ? `a change to ${id}` : `new tool ${id}`}: ${r.passed ? "passed" : `${r.failures.length} problem(s)`}`);
-      // The renders as files too, for a client that drops images (a long page's parts only there).
-      let room = MAX_PARTS_BYTES;
-      const parts = (r.parts ?? []).filter((s) => (room -= s.png.length) >= 0);
       const later = cap && (await this.runtime.hasState({ capabilityId: cap.id })) ? `\n\nNot in a check: the upgrade dry run, your migrations on a copy of ${cap.id}'s data. It runs when you submit.` : "";
-      return { passed: r.passed, text: r.text + later, failures: r.failures, defects: r.defects, images: r.images, files: [...r.images, ...parts].map((s) => ({ path: `screenshots/${s.name}.png`, content: toBase64(s.png), encoding: "base64" as const })) };
+      return { passed: r.passed, text: r.text + later, failures: r.failures, defects: r.defects, images: shots === "none" ? [] : [...r.images, ...(r.parts ?? [])] };
     };
     const prev = this.checking.get(agent.id) ?? Promise.resolve();
     const next = prev.then(run, run);
