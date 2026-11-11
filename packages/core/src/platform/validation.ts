@@ -678,8 +678,11 @@ const listed = (msg: string, problems: string[]) => (problems.length ? `${msg}:\
 /** "1 problem", "3 problems". */
 const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
-/** Where a check's renders go: a builder's `screenshots/` (the four shown too), all shown as images (a client's), or nowhere. */
-export type ShotsShown = "files" | "attached" | "none";
+/**
+ * Where a check's renders go: a builder's `screenshots/` (the four shown too); for a client, the four
+ * as images (`four`, a long page's further parts named but left out) or all of them (`all`); or nowhere.
+ */
+export type ShotsShown = "files" | "four" | "all" | "none";
 
 /** What the text says of the renders: `images`, the top of each; `parts`, the rest of a long page. */
 function shotsText(images: string[], parts: string[], shown: ShotsShown): string {
@@ -689,7 +692,9 @@ function shotsText(images: string[], parts: string[], shown: ShotsShown): string
     ? ""
     : shown === "files"
       ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.`
-      : ` A long page shows its top part; the rest follows it (${parts.join(", ")}, top to bottom).`;
+      : shown === "all"
+        ? ` A long page shows its top part; the rest follows it (${parts.join(", ")}, top to bottom).`
+        : ` A long page shows its top part; the rest (${parts.join(", ")}, top to bottom) is left out: check again with screenshots: "all" to see it.`;
   return `${where}${rest} Open every one and fix what looks broken, cramped, cut off or unreadable.`;
 }
 

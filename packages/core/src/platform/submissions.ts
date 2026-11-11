@@ -36,7 +36,10 @@ export interface Pack {
   next: string;
 }
 
-/** What `capabilities_check` returns: the check's result and its renders as images (the four, then a long page's further parts), none with `screenshots: false`. */
+/**
+ * What `capabilities_check` returns: the check's result and its renders as images, the four (a long
+ * page's top part); with `screenshots: "all"` a long page's further parts after them; none with `screenshots: false`.
+ */
 export interface ClientCheck {
   passed: boolean;
   text: string;
@@ -163,14 +166,16 @@ export class Submissions extends Domain {
    * migrations, the tests, the sample data, the screen at 1280 and 390 px in light and dark with
    * what to fix measured on it), but for the upgrade dry run on the tool's own data, which runs when
    * it's submitted. At most `CHECKS_PER_HOUR` a client (counted in memory: a restart starts afresh),
-   * one at a time. `screenshots: false`: the UI still renders and is measured, but no images come back.
+   * one at a time. The four renders come back as images; `screenshots: "all"` adds a long page's
+   * further parts (the text names them either way); `screenshots: false`: the UI still renders and is
+   * measured, but no images come back.
    */
   async check(agent: Agent, req: { files?: unknown; capabilityId?: unknown; screenshots?: unknown }): Promise<ClientCheck> {
     const change = req.capabilityId !== undefined;
     requireScope(agent, change ? "modify" : "create");
     if (change && typeof req.capabilityId !== "string") throw new PlatformError("invalid_request", "capabilityId: the tool your files change");
-    if (req.screenshots !== undefined && typeof req.screenshots !== "boolean") throw new PlatformError("invalid_request", "screenshots: true or false");
-    const shots = req.screenshots === false ? "none" : "attached";
+    if (req.screenshots !== undefined && typeof req.screenshots !== "boolean" && req.screenshots !== "all") throw new PlatformError("invalid_request", 'screenshots: true, false or "all"');
+    const shots = req.screenshots === false ? "none" : req.screenshots === "all" ? "all" : "four";
     const files = candidateFiles(filesFromEntries(req.files));
     const cap = change ? this.visibleActive(agent, req.capabilityId as string) : undefined;
     const id = cap?.id ?? this.newToolId(files);
@@ -191,7 +196,7 @@ export class Submissions extends Domain {
       }
       this.logger(`check by ${agent.id} of ${cap ? `a change to ${id}` : `new tool ${id}`}: ${r.passed ? "passed" : `${r.failures.length} problem(s)`}`);
       const later = cap && (await this.runtime.hasState({ capabilityId: cap.id })) ? `\n\nNot in a check: the upgrade dry run, your migrations on a copy of ${cap.id}'s data. It runs when you submit.` : "";
-      return { passed: r.passed, text: r.text + later, failures: r.failures, defects: r.defects, images: shots === "none" ? [] : [...r.images, ...(r.parts ?? [])] };
+      return { passed: r.passed, text: r.text + later, failures: r.failures, defects: r.defects, images: shots === "none" ? [] : shots === "all" ? [...r.images, ...(r.parts ?? [])] : r.images };
     };
     const prev = this.checking.get(agent.id) ?? Promise.resolve();
     const next = prev.then(run, run);

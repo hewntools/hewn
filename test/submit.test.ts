@@ -2,13 +2,14 @@
 // Builds from anywhere: a client fetches the pack, checks its files and submits them; Hewn validates
 // a submission as any build and holds an agent's change for the owner (its approval mode).
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER, WEB_USER } from "@hewntools/core/auth.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
-import { candidateFiles, type FileEntry } from "@hewntools/core/platform.ts";
+import { type BuildView, candidateFiles, type FileEntry } from "@hewntools/core/platform.ts";
 import type { VisualCheck } from "@hewntools/cli/visual.ts";
 import { FIXTURES, installFrom, installSeed, SEED, setup } from "./helpers.ts";
 
@@ -111,18 +112,22 @@ describe("check: validation on request, promoting nothing", () => {
   afterEach(() => t.cleanup());
   const counter = () => entriesOf(join(FIXTURES, "ui-counter")).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace('"ui-counter"', '"my-counter"').replace("UI Counter", "My Counter") } : f));
 
-  test("a passing new tool: PASS, the renders as images (a long page's part after the four), nothing installed; screenshots: false leaves them out", async () => {
+  test("a passing new tool: PASS, the four renders as images (a long page's further part named, left out), nothing installed; screenshots: \"all\" adds it, false leaves them all out", async () => {
     const r = await t.platform.checkFiles(t.claude, { files: counter() });
     assert.equal(r.passed, true, r.text);
     assert.match(r.text, /^PASS/);
-    assert.deepEqual(r.images.map((i) => i.name), [...SHOTS, "mobile-light-2"]);
-    assert.match(r.text, /attached \(desktop-light, desktop-dark, mobile-light, mobile-dark\)\. A long page shows its top part; the rest follows it \(mobile-light-2, top to bottom\)/);
+    assert.deepEqual(r.images.map((i) => i.name), SHOTS);
+    assert.match(r.text, /attached \(desktop-light, desktop-dark, mobile-light, mobile-dark\)\. A long page shows its top part; the rest \(mobile-light-2, top to bottom\) is left out: check again with screenshots: "all" to see it\./);
     assert.ok(!r.text.includes("screenshots/"), "no files to open: a client has the images only");
+    const all = await t.platform.checkFiles(t.claude, { files: counter(), screenshots: "all" });
+    assert.deepEqual(all.images.map((i) => i.name), [...SHOTS, "mobile-light-2"]);
+    assert.match(all.text, /attached \(desktop-light, desktop-dark, mobile-light, mobile-dark\)\. A long page shows its top part; the rest follows it \(mobile-light-2, top to bottom\)\./);
+    assert.deepEqual((await t.platform.checkFiles(t.claude, { files: counter(), screenshots: true })).images.map((i) => i.name), SHOTS);
     const bare = await t.platform.checkFiles(t.claude, { files: counter(), screenshots: false });
     assert.equal(bare.passed, true, bare.text);
     assert.deepEqual(bare.images, []);
     assert.match(bare.text, /rendered and measured, the screenshots left out \(screenshots: false\)/);
-    await assert.rejects(t.platform.checkFiles(t.claude, { files: counter(), screenshots: "no" }), code("invalid_request", /screenshots/));
+    await assert.rejects(t.platform.checkFiles(t.claude, { files: counter(), screenshots: "no" }), code("invalid_request", /screenshots: true, false or "all"/));
     assert.equal(t.platform.registry.getCapability("my-counter"), undefined, "nothing installed");
   });
 
@@ -160,7 +165,7 @@ describe("check: validation on request, promoting nothing", () => {
 describe("submit: the same gate as any build", () => {
   let t: ReturnType<typeof setup>;
   beforeEach(async () => {
-    t = setup({ visualCheck: fakeVisual });
+    t = setup({ visualCheck: fakeVisual, attempts: 3 });
     await installSeed(t.platform);
   });
   afterEach(() => t.cleanup());
@@ -216,12 +221,26 @@ describe("submit: the same gate as any build", () => {
     await assert.rejects(t.platform.submitFiles(t.claude, { files: [...files, { path: ".npmrc", content: "x" }], capabilityId: "running-log", request: "x" }), code("invalid_request", /\.npmrc: Hewn never keeps/));
   });
 
-  test("a submission that fails validation fails once, saying why", async () => {
-    const broken = edit(counter(), "tests/cases.json", () => "[]");
-    const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: broken, request: "A counter" })).buildId);
-    assert.equal(b.status, "failed");
-    assert.match(b.log.join("\n"), /at least one case/);
-    assert.equal(b.log.filter((l) => /validating candidate/.test(l)).length, 1, "validated once: the same files would fail the same way");
+  test("files that fail validation fail once, saying why: a submission, an install from a file, one from a folder", async () => {
+    // A build may try 3 times here; with no builder to change the files, the same files would fail the same way.
+    const broken = (id: string) => edit(counter(), "tests/cases.json", () => "[]").map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace('"ui-counter"', `"${id}"`) } : f));
+    const once = (b: BuildView, builder: string) => {
+      assert.equal(b.builder, builder);
+      assert.equal(b.status, "failed", builder);
+      assert.match(b.log.join("\n"), /at least one case/, builder);
+      assert.equal(b.log.filter((l) => /validating candidate/.test(l)).length, 1, `${builder}: validated once`);
+      assert.match(b.log.at(-1)!, /after 1 attempts/, builder);
+    };
+    once(await t.platform.settle((await t.platform.submitFiles(t.claude, { files: broken("sent-counter"), request: "A counter" })).buildId), "submitted");
+    const seed = Object.fromEntries(broken("file-counter").map((f) => [f.path, bytes(f.content)]));
+    once(await t.platform.settle((await t.platform.install(USER, { name: "File Counter", purpose: "x", builder: "bundle", id: "file-counter", seed })).buildId), "bundle");
+    const dir = mkdtempSync(join(tmpdir(), "hewn-copy-"));
+    for (const f of broken("folder-counter")) {
+      mkdirSync(dirname(join(dir, f.path)), { recursive: true });
+      writeFileSync(join(dir, f.path), f.content);
+    }
+    once(await t.platform.settle((await t.platform.install(USER, { name: "Folder Counter", purpose: "x", builder: `copy:${dir}` })).buildId), `copy:${dir}`);
+    rmSync(dir, { recursive: true });
   });
 
   test("the owner's own submission isn't held", async () => {
