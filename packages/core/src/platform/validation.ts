@@ -125,7 +125,8 @@ export class Validation extends Domain {
     const code: CodeRef = { hash: contentHash(files, bundled.js), js: bundled.js };
     let exportedKeys: string[];
     try {
-      exportedKeys = await this.runtime.describe(code);
+      // Loading runs its top-level code: written down like a call, for a candidate that never lets go.
+      exportedKeys = await this.d.stalls.running({ capabilityId: id, state: `test:${build.id}`, what: "load", caller: "validation" }, () => this.runtime.describe(code));
     } catch (e) {
       return fail(`implementation failed to load: ${(e as Error).message}`);
     }

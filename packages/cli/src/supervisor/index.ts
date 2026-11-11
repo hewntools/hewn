@@ -188,6 +188,7 @@ const hewn :Workerd.Worker = (
     (name = "REMOTE_JOBS", fromEnvironment = "HEWN_REMOTE_JOBS"),
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
+    (name = "STALLED", fromEnvironment = "HEWN_STALLED"),
     (name = "PORT", text = "${o.port}"),
     (name = "VERSION", text = "${VERSION}"),
   ],
@@ -474,6 +475,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   let stopping = false;
   let restarts = 0;
   let quickExits = 0;
+  /** When the watchdog last restarted workerd for not responding: the next workerd says what was running then. */
+  let stalledAt = "";
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
   // A workerd left behind by a supervisor that died (macOS has no die-with-parent) would hold the port.
   const pidFile = join(data, "workerd.pid");
@@ -493,7 +496,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     child = spawn(command[0], command.slice(1), {
       // Run in its own data dir: workerd opens its working directory, and the sandbox only allows that.
       cwd: data,
-      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" },
+      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "", HEWN_STALLED: stalledAt },
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (child.pid) writeFileSync(pidFile, String(child.pid));
@@ -585,6 +588,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       else if (Date.now() - lastOk > stallMs) {
         log(`workerd unresponsive for ${Math.round((Date.now() - lastOk) / 1000)}s (a capability may be stuck in a loop); restarting it`);
         lastOk = Date.now() + 5000;
+        stalledAt = new Date().toISOString();
         child?.kill("SIGKILL");
       }
       checking = false;

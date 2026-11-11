@@ -339,6 +339,10 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST restore":
         platform.restore(owner, id);
         return { ok: true };
+      // A tool Hewn suspended (it kept Hewn from responding) runs again.
+      case "POST resume":
+        platform.resume(owner, id);
+        return { ok: true };
       case "POST rollback":
         return platform.rollback(owner, id, (await readJson(req)).version);
       case "POST purge":
@@ -946,7 +950,7 @@ export const failureReason = (f?: { title: string; detail: string }) => (!f ? ""
 
 export interface InboxItem {
   /** "builder-model": the model the owner picked for building has a successor. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model";
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model" | "suspended";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -994,6 +998,12 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const c of caps) {
     const m = platform.activeManifest(c.id);
     if (m.requires?.model) modelUsers = true;
+    // Suspended by Hewn: nothing runs it until the owner resumes it, a fix on its way or not.
+    const suspended = platform.suspension(c.id);
+    if (suspended) {
+      needs.push({ kind: "suspended", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: `Suspended: ${suspended.reason}`, severity: "danger", action: "Resume…", at: suspended.at });
+      continue;
+    }
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
     // Held back only by what the owner said no to (Deny): nothing to ask.

@@ -387,6 +387,16 @@ CREATE TABLE IF NOT EXISTS share_links (
   downloads      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS share_links_by_cap ON share_links (capability_id);
+-- Tool code running now (a call, a build's tests): a row while it runs. Rows left when Hewn stopped
+-- responding say what was running then. \`state\`: '' for the tool's own data, else the scratch state.
+CREATE TABLE IF NOT EXISTS running_code (
+  id             TEXT PRIMARY KEY,
+  capability_id  TEXT NOT NULL,
+  state          TEXT NOT NULL,
+  what           TEXT NOT NULL,
+  caller         TEXT NOT NULL,
+  started_at     TEXT NOT NULL
+);
 `;
 
 type Row = Record<string, any>;
@@ -623,6 +633,27 @@ export class Registry {
       )
       .all(month)
       .map((r) => ({ capabilityId: r.capability_id, model: r.model, calls: Number(r.calls), costUsd: Number(r.cost), inputTokens: Number(r.tin), outputTokens: Number(r.tout) }));
+  }
+
+  // ---------- tool code running now ----------
+
+  codeStarted(c: { capabilityId: string; state: string; what: string; caller: string }): string {
+    const id = crypto.randomUUID();
+    this.db.prepare("INSERT INTO running_code (id, capability_id, state, what, caller, started_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, c.capabilityId, c.state, c.what, c.caller, now());
+    return id;
+  }
+
+  codeEnded(id: string) {
+    this.db.prepare("DELETE FROM running_code WHERE id = ?").run(id);
+  }
+
+  /** What was running when the previous process ended, oldest first; the rows go. */
+  takeRunningCode(): { capabilityId: string; state: string; what: string; caller: string; startedAt: string }[] {
+    return this.transaction(() => {
+      const rows = this.db.prepare("SELECT * FROM running_code ORDER BY started_at").all().map((r) => ({ capabilityId: r.capability_id as string, state: r.state as string, what: r.what as string, caller: r.caller as string, startedAt: r.started_at as string }));
+      this.db.prepare("DELETE FROM running_code").run();
+      return rows;
+    });
   }
 
   /** Builds left mid-flight by a previous process can never finish. Returns their ids. */
@@ -1222,8 +1253,8 @@ export class Registry {
     });
   }
 
-  /** Owner lifecycle actions for the activity timeline: delete, restore, rollback, purge. */
-  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share", detail: string, actor: string) {
+  /** Lifecycle actions for the activity timeline: delete, restore, rollback, purge …, and Hewn's own (stalled, suspend). */
+  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "suspend" | "resume", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
   }
 
@@ -1253,7 +1284,7 @@ export class Registry {
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
       // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?)").run(`failures:${id}`, `instructions:${id}`);
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`);
     });
   }
 

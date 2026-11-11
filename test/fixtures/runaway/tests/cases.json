@@ -1,0 +1,4 @@
+[
+  { "name": "tick", "operation": "tick", "input": { "tag": "test" } },
+  { "name": "rows", "operation": "widget_rows", "input": {} }
+]

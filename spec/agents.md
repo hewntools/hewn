@@ -86,7 +86,7 @@ A failed call is an MCP tool result with `isError: true` and JSON text `{ error,
 | --- | --- |
 | `not_found` | No such tool, or not visible to this agent; or no such operation (`details.available` lists the operations). |
 | `invalid_input` | The input doesn't match `inputSchema`; `details` lists the schema errors. |
-| `not_ready` | The tool needs the owner first (a grant, a secret, config, a model); `details` is its readiness, with `userAction` saying what to ask the owner. `capabilities_request_access` files a visible request. |
+| `not_ready` | The tool needs the owner first (a grant, a secret, config, a model, or to resume it after Hewn suspended it); `details` is its readiness, with `userAction` saying what to ask the owner. `capabilities_request_access` files a visible request. |
 | `awaiting_confirmation` | A destructive call is waiting for the owner (below). |
 | `forbidden` | Not allowed: a missing scope, the owner rejected a destructive call, or a sign-in step. |
 | `operation_failed` | The tool's code threw, or the call ran out of time. |

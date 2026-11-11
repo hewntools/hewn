@@ -64,6 +64,8 @@ interface Env {
   VERSION?: string;
   /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
   HOST_SIGNIN_URL?: string;
+  /** When the supervisor's watchdog last restarted workerd for not responding (ISO time; "" = never, in this supervisor's run). */
+  STALLED?: string;
 }
 
 const COMPAT_DATE = "2026-09-01";
@@ -316,14 +318,25 @@ function workerdRuntime(env: Env): CapabilityRuntime {
         return onCall({ capabilityId, operation, input: callInput });
       };
       const timer = deadlineTimer(deadlineOf(target.deadline, CALL_TIMEOUT_MS), () => new PlatformError("operation_failed", `${key} timed out (call chain deadline)`));
+      // Past the deadline the call is stopped, not only no longer waited for: its code, and anything
+      // else running on that state with it, ends there. (Code that never yields can't be stopped from
+      // here: it holds the thread this runs on too, until the supervisor's watchdog restarts workerd.)
+      let late: Error | undefined;
+      const expired = timer.expired.catch(async (e: Error) => {
+        late = e;
+        await host(target.capabilityId).stop(target.state.scratch ?? null, `stopped: ${target.capabilityId}/${key} ran past its deadline`).catch(() => {});
+        throw e;
+      });
       try {
         const r = await Promise.race([
           host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly),
-          timer.expired,
+          expired,
         ]);
         if (!r.ok) throw new PlatformError("operation_failed", `${key} failed: ${r.error}`, { logs: r.logs });
         return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs, inserted: r.inserted };
       } catch (e) {
+        // Out of time: whatever came back once it was stopped, it timed out.
+        if (late) throw late;
         if (e instanceof PlatformError) throw e;
         throw new PlatformError("operation_failed", `${key} failed: ${(e as Error).message}`);
       } finally {
@@ -344,7 +357,7 @@ function workerdRuntime(env: Env): CapabilityRuntime {
 }
 
 type CapabilityHostApi = {
-  [K in "invoke" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
+  [K in "invoke" | "stop" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
 };
 
 // ---------- HewnDO: the owner's platform ----------
@@ -403,6 +416,12 @@ export class HewnDO extends DurableObject<Env> {
       });
       this.sessions = new McpSessions(this.platform, (m) => console.log(`[${new Date().toISOString()}] ${m}`), (p) => this.surfaceHost().asset(p));
       await this.armAlarm();
+      // What was running when workerd stopped responding is told so first: a build whose own code did it fails rather than being retried.
+      try {
+        this.platform.recoverStall(env.STALLED || undefined);
+      } catch (e) {
+        console.log(`[${new Date().toISOString()}] couldn't tell what was running when Hewn stopped responding: ${(e as Error).message}`);
+      }
       // Not awaited: retried builds run in the background.
       void this.platform.recoverInterruptedBuilds().then(() => this.platform.cleanup());
     });
@@ -674,7 +693,7 @@ function adminChanges(path: string, body: any): boolean {
 const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
   setSecret: { owner: true, changes: true }, deleteSecret: { owner: true, changes: true }, setConfig: { owner: true, changes: true }, connect: { owner: true, changes: true }, accounts: { owner: true }, approveGrants: { owner: true, changes: true }, approveGrant: { owner: true, changes: true }, revokeGrant: { owner: true, changes: true }, declineGrant: { owner: true, changes: true },
-  archive: { owner: true, changes: true }, restore: { owner: true, changes: true }, archived: { owner: true }, rollback: { owner: true, changes: true }, exportData: { owner: true }, importData: { owner: true, changes: true }, purge: { owner: true, changes: true }, startOver: { owner: true, changes: true },
+  archive: { owner: true, changes: true }, restore: { owner: true, changes: true }, resume: { owner: true, changes: true }, archived: { owner: true }, rollback: { owner: true, changes: true }, exportData: { owner: true }, importData: { owner: true, changes: true }, purge: { owner: true, changes: true }, startOver: { owner: true, changes: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
   buildReport: { owner: true },
@@ -695,10 +714,46 @@ const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : "live"
 export class CapabilityHost extends DurableObject<Env> {
   /** Which loaded code each running facet was started with. */
   private running = new Map<string, string>();
+  /** Calls (and other work) in progress on each facet. */
+  private busy = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS states (name TEXT PRIMARY KEY)");
+  }
+
+  /**
+   * Stop a state's code: whatever it has running (awaits, timers, writes) ends, and calls in progress
+   * on it fail with `reason`. Its data stays; the next call starts it afresh. How a tool's code is
+   * stopped is this host's business: code in a process of its own would be stopped by ending that.
+   */
+  stop(scratch: string | null, reason: string) {
+    this.halt(facetName(scratch), reason);
+  }
+
+  private halt(name: string, reason: string) {
+    if (this.running.has(name)) this.ctx.facets.abort(name, new Error(reason));
+    this.running.delete(name);
+  }
+
+  /**
+   * Work on a facet. When the last piece of work on it ends, the facet is stopped, so nothing a call
+   * leaves behind (a timer, a promise it didn't await) runs on after it.
+   */
+  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], work: (facet: any) => Promise<T>): Promise<T> {
+    const name = facetName(scratch);
+    const facet = this.facet(scratch, code, hosts);
+    this.busy.set(name, (this.busy.get(name) ?? 0) + 1);
+    try {
+      return await work(facet);
+    } finally {
+      const left = this.busy.get(name)! - 1;
+      if (left > 0) this.busy.set(name, left);
+      else {
+        this.busy.delete(name);
+        this.halt(name, "finished");
+      }
+    }
   }
 
   private worker(code: CodeRef, hosts: string[]) {
@@ -727,7 +782,7 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false) {
-    return this.facet(scratch, code, hosts).invoke(key, input, secrets, caller, call, config, model, readOnly);
+    return this.on(scratch, code, hosts, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
   }
 
   async describe(code: CodeRef): Promise<string[]> {
@@ -735,19 +790,19 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   async migrate(scratch: string | null, migrations: Migration[], code: CodeRef): Promise<string[]> {
-    return this.facet(scratch, code, []).migrate(migrations);
+    return this.on(scratch, code, [], (f) => f.migrate(migrations));
   }
 
   async dump(scratch: string | null, code: CodeRef) {
-    return this.facet(scratch, code, []).dump();
+    return this.on(scratch, code, [], (f) => f.dump());
   }
 
   async count(scratch: string | null, code: CodeRef): Promise<Record<string, number>> {
-    return this.facet(scratch, code, []).count();
+    return this.on(scratch, code, [], (f) => f.count());
   }
 
   async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef): Promise<number> {
-    return this.facet(scratch, code, []).load(tables);
+    return this.on(scratch, code, [], (f) => f.load(tables));
   }
 
   hasState(scratch: string | null): boolean {
@@ -767,8 +822,7 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   private drop(name: string) {
-    if (this.running.has(name)) this.ctx.facets.abort(name, new Error("dropped"));
-    this.running.delete(name);
+    this.halt(name, "dropped");
     this.ctx.facets.delete(name);
     this.ctx.storage.sql.exec("DELETE FROM states WHERE name = ?", name);
   }

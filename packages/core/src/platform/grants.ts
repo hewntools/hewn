@@ -32,6 +32,8 @@ export interface Readiness {
   missingModel?: string;
   /** Set when a pinned model was retired: the platform's suggested successor, if it knows one. */
   retiredModel?: { model: string; successor?: string };
+  /** Set while Hewn has it suspended (it kept Hewn from responding): nothing runs it until the owner resumes it. */
+  suspended?: { at: string; reason: string };
   /** For agents: what to ask the user to do. */
   userAction?: string;
 }
@@ -53,8 +55,9 @@ export class Grants extends Domain {
     const missingDependencies = (req.capabilities ?? []).flatMap((c) => c.operations.filter((op) => !this.offers(c.id, op)).map((op) => `${c.id}/${op}`));
     const unsupportedAbi = abiUnsupported(abiOf(manifest));
     const missingModel = req.model ? this.platform.modelProblem(req.model) : undefined;
-    const ready = !pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
-    const onlySaidNo = declinedGrants.length > 0 && declinedGrants.length === pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
+    const suspended = this.platform.suspension(capabilityId);
+    const ready = !pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel && !suspended;
+    const onlySaidNo = declinedGrants.length > 0 && declinedGrants.length === pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel && !suspended;
     return {
       ready,
       missingSecrets,
@@ -66,10 +69,13 @@ export class Grants extends Domain {
       ...(unsupportedAbi ? { unsupportedAbi } : {}),
       ...(missingModel ? { missingModel } : {}),
       ...(req.model?.model && this.platform.retiredModel(req.model.model) ? { retiredModel: { model: req.model.model, ...this.platform.retiredModel(req.model.model) } } : {}),
+      ...(suspended ? { suspended } : {}),
       ...(ready
         ? {}
         : {
-            userAction: unsupportedAbi
+            userAction: suspended
+              ? `Hewn suspended it: ${suspended.reason}. It runs again once the owner resumes it in the Hewn web client (or with hewn resume ${capabilityId}), best after a fix.`
+              : unsupportedAbi
               ? `It ${unsupportedAbi}: upgrade Hewn, or roll it back to a version this Hewn can run.`
               : missingModel && !pendingGrants.length
               ? `It needs a model: ${missingModel}. The owner sets that up under Settings › AI › Models in the Hewn web client.`

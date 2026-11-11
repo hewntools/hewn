@@ -156,6 +156,12 @@ async function infoPage(id) {
 
   // W2: whatever needs the owner, above the composer, each with its one action. It stays in its section too.
   const notices = [];
+  // Suspended by Hewn: first, as nothing runs it until the owner resumes it.
+  if (cap.status.suspended) {
+    const resume = () => api(`/capabilities/${enc(id)}/resume`, { method: "POST" }).then(() => (invalidateCaps(), toast(`${cap.name} resumed`), route()), fail);
+    const fix = () => openChange(c, { m: "It kept Hewn from responding while it ran (an endless loop?), so Hewn suspended it. Find what never lets go and fix it." });
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `Suspended: ${cap.status.suspended.reason}. Its calls, schedules and widgets are refused until you resume it.`), h("button", { class: "sm", onclick: fix }, "Ask builder to fix"), h("button", { class: "sm primary", onclick: resume }, "Resume")));
+  }
   const shownPending = pending.filter((i) => !denied(i));
   if (shownPending.length === 1 && oneTap(shownPending[0]) && !missingConfig.length) {
     const i = shownPending[0];

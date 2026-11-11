@@ -129,6 +129,13 @@ export class Schedules extends Domain {
       const cron = parseCron(toCron(s.cadence));
       // Claim the slot first, so a slow run can't be started twice.
       this.schedules.update(s.id, { nextRunAt: nextRun(cron, s.timezone, Math.max(now, Date.now())) });
+      // A suspended tool's schedule is refused (it says why) without counting as a failure: it runs on once the tool is resumed.
+      const suspended = this.platform.suspension(s.capabilityId);
+      if (suspended) {
+        this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: `not_ready: ${s.capabilityId} is suspended: ${suspended.reason}. It runs again once the owner resumes it` });
+        ran.push({ id: s.id, ok: false });
+        continue;
+      }
       const outcome = await this.runOnce(s);
       const ok = outcome === "ok";
       const failures = ok ? 0 : s.failures + 1;
