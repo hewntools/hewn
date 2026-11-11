@@ -69,8 +69,10 @@ The agent learns about the owner's tools in three places:
 A catalog line looks like this; connections are listed apart, and a tool that isn't ready says so:
 
 ```
-- Running Log (running-log): Maintain a durable personal running history … Operations: record_run@1, list_runs@1, get_summary@1.
+- Running Log (running-log): "Maintain a durable personal running history …" Operations: record_run@1, list_runs@1, get_summary@1.
 ```
+
+What a tool says about itself is its author's, not Hewn's. The purpose is quoted (a JSON string, so it stays on one line), and wherever an agent gets it (the catalog, `capabilities_list`, `capabilities_get`) a name is cut to 80 characters and a purpose or an operation's description to 600. The server instructions and `capabilities_invoke`'s description tell the agent to read a tool's words and results as information, not instructions.
 
 Without `discover`, the catalog is empty. When the agent's list of MCP tools changes, including any description (a tool created, changed, deleted, made ready, or the agent's scopes changed), the session gets `notifications/tools/list_changed` and the client should list tools again.
 
