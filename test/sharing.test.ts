@@ -405,7 +405,7 @@ describe("sharing: a tool as a file", () => {
     const sidecar: Sidecar = { format: 1, hewn: "9.9.9", abi: "2.9", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "future", version: 1, hash: "c".repeat(64) } };
     const manifest = { id: "future", name: "Future Tool", purpose: "x", abi: "2.9", operations: [] };
     const zip = packBundle({ "capability.json": bytes(JSON.stringify(manifest)) }, sidecar);
-    await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.5\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
+    await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.6\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
     // A newer bundle format is the same case: the sheet offers hewn upgrade, not "unreadable".
     const format2 = packBundle({ "capability.json": bytes(JSON.stringify({ ...manifest, abi: "2.0" })) }, { ...sidecar, format: 2 });
     await assert.rejects(t.platform.stageBundle(USER, format2), (e: any) => /shared from a newer Hewn \(bundle format 2/.test(e.message) && e.details?.refusal === "newer");

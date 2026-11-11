@@ -56,7 +56,7 @@ The build page keeps what led to the build: **Spec agreed** opens the spec the b
 
 ![Activity › Builds: a change to Reading List in progress (spec done, code being written, tests and you still to come), a failed change to Plant Care with Retry, and earlier builds with their versions](images/build-in-progress.png)
 
-When it's live, the tool may still need you: **Allowed to** on its Info lists the [grants](concepts.md#grants) it asked for (a host such as `api.met.no`, a key, another tool's operations, a model). It isn't ready until you authorize them, and the Inbox says so. You can revoke any of it later.
+When it's live, the tool may still need you: **Allowed to** on its Info lists the [grants](concepts.md#grants) it asked for (a host such as `api.met.no`, a key, another tool's operations, a model). It isn't ready until you authorize them, and the Inbox says so. You can revoke any of it later. A setting it asks for (a server address, a repository) may come with a suggested value already in its field: check it and save, or type another. Nothing is filled in for you until you save. (Builders write that value as `suggested` on the setting, never as a `default`.)
 
 ## Changing a tool
 
