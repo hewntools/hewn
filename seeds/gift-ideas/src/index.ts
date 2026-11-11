@@ -649,7 +649,6 @@ export const operations: Record<string, (input: any, ctx: Ctx) => any> = {
 
   "prepare_upcoming@1": async (input: { days?: number; count?: number; today?: string }, ctx: Ctx) => {
     const today = resolveToday(input.today);
-    ctx.db.prepare("DELETE FROM prepared_suggestions WHERE date < ?").run(today);
     const list = upcomingFor(ctx.db, today).filter((u) => u.days_until <= (input.days ?? 21));
     const prepared: any[] = [];
     let skipped = 0;

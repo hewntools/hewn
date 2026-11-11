@@ -182,8 +182,11 @@ export class Validation extends Domain {
       onTests(0, cases.length);
       for (const [i, c] of cases.entries()) {
         try {
-          const result = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
-          const op = manifest.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
+          const op = caseOperation(manifest, c);
+          const before = await this.runtime.countState(testState, code);
+          const { result, inserted } = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
+          // A case that passed (one that expects an error is about the error, not what the call left behind).
+          if (op && !c.expectError) undeclaredDelete(op, { before, after: await this.runtime.countState(testState, code), inserted }, `test '${c.name}'`);
           if (op && !c.expectError && !views.has(opKey(op.name, op.version))) views.set(opKey(op.name, op.version), result);
         } catch (e) {
           failed.push((e as Error).message);
@@ -210,10 +213,20 @@ export class Validation extends Domain {
         await this.runtime.migrate(sampleState, migrations, code);
         let replayed = true;
         for (const [i, c] of sample.entries()) {
+          const before = await this.runtime.countState(sampleState, code);
+          let inserted: string[];
           try {
-            await this.replayCall(manifest, sampleTarget, c);
+            ({ inserted } = await this.replayCall(manifest, sampleTarget, c));
           } catch (e) {
             softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
+            replayed = false;
+            break;
+          }
+          const op = caseOperation(manifest, c);
+          try {
+            if (op) undeclaredDelete(op, { before, after: await this.runtime.countState(sampleState, code), inserted });
+          } catch (e) {
+            softFail(`${SAMPLE_FILE}: call ${i + 1} (${c.operation}): ${(e as Error).message}`);
             replayed = false;
             break;
           }
@@ -534,7 +547,7 @@ export class Validation extends Domain {
               return { text, ...(json !== undefined ? { json } : {}), usage: { inputTokens: 0, outputTokens: 0 }, cost: 0, model: "test/fake" };
             }
           : undefined;
-      const { result } = await this.d.invocation.execute(
+      const { result, inserted } = await this.d.invocation.execute(
         manifest,
         { ...target, caller: { kind: "test", id: "validation" }, ...(widget ? { readOnly: true } : {}) },
         { capabilityId: manifest.id, operation: c.operation, operationVersion: c.version, input: c.input },
@@ -547,9 +560,9 @@ export class Validation extends Domain {
       if (c.expect !== undefined && !matches(c.expect, result)) {
         throw new Error(`${label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(result)}`);
       }
-      return result;
+      return { result, inserted };
     } catch (e) {
-      if (e instanceof PlatformError && c.expectError) return undefined;
+      if (e instanceof PlatformError && c.expectError) return { result: undefined, inserted: [] };
       if (e instanceof PlatformError) {
         throw new Error(`${label}: ${e.code}: ${e.message}${e.details ? " " + JSON.stringify(e.details) : ""}`);
       }
@@ -557,6 +570,27 @@ export class Validation extends Domain {
     }
   }
 }
+
+/**
+ * Hewn's own check of a call's side effect, whatever the tool's tests expect: an operation that leaves a table with
+ * fewer rows (or drops it) and adds none to it deletes, and only one declared `destructive` may (it asks the owner
+ * before an agent runs it, and can't be scheduled). Rows are counted per table before and after the call; `inserted`
+ * is the tables a statement inserted into during it (the db wrapper's). A table that lost rows but got new ones is a
+ * replace (a tag set swapped for a smaller one, delete-then-insert, INSERT OR REPLACE), a normal write. Not caught: an
+ * overwrite that keeps the count, or a delete that also inserts into the same table.
+ */
+function undeclaredDelete(op: OperationManifest, call: { before: Record<string, number>; after: Record<string, number>; inserted: string[] }, label?: string) {
+  if (op.sideEffect === "destructive") return;
+  const { before, after } = call;
+  const added = new Set(call.inserted);
+  // Fewer rows, or gone (dropped, even empty).
+  const fewer = Object.keys(before).filter((t) => (!(t in after) || after[t] < before[t]) && !added.has(t.toLowerCase()));
+  if (fewer.length) throw new Error(`${label ? `${label}: ` : ""}${op.name} leaves ${fewer.join(", ")} with fewer rows and adds none: declare it destructive`);
+}
+
+/** The operation a test case or sample call runs: its version, or the highest. */
+const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
+  m.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
 
 function readCases(files: Files): TestCase[] {
   const raw = files["tests/cases.json"];
