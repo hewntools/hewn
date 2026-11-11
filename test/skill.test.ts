@@ -29,7 +29,7 @@ describe("the Skill: build a Hewn tool", () => {
     // How to read the pack's schedules, and what the check sends back.
     for (const how of ["`schedules`", "`name@version`", "`structuredContent.screenshots`", "`screenshots: false`", "`screenshots: \"all\"`"]) assert.ok(s.includes(how), how);
     // The pack downloaded and unzipped into your workspace, or paged; a new tool waits for the owner too.
-    for (const how of ["`download.url`", "unzip it into your workspace", "page the pack", "`paths`", "a new tool waits for the owner's approval"]) assert.ok(s.includes(how), how);
+    for (const how of ["`download.url`", "unzip it into your workspace", "page the pack", "fetch it once, yourself", "`paths`", "a new tool waits for the owner's approval"]) assert.ok(s.includes(how), how);
     assert.ok(!/into your folder|in your folder/.test(s), "the pack goes into your workspace");
     // What the pack gives the client, the Skill may name; what only a builder's workspace has, it may not.
     for (const word of ["BUILDER.md", "BRIEF.md", "OWNERS_WORDS.md", "attachments/", "`check` tool", "{{"]) assert.ok(!s.includes(word), `the Skill says ${word}`);
