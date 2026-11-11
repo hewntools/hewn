@@ -110,7 +110,7 @@ The supervisor (`packages/cli/src/supervisor/`) is the Node process behind `hewn
 - watches `/health` and restarts workerd when it stalls (a capability in a CPU loop blocks the single-threaded workerd), and kills a workerd left behind by a dead supervisor;
 - serves the workerd side of the `Workbench` port: workspaces, builders, bundling (esbuild and npm), the visual check;
 - runs the intake, connects local agents (`setup/`), deletes blobs, takes and restores backups, and runs tunnels (`tunnel.ts`: cloudflared or `tailscale funnel`);
-- checks the free space on the data's disk every 5 s, and tells `HewnDO` (`/_admin/disk`) while it's under `DISK_FLOOR` (1 GB): no capability's data grows then.
+- checks the free space on the data's disk every 5 s, and tells `HewnDO` (`/_admin/disk`) while it's under its floor (`diskFloor`: 1 GB, or a tenth of a disk smaller than 10 GB): no capability's data grows then.
 
 Both directions are token-authenticated (`HEWN_ADMIN_TOKEN` into workerd, `HEWN_SUPERVISOR_TOKEN` back out). The CLI talks to the running Hewn as the owner through the admin channel (`/_admin/call`, an allow-list of core methods), and to the supervisor through its own control channel for machine-level work (backup, restore, status). Both tokens are in `supervisor.json` in the home. When Hewn isn't running, the CLI says so.
 

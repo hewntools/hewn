@@ -119,7 +119,9 @@ const until = async (fn: () => Promise<boolean>, ms = 10_000) => {
 describe("each tool's data has a size limit (workerd)", () => {
   let h: TestHost;
   let dirs: string;
-  let free = 10 * GB;
+  /** The disk the supervisor sees, and how many times it has looked. */
+  let disk = { free: 10 * GB, total: 100 * GB };
+  let looks = 0;
   const add = (kb: number, rows: number) => h.invoke("filler", "add", { kb, rows }).then((r) => r.result);
   const count = () => h.invoke("filler", "count").then((r) => r.result as { rows: number; bytes: number });
   const failure = (p: Promise<unknown>) => p.then(() => "", (e: Error) => e.message);
@@ -130,7 +132,7 @@ describe("each tool's data has a size limit (workerd)", () => {
     );
 
   before(async () => {
-    h = await startTestHost({ disk: { free: () => free, intervalMs: 100 } });
+    h = await startTestHost({ disk: { space: () => (looks++, disk), intervalMs: 100 } });
     writeFileSync(join(h.root, "supervisor.json"), JSON.stringify({ url: h.sv.url, adminToken: h.sv.adminToken, control: h.sv.control, pid: process.pid }));
     dirs = mkdtempSync(join(tmpdir(), "hewn-limit-"));
     await h.sv.admin("settings", { toolDataLimitMB: 2 });
@@ -202,14 +204,27 @@ describe("each tool's data has a size limit (workerd)", () => {
   test("a nearly full disk: tools can't add data, can read, and can again once there's room", async () => {
     // A limit out of the way; 4 MB a call is more than the room its earlier rows left in its file.
     await h.sv.admin("settings", { toolDataLimitMB: 50 });
-    free = 512 * MB;
+    disk = { free: 512 * MB, total: 100 * GB };
     let refused = "";
     await until(async () => /the disk/.test((refused = await failure(add(64, 64)))));
     assert.equal(refused, "Filler can't save more: the disk with Hewn's data has less than 1 GB free.");
     const before = await count();
     assert.equal(typeof before.rows, "number", "reading works");
-    free = 10 * GB;
+    disk = { free: 10 * GB, total: 100 * GB };
     await until(async () => !(await failure(add(64, 64))));
     assert.equal((await count()).rows, before.rows + 64);
+  });
+
+  test("a small disk: the floor is a tenth of it, so a disk under 1 GB still takes data", async () => {
+    disk = { free: 200 * MB, total: 512 * MB };
+    const seen = looks;
+    await until(async () => looks >= seen + 3); // two whole checks of this disk
+    const before = (await count()).rows;
+    assert.equal((await add(64, 16)).rows, before + 16, "200 MB free of 512 MB is room");
+    disk = { free: 40 * MB, total: 512 * MB };
+    let refused = "";
+    await until(async () => /the disk/.test((refused = await failure(add(64, 64)))));
+    assert.equal(refused, "Filler can't save more: the disk with Hewn's data has less than 51 MB free.");
+    disk = { free: 10 * GB, total: 100 * GB };
   });
 });

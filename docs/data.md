@@ -42,7 +42,7 @@ hewn data limit 250             every tool's limit, in MB
 hewn data limit <id> 1000       one tool's own (default: back to every tool's)
 ```
 
-When the disk with Hewn's data has less than 1 GB free, no tool can add data: a call that would fails with "Plant Log can't save more: the disk with Hewn's data has less than 1 GB free." Reading still works, and Hewn keeps running. Free some space and tools can save again within seconds.
+When the disk with Hewn's data is nearly full (less than 1 GB free, or a tenth of a small disk), no tool can add data: a call that would fails with "Plant Log can't save more: the disk with Hewn's data has less than 1 GB free." Reading still works, and Hewn keeps running. Free some space and tools can save again within seconds.
 
 ## Start over
 

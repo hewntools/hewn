@@ -91,17 +91,21 @@ export interface SupervisorOptions {
   /** Each agent's model list (default: read from its CLI, or the remote service). Tests stub it. */
   models?: (agent: string) => Promise<ModelCatalog>;
   /**
-   * The check on the disk with Hewn's data, every `intervalMs` (default 5 s): with less than
-   * `floorBytes` free (default DISK_FLOOR), tools' data doesn't grow. `free` says how much is free
-   * instead of asking the disk (tests).
+   * The check on the disk with Hewn's data, every `intervalMs` (default 5 s): with less than its
+   * floor free (diskFloor), tools' data doesn't grow. `space` says how big the disk is and how much
+   * is free instead of asking it (tests).
    */
-  disk?: { floorBytes?: number; intervalMs?: number; free?: () => number };
+  disk?: { intervalMs?: number; space?: () => { free: number; total: number } };
 }
 
-/** Free space below which tools can't add data: room for what's already running, Hewn's own database and the system. */
+/** The most free space Hewn keeps for itself and the system: below it, tools can't add data. */
 export const DISK_FLOOR = 1024 ** 3;
 
-const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+/** The floor on a disk of `total` bytes: 1 GB, or a tenth of a small disk (a disk of 1 GB or less would never have 1 GB free). */
+export const diskFloor = (total: number) => Math.floor(Math.min(DISK_FLOOR, total / 10));
+
+/** "1.4 GB", "80 MB". */
+const sized = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`);
 
 export type { Hosted };
 
@@ -663,17 +667,18 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // ---------- the disk ----------
   // A tool's data can't grow while the disk with Hewn's data is nearly full. workerd is told while it is
   // (on every check: a restarted workerd starts out not knowing), and once when it no longer is.
-  const { floorBytes = DISK_FLOOR, intervalMs: diskMs = 5000, free = () => { const f = statfsSync(data); return f.bavail * f.bsize; } } = o.disk ?? {};
+  const { intervalMs: diskMs = 5000, space = () => { const f = statfsSync(data); return { free: f.bavail * f.bsize, total: f.blocks * f.bsize }; } } = o.disk ?? {};
   let diskLow = false;
   let diskChecking = false;
   const checkDisk = async () => {
     if (diskChecking) return;
     diskChecking = true;
     try {
-      const bytes = free();
-      const low = bytes < floorBytes;
-      if (low || diskLow) await admin("disk", { low, free: bytes, floor: floorBytes });
-      if (low !== diskLow) log(low ? `the disk with Hewn's data has ${gb(bytes)} free, under ${gb(floorBytes)}: tools can't add data until there's more room` : `the disk with Hewn's data has ${gb(bytes)} free again: tools can add data`);
+      const { free, total } = space();
+      const floor = diskFloor(total);
+      const low = free < floor;
+      if (low || diskLow) await admin("disk", { low, free, floor });
+      if (low !== diskLow) log(low ? `the disk with Hewn's data has ${sized(free)} free, under ${sized(floor)}: tools can't add data until there's more room` : `the disk with Hewn's data has ${sized(free)} free again: tools can add data`);
       diskLow = low;
     } catch {
       // workerd restarting, or the disk unreadable for a moment: the next check
