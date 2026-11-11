@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 
-// LICENSING.md: Apache-2.0 for spec/, packages/ui and seeds/; AGPL-3.0-or-later for the rest.
+// LICENSING.md: Apache-2.0 for spec/, packages/ui, seeds/ and skills/; AGPL-3.0-or-later for the rest.
 const ROOT = join(import.meta.dirname, "..");
-const APACHE = ["spec/", "packages/ui/", "seeds/"];
+const APACHE = ["spec/", "packages/ui/", "seeds/", "skills/"];
 const expected = (path: string) => (APACHE.some((p) => path.startsWith(p)) ? "Apache-2.0" : "AGPL-3.0-or-later");
 
 test("every source file names its licence in an SPDX header, matching its folder", () => {
@@ -28,7 +28,8 @@ test("every package carries its licence text and declares it", () => {
   const apache = readFileSync(join(ROOT, "spec", "LICENSE"), "utf8");
   assert.match(AGPL, /GNU AFFERO GENERAL PUBLIC LICENSE\s+Version 3/);
   assert.match(apache, /Apache License\s+Version 2\.0/);
-  for (const dir of ["spec", "packages/core", "packages/host-workerd", "packages/ui", "packages/cli", "packages/test-host", "seeds"]) {
+  // skills/ has no package.json: its LICENSE, and SKILL.md's frontmatter (test/skill.test.ts).
+  for (const dir of ["spec", "packages/core", "packages/host-workerd", "packages/ui", "packages/cli", "packages/test-host", "seeds", "skills"]) {
     const want = expected(dir + "/");
     assert.equal(readFileSync(join(ROOT, dir, "LICENSE"), "utf8"), want === "Apache-2.0" ? apache : AGPL, `${dir}/LICENSE`);
     if (existsSync(join(ROOT, dir, "package.json"))) assert.equal(JSON.parse(readFileSync(join(ROOT, dir, "package.json"), "utf8")).license, want, `${dir}/package.json`);

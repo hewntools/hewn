@@ -8,6 +8,7 @@ Hewn is open source under two licences, by folder:
 | `spec/` (`@hewntools/spec`) | [Apache-2.0](spec/LICENSE) | The capability contract: types, JSON Schemas, the capability model and the build brief. Anyone may build tools on it or implement another host, without the AGPL applying to them. |
 | `packages/ui` (`@hewntools/ui`) | [Apache-2.0](packages/ui/LICENSE) | The UI kit tool UIs load from `/_platform/`. Tool UIs build on it, so it carries no AGPL question. |
 | `seeds/` | [Apache-2.0](seeds/LICENSE) | Example tools, meant to be copied. |
+| `skills/` | [Apache-2.0](skills/LICENSE) | The Agent Skill "build a Hewn tool", copied into agents' skills folders. It's made only from the spec (the build brief and `spec/src/skill.ts`), and says so in its frontmatter (`license: Apache-2.0`). |
 
 Each source file says which applies in its first line (`SPDX-License-Identifier`); a test checks that every file does. Where a file and this table disagree, the file's header wins.
 

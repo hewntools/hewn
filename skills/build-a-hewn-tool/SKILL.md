@@ -1,6 +1,7 @@
 ---
 name: build-a-hewn-tool
 description: Build or change a tool (a capability) in the user's Hewn yourself, in a workspace of your own, then hand it to Hewn, which checks it and goes live or holds it for the owner. Use when the user asks you to write a Hewn tool instead of asking Hewn's builder. Needs Hewn's MCP tools capabilities_pack, capabilities_check and capabilities_submit.
+license: Apache-2.0
 ---
 
 # Build a Hewn tool

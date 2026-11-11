@@ -24,7 +24,8 @@ describe("the Skill: build a Hewn tool", () => {
 
   test("it's an Agent Skill that names the three calls, and nothing only Hewn's builder's workspace has", () => {
     const s = skillText(brief());
-    assert.match(s, /^---\nname: build-a-hewn-tool\ndescription: .+\n---\n/);
+    // Frontmatter first (an agent reads its name and description from it), with its licence, the spec's.
+    assert.match(s, /^---\nname: build-a-hewn-tool\ndescription: .+\nlicense: Apache-2.0\n---\n/);
     for (const call of ["capabilities_pack", "capabilities_check", "capabilities_submit", "builds_wait", "baseVersion"]) assert.ok(s.includes(call), call);
     // How to read the pack's schedules, and what the check sends back.
     for (const how of ["`schedules`", "`name@version`", "`structuredContent.screenshots`", "`screenshots: false`", "`screenshots: \"all\"`"]) assert.ok(s.includes(how), how);
