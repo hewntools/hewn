@@ -62,7 +62,7 @@ Installing runs the tool's own tests, as for any build, but no builder: the code
 
 Info shows where it came from ("from a file · Plant Log v7", or "from a link · anna.example.com" with the host the file came from), and Activity and the build say "Installed from a file" (or from the host). For a link that redirected, that's the host the redirects ended on, where the file really came from; the install sheet also says where the link itself was ("From files.example, linked from short.example"). Change it like any of your tools: it's yours now, and nothing pulls updates from where it came from.
 
-A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB or holds more than 1,000 files, it names one file twice (`src/index.ts` and `SRC/index.ts` are one file on many disks), its npm dependencies aren't all registry versions or it carries npm settings (`.npmrc`), or it needs a newer Hewn (a newer file format or tool spec: then `hewn upgrade` and try again). Code that imports anything outside the tool fails to install, saying which import.
+A file is refused with the reason when it isn't a tool Hewn shared, it's over 5 MB or holds more than 1,000 files, it names one file twice (`src/index.ts` and `SRC/index.ts` are one file on many disks), its npm dependencies aren't all registry versions or it carries npm settings (`.npmrc`), or files a tool never keeps (a builder's settings such as `CLAUDE.md` or dotfiles, or build output such as `node_modules`), or it needs a newer Hewn (a newer file format or tool spec: then `hewn upgrade` and try again). Code that imports anything outside the tool fails to install, saying which import.
 
 From the terminal: `hewn install <file.hewn.zip | https://…> [--name "Plant Log 2"] [--no-sample]`.
 

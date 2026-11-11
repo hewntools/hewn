@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A tool as a file or a link. Share…: what a version would ship (its files, the scan, sample
 // data), the bundle, and links to it (/share/<token>, one version each, until they expire or are
-// revoked). Install from a file or a link: staged first so the owner can read it, then a create
-// build with no builder ("bundle") through the normal validation. Sample data: replayed after an
+// revoked). Install from a file, a link or Hewn's tools: staged first so the owner can read it,
+// then submitted (`Builds.submit`, builder "bundle"): the one gate a client's tool goes through
+// too, so the same file rules and the same validation. Sample data: replayed after an
 // install or Start over, and written by the owner as a new version. Owner only, but for what a
 // link serves (the token is the authority there).
 import { type Agent, requireOwner } from "../auth.ts";
@@ -18,6 +19,7 @@ import { archivedConflict, type BuildView, RESERVED_IDS, slugify } from "./build
 import { Domain } from "./context.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
+import { candidateFiles } from "./submissions.ts";
 
 /** A staged bundle (uploaded, not installed) is dropped after a day. */
 const STAGED_MS = 24 * 3600_000;
@@ -337,9 +339,9 @@ export class Sharing extends Domain {
   }
 
   /**
-   * Install a staged bundle under `name` (its id comes from the name): a create build whose files
-   * are the bundle's, with `source` set to where it came from, through the normal validation.
-   * `sample`: replay its sample data once it's live.
+   * Install a staged bundle under `name` (its id comes from the name): its files submitted as a new
+   * tool (builder "bundle", no base version), with `source` set to where it came from. `sample`:
+   * replay its sample data once it's live.
    */
   async installBundle(owner: Agent, token: string, req: { name: string; sample?: boolean }): Promise<BuildView> {
     requireOwner(owner);
@@ -354,11 +356,10 @@ export class Sharing extends Domain {
     if (taken?.archivedAt) throw archivedConflict(taken);
     if (taken) throw new PlatformError("conflict", `You already have a tool called ${name}. Pick another name.`);
     const source: ToolSource = { id: s.sidecar.tool.id, name: s.manifest.name, version: s.sidecar.tool.version, hash: s.sidecar.tool.hash, from: s.staged.from, ...(s.staged.host ? { host: s.staged.host } : {}) };
-    const manifest = stampSource({ ...s.manifest, id, name }, source);
-    const seed: Files = { ...s.files, "capability.json": bytes(JSON.stringify(manifest, null, 2) + "\n") };
     const sample = !!req.sample && !!s.files[SAMPLE_FILE];
     const summary = s.staged.summary ?? hewnReading(s.sidecar, s.staged);
-    const build = await this.platform.install(owner, { name, purpose: manifest.purpose, builder: "bundle", id, seed, requirements: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample, ...(summary ? { summary } : {}) });
+    // Submit writes the id, the name and `source` into its capability.json.
+    const build = await this.d.builds.submit(owner, { files: s.files, id, name, builder: "bundle", request: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample, ...(summary ? { summary } : {}) });
     await this.dropStaged(owner, token);
     return build;
   }
@@ -616,6 +617,13 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
   if (typeof tool?.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(tool.id) || !Number.isInteger(tool.version) || tool.version < 1 || typeof tool.hash !== "string" || !/^[0-9a-f]{64}$/.test(tool.hash)) refuse("Its hewn-bundle.json doesn't say which tool and version it is.");
   const deps = dependencyProblems(unpacked.files);
   if (deps.length) refuse(`Hewn won't install ${manifest.name}: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
+  // What the install will submit, held to submit's rules now: a file the install would refuse isn't staged.
+  try {
+    candidateFiles(unpacked.files);
+  } catch (e) {
+    if (e instanceof PlatformError) refuse(e.message, e.details as Record<string, unknown>);
+    throw e;
+  }
   return { ...unpacked, manifest };
 }
 

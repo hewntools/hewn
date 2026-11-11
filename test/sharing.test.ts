@@ -252,6 +252,36 @@ describe("sharing: a tool as a file", () => {
     assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.capabilityId === "picky" && e.action === "sample" && /0 of 1 calls; add failed: .*not for people/.test(e.detail)));
   });
 
+  test("an install is a submission: one gate for a file, a link and Hewn's tools; checks that fail run once; a file submit would refuse isn't staged", async () => {
+    // The entry installBundle hands Builds.submit: a new tool (no capabilityId, no base), builder "bundle", its source.
+    const builds = (t.platform as unknown as { d: { builds: { submit: (a: unknown, e: Record<string, unknown>) => Promise<{ buildId: string }> } } }).d.builds;
+    const real = builds.submit.bind(builds);
+    const entries: Record<string, unknown>[] = [];
+    builds.submit = (a, e) => (entries.push(e), real(a, e));
+    const op = { name: "add", description: "Adds one", version: 1, sideEffect: "write", inputSchema: { type: "object" }, outputSchema: { type: "object" } };
+    const files = {
+      "capability.json": bytes(JSON.stringify({ id: "adder", name: "Adder", purpose: "Adds", abi: "2.0", operations: [op] })),
+      "src/index.ts": bytes('export const operations = { "add@1": () => ({ ok: true }) };\n'),
+      "tests/cases.json": bytes("[]"),
+    };
+    const sidecar: Sidecar = { format: 1, hewn: "test", abi: "2.0", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "adder", version: 3, hash: "f".repeat(64) } };
+    const preview = await t.platform.stageBundle(USER, packBundle(files, sidecar));
+    const failed = await t.platform.settle((await t.platform.installBundle(USER, preview.token, { name: "My Adder", sample: true })).buildId);
+    assert.deepEqual(entries.map(({ files: _, ...e }) => e), [{ id: "my-adder", name: "My Adder", builder: "bundle", request: "Installed from a file: Adder v3", source: { id: "adder", name: "Adder", version: 3, hash: "f".repeat(64), from: "file" }, sample: false }]);
+    assert.equal(failed.builder, "bundle");
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.log.filter((l) => /validating candidate/.test(l)).length, 1, "the same files would fail the same way: validated once");
+    // One of Hewn's tools goes the same way.
+    const hub = await t.platform.hubStage(USER, readShelf(resolve(import.meta.dirname, "../seeds")).tools, "kid-quotes");
+    const kid = await t.platform.settle((await t.platform.installBundle(USER, hub.token, { name: "Kid Quotes" })).buildId);
+    assert.equal(kid.status, "promoted", kid.log.join("\n"));
+    assert.equal((entries.at(-1)!.source as { from: string }).from, "hub");
+    // What submit refuses (a builder's config, build output) is refused when the file is staged, with the rule.
+    for (const extra of ["CLAUDE.md", ".DS_Store", "node_modules/x/index.js"]) {
+      await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, [extra]: bytes("x") }, sidecar)), (e: any) => e.details?.refusal === "unreadable" && e.message.includes(extra) && /Hewn won't take these files/.test(e.message), extra);
+    }
+  });
+
   test("the owner's own keys block sharing, each listed and never sent back whole; a setting only warns", async () => {
     await withSample();
     await installFrom(t.platform, resolve(FIX, "site-connection"));
