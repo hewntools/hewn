@@ -224,7 +224,7 @@ function tile(c, { hidden = false, editHome, show } = {}) {
     Object.assign(c, cap);
     const paused = c.lastBuild?.paused;
     const failed = c.lastBuild?.status === "failed" && !paused;
-    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0;
+    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0 || c.lastBuild?.status === "review";
     const more = c.building ? null : h("span", { class: "more", "aria-hidden": "true", onclick: (e) => (e.stopPropagation(), menuFrom(more, items())) }, "•••");
     // Lit cells follow real progress: none while code is written (the glyph pulses), then tests passed / total.
     const b = c.building;

@@ -424,7 +424,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         shot && [h("div", { class: "eyebrow" }, "The screen after the change (rendered with no data)"), h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" })],
         b.review.changes && files,
         reviewRequest(b, all),
-        h("div", { class: "row tight" }, yes, no),
+        h("div", { class: "row tight" }, yes, no, h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
         logBlock(false),
       );
     };
