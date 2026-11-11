@@ -325,6 +325,11 @@ describe("web client (owner surface)", () => {
       assert.equal((await api(`/builds/${held.buildId}/code?path=src/index.ts`)).json.path, "src/index.ts");
       assert.equal((await api(`/builds/${held.buildId}/shots/desktop-light`)).status, 404, "Running Log has no screen");
       assert.equal((await api(`/builds/${held.buildId}/code`, { cookie: "", headers: { authorization: `Bearer ${TOKENS.claude}` } })).status, 401, "the owner's only");
+      // Opening the tool shows it, whatever was built since (a later build that failed, say).
+      platform.registry.insertBuild({ id: "b-later", capabilityId: "running-log", kind: "modify", request: { request: "x" }, requestedBy: "web", baseVersion: 1, builder: "fake" });
+      platform.registry.updateBuild("b-later", { status: "failed" });
+      const tool = (await api("/capabilities")).json.find((c: any) => c.id === "running-log");
+      assert.deepEqual([tool.lastBuild.buildId, tool.held], ["b-later", held.buildId]);
       await api(`/builds/${held.buildId}/reject`, { method: "POST" });
       assert.equal((await api(`/builds/${held.buildId}/code`)).status, 404, "once decided, no card");
     });
@@ -334,7 +339,7 @@ describe("web client (owner surface)", () => {
       const held = await platform.settle((await platform.create(claude, { name: "Agent Log", purpose: "p", requirements: "r" })).buildId);
       assert.equal(held.status, "review", held.log.join("\n"));
       const tile = (await api("/capabilities")).json.find((c: any) => c.id === "agent-log");
-      assert.deepEqual([tile.version, tile.ready, tile.building, tile.lastBuild], [null, false, null, { buildId: held.buildId, status: "review", builder: "fake" }]);
+      assert.deepEqual([tile.version, tile.ready, tile.building, tile.lastBuild, tile.held], [null, false, null, { buildId: held.buildId, status: "review" }, held.buildId]);
       assert.match((await api("/inbox")).json.needs.find((n: any) => n.buildId === held.buildId).detail, / made it: it waits for you$/);
       assert.equal((await api(`/builds/${held.buildId}/code`)).json.base, null, "a new tool: nothing to compare with");
       assert.equal((await api(`/builds/${held.buildId}/approve`, { method: "POST" })).status, 200);

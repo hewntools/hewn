@@ -158,7 +158,7 @@ async function home({ editing = false } = {}) {
   if (editing) enterEdit();
 
   // Building tiles fill in live; when a build starts or finishes the grid is rebuilt.
-  const signature = (cs) => cs.map((c) => `${c.id}:${!!c.building}:${c.ready}:${c.lastBuild?.status}:${c.requests}`).join("|");
+  const signature = (cs) => cs.map((c) => `${c.id}:${!!c.building}:${c.ready}:${c.lastBuild?.status}:${c.held}:${c.requests}`).join("|");
   let last = signature(list);
   const poll = async () => {
     if (!document.body.contains(grid)) return;
@@ -220,13 +220,13 @@ function tile(c, { hidden = false, editHome, show } = {}) {
   const label = h("span", { class: "tile-label" });
   const iconSlot = h("span", { class: "tile-icon" });
   // Not yet a tool (being built, or an agent's new tool waiting for you): it opens its build.
-  const unbuilt = () => !c.version && (c.building ?? c.lastBuild);
+  const unbuilt = () => !c.version && (c.building ?? (c.held && { buildId: c.held }));
   const el = h("div", { class: "tile", role: "button", tabindex: 0, "data-id": unbuilt() ? undefined : c.id }, iconSlot, label);
   const render = (cap) => {
     Object.assign(c, cap);
     const paused = c.lastBuild?.paused;
     const failed = c.lastBuild?.status === "failed" && !paused;
-    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0 || c.lastBuild?.status === "review";
+    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0 || !!c.held;
     const more = c.building ? null : h("span", { class: "more", "aria-hidden": "true", onclick: (e) => (e.stopPropagation(), menuFrom(more, items())) }, "•••");
     // Lit cells follow real progress: none while code is written (the glyph pulses), then tests passed / total.
     const b = c.building;

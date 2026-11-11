@@ -6,7 +6,7 @@ import { type Agent, canSee, requireOwner, requireScope, type Scope } from "../a
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
-import { bytes, contentHash, decodeVersion, text, versionFiles } from "../files.ts";
+import { bytes, contentHash, CONTRACTS_DIR, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
 import type { BundleSummary } from "../bundle.ts";
 import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, stampSource, type ToolSource } from "../manifest.ts";
@@ -531,10 +531,15 @@ export class Builds extends Domain {
   private oneCreateAtATime(agent: Agent, id: string) {
     const building = this.registry.unfinishedBuild(id, { kind: "create" });
     if (building) throw new PlatformError("conflict", `'${id}' is already being built${this.buildRef(agent, building)}; wait for it, or cancel it`);
-    const held = this.registry.buildsInReview().find((b) => b.capabilityId === id && b.kind === "create");
-    if (held) throw new PlatformError("conflict", `'${id}' is built and waits for the owner's approval${this.buildRef(agent, held)}`);
+    this.notHeld(agent, id);
     const paused = this.pausedBuild(id, "create");
     if (paused) throw this.pausedFirst(agent, `'${id}'`, paused);
+  }
+
+  /** Refused while a new tool of this id waits for the owner's approval: it keeps its id until they decide. */
+  private notHeld(agent: Agent, id: string) {
+    const held = this.registry.buildsInReview().find((b) => b.capabilityId === id && b.kind === "create");
+    if (held) throw new PlatformError("conflict", `'${id}' is built and waits for the owner's approval${this.buildRef(agent, held)}`);
   }
 
   /** " (build …)" in a message to `agent`, if it may see that build; else nothing. */
@@ -1077,6 +1082,7 @@ export class Builds extends Domain {
       // widgets build chained after this one (create with widgets): that one follows the retry.
       const building = this.registry.unfinishedBuild(old.capabilityId, { kind: "create" });
       if (building) throw new PlatformError("conflict", `'${old.capabilityId}' is being built again${this.buildRef(agent, building)}; wait for it`);
+      this.notHeld(agent, old.capabilityId);
       // Or took it over and paused, its work kept: retrying this one would strand it (unless this is its Continue).
       const paused = this.pausedBuild(old.capabilityId, "create");
       if (paused && paused.id !== old.id) throw this.pausedFirst(agent, `'${old.capabilityId}'`, paused);
@@ -1617,7 +1623,6 @@ export class Builds extends Domain {
       const manifest = JSON.parse(text(v.files["capability.json"])) as CapabilityManifest;
       step(`approved by ${owner.id}`);
       const version = await this.d.validation.promoteVersion(build, manifest, v.files, { hash: build.review.contentHash, js: v.bundle }, step);
-      await this.dropReviewShots(build);
       step(`promoted: implementation v${version} is now active`);
       this.d.schedules.applyApprovedSchedules(build, step);
       this.registry.updateBuild(buildId, { status: "promoted", resultVersion: version, review: null, log });
@@ -1625,6 +1630,8 @@ export class Builds extends Domain {
       step(`FAILED: ${(e as Error).message}`);
       this.registry.updateBuild(buildId, { status: "failed", review: null, log });
     }
+    // Decided either way: the card's renders go.
+    await this.dropReviewShots(build);
     await this.keepTranscript(buildId);
     this.buildEnded(buildId);
     return this.buildView(this.mustBuild(buildId));
@@ -1635,7 +1642,7 @@ export class Builds extends Domain {
     requireOwner(owner);
     const build = this.mustBuild(buildId);
     if (build.status !== "review" || !build.review) throw new PlatformError("conflict", `build ${buildId} isn't waiting for review (it is ${build.status})`);
-    const line = `REJECTED by ${owner.id}: the change didn't go live`;
+    const line = `REJECTED by ${owner.id}: the ${build.kind === "create" ? "new tool" : "change"} didn't go live`;
     this.registry.updateBuild(buildId, { status: "cancelled", review: null, log: [...build.log, line] });
     this.buildEvent(buildId, line, `build ${buildId} [${build.kind} ${build.capabilityId}]`);
     this.registry.addAuthorityEvent({ actor: owner.id, action: "build_rejected", subject: build.requestedBy, capabilityId: build.capabilityId, detail: buildId });
@@ -1674,6 +1681,7 @@ export class Builds extends Domain {
     return { version: (b.baseVersion ?? 0) + 1, base: b.baseVersion, files: codeFiles(candidate.files, base) };
   }
 
+  /** One file of the review card's diff (`reviewCode`). Owner only. */
   async reviewFile(owner: Agent, buildId: string, path: string): Promise<CodeText> {
     const b = this.heldBuild(owner, buildId);
     const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.heldBase(b)]);
@@ -2218,8 +2226,7 @@ export interface Callee {
 /** How much of a capability's purpose CONTRACTS.md shows (`.hewn-contracts/<id>.md` has all of it). */
 export const INDEX_PURPOSE_CHARS = 200;
 
-/** The workspace folder with each other capability's contract in full: a dot-folder, which no version can hold. */
-export const CONTRACTS_DIR = ".hewn-contracts";
+export { CONTRACTS_DIR };
 
 /**
  * BUILDER.md's end: the owner's other capabilities by name, and where to read what they offer. A

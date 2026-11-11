@@ -421,7 +421,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, create ? "What agents can do with it" : "New"),
         ...b.review.newOperations.map((o) => reviewOp(o, { full: true })),
         changes && [h("div", { class: "eyebrow" }, changes.every(([ok]) => ok) ? "Nothing else changes" : "Also"), changeList(changes)],
-        shots.length > 0 && [h("div", { class: "eyebrow" }, create ? "Its screen" : "The screen after the change"), h("div", { class: "review-shots" }, shots.map((n) => h("a", { href: `/api/builds/${enc(id)}/shots/${enc(n)}`, target: "_blank", rel: "noopener" }, h("img", { class: "build-shot", src: `/api/builds/${enc(id)}/shots/${enc(n)}`, alt: `The screen after the change: ${n.replace("-", ", ")}`, loading: "lazy" }))))],
+        shots.length > 0 && [h("div", { class: "eyebrow" }, create ? "Its screen" : "The screen after the change"), h("div", { class: "review-shots" }, shots.map((n) => h("a", { href: `/api/builds/${enc(id)}/shots/${enc(n)}`, target: "_blank", rel: "noopener" }, h("img", { class: "build-shot", src: `/api/builds/${enc(id)}/shots/${enc(n)}`, alt: `${create ? "Its screen" : "The screen after the change"}: ${n.replace("-", ", ")}`, loading: "lazy" }))))],
         shot && [h("div", { class: "eyebrow" }, "The screen after the change (rendered with no data)"), h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" })],
         (b.review.changes || create) && files,
         reviewRequest(b, all),

@@ -20,14 +20,15 @@ const MAX_PENDING = { local: 20, tunnel: 10 } as const;
 const MAX_CLIENTS = 200;
 
 /**
- * What happens to an agent's changes to an existing tool once they pass validation: they wait for the
- * owner's approval, or go live after the checks. Only "wait" can be chosen until Hewn's own tests guard
+ * What happens to an agent's new tools, and its changes to existing ones, once they pass validation:
+ * they wait for the owner's approval, or go live after the checks (what a tool asks for, a host or a
+ * key, waits for the owner either way). Only "wait" can be chosen until Hewn's own tests guard
  * the owner's data (0.4.12).
  */
 export type ApprovalMode = "wait" | "live";
 export const APPROVAL_MODES: ApprovalMode[] = ["wait", "live"];
 /** Why "live" can't be chosen yet, as the owner and an agent read it. */
-export const LIVE_NOT_YET = "going live after the checks comes in 0.4.12, once Hewn's own tests guard your data; until then an agent's changes wait for your approval";
+export const LIVE_NOT_YET = "going live after the checks comes in 0.4.12, once Hewn's own tests guard your data; until then an agent's new tools and changes wait for your approval";
 
 /** OAuth protocol errors (RFC 6749 §5.2 codes), answered as `{error, error_description}`. */
 export class OAuthError extends Error {
@@ -82,7 +83,7 @@ export interface AgentDetails extends AgentInfo {
   address: string | null;
   createdAt: string;
   lastUsedAt: string | null;
-  /** Its changes to an existing tool: wait for the owner's approval, or go live after the checks. */
+  /** Its new tools and changes: wait for the owner's approval, or go live after the checks. */
   approvalMode: ApprovalMode;
 }
 
@@ -221,7 +222,7 @@ export class AgentStore {
       }));
   }
 
-  /** What happens to an agent's changes once they pass validation (`ApprovalMode`). One Hewn no longer knows (revoked): they wait. */
+  /** What happens to an agent's new tools and changes once they pass validation (`ApprovalMode`). One Hewn no longer knows (revoked): they wait. */
   approvalMode(id: string): ApprovalMode {
     return this.sql.prepare("SELECT approval_mode FROM agents WHERE id = ?").get(id)?.approval_mode === "live" ? "live" : "wait";
   }
