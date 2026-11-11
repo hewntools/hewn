@@ -848,7 +848,8 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
+      // A failed build the owner discarded isn't shown on the tool (Home's badge, Info's notice): it's put aside.
+      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
     });
   }
