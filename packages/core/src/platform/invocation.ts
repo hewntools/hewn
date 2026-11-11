@@ -4,6 +4,7 @@
 import { type Agent, requireOwner, requireScope } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { type Deadline, deadlineOf } from "../deadline.ts";
+import { capError, capLines } from "../abi.ts";
 import { abiAtLeast, type CapabilityManifest, compileSchema, connectOperation, type OperationManifest, opKey, schemaErrors } from "../manifest.ts";
 import type { ModelHandler } from "../models.ts";
 import type { CallHandler, ExecutionTarget } from "../ports.ts";
@@ -170,7 +171,16 @@ export class Invocation extends Domain {
     const input = req.input ?? {};
     const checkIn = compileSchema(op.inputSchema);
     if (!checkIn(input)) throw inputMismatch(key, schemaErrors(checkIn));
-    const { output: result, secretUpdates, logs, inserted = [] } = await this.runtime.invoke(target, key, input, onCall, onModel);
+    // The runtime caps the error and console lines next to the tool's code, which can change them:
+    // capped again here, before anything is kept or passed on.
+    const ran = await this.runtime.invoke(target, key, input, onCall, onModel).catch((e: unknown) => {
+      if (e instanceof Error) e.message = capError(e.message);
+      const details = e instanceof PlatformError ? (e.details as { logs?: unknown } | undefined) : undefined;
+      if (details && typeof details === "object" && "logs" in details) (e as PlatformError).details = { ...details, logs: capLines(details.logs) };
+      throw e;
+    });
+    const { output: result, secretUpdates, inserted = [] } = ran;
+    const logs = capLines(ran.logs);
     const checkOut = compileSchema(op.outputSchema);
     if (!checkOut(result)) {
       throw new PlatformError("invalid_output", `implementation returned output violating ${key} outputSchema`, schemaErrors(checkOut));

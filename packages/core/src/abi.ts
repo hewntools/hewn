@@ -200,11 +200,26 @@ function b64(b: Uint8Array) {
   return btoa(s);
 }
 
-/** Cap and prefix a call's console lines ("| " log, "! " error/warn). */
-export function capLines(lines: string[]): string[] {
-  const out = lines.slice(0, 200).map((l) => (l.length > 500 ? l.slice(0, 500) + "…" : l));
-  if (lines.length > 200) out.push(`… ${lines.length - 200} more lines`);
-  return out;
+/** The console lines of a call Hewn keeps, and the characters of each. */
+export const LOG_LINES = 200;
+export const LOG_LINE_CHARS = 500;
+/** The characters of a failed call's error Hewn keeps and passes on (as many as its failure record keeps). */
+export const ERROR_CHARS = 1000;
+
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+/**
+ * Cap a call's console lines ("| " log, "! " error/warn): at most LOG_LINES, the last one saying how
+ * many more there were, each at most LOG_LINE_CHARS. Anything but strings is left out. Capping
+ * again changes nothing, so the platform caps what comes back from a tool's isolate once more.
+ */
+export function capLines(lines: unknown): string[] {
+  const all = Array.isArray(lines) ? lines.filter((l): l is string => typeof l === "string") : [];
+  if (all.length <= LOG_LINES) return all.map((l) => cut(l, LOG_LINE_CHARS));
+  return [...all.slice(0, LOG_LINES - 1).map((l) => cut(l, LOG_LINE_CHARS)), `… ${all.length - LOG_LINES + 1} more lines`];
 }
+
+/** A failed call's error, cut to ERROR_CHARS. */
+export const capError = (message: string) => cut(message, ERROR_CHARS);
 
 export const CALL_TIMEOUT_MS = 30_000;

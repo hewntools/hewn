@@ -135,7 +135,7 @@ export const operations = {
 - The import is type-only: it disappears when the tool is bundled, so a tool has no runtime dependency on the spec. Add `@hewntools/spec` as a dev dependency for type checking.
 - Every operation in the manifest must be exported; a version that doesn't is rejected. The module is loaded once to check this.
 - A handler may be `async`. Its return value is the output and crosses to the host as JSON (`undefined` becomes `null`).
-- A thrown error fails the call with `operation_failed` and the error's message.
+- A thrown error fails the call with `operation_failed` and the error's message, cut to 1,000 characters.
 
 ## `ctx`
 

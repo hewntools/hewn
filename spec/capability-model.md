@@ -402,7 +402,7 @@ export const operations: Record<string, (input: unknown, ctx: Ctx) => unknown | 
 
 - Every operation in the manifest must be exported; a version that doesn't is rejected.
 - A handler may be `async`. Its return value is the output, passed as JSON (`undefined` becomes `null`).
-- A thrown error fails the call (`operation_failed`) with the error's message.
+- A thrown error fails the call (`operation_failed`) with the error's message, cut to 1,000 characters.
 
 ### `ctx`
 

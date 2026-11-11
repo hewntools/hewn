@@ -33,6 +33,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **The reading says what it didn't read.** When your builder reads a tool before you install it, the sheet names the files it left out or cut short (too long, or not text), and the reader is told it can't see the code of the npm packages the tool uses. **Show** on a finding opens only a place that's in the tool. See [Sharing](docs/sharing.md).
 - **An agent's widgets for a tool you're creating wait for you.** Widgets an agent adds to a new tool someone else asked for are that agent's own change: if they add operations, they wait for your review, as any agent's change does. Widgets that come with the agent's own new tool (`widgets: true`) still go live with it. See [the agent spec](spec/agents.md).
 - **A model call cut off by its deadline counts what it may have cost.** The provider may still bill a call it didn't answer in time, so it counts against your monthly budget and the tool's cap at the most it could have cost, as a call cut short when Hewn stopped already did. See [Spending](docs/models.md#spending).
+- **Hewn caps what a tool's call leaves behind.** A failed call's error is cut to 1,000 characters before Hewn keeps it or passes it to an agent, and its log to 200 lines of 500 characters, whatever the tool's code does. A cut log's last line says how many more lines there were. See [Call logs](docs/data.md#call-logs).
 
 ## 0.4.10 (2026-11-07)
 

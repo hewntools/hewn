@@ -42,7 +42,7 @@ Deleting a tool keeps its data. Settings › Data › Deleted tools brings it ba
 
 ## Call logs
 
-Every call to a tool is logged: who called it, when, and how it went. Settings › Data › Keep call logs sets how long (two weeks by default). Builds, grants and access changes are always kept. `hewn logs <id>` shows a tool's calls.
+Every call to a tool is logged: who called it, when, and how it went, with up to 200 of the tool's own log lines (500 characters each) and, for a failed call, its error (1,000 characters). Settings › Data › Keep call logs sets how long (two weeks by default). Builds, grants and access changes are always kept. `hewn logs <id>` shows a tool's calls.
 
 ## Moving to a new machine
 
