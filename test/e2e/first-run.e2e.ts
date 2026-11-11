@@ -115,9 +115,12 @@ try {
     await page.locator(".inbox-count:not([hidden])").waitFor({ timeout: 20_000 });
     await page.locator(".inbox-btn").click();
     const row = page.locator(".inbox-row", { hasText: "wants to connect" });
+    // "Claude Code (hewn)" is Claude Code: its logo, not the letters "CL".
+    await row.locator(".icon-mask.logo").waitFor();
     await row.click();
     const sheet = page.locator("dialog[open]", { hasText: "Claude Code (hewn) wants to connect" });
     await sheet.waitFor();
+    await sheet.locator(".app-icon .icon-mask.logo").first().waitFor();
     const code = (await sheet.locator(".user-code").textContent())!.trim();
     if (!/^[A-Z0-9]{3}-[A-Z0-9]{3}$/.test(code)) throw new Error(`code ${code}`);
     await sheet.getByRole("checkbox", { name: "Make new ones" }).uncheck();

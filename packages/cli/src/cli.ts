@@ -369,6 +369,9 @@ async function main() {
       const body = zip ? { bundle: readFileSync(dir).toString("base64"), ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
       const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
+      // A deleted tool has that id: how to bring it back, or to install this one beside it.
+      const archived = result.details?.archived;
+      if (!res.ok && archived) throw new Error(`${archived.name} (${archived.id}) was deleted and is kept with its data: hewn restore ${archived.id} brings it back, hewn purge ${archived.id} deletes it for good, or install this one under another name with --name <name>`);
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
       process.exitCode = result.status === "promoted" ? 0 : 1;

@@ -124,7 +124,7 @@ Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@
 
 ## Deleting a tool
 
-**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back.
+**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back. While it's deleted, its name stays its own: installing or building a tool by that name says so and points you to Deleted tools (or to `hewn restore`, `hewn purge` and `--name` in the terminal), or install the new one under another name.
 
 ## From the terminal
 

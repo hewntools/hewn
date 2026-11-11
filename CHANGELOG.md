@@ -4,6 +4,8 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.11 (unreleased)
 
+- **A deleted tool's name says so.** Installing (or building) a tool with the name of one you deleted used to say only "already exists". Now it says the tool is deleted and kept with its data, and where to bring it back or delete it for good (Settings › Data › Deleted tools; in the terminal, `hewn restore`, `hewn purge` or `--name`). An agent is told to use another name or ask you.
+- **An agent's tile shows its logo** when it connects under a name with a note, like "Claude Code (hewn)", instead of the letters CL.
 - **Discard a failed build.** A failed build waited in the Inbox until you retried it. **Discard**, next to Retry on its page, takes it off the Inbox; Activity keeps it, marked discarded. Nothing about the tool changes. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 - **Activity says it in words.** A setting you set ("Set REPO"), a change you approved or declined, and a sign-in to a connection no longer show as `config_set`, `build_approved`, `build_rejected` or `signed_in`.
 - **A tool's packages come from the npm registry, and so do theirs.** When Hewn installs a tool's npm dependencies, npm never runs git, asks your registry for every package wherever a lockfile points, and a package it would take from your disk fails the build. A tool's own `package.json` already had to name registry versions. See [the tool spec](spec/tools.md).
