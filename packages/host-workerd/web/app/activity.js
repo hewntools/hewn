@@ -86,7 +86,7 @@ function activityRow(g, all, showCap) {
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
     if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "failed" && g.failure?.paused) (dot = "warn"), (text = on("Build paused", ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
-    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
+    else if (g.outcome === "failed") (dot = g.discarded ? "" : "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.discarded && h("span", { class: "faint" }, "· discarded"), g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
   } else if (g.kind === "lifecycle") {
@@ -236,7 +236,9 @@ async function buildsView(head, only, all0) {
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
-          ? failed.has(b.buildId) && retryable(b)
+          ? b.discardedAt
+            ? kindTag("discarded")
+            : failed.has(b.buildId) && retryable(b)
             ? b.failure?.paused
               ? h("a", { class: "btn sm", href: `#/b/${enc(b.buildId)}`, onclick: (e) => e.stopPropagation() }, "Continue…")
               : h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")

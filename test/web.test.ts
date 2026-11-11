@@ -77,6 +77,7 @@ describe("web client (owner surface)", () => {
       name: "fake",
       build: async (job) => {
         if (job.capabilityId === "stops-early") throw new Error("hit the usage limit");
+        if (job.kind === "modify" && readFileSync(resolve(job.workspace, "BUILDER.md"), "utf8").includes("Fail this change")) throw new Error("the change didn't work out");
         appendFileSync(job.logPath, "00:00:00 → Write src/index.ts\n");
         job.onActivity?.("→ Write src/index.ts");
         cpSync(SEED, job.workspace, { recursive: true });
@@ -635,6 +636,39 @@ describe("web client (owner surface)", () => {
       const row = (await api("/activity")).json.items.find((i: any) => i.buildId === b.json.buildId);
       assert.equal(row.reason, "hit the usage limit");
       assert.equal((await api("/activity")).json.items.find((i: any) => i.buildId === last).reason, title);
+    });
+
+    test("Discard: a failed build leaves the Inbox and stays in Activity, marked; only a failed one, only the owner", async () => {
+      const b = await api("/capabilities", { method: "POST", body: { name: "Stops Early", purpose: "p", requirements: "r" } });
+      const id = b.json.buildId;
+      await platform.settle(id);
+      assert.ok((await api("/inbox")).json.needs.some((n: any) => n.buildId === id), "failed: in the Inbox");
+      await assert.rejects(platform.discardBuild(t.claude, id), /owner/, "an agent can't");
+      const r = await api(`/builds/${id}/discard`, { method: "POST" });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.ok(r.json.discardedAt);
+      assert.equal(r.json.status, "failed", "still what it was");
+      assert.ok(!(await api("/inbox")).json.needs.some((n: any) => n.buildId === id), "gone from the Inbox");
+      const row = (await api("/activity")).json.items.find((i: any) => i.buildId === id);
+      assert.equal(row.outcome, "failed");
+      assert.equal(row.discarded, true, "kept in Activity, marked");
+      assert.equal(platform.registry.getCapability("stops-early")?.activeVersion ?? null, null, "nothing installed");
+      // Twice is fine; something that isn't a failed build isn't discarded.
+      assert.equal((await api(`/builds/${id}/discard`, { method: "POST" })).status, 200);
+      // A failed change, discarded: the tool keeps its version, and neither Home nor Info shows the failure any more.
+      const cid = (await platform.modify(USER, { capabilityId: "secret-echo", request: "Fail this change" })).buildId;
+      assert.equal((await platform.settle(cid)).status, "failed");
+      const before = (await api("/capabilities")).json.find((c: any) => c.id === "secret-echo");
+      assert.equal(before.lastBuild?.buildId, cid);
+      assert.equal(before.lastBuild.status, "failed");
+      assert.equal((await api(`/builds/${cid}/discard`, { method: "POST" })).status, 200);
+      const after = (await api("/capabilities")).json.find((c: any) => c.id === "secret-echo");
+      assert.equal(after.lastBuild, null, "the tool no longer shows the failure");
+      assert.equal(after.version, before.version, "the active version is untouched");
+      const promoted = (await api("/builds?n=50&brief=1")).json.find((x: any) => x.status === "promoted");
+      const no = await api(`/builds/${promoted.buildId}/discard`, { method: "POST" });
+      assert.equal(no.status, 409);
+      assert.match(no.json.message, /only a failed build can be discarded/);
     });
 
     test("home data: hue, icon kind, last build, in-flight builds", async () => {

@@ -37,6 +37,8 @@ export interface BuildView {
   createdAt: string;
   /** Last status change (when it finished, for a finished build). */
   updatedAt: string;
+  /** A failed build the owner discarded: gone from the Inbox, kept in Activity. */
+  discardedAt?: string;
   /** Liveness of a platform builder while it works. No transcript content (that would leak source). */
   progress?: BuildProgress;
   /** The version it produced, once promoted. */
@@ -994,6 +996,26 @@ export class Builds extends Domain {
     return this.buildView(this.mustBuild(buildId));
   }
 
+  /**
+   * Discard a failed build (owner only): it leaves the Inbox and stays in Activity, marked discarded. Nothing about
+   * the tool changes (a failed create installed nothing, a failed change left the active version as it was); the
+   * workspace it left goes now rather than after a day. Not a paused one (Continue or Stop it), nor one retried.
+   */
+  async discardBuild(owner: Agent, buildId: string): Promise<BuildView> {
+    requireOwner(owner);
+    const build = this.mustBuild(buildId);
+    if (build.status !== "failed") throw new PlatformError("conflict", `only a failed build can be discarded; this one is ${build.status}`);
+    if (isPaused(build)) throw new PlatformError("conflict", "a paused build is continued or stopped, not discarded");
+    const next = this.registry.retryOf(build.id);
+    if (next) throw new PlatformError("conflict", `build ${buildId} was retried as ${next}`);
+    if (!build.discardedAt) {
+      this.registry.discardBuild(buildId);
+      await this.workbench.remove(buildId).catch(() => {});
+      this.logger(`build ${buildId} [${build.kind} ${build.capabilityId}] discarded by ${owner.id}`);
+    }
+    return this.buildView(this.mustBuild(buildId));
+  }
+
   getBuild(agent: Agent, buildId: string): BuildView {
     requireScope(agent, "create", "modify");
     return this.buildView(this.visibleBuild(agent, buildId));
@@ -1697,6 +1719,7 @@ export class Builds extends Domain {
     };
     if (b.resultVersion) view.resultVersion = b.resultVersion;
     if (b.dependsOn) view.dependsOn = b.dependsOn;
+    if (b.discardedAt) view.discardedAt = b.discardedAt;
     // Builds made on a 0.4.9 pre-release logged "(screenshot with the sample data)", and their logs keep it.
     if (b.log.some((l) => /\(screenshot (attached|with the sample data)/.test(l))) view.screenshot = true;
     const step = this.stepState(b.id);
