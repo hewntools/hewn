@@ -420,6 +420,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.createSchedule(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input, cadence: String(body.cadence ?? "") });
       }
+      // Info › Agents: which agents can use it; switching one overrides its default (every tool, or only some).
+      case "GET agents":
+        return platform.capabilityAgents(owner, id);
+      case "PUT agents":
+        return platform.setCapabilityAgent(owner, id, arg ?? "", (await readJson(req)).canUse);
       case "POST grants":
         if (arg === "approve") {
           // A body names one grant; no body approves everything the version requests.

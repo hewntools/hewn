@@ -103,6 +103,7 @@ function activityRow(g, all, showCap) {
       agent_connected: () => ((dot = "ok"), on(`Connected ${subject}`, g.detail && h("span", { class: "faint" }, g.detail))),
       agent_declined: () => on(`Declined ${g.subject}`),
       agent_revoked: () => ((dot = "warn"), on(`Disconnected ${subject}`)),
+      agent_tool: () => on(g.detail === "on" ? `${subject} can use` : `${subject} can no longer use`, ref ?? "this tool"),
       agent_scopes: () => on(`${subject} may now: ${g.detail || "nothing"}`),
       agent_capabilities: () => on(`${subject} sees: ${g.detail === "*" ? "everything" : g.detail || "nothing"}`),
       agent_approval_mode: () => on(g.detail === "live" ? `${subject}'s changes go live after the checks` : `${subject}'s changes wait for your approval`),

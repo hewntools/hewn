@@ -94,7 +94,7 @@ Agents (MCP clients sign in with OAuth; you approve them)
   setup [--agents claude-code,codex,opencode] [--yes] [--dry-run]
                       connect local agents: registers Hewn with them, then they sign in
   agents              connected agents; agents pending | approve <code> [--scopes a,b] [--name n] [--only id,id]
-                      | deny <code> | scopes <agent> a,b | revoke <agent>
+                      | deny <code> | scopes <agent> a,b | tool <agent> <tool> on|off | revoke <agent>
   tunnel [status]     reach Hewn from cloud agents (claude.ai, ChatGPT): only MCP and sign-in are exposed
   tunnel start [--quick | --cloudflared <tunnel> --hostname <host> | --tailscale] | stop`;
 
@@ -726,9 +726,9 @@ async function agentsCommand(c: PlatformClient) {
   };
   switch (sub ?? "list") {
     case "list": {
-      const agents = (await c.call("agents")) as { id: string; name: string; scopes: string[]; capabilities: "*" | string[]; via: string; lastUsedAt: string | null }[];
+      const agents = (await c.call("agents")) as { id: string; name: string; scopes: string[]; capabilities: "*" | string[]; except: string[]; via: string; lastUsedAt: string | null }[];
       if (!agents.length) console.log("No agents yet. Connect one: hewn setup (local), or add Hewn's address in the agent (hewn tunnel for cloud agents).");
-      for (const a of agents) console.log(`${a.id.padEnd(16)} ${a.scopes.join(",") || "(no access)"}${a.capabilities === "*" ? "" : ` · only ${a.capabilities.join(", ")}`} · ${a.via} · ${a.lastUsedAt ? `last used ${a.lastUsedAt.slice(0, 16).replace("T", " ")}` : "not used yet"}`);
+      for (const a of agents) console.log(`${a.id.padEnd(16)} ${a.scopes.join(",") || "(no access)"}${a.capabilities === "*" ? (a.except.length ? ` · every tool except ${a.except.join(", ")}` : "") : ` · only ${a.capabilities.join(", ")}`} · ${a.via} · ${a.lastUsedAt ? `last used ${a.lastUsedAt.slice(0, 16).replace("T", " ")}` : "not used yet"}`);
       const pending = (await c.call("pendingAgents")) as unknown[];
       if (pending.length) console.log(`\n${pending.length} waiting for approval: hewn agents pending`);
       return;
@@ -760,13 +760,20 @@ async function agentsCommand(c: PlatformClient) {
       await c.call("updateAgent", target, { scopes: extra.split(",").filter(Boolean) });
       return console.log(`✔ ${target}: ${extra}`);
     }
+    case "tool": {
+      // Over its default: an agent that sees every tool switched off for this one, or one limited to some given it.
+      const onOff = positional()[3];
+      if (!target || !extra || (onOff !== "on" && onOff !== "off")) throw new Error("usage: hewn agents tool <agent> <tool> on|off");
+      await c.call("setCapabilityAgent", extra, target, onOff === "on");
+      return console.log(onOff === "on" ? `✔ ${target} can use ${extra}` : `✔ ${target} can no longer use ${extra}: it doesn't see it`);
+    }
     case "revoke": {
       if (!target) throw new Error("usage: hewn agents revoke <agent>");
       await c.call("updateAgent", target, "revoke");
       return console.log(`✔ ${target} revoked: its next call fails. Connect it again to restore access.`);
     }
     default:
-      throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | revoke <agent>]");
+      throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | tool <agent> <tool> on|off | revoke <agent>]");
   }
 }
 

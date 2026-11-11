@@ -288,6 +288,8 @@ export class Platform {
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke") { return this.d.grants.updateAgent(owner, id, change); }
   pendingAgents(owner: Agent): PendingRequest[] { return this.d.grants.pendingAgents(owner); }
   decideAgent(owner: Agent, requestId: string, d: { approve: false } | { approve: true; name?: string; scopes?: Scope[]; capabilities?: "*" | string[] }): { agentId?: string } { return this.d.grants.decideAgent(owner, requestId, d); }
+  capabilityAgents(owner: Agent, capabilityId: string) { return this.d.grants.capabilityAgents(owner, capabilityId); }
+  setCapabilityAgent(owner: Agent, capabilityId: string, agentId: string, canUse: boolean) { return this.d.grants.setCapabilityAgent(owner, capabilityId, agentId, canUse); }
   unreadableSecrets(owner: Agent): { capabilityId: string; name: string }[] { return this.d.grants.unreadableSecrets(owner); }
   setSecret(owner: Agent, capabilityId: string, name: string, value: string) { return this.d.grants.setSecret(owner, capabilityId, name, value); }
   setConfig(owner: Agent, capabilityId: string, name: string, value: string) { return this.d.grants.setConfig(owner, capabilityId, name, value); }

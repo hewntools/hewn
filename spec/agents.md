@@ -56,7 +56,7 @@ There are four scopes. The web client shows them as See, Use, Make and Change. A
 | `builds_cancel` | | | yes | yes |
 | `hewn_docs` | yes | yes | yes | yes |
 
-Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent limited to some tools gets `not_found` for the others.
+Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent gets `not_found` for a tool it can't use: one not on its list if it's limited to some tools, or one the owner switched it off for (on the tool's page) if it sees every tool. An agent limited to some tools that the owner switches on for a tool gets that tool on its list.
 
 ## Discovery
 

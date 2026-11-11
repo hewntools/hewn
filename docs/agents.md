@@ -79,7 +79,9 @@ When you approve an agent, you choose its scopes. You can narrow what it asked f
 | Make | ask for new tools (the builder builds them) |
 | Change | ask for changes to existing ones |
 
-You can also limit it to **some tools**. Later, click the agent on **Agents** to turn scopes off and back on, within what you approved, or to disconnect it. To give it more, disconnect it and let it ask again.
+You can also limit it to **some tools**. Later, click the agent on **Agents** to turn scopes off and back on, within what you approved, or to disconnect it. To give it a scope it didn't ask for, disconnect it and let it ask again.
+
+**Which agents can use a tool** is on the tool's own page, under **Agents**: a switch for each agent. Switch off an agent that sees every tool, and it no longer sees that one or can use it. Switch on an agent limited to some tools, and the tool joins its list. Switching back undoes either, and open sessions see it at once. On **Agents**, each agent says what it can use: "every tool except Aurora Watch, Gift Ideas", or "only" the tools on its list. Turning **Only some tools** on or off for an agent forgets what you switched for it on tools' pages, and so does disconnecting it. An agent that connects again without being disconnected first keeps them.
 
 **Its new tools and changes** (its approval mode, on the same sheet): a new tool an agent makes, or a change to one you have, waits for your approval once it passes its checks, whether Hewn's builder wrote it or the agent did. The Inbox shows it with what it adds, what else changes, the files it changes and the screen after the change, on a desktop and a phone, light and dark. So does opening the tool, whose tile says it needs you: **Later** opens the tool as it is. A new tool shows what agents can do with it, its screen and its files. **Go live after the checks** is shown but can't be chosen yet: it comes once Hewn's own tests guard your data. Whatever the mode, what a tool asks for (a host, a key, another tool, a model) waits for you, as it always has: it can't run, reach the network or start a schedule until you approve it.
 
@@ -109,6 +111,7 @@ hewn agents pending             requests waiting for you, with their codes
 hewn agents approve <code> [--scopes discover,invoke] [--name <name>] [--only <id>,<id>]
 hewn agents deny <code>
 hewn agents scopes <agent> discover,invoke
+hewn agents tool <agent> <tool> on|off
 hewn agents revoke <agent>
 hewn tunnel [status|start …|stop]
 ```

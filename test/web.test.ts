@@ -813,6 +813,31 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/confirmations/nope", { method: "POST", body: { approve: true } })).status, 404);
     });
 
+    test("a tool's agents: which can use it, each switched on the tool's page over its default", async () => {
+      const narrow = platform.agentStore.approveDirect("Narrow", ["discover", "invoke"], ["running-log"]);
+      const set = (agent: string, canUse: unknown) => api(`/capabilities/ui-counter/agents/${agent}`, { method: "PUT", body: { canUse } });
+      const row = async (agent: string) => (await api("/capabilities/ui-counter/agents")).json.find((a: any) => a.id === agent);
+      assert.deepEqual(await row("claude-code"), { id: "claude-code", name: "claude-code", canUse: true, default: "all" });
+      assert.deepEqual(await row(narrow), { id: "narrow", name: "Narrow", canUse: false, default: "some" });
+      assert.deepEqual((await set("claude-code", false)).json, { id: "claude-code", name: "claude-code", canUse: false, default: "all" });
+      assert.equal((await set(narrow, true)).json.canUse, true);
+      const agents = (await api("/agents")).json;
+      assert.deepEqual(agents.find((a: any) => a.id === "claude-code").except, ["ui-counter"]);
+      assert.deepEqual(agents.find((a: any) => a.id === narrow).capabilities, ["running-log", "ui-counter"]);
+      assert.ok(!platform.list(platform.agentStore.get("claude-code")!).some((c) => c.id === "ui-counter"));
+      const items = (await api("/activity?limit=300")).json.items;
+      assert.ok(items.some((i: any) => i.kind === "authority" && i.outcome === "agent_tool" && i.subject === "claude-code" && i.capabilityId === "ui-counter" && i.detail === "off"));
+      assert.equal((await set("claude-code", "no")).status, 400);
+      assert.equal((await set("nobody", false)).status, 404);
+      assert.equal((await api("/capabilities/nope/agents")).status, 404);
+      // Switching back undoes either.
+      await set("claude-code", true);
+      await set(narrow, false);
+      assert.deepEqual([(await row("claude-code")).canUse, (await row(narrow)).canUse], [true, false]);
+      assert.deepEqual((await api("/agents")).json.find((a: any) => a.id === narrow).capabilities, ["running-log"]);
+      platform.updateAgent(USER, narrow, "revoke");
+    });
+
     test("another MCP client: just the address (it signs in with OAuth)", async () => {
       const m = (await api("/setup/manual")).json;
       assert.match(m.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);

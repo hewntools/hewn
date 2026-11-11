@@ -253,7 +253,9 @@ export class Builds extends Domain {
       // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
       if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
-      const requester: Agent = { id: b.requestedBy, kind: owner ? "user" : "agent", scopes: new Set([scopeOf(b.kind)]), capabilities: "*" };
+      // An agent's retry sees only the tools it may use now: the owner may have switched it off for this one since.
+      const now = owner ? undefined : this.agentStore.get(b.requestedBy);
+      const requester: Agent = { id: b.requestedBy, kind: owner ? "user" : "agent", scopes: new Set([scopeOf(b.kind)]), capabilities: now?.capabilities ?? "*", ...(now?.except ? { except: now.except } : {}) };
       try {
         const next = await this.retryBuild(requester, id, { auto: true });
         retried.push(next.buildId);

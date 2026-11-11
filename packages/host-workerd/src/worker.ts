@@ -701,6 +701,7 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   listSchedules: { owner: true }, createSchedule: { owner: true, changes: true }, updateSchedule: { owner: true, changes: true }, deleteSchedule: { owner: true, changes: true },
   createWebTicket: { owner: true }, createUiTicket: { owner: false }, publicUrl: { owner: false }, setPublicUrl: { owner: true, changes: true }, passkeys: { owner: true }, removePasskey: { owner: true, changes: true },
   agents: { owner: true }, updateAgent: { owner: true, changes: true }, pendingAgents: { owner: true }, decideAgent: { owner: true, changes: true }, unreadableSecrets: { owner: true },
+  capabilityAgents: { owner: true }, setCapabilityAgent: { owner: true, changes: true },
   confirmations: { owner: true }, decideConfirmation: { owner: true },
   models: { owner: true }, setModelSettings: { owner: true, changes: true }, setModelKey: { owner: true, changes: true }, checkModelProvider: { owner: true }, replacePinnedModel: { owner: true }, setCapabilityModel: { owner: true }, modelSpend: { owner: true }, refreshModelCatalog: { owner: false },
   metrics: { owner: true }, idleActivity: { owner: false },

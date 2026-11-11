@@ -5,6 +5,8 @@ import { after, before, describe, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readZip } from "@hewntools/core/bundle.ts";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { USER } from "@hewntools/core/auth.ts";
 import { serverUrl } from "@hewntools/test-host/server.ts";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -114,6 +116,30 @@ describe("Hewn over MCP", () => {
     });
     assert.equal(r.isError, true);
     assert.equal(parse(r).error, "invalid_input");
+    await codex.close();
+  });
+
+  test("switched off a tool, or back on, an open session hears it at once: tools/list_changed", async () => {
+    const codex = await connect(url, TOKENS.codex);
+    const catalog = async () => (await codex.listTools()).tools.find((x) => x.name === "capabilities_invoke")!.description!;
+    const changed = () =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("no tools/list_changed")), 5000);
+        codex.setNotificationHandler(ToolListChangedNotificationSchema, async () => (clearTimeout(timer), resolve()));
+      });
+    assert.match(await catalog(), /running-log/);
+    await new Promise((r) => setTimeout(r, 200)); // the client's notification stream is open
+    let heard = changed();
+    t.platform.setCapabilityAgent(USER, "running-log", "codex", false);
+    await heard;
+    assert.doesNotMatch(await catalog(), /running-log/);
+    const r = await codex.callTool({ name: "capabilities_invoke", arguments: { capabilityId: "running-log", operation: "get_summary" } });
+    assert.equal(parse(r).error, "not_found");
+    assert.deepEqual(parse(await codex.callTool({ name: "capabilities_list", arguments: {} })).capabilities, []);
+    heard = changed();
+    t.platform.setCapabilityAgent(USER, "running-log", "codex", true);
+    await heard;
+    assert.match(await catalog(), /running-log/);
     await codex.close();
   });
 

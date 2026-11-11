@@ -254,7 +254,9 @@ export class Grants extends Domain {
   /** Delegated agents (owner only). */
   agents(owner: Agent): AgentDetails[] {
     requireOwner(owner);
-    return this.agentStore.list();
+    // A deleted tool an agent was switched off for isn't named; restored, it stays off.
+    const there = new Set(this.registry.listActiveCapabilities().map((c) => c.id));
+    return this.agentStore.list().map((a) => ({ ...a, except: a.except.filter((id) => there.has(id)) }));
   }
 
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke") {
@@ -287,6 +289,27 @@ export class Grants extends Domain {
     } else this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_declined", subject: request?.clientName ?? "agent" });
     this.logger(d.approve ? `agent ${r.agentId} approved (${(d.scopes ?? []).join(", ") || "requested scopes"}) by ${owner.id}` : `agent connection request declined by ${owner.id}`);
     return r;
+  }
+
+  /** The agents that can use a tool, and those that can't (owner only): each by its default, or as the owner switched it here. */
+  capabilityAgents(owner: Agent, capabilityId: string) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    return this.agentStore.forTool(capabilityId);
+  }
+
+  /**
+   * Switch one agent on or off for a tool (owner only), over its default: one that sees every tool
+   * can be kept off this one, one limited to some can be given it. Its open sessions see it at once.
+   */
+  setCapabilityAgent(owner: Agent, capabilityId: string, agentId: string, canUse: boolean) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    if (typeof canUse !== "boolean") throw new PlatformError("invalid_request", "canUse must be true or false");
+    this.agentStore.setTool(agentId, capabilityId, canUse);
+    this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_tool", subject: agentId, capabilityId, detail: canUse ? "on" : "off" });
+    this.logger(`agent ${agentId} ${canUse ? "can use" : "can no longer use"} ${capabilityId} (by ${owner.id})`);
+    return this.agentStore.forTool(capabilityId).find((a) => a.id === agentId)!;
   }
 
   /** Secrets stored under another key (a backup from another machine): they count as not set until set again. */
