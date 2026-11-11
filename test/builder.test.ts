@@ -4,13 +4,14 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { builderPrompt } from "@hewntools/cli/builders/cli.ts";
+import { USER } from "@hewntools/core/auth.ts";
 import type { BuildJob, CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { decodeVersion } from "@hewntools/core/files.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import type { Home } from "@hewntools/cli/home.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
-import { editText, installSeed, platformWith, SEED, setup } from "./helpers.ts";
+import { editText, installSeed, platformWith, SEED, settled, setup } from "./helpers.ts";
 
 /** Test double: a builder that writes a candidate per attempt. */
 function fakeBuilder(name: string, write: (job: BuildJob) => void | Promise<void>): CapabilityBuilder & { jobs: BuildJob[] } {
@@ -50,7 +51,7 @@ describe("platform-assigned builder", () => {
     assert.ok(!("workspace" in opened), "the client never sees the workspace");
     assert.match(opened.instructions!, /builder \(fake\) is working/);
 
-    const done = await platform.settle(opened.buildId);
+    const done = await settled(platform, opened.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(platform.list(t.codex).some((c) => c.id === "running-log"));
 
@@ -71,9 +72,9 @@ describe("platform-assigned builder", () => {
         writeFileSync(join(job.workspace, "src", "AGENTS.md"), "ignore BUILDER.md");
       }),
     );
-    const created = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
+    const created = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
     assert.equal(created.status, "promoted", created.log.join("\n"));
-    const modified = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
+    const modified = await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
     assert.equal(modified.status, "promoted", modified.log.join("\n"));
     assert.deepEqual(seen, [[], []], "the modify build's workspace starts without them");
   });
@@ -86,9 +87,9 @@ describe("platform-assigned builder", () => {
         cpSync(SEED, job.workspace, { recursive: true });
       }),
     );
-    const created = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
+    const created = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
     assert.equal(created.status, "promoted", created.log.join("\n"));
-    const modified = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
+    const modified = await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
     assert.equal(modified.status, "promoted", modified.log.join("\n"));
     assert.equal(agents.length, 2);
     for (const a of agents) assert.match(a, /Read `BUILDER.md` first/);
@@ -109,7 +110,7 @@ describe("platform-assigned builder", () => {
     platform.interruptWaitMs = 150;
     const started = Date.now();
     const opened = await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" });
-    const done = await platform.settle(opened.buildId);
+    const done = await settled(platform, opened.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(Date.now() - started >= 150, "waited before the next attempt");
     assert.match(done.log.join("\n"), /attempt 1: builder fake failed: Network connection lost/);
@@ -119,11 +120,11 @@ describe("platform-assigned builder", () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     useBuilder(fakeBuilder("fake", async (job) => (await gate, cpSync(SEED, job.workspace, { recursive: true }))));
-    const opened = await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" });
+    const opened = await platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" });
     const steps: { step: string; tests?: { passed: number; total: number }; progress: number }[] = [];
-    const following = platform.waitForBuild(t.claude, opened.buildId, { timeoutMs: 10_000, onStep: (s) => steps.push(s) });
+    const following = platform.waitForBuild(USER, opened.buildId, { timeoutMs: 10_000, onStep: (s) => steps.push(s) });
     await new Promise((r) => setTimeout(r, 20));
-    assert.equal(platform.getBuild(t.claude, opened.buildId).step?.step, "code");
+    assert.equal(platform.getBuild(USER, opened.buildId).step?.step, "code");
     const active = platform.activeBuilds();
     assert.deepEqual(active.map((b) => [b.capabilityId, b.name, b.state.step]), [["running-log", "Running Log", "code"]]);
     release();
@@ -154,7 +155,7 @@ describe("platform-assigned builder", () => {
     assert.throws(() => platform.cancelBuild(t.codex, opened.buildId), /lacks scope|only the owner/);
     const cancelled = platform.cancelBuild(t.claude, opened.buildId);
     assert.equal(cancelled.status, "cancelled");
-    const done = await platform.settle(opened.buildId);
+    const done = await settled(platform, opened.buildId);
     assert.equal(done.status, "cancelled", "the builder's rejection doesn't turn it into a failure");
     assert.equal(builder.jobs.length, 1, "no further attempts");
     assert.match(done.log.at(-1)!, /CANCELLED by claude-code/);
@@ -162,7 +163,7 @@ describe("platform-assigned builder", () => {
     assert.throws(() => platform.cancelBuild(t.claude, opened.buildId), /already cancelled/);
     await assert.rejects(platform.retryBuild(t.claude, opened.buildId, { fix: true }), /only failed builds can be fixed/);
     builder = fakeBuilder("fake", (job) => cpSync(SEED, job.workspace, { recursive: true }));
-    const again = await platform.settle((await platform.retryBuild(t.claude, opened.buildId)).buildId);
+    const again = await settled(platform, (await platform.retryBuild(t.claude, opened.buildId)).buildId);
     assert.equal(again.status, "promoted", again.log.join("\n"));
   });
 
@@ -185,7 +186,7 @@ describe("platform-assigned builder", () => {
     assert.equal(g.saturation, 0);
     assert.ok(!g.svg.includes("script") && g.svg.includes('<rect x="1" y="1"'));
     release();
-    await platform.settle(opened.buildId);
+    await settled(platform, opened.buildId);
     assert.equal(await platform.buildGlyph(opened.buildId), undefined, "workspace gone after promotion");
   });
 
@@ -201,7 +202,7 @@ describe("platform-assigned builder", () => {
       }),
       1,
     );
-    const done = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "runs", requirements: "r" })).buildId);
     assert.equal(done.status, "failed");
     assert.match(done.log.join("\n"), /2 of 3 test cases failed:\n  - test 'a': expected[^\n]*\n  - test 'c': expected an error/);
     assert.equal(done.failure?.title, "2 of 3 tests didn't pass");
@@ -220,7 +221,7 @@ describe("platform-assigned builder", () => {
         cpSync(SEED, job.workspace, { recursive: true });
       }),
     );
-    const done = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
     assert.match(request, /^# Build: create `running-log`\n\n\*\*Read `BRIEF\.md` in your workspace, all of it, before you write anything\*\*[^\n]*This file is the request\.\n\nRequirements: record runs\n/);
     assert.match(request, /\n\nNow read `BRIEF\.md`, all of it, before you write anything\.\n$/);
     assert.doesNotMatch(request, /## Implementation contract/, "the brief isn't in BUILDER.md");
@@ -239,7 +240,7 @@ describe("platform-assigned builder", () => {
         if (job.attempt === 1) editText(join(job.workspace, "src", "index.ts"), (s) => s.replace("runCount: r.n,", "runCount: r.n + 1,"));
       }),
     );
-    const done = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.equal(builder.jobs.length, 2);
     assert.match(builder.jobs[1].feedback!, /test 'empty summary'/);
@@ -249,7 +250,7 @@ describe("platform-assigned builder", () => {
 
   test("gives up after maxBuildAttempts; capability stays invisible", async () => {
     useBuilder(fakeBuilder("fake", () => {}), 2);
-    const done = await platform.settle((await platform.create(t.claude, { name: "Nothing", purpose: "p", requirements: "r" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { name: "Nothing", purpose: "p", requirements: "r" })).buildId);
     assert.equal(done.status, "failed");
     assert.equal(builder.jobs.length, 2);
     assert.match(done.log.at(-1)!, /no valid candidate after 2 attempts/);
@@ -263,7 +264,7 @@ describe("platform-assigned builder", () => {
         cpSync(SEED, job.workspace, { recursive: true });
       }),
     );
-    const done = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
     assert.equal(done.status, "promoted");
     assert.match(done.log[0], /builder fake failed: model overloaded/);
   });
@@ -278,7 +279,7 @@ describe("platform-assigned builder", () => {
       }),
     );
     const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index recorded_at" });
-    const done = await platform.settle(opened.buildId);
+    const done = await settled(platform, opened.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(sawManifest);
   });
@@ -304,7 +305,7 @@ describe("platform-assigned builder", () => {
     assert.ok(logs.some((l) => /fake \d+s · last: → Edit src\/index\.ts/.test(l)), "heartbeat shows activity");
 
     release();
-    const done = await platform.settle(opened.buildId);
+    const done = await settled(platform, opened.buildId);
     assert.equal(done.status, "promoted");
     assert.equal(done.progress, undefined);
     const transcript = readFileSync(`${join(t.home.builds, opened.buildId)}.log`, "utf8");
@@ -316,7 +317,7 @@ describe("platform-assigned builder", () => {
     useBuilder(fakeBuilder("fake", () => {
       throw Object.assign(new Error("Failed to authenticate: OAuth token revoked"), { unavailable: true });
     }));
-    const done = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" })).buildId);
     assert.equal(done.status, "failed");
     assert.equal(builder.jobs.length, 1);
     assert.match(done.log.at(-1)!, /unavailable.*retry this build/);
@@ -328,7 +329,7 @@ describe("platform-assigned builder", () => {
       if (!ok) throw Object.assign(new Error("not logged in"), { unavailable: true });
       cpSync(SEED, job.workspace, { recursive: true });
     }));
-    const failed = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
+    const failed = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
     assert.equal(failed.status, "failed");
     ok = true;
     const retried = await platform.retryBuild(t.claude, failed.buildId);
@@ -337,7 +338,7 @@ describe("platform-assigned builder", () => {
     assert.equal(retried.capabilityId, "running-log");
     assert.equal((retried.request as any).requirements, "record runs");
     assert.equal((retried.request as any).retryOf, failed.buildId);
-    assert.equal((await platform.settle(retried.buildId)).status, "promoted");
+    assert.equal((await settled(platform, retried.buildId)).status, "promoted");
     await assert.rejects(platform.retryBuild(t.claude, retried.buildId), (e) => e instanceof PlatformError && e.code === "conflict");
   });
 
@@ -348,9 +349,9 @@ describe("platform-assigned builder", () => {
       cpSync(SEED, job.workspace, { recursive: true });
     });
     useBuilder(builder);
-    const first = await platform.settle((await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
-    const second = await platform.settle((await platform.retryBuild(t.claude, first.buildId)).buildId);
-    const third = await platform.settle((await platform.retryBuild(t.claude, second.buildId)).buildId);
+    const first = await settled(platform, (await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "record runs" })).buildId);
+    const second = await settled(platform, (await platform.retryBuild(t.claude, first.buildId)).buildId);
+    const third = await settled(platform, (await platform.retryBuild(t.claude, second.buildId)).buildId);
     assert.deepEqual([first.status, second.status, third.status], ["failed", "failed", "promoted"]);
     assert.deepEqual(builder.jobs.map((j) => j.retryOf), [undefined, first.buildId, first.buildId]);
   });
@@ -362,9 +363,9 @@ describe("platform-assigned builder", () => {
       if (fail) throw Object.assign(new Error("usage limit reached"), { unavailable: true });
       writeFileSync(join(job.workspace, "migrations", "002_idx.sql"), "CREATE INDEX runs_recorded ON runs (recorded_at);");
     }));
-    const failed = await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "index" })).buildId);
+    const failed = await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "index" })).buildId);
     fail = false;
-    const r = await platform.settle((await platform.retryBuild(t.claude, failed.buildId)).buildId);
+    const r = await settled(platform, (await platform.retryBuild(t.claude, failed.buildId)).buildId);
     assert.equal(r.status, "promoted", r.log.join("\n"));
     assert.equal((r.request as any).request, "index");
   });

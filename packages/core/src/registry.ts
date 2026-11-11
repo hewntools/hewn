@@ -71,6 +71,10 @@ export interface BuildReview {
     /** Operations it no longer has (deprecated ones nothing uses). */
     removedOperations: string[];
   };
+  /** Held because the agent's changes wait for the owner's approval (its approval mode), whatever the change adds. */
+  approval?: "wait";
+  /** The candidate's screen as validation rendered it (`desktop-light`, `desktop-dark`, `mobile-light`, `mobile-dark`): blobs `screenshots/<build>/<name>.png`. */
+  shots?: string[];
 }
 
 /** What a build ran on (Settings › AI, or what was asked for), for the build page and Activity. */

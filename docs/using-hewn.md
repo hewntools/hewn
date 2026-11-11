@@ -42,6 +42,7 @@ Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page
 
 The **Inbox** button on the right of the top bar holds everything that needs you, with a count:
 - tools waiting for your approval of what they need (a host, a key, another tool, a model)
+- an agent's change to a tool, waiting for your approval (opening the tool shows it too)
 - agents waiting to be approved
 - schedules an agent proposed
 - builds that failed, and builds a host's builder paused (**Continue** or **Stop**)

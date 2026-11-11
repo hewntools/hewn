@@ -19,6 +19,17 @@ const CODE_TTL = 5 * 60 * 1000;
 const MAX_PENDING = { local: 20, tunnel: 10 } as const;
 const MAX_CLIENTS = 200;
 
+/**
+ * What happens to an agent's new tools, and its changes to existing ones, once they pass validation:
+ * they wait for the owner's approval, or go live after the checks (what a tool asks for, a host or a
+ * key, waits for the owner either way). Only "wait" can be chosen until Hewn's own tests guard
+ * the owner's data (0.4.12).
+ */
+export type ApprovalMode = "wait" | "live";
+export const APPROVAL_MODES: ApprovalMode[] = ["wait", "live"];
+/** Why "live" can't be chosen yet, as the owner and an agent read it. */
+export const LIVE_NOT_YET = "going live after the checks comes in 0.4.12, once Hewn's own tests guard your data; until then an agent's new tools and changes wait for your approval";
+
 /** OAuth protocol errors (RFC 6749 §5.2 codes), answered as `{error, error_description}`. */
 export class OAuthError extends Error {
   code: string;
@@ -72,6 +83,8 @@ export interface AgentDetails extends AgentInfo {
   address: string | null;
   createdAt: string;
   lastUsedAt: string | null;
+  /** Its new tools and changes: wait for the owner's approval, or go live after the checks. */
+  approvalMode: ApprovalMode;
 }
 
 export interface Tokens {
@@ -162,6 +175,8 @@ export class AgentStore {
       CREATE TABLE IF NOT EXISTS oauth_tokens (
         hash TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, client_id TEXT, expires_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS oauth_tokens_agent ON oauth_tokens (agent_id);`);
+    // Added after the table first shipped (0.4.11): every agent, existing ones included, starts at "wait".
+    if (!sql.prepare("PRAGMA table_info(agents)").all().some((c) => c.name === "approval_mode")) sql.exec("ALTER TABLE agents ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'wait'");
   }
 
   // ---------- resource server ----------
@@ -203,16 +218,26 @@ export class AgentStore {
         address: r.address ?? null,
         createdAt: r.created_at,
         lastUsedAt: r.last_used_at ?? null,
+        approvalMode: r.approval_mode === "live" ? "live" : "wait",
       }));
+  }
+
+  /** What happens to an agent's new tools and changes once they pass validation (`ApprovalMode`). One Hewn no longer knows (revoked): they wait. */
+  approvalMode(id: string): ApprovalMode {
+    return this.sql.prepare("SELECT approval_mode FROM agents WHERE id = ?").get(id)?.approval_mode === "live" ? "live" : "wait";
   }
 
   /**
    * Change an agent's scopes (within what it was approved for: never wider), its capability
-   * allowlist, or revoke it (its tokens die with it).
+   * allowlist, its approval mode (only "wait" for now), or revoke it (its tokens die with it).
    */
-  update(id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[] } | "revoke"): void {
+  update(id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke"): void {
     const r = this.sql.prepare("SELECT * FROM agents WHERE id = ?").get(id);
     if (!r) throw new PlatformError("not_found", `no agent '${id}'`);
+    if (change !== "revoke" && change.approvalMode !== undefined) {
+      if (!APPROVAL_MODES.includes(change.approvalMode)) throw new PlatformError("invalid_request", 'approvalMode must be "wait" or "live"');
+      if (change.approvalMode === "live") throw new PlatformError("invalid_request", `${r.name}: ${LIVE_NOT_YET}`);
+    }
     if (change === "revoke") {
       this.sql.prepare("DELETE FROM oauth_tokens WHERE agent_id = ?").run(id);
       this.sql.prepare("DELETE FROM agents WHERE id = ?").run(id);
@@ -224,6 +249,7 @@ export class AgentStore {
         this.sql.prepare("UPDATE agents SET scopes = ? WHERE id = ?").run(JSON.stringify(change.scopes), id);
       }
       if (change.capabilities) this.sql.prepare("UPDATE agents SET capabilities = ? WHERE id = ?").run(JSON.stringify(change.capabilities), id);
+      if (change.approvalMode) this.sql.prepare("UPDATE agents SET approval_mode = ? WHERE id = ?").run(change.approvalMode, id);
     }
     this.onChange(id);
   }

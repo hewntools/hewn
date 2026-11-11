@@ -71,6 +71,8 @@ An Agent that can invoke a Capability should not automatically receive its sourc
 
 A Builder may receive source as part of a scoped build job.
 
+An Agent with `modify` scope receives a tool's source through the pack (`capabilities_pack`), for a tool its grant shows it: writing a change itself, it is that change's Builder. An Agent that can only discover and invoke never does.
+
 Source access should eventually be independently authorizable.
 
 ## State access
@@ -172,6 +174,8 @@ This does not imply authority to:
 - access unrelated Capabilities
 
 A Builder should receive only the information needed for its build job.
+
+An Agent that writes a tool itself (`capabilities_submit`) is held to the same: it promotes nothing (its files go through the same validation as any build, and while its approval mode is `wait` the owner approves the result), and it never receives the owner's data or secrets.
 
 One exception, the owner's to make per build: a Polish with **Show the builder my own data** ticked
 (`realData`, off by default, only offered when the tool has rows of its own, never by an agent: Polish is

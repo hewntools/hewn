@@ -62,6 +62,11 @@ const SCOPES = [
   ["create", "Make new ones", "make tools"],
   ["modify", "Change existing ones", "change tools"],
 ];
+/** What happens to an agent's new tools and changes once they pass the checks (its approval mode); only "wait" can be chosen until 0.4.12. */
+const APPROVAL = [
+  ["wait", "Wait for your approval", null],
+  ["live", "Go live after the checks", "From 0.4.12, once Hewn's own tests guard your data"],
+];
 /** Scopes in words: "see, use, make". */
 const scopeWords = (scopes) => {
   const s = new Set(scopes);
@@ -319,7 +324,7 @@ function agentSheet(a, all) {
       const switches = h("div", { class: "settings-list" });
       const save = async (body, message, undo) => {
         const next = await api(`/agents/${enc(a.id)}`, { method: "PUT", body });
-        Object.assign(a, body.scopes ? { scopes: body.scopes } : {}, body.capabilities ? { capabilities: body.capabilities } : {}, next?.scopes ? { scopes: next.scopes } : {});
+        Object.assign(a, body.scopes ? { scopes: body.scopes } : {}, body.capabilities ? { capabilities: body.capabilities } : {}, body.approvalMode ? { approvalMode: body.approvalMode } : {}, next?.scopes ? { scopes: next.scopes } : {});
         render();
         toast(message, { undo });
       };
@@ -361,6 +366,15 @@ function agentSheet(a, all) {
                 ),
             ];
           })(),
+          // Its approval mode: what happens to its new tools and its changes to yours once they pass the checks.
+          (max.has("create") || max.has("modify")) && [
+            h("div", { class: "eyebrow", style: { "margin-top": "var(--s4)" } }, "Its new tools and changes"),
+            APPROVAL.map(([mode, text, sub]) => {
+              const r = h("input", { type: "radio", name: `approval-${a.id}`, value: mode, checked: (a.approvalMode ?? "wait") === mode, disabled: mode !== "wait", "aria-label": text });
+              r.addEventListener("change", () => r.checked && save({ approvalMode: mode }, `${a.name}'s new tools and changes: ${text.toLowerCase()}`).catch(fail));
+              return h("label", { class: `setting compact${mode !== "wait" ? " faint" : ""}` }, h("div", { class: "grow stack-xs" }, h("span", {}, text), sub && h("span", { class: "small faint" }, sub)), r);
+            }),
+          ],
         );
       };
       render();

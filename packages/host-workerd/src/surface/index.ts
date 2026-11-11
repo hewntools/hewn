@@ -5,8 +5,9 @@
 // listener (a reverse proxy or a tunnel, see public.ts): on the public URL's host they reach the
 // web client and capability UIs too (site.ts); on any other host only MCP and OAuth.
 import type { Platform } from "@hewntools/core/platform.ts";
+import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";
 import type { SurfaceHost } from "./host.ts";
-import { json } from "./http.ts";
+import { body, json } from "./http.ts";
 import type { McpSessions } from "./mcp-sessions.ts";
 import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
 import { CLIENT_IP_HEADER, PUBLIC_HEADER, PUBLIC_PATHS } from "./public.ts";
@@ -64,7 +65,7 @@ async function answer(platform: Platform, sessions: McpSessions, host: SurfaceHo
       const site = publicUrl ? publicSite(publicUrl) : undefined;
       const web = !!site?.isWeb(requestHost(req));
       let res: Response;
-      if (PUBLIC_PATHS.has(url.pathname)) res = await route(platform, sessions, host, req, url, true, site);
+      if (PUBLIC_PATHS.has(url.pathname) || url.pathname.startsWith(PACK_PATH)) res = await route(platform, sessions, host, req, url, true, site);
       else if (site && web) res = await browser(platform, host, site, req, url);
       else res = json(404, { error: "not_found" });
       // The browser's own traffic stays out of the log unless it fails; agents and sign-in are always logged.
@@ -84,6 +85,30 @@ async function answer(platform: Platform, sessions: McpSessions, host: SurfaceHo
     host.log(`http error: ${(e as Error).stack ?? e}`);
     return json(500, { error: "internal" });
   }
+}
+
+/**
+ * Where a link given to an agent (a pack's download) points: the local address it reached (its host
+ * is a loopback name, checked above), or on the public listener the public URL when there is one,
+ * else the host the request was forwarded for, if that is a host name (and a port). Undefined: the
+ * agent gets the link's path only.
+ */
+export function linkOrigin(origin: string, isPublic: boolean, publicUrl: string | undefined): string | undefined {
+  if (!isPublic) return origin;
+  if (publicUrl) return publicUrl;
+  const host = origin.replace(/^https:\/\//, "");
+  return /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::\d{1,5})?$/i.test(host) && !host.includes("..") ? origin : undefined;
+}
+
+/**
+ * A pack's download link (capabilities_pack's `download`): the token is the key, minted for one
+ * agent's pack inside its authenticated call, good once and for minutes. Anything else is a 404,
+ * the same whether the token never was, was used, ran out or its agent lost the pack.
+ */
+async function packDownload(platform: Platform, req: Request, token: string): Promise<Response> {
+  const zip = req.method === "GET" && /^[A-Za-z0-9_-]{43}$/.test(token) ? await platform.packDownload(token) : undefined;
+  if (!zip) return json(404, { error: "not_found" });
+  return new Response(body(zip), { headers: { "content-type": "application/zip", "content-disposition": 'attachment; filename="hewn-pack.zip"', "cache-control": "no-store", "referrer-policy": "no-referrer" } });
 }
 
 const LOOPBACK_NAMES = new Set(["127.0.0.1", "localhost", "hewn.localhost", "[::1]"]);
@@ -107,9 +132,10 @@ function browser(platform: Platform, host: SurfaceHost, site: Site, req: Request
 async function route(platform: Platform, sessions: McpSessions, host: SurfaceHost, req: Request, url: URL, isPublic: boolean, site?: Site): Promise<Response> {
   const origin = originOf(req, isPublic);
   if (OAUTH_PATHS.has(url.pathname)) return handleOAuth(platform, req, origin, { webUrl: (site ?? localSite(host.port)).web, hosted: !!host.hosted, log: host.log });
+  if (url.pathname.startsWith(PACK_PATH)) return packDownload(platform, req, url.pathname.slice(PACK_PATH.length));
   if (url.pathname !== "/mcp") return json(404, { error: "not_found" });
   const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
   const agent = platform.agentStore.authenticate(token);
   if (!agent) return challenge(origin);
-  return sessions.handle(req, agent);
+  return sessions.handle(req, agent, linkOrigin(origin.url, isPublic, platform.publicUrl()));
 }

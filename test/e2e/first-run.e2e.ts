@@ -91,11 +91,13 @@ const askToConnect = async () => {
   const html = await (await fetch(`${base}/authorize?${q}`)).text();
   agentReq = { id: /id:"([^"]+)"/.exec(html)![1], secret: /secret:"([^"]+)"/.exec(html)![1], clientId: reg.client_id };
 };
+let token: string | undefined;
 const agentToken = async () => {
+  if (token) return token;
   const poll = await (await fetch(`${base}/authorize/poll`, { method: "POST", body: new URLSearchParams({ id: agentReq!.id, secret: agentReq!.secret }) })).json();
   const code = new URL(poll.redirect).searchParams.get("code")!;
   const t = await (await fetch(`${base}/token`, { method: "POST", body: new URLSearchParams({ grant_type: "authorization_code", code, code_verifier: verifier, client_id: agentReq!.clientId, redirect_uri: redirect }) })).json();
-  return t.access_token as string;
+  return (token = t.access_token as string);
 };
 
 try {
@@ -394,6 +396,35 @@ export const operations = {
     if (r.isError || JSON.parse(r.content[0].text).result.count !== 0) throw new Error(r.content[0].text);
     await client.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  await step("an agent's change waits for the owner: the tool's tile says so and opens it, Later opens the tool as it is, Allow puts it live", async () => {
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
+    const parse = (r: any) => JSON.parse(r.content[0].text);
+    const pack = parse(await client.callTool({ name: "capabilities_pack", arguments: { kind: "modify", capabilityId: "ui-counter" } }));
+    const files = pack.files
+      .filter((f: { path: string }) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path))
+      .map((f: { path: string; content: string }) => (f.path === "capability.json" ? { ...f, content: f.content.replace(/"purpose": "([^"]*)"/, '"purpose": "$1, and again"') } : f));
+    const b = parse(await client.callTool({ name: "capabilities_submit", arguments: { files, capabilityId: "ui-counter", request: "Reword its purpose", baseVersion: pack.baseVersion } }));
+    const held = parse(await client.callTool({ name: "builds_wait", arguments: { buildId: b.buildId, timeoutSeconds: 120 } }, undefined, { timeout: 150_000 }));
+    if (held.status !== "review") throw new Error(held.log?.join("\n") ?? JSON.stringify(held));
+    await client.close();
+    await page.goto(`${web}/#/`);
+    const tile = page.locator('.tile[aria-label="UI Counter, needs you"]');
+    await tile.click();
+    const card = page.locator(".card", { hasText: "It goes live only if you allow it." });
+    await card.waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-held.png" });
+    await card.getByRole("link", { name: "Later" }).click();
+    await page.waitForURL(/#\/app\/ui-counter/);
+    await page.goto(`${web}/#/`);
+    await tile.click();
+    await card.getByRole("button", { name: "Allow", exact: true }).click();
+    await page.locator(".card", { hasText: "UI Counter is ready" }).getByRole("button", { name: "Open" }).click();
+    await page.waitForURL(/#\/app\/ui-counter/);
+    const now = (await sv.admin("call", { method: "list", args: [] })).result.find((c: any) => c.id === "ui-counter");
+    if (!/, and again$/.test(now?.purpose)) throw new Error(`purpose ${now?.purpose}`);
   });
 
   await step("a tool from a file: Share… shows its sample data, and opens on the version on screen", async () => {

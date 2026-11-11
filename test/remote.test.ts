@@ -14,6 +14,7 @@ import { openHome } from "@hewntools/cli/home.ts";
 import { normalizePublicUrl } from "@hewntools/core/platform.ts";
 import { sha256 } from "@hewntools/core/sha256.ts";
 import { b64url, fromB64url, verifyAssertion, verifyRegistration } from "@hewntools/core/webauthn.ts";
+import { linkOrigin } from "@hewntools/host-workerd/surface/index.ts";
 import { startPublicServer } from "@hewntools/test-host/server.ts";
 import { FIXTURES, installFrom, installSeed, serve, setup } from "./helpers.ts";
 
@@ -137,6 +138,13 @@ describe("the public URL", () => {
     assert.throws(() => normalizePublicUrl("https://203.0.113.4"), /domain name/);
     assert.throws(() => normalizePublicUrl("https://localhost"), /domain name/);
     assert.throws(() => normalizePublicUrl("hewn.example.com"), /look like/);
+  });
+
+  test("a link given to an agent (a pack's download): the local address; on the public listener the public URL, else a forwarded host that is a host name", () => {
+    assert.equal(linkOrigin("http://127.0.0.1:7717", false, "https://hewn.example.com"), "http://127.0.0.1:7717");
+    assert.equal(linkOrigin("https://anything.example", true, "https://hewn.example.com"), "https://hewn.example.com");
+    assert.equal(linkOrigin("https://tunnel.example.net:8443", true, undefined), "https://tunnel.example.net:8443");
+    for (const bad of ["https://evil.example/x", "https://a@b.example", "https://a b", "https://a..b", "https://-a.example", "https://"]) assert.equal(linkOrigin(bad, true, undefined), undefined, bad);
   });
 });
 
