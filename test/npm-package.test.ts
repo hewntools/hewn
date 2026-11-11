@@ -27,6 +27,7 @@ describe("the npm packages", () => {
     assert.equal(pkg.version, JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version);
     assert.deepEqual(pkg.bin, { hewn: "dist/cli.js" });
     assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["esbuild", "workerd"]);
+    assert.match(pkg.dependencies.workerd, /^\d+\.\d+\.\d+$/, "workerd exactly: the size limit needs what that version offers");
     assert.equal(pkg.private, undefined);
     const list = packed(CLI);
     for (const f of list) assert.match(f, /^(dist\/(cli\.js|host\/(worker\.js|capability-runtime\.js|capability-guard\.js|builder-brief\.md)|web\/.+|platform-ui\/.+|seeds\/.+|skills\/([\w-]+\/SKILL\.md|LICENSE)|docs\/(spec\/)?([\w-]+\.md|LICENSE))|README\.md|LICENSE|LICENSING\.md|CHANGELOG\.md|package\.json)$/, f);
