@@ -171,7 +171,7 @@ const MAX_REPLY_CHARS = 100_000;
  * an agent's; `details.archived` lets the web client and the CLI say it their own way (where to bring it back, or
  * which command).
  */
-const archivedConflict = (c: { id: string; name: string; displayName?: string | null }) =>
+export const archivedConflict = (c: { id: string; name: string; displayName?: string | null }) =>
   new PlatformError("conflict", `'${c.id}' was deleted by the owner and is kept with its data; use another id, or ask the owner to restore it`, { archived: { id: c.id, name: c.displayName ?? c.name } });
 
 export class Builds extends Domain {

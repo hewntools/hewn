@@ -371,7 +371,7 @@ async function main() {
       const result = (await res.json()) as any;
       // A deleted tool has that id: how to bring it back, or to install this one beside it.
       const archived = result.details?.archived;
-      if (!res.ok && archived) throw new Error(`${archived.name} (${archived.id}) was deleted and is kept with its data: hewn restore ${archived.id} brings it back, hewn purge ${archived.id} deletes it for good, or install this one under another name with --name <name>`);
+      if (!res.ok && archived) throw new Error(`${archived.name} (${archived.id}) was deleted and is kept with its data: hewn restore ${archived.id} brings it back, hewn purge ${archived.id} deletes it for good, or install this one under another name (${zip ? "--name <name>" : "another id in its capability.json"})`);
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
       process.exitCode = result.status === "promoted" ? 0 : 1;

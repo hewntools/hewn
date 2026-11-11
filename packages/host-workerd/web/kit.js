@@ -51,7 +51,7 @@ export async function api(path, { method = "GET", body, refresh = false } = {}) 
 /** An error as the owner reads it here, where Hewn's own words are an agent's (or a command's). */
 function ownersWords(data) {
   const archived = data?.details?.archived;
-  if (archived) return `${archived.name} was deleted and is kept with its data. Bring it back or delete it for good in Settings › Data › Deleted tools, or install this one under another name.`;
+  if (archived) return `${archived.name} was deleted and is kept with its data. Bring it back or delete it for good in Settings › Data › Deleted tools, or give the new one another name.`;
   return "";
 }
 

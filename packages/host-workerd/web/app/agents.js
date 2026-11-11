@@ -103,16 +103,19 @@ const agentKey = (name) =>
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "-");
-/** The catalog entry an id or a client's name belongs to: claude-code, claude-code-2, "Claude Code (hewn)", "Codex". */
+/**
+ * The catalog entry an id or a client's name belongs to: claude-code, claude-code-2, "Claude Code (hewn)", "Codex".
+ * A name made an id is matched against the ids; a label only as it is ("VS Code (Copilot)", not "VS Code (Cline)").
+ */
 const catalogEntry = (id, label) => {
   const keys = [String(id), agentKey(id), agentKey(label)];
-  return AGENT_CATALOG.find((c) => keys.some((k) => k === c.id || k.startsWith(`${c.id}-`) || c.match?.test(k)) || c.label === label || c.label === id || agentKey(c.label) === agentKey(label));
+  return AGENT_CATALOG.find((c) => keys.some((k) => k === c.id || k.startsWith(`${c.id}-`) || c.match?.test(k)) || c.label === label || c.label === id);
 };
 /** An agent's tile, by id (claude-code-2 → claude-code) or by its name ("Claude Code (hewn)"). */
 const agentTile = (id, label = id, size = 44) => {
   if (id === "remote") return brandTile(size);
   const entry = catalogEntry(id, label);
-  const [hue, logo, saturation] = TILES[entry?.id ?? id] ?? TILES[agentKey(label)] ?? [260, null];
+  const [hue, logo, saturation] = TILES[entry?.id ?? id] ?? [260, null];
   return logoTile(hue, logo, String(label).replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "AG", size, saturation);
 };
 /** A model provider's tile. */

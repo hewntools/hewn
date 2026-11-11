@@ -19,6 +19,7 @@ test("the core: installing or creating on a deleted tool's id is a conflict that
   const t = setup();
   try {
     await installSeed(t.platform);
+    const { bundle } = await t.platform.shareBundle(USER, "running-log");
     t.platform.archive(USER, "running-log");
     const refused = (e: unknown) =>
       e instanceof PlatformError &&
@@ -28,6 +29,12 @@ test("the core: installing or creating on a deleted tool's id is a conflict that
       (e.details as any)?.archived?.name === "Running Log";
     await assert.rejects(t.platform.install(USER, { name: "Running Log", purpose: "x", builder: `copy:${SEED}` }), refused);
     await assert.rejects(t.platform.create(t.claude, { name: "Running Log", purpose: "x", requirements: "x" }), refused);
+    // A shared file installed under that name: the same, before anything is built (the install sheet's path).
+    const staged = await t.platform.stageBundle(USER, bundle);
+    await assert.rejects(t.platform.installBundle(USER, staged.token, { name: "Running Log" }), refused);
+    // Under another name it installs.
+    const other = await t.platform.installBundle(USER, staged.token, { name: "Running Log Two" });
+    assert.equal((await t.platform.settle(other.buildId)).status, "promoted");
   } finally {
     t.cleanup();
   }
@@ -41,7 +48,7 @@ test("the web client says where to bring it back, and names no command", async (
   try {
     const { api } = (await import(join(import.meta.dirname, "../packages/host-workerd/web/kit.js"))) as { api: (path: string, o?: unknown) => Promise<unknown> };
     await assert.rejects(api("/bundles/x/install", { method: "POST", body: {} }), (e: Error) => {
-      assert.equal(e.message, "Running Log was deleted and is kept with its data. Bring it back or delete it for good in Settings › Data › Deleted tools, or install this one under another name.");
+      assert.equal(e.message, "Running Log was deleted and is kept with its data. Bring it back or delete it for good in Settings › Data › Deleted tools, or give the new one another name.");
       assert.doesNotMatch(e.message, /hewn |ask the owner/);
       return true;
     });
@@ -68,7 +75,7 @@ test("hewn install names the commands: restore, purge, or --name", async () => {
     const err = await new Promise<string>((resolve) =>
       execFile(process.execPath, ["--disable-warning=ExperimentalWarning", CLI, "install", SEED], { env: { ...process.env, HEWN_HOME: home } }, (_e, out, stderr) => resolve(stderr + out)),
     );
-    assert.match(err, /Running Log \(running-log\) was deleted and is kept with its data: hewn restore running-log brings it back, hewn purge running-log deletes it for good, or install this one under another name with --name <name>/);
+    assert.match(err, /Running Log \(running-log\) was deleted and is kept with its data: hewn restore running-log brings it back, hewn purge running-log deletes it for good, or install this one under another name \(another id in its capability\.json\)/);
   } finally {
     server.close();
     rmSync(home, { recursive: true, force: true });
