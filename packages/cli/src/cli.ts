@@ -921,7 +921,7 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
       const value = secret ? (st.missingSecrets.includes(secret) ? " (value missing)" : " (value set)") : "";
       console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : st.declinedGrants?.includes(i.grant) ? "  [you said no]" : "  [not authorized]"}`);
     }
-    for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? "(not set)"}  ${x.description}`);
+    for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? (x.suggested !== undefined ? `(not set; suggested: ${x.suggested})` : "(not set)")}  ${x.description}`);
     for (const d of st.missingDependencies) console.log(`  ✖ depends on ${d}, which no longer exists`);
     if (st.retiredModel) console.log(`  ✖ ${st.retiredModel.model} is no longer available: hewn models set ${id} ${st.retiredModel.successor ?? "<provider/model>"}`);
     else if (st.missingModel) console.log(`  ✖ model: ${st.missingModel}${/provider is set up/.test(st.missingModel) ? " (hewn models key <provider>)" : ""}`);
@@ -958,7 +958,9 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     return;
   }
   const setConfig = async (id: string, name: string, value?: string) => {
-    const v = value ?? (await rl.question(`${name} for ${id}: `)).trim();
+    // A suggested value is offered in the prompt: Enter takes it, as Save does in Hewn. Nothing is stored before.
+    const suggested = value === undefined ? ((await c.call("authorization", id)).config ?? []).find((x: { name: string }) => x.name === name)?.suggested : undefined;
+    const v = value ?? ((await rl.question(`${name} for ${id}${suggested !== undefined ? ` [${suggested}]` : ""}: `)).trim() || suggested);
     if (!v) throw new Error("empty value, nothing stored");
     await c.call("setConfig", id, name, v);
     console.log(`✔ ${name} set`);

@@ -47,3 +47,49 @@ test("hewn grants deny: says no to a host, never to a secret", async () => {
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("hewn config: a suggested value is shown, and Enter at the prompt takes it; nothing is stored before", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hewn-cli-config-"));
+  const calls: { method: string; args: unknown[] }[] = [];
+  const results: Record<string, unknown> = {
+    list: [{ id: "reviews" }],
+    get: { name: "Reviews", status: { ready: false, missingSecrets: [], missingDependencies: [] } },
+    authorization: { items: [], config: [{ name: "REPO", description: "The repository", value: null, suggested: "hewntools/hewn" }, { name: "REVIEWER", description: "Who reviews", value: null }] },
+  };
+  const server = createServer((req, res) => {
+    if (req.url === "/health") return void res.end("ok");
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      const { method, args } = JSON.parse(body);
+      calls.push({ method, args });
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ result: results[method] ?? null }));
+    });
+  }).listen(0, "127.0.0.1");
+  try {
+    await new Promise((r) => server.once("listening", r));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    writeFileSync(join(home, "supervisor.json"), JSON.stringify({ url, adminToken: "t", control: { url, token: "t" }, pid: 1 }));
+    const hewn = (input: string, ...a: string[]) =>
+      new Promise<string>((resolve, reject) => {
+        const p = execFile(process.execPath, ["--disable-warning=ExperimentalWarning", CLI, ...a], { env: { ...process.env, HEWN_HOME: home } }, (e, out, err) => (e ? reject(new Error(`hewn ${a.join(" ")}: ${err || out}`)) : resolve(out)));
+        // Answered once it asks (an early end of input would close the prompt before it's shown).
+        if (!input) return void p.stdin!.end();
+        p.stdout!.on("data", (d) => / for reviews.*: $/.test(String(d)) && p.stdin!.end(input));
+      });
+    const sets = () => calls.filter((c) => c.method === "setConfig");
+
+    assert.match(await hewn("", "config", "reviews"), /config REPO: \(not set; suggested: hewntools\/hewn\)/);
+    assert.match(await hewn("\n", "config", "reviews", "REPO"), /REPO for reviews \[hewntools\/hewn\]: ✔ REPO set/);
+    assert.deepEqual(sets().at(-1)!.args, ["reviews", "REPO", "hewntools/hewn"], "Enter takes the suggestion");
+    await hewn("hewntools/other\n", "config", "reviews", "REPO");
+    assert.deepEqual(sets().at(-1)!.args, ["reviews", "REPO", "hewntools/other"], "typing replaces it");
+    const before = sets().length;
+    await assert.rejects(hewn("\n", "config", "reviews", "REVIEWER"), /empty value, nothing stored/);
+    assert.equal(sets().length, before, "no suggestion, nothing typed: nothing stored");
+  } finally {
+    server.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
