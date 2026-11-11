@@ -25,7 +25,7 @@ import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
 import type { BundleSummary, ShelfTool } from "./bundle.ts";
 import { type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
-import { CHECKS_PER_HOUR, type ClientCheck, type Pack, Submissions } from "./platform/submissions.ts";
+import { CHECKS_PER_HOUR, type ClientCheck, type Pack, PACK_LINK_MS, PACK_PAGE_BYTES, Submissions } from "./platform/submissions.ts";
 import type { CodeFile, CodeText } from "./code.ts";
 import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
@@ -48,7 +48,7 @@ export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
 export { type SummaryInput } from "./platform/sharing.ts";
 export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReportRow, type BuildReport, slugify, RESERVED_IDS, type SubmitEntry } from "./platform/builds.ts";
-export { CHECKS_PER_HOUR, type ClientCheck, type FileEntry, type Pack, candidateFiles } from "./platform/submissions.ts";
+export { CHECKS_PER_HOUR, type ClientCheck, type FileEntry, type Pack, candidateFiles, PACK_PATH } from "./platform/submissions.ts";
 export { matches } from "./platform/validation.ts";
 export { ATTACHMENT_LIMITS, type AttachmentWithData, attachmentRefs } from "./platform/attachments.ts";
 export { type InstructionScope, type Instruction } from "./platform/instructions.ts";
@@ -141,6 +141,10 @@ export class Platform {
   version?: string;
   /** `capabilities_check` calls a client may make in an hour (PlatformOptions.checksPerHour). */
   checksPerHour: number;
+  /** The most of the pack's files one `capabilities_pack` call sends, in bytes (tests make it small). */
+  packPageBytes = PACK_PAGE_BYTES;
+  /** How long a pack's download link works (once). */
+  packLinkMs = PACK_LINK_MS;
   /** Heartbeat interval for builder liveness logging. */
   heartbeatMs = 10_000;
   /** How long a build waits after losing its builder connection before counting the attempt. */
@@ -399,7 +403,9 @@ export class Platform {
 
   // ---------- builds from anywhere: pack, check, submit for a client (platform/submissions.ts) ----------
 
-  pack(agent: Agent, req: { kind?: unknown; capabilityId?: unknown }): Promise<Pack> { return this.d.submissions.pack(agent, req); }
+  pack(agent: Agent, req: { kind?: unknown; capabilityId?: unknown; paths?: unknown }): Promise<Pack> { return this.d.submissions.pack(agent, req); }
+  /** The pack a download link (`Pack.download`) was minted for, as a zip, once; undefined otherwise. */
+  packDownload(token: string): Promise<Uint8Array | undefined> { return this.d.submissions.packDownload(token); }
   checkFiles(agent: Agent, req: { files?: unknown; capabilityId?: unknown; screenshots?: unknown }): Promise<ClientCheck> { return this.d.submissions.check(agent, req); }
   submitFiles(agent: Agent, req: { files?: unknown; capabilityId?: unknown; request?: unknown; baseVersion?: unknown }): Promise<BuildView> { return this.d.submissions.submit(agent, req); }
 

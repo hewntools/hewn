@@ -21,6 +21,8 @@ interface Session {
   transport: WebStandardStreamableHTTPServerTransport;
   signature: string;
   lastSeen: number;
+  /** Where the client reached this Hewn (its last request), for links it's given. */
+  origin: string;
 }
 
 const IDLE_MS = 2 * 60 * 60 * 1000;
@@ -82,13 +84,14 @@ export class McpSessions {
     }
   }
 
-  async handle(req: Request, agent: Agent): Promise<Response> {
+  async handle(req: Request, agent: Agent, origin: string): Promise<Response> {
     const id = req.headers.get("mcp-session-id");
     if (id) {
       const s = this.sessions.get(id);
       // Unknown, expired, or someone else's: the client starts a new session.
       if (!s || s.agent.id !== agent.id) return json(404, { jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null });
       s.agent = agent;
+      s.origin = origin;
       s.lastSeen = Date.now();
       const res = await s.transport.handleRequest(req);
       if (req.method === "DELETE") this.close(id);
@@ -96,7 +99,7 @@ export class McpSessions {
     }
     if (req.method !== "POST") return json(400, { jsonrpc: "2.0", error: { code: -32000, message: "Bad Request: Mcp-Session-Id header is required" }, id: null });
     this.evict(agent.id);
-    const session = { agent } as Session;
+    const session = { agent, origin } as Session;
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomToken(24),
       onsessioninitialized: (sid) => {
@@ -106,7 +109,7 @@ export class McpSessions {
         this.sessions.set(sid, session);
       },
     });
-    const server = createMcpServer(this.platform, () => session.agent, this.log, { widgetHtml: this.widgetHtml, docs: this.docs });
+    const server = createMcpServer(this.platform, () => session.agent, this.log, { widgetHtml: this.widgetHtml, docs: this.docs, origin: () => session.origin });
     session.server = server;
     session.transport = transport;
     transport.onclose = () => session.id && this.sessions.delete(session.id);

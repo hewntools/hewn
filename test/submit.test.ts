@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER, WEB_USER } from "@hewntools/core/auth.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
-import { type BuildView, candidateFiles, type FileEntry } from "@hewntools/core/platform.ts";
+import { type BuildView, candidateFiles, type FileEntry, type Pack, PACK_PATH } from "@hewntools/core/platform.ts";
+import { readZip } from "@hewntools/core/bundle.ts";
 import type { VisualCheck } from "@hewntools/cli/visual.ts";
 import { FIXTURES, installFrom, installSeed, SEED, setup } from "./helpers.ts";
 
@@ -43,35 +44,80 @@ describe("the pack: what a client builds from", () => {
   });
   afterEach(() => t.cleanup());
 
-  test("for a new tool: the other tools' contracts and looks and the design system, never the request or the owner's words", async () => {
+  /** Every path a pack has: this page's and the rest. */
+  const allPaths = (p: Pack) => [...p.files.map((f) => f.path), ...(p.more ?? []).map((m) => m.path)];
+  const download = (p: Pack) => t.platform.packDownload(p.download!.path.slice(PACK_PATH.length));
+
+  test("for a new tool: the other tools' contracts and looks and the design system, never the request or the owner's words; contracts in full only in its download", async () => {
     const pack = await t.platform.pack(t.claude, { kind: "create" });
-    const paths = pack.files.map((f) => f.path);
-    assert.ok(paths.includes("CONTRACTS.md"), paths.join(", "));
-    assert.ok(paths.includes(".hewn-contracts/running-log.md") && paths.includes(".hewn-contracts/ui-counter.md"));
-    assert.ok(paths.includes("OTHER_TOOLS.md"));
+    const paths = allPaths(pack);
+    assert.deepEqual(pack.files.slice(0, 2).map((f) => f.path), ["CONTRACTS.md", "OTHER_TOOLS.md"], "read first");
+    assert.ok(paths.includes("PLATFORM_UI.css"), paths.join(", "));
+    assert.ok(!paths.some((p) => p.startsWith(".hewn-contracts/")), "a tool's full contract: capabilities_get");
     for (const p of ["BUILDER.md", "OWNERS_WORDS.md", "BRIEF.md", "AGENTS.md", "capability.json"]) assert.ok(!paths.includes(p), p);
     assert.match(pack.next, /capabilities_check/);
+    assert.match(pack.download!.path, new RegExp(`^${PACK_PATH.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}[A-Za-z0-9_-]{43}$`));
+    const zip = readZip((await download(pack))!);
+    for (const p of [...paths, ".hewn-contracts/running-log.md", ".hewn-contracts/ui-counter.md"]) assert.ok(p in zip, p);
+    assert.equal(await download(pack), undefined, "once");
   });
 
   test("for a change: the tool's own files, its version and its schedules too", async () => {
     t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "get_summary", cadence: "daily 07:00" });
     const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
-    const paths = pack.files.map((f) => f.path);
-    for (const p of ["capability.json", "src/index.ts", "tests/cases.json", "sample/calls.json", "migrations/001_init.sql", "CONTRACTS.md", ".hewn-contracts/ui-counter.md"]) assert.ok(paths.includes(p), `${p} in ${paths.join(", ")}`);
-    assert.ok(!paths.includes(".hewn-contracts/running-log.md"), "not its own contract");
+    const paths = allPaths(pack);
+    for (const p of ["capability.json", "src/index.ts", "tests/cases.json", "sample/calls.json", "migrations/001_init.sql", "CONTRACTS.md"]) assert.ok(paths.includes(p), `${p} in ${paths.join(", ")}`);
     assert.equal(pack.baseVersion, 1);
     assert.deepEqual(pack.schedules?.map((s) => [s.operation, s.cadence]), [["get_summary@1", "daily 07:00"]]);
+    const zip = readZip((await download(pack))!);
+    assert.ok(".hewn-contracts/ui-counter.md" in zip && "src/index.ts" in zip);
+    assert.ok(!(".hewn-contracts/running-log.md" in zip), "not its own contract");
   });
 
-  test("a client sees only the tools its grant shows it", async () => {
+  test("a page at a time: what doesn't fit is listed with its size and fetched with paths; only the pack's own, never a contract in full", async () => {
+    t.platform.packPageBytes = 3000;
+    const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
+    const size = (fs: FileEntry[]) => fs.reduce((n, f) => n + f.content.length, 0);
+    assert.ok(pack.files.length === 1 || size(pack.files) <= 3000, String(size(pack.files)));
+    assert.ok(pack.more!.length > 1);
+    assert.match(pack.next, new RegExp(`${pack.more!.length} more of the pack's files: capabilities_pack with paths`));
+    const got = [...pack.files];
+    let more = pack.more!.map((m) => m.path);
+    while (more.length) {
+      const next = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log", paths: more });
+      assert.equal(next.download, undefined, "a link only with the first page");
+      assert.ok(next.files.length >= 1);
+      got.push(...next.files);
+      more = (next.more ?? []).map((m) => m.path);
+    }
+    const whole = readZip((await download(pack))!);
+    assert.deepEqual(got.map((f) => f.path).sort(), Object.keys(whole).filter((p) => !p.startsWith(".hewn-contracts/")).sort());
+    assert.equal(got.find((f) => f.path === "src/index.ts")!.content, new TextDecoder().decode(whole["src/index.ts"]));
+    await assert.rejects(t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log", paths: ["nope.md"] }), code("invalid_request", /not in the pack: nope\.md/));
+    await assert.rejects(t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log", paths: [".hewn-contracts/ui-counter.md"] }), code("invalid_request", /capabilities_get/));
+    await assert.rejects(t.platform.pack(t.claude, { kind: "create", paths: "CONTRACTS.md" }), code("invalid_request", /paths/));
+  });
+
+  test("a client sees only the tools its grant shows it, in its pages and its download; a link is its own, once and for minutes", async () => {
     const limited = t.platform.agentStore.approveDirect("limited", ["discover", "create", "modify"], ["running-log"]);
     const agent = t.platform.agentStore.get(limited)!;
     const pack = await t.platform.pack(agent, { kind: "create" });
-    const paths = pack.files.map((f) => f.path);
-    assert.ok(paths.includes(".hewn-contracts/running-log.md"));
-    assert.ok(!paths.some((p) => p.includes("ui-counter")), paths.join(", "));
+    assert.ok(!allPaths(pack).some((p) => p.includes("ui-counter")));
     for (const f of pack.files.filter((x) => x.path === "CONTRACTS.md" || x.path === "OTHER_TOOLS.md")) assert.doesNotMatch(f.content, /ui-counter|UI Counter/, f.path);
+    const zip = readZip((await download(pack))!);
+    assert.ok(".hewn-contracts/running-log.md" in zip);
+    assert.ok(!Object.keys(zip).some((p) => p.includes("ui-counter")), Object.keys(zip).join(", "));
     await assert.rejects(t.platform.pack(agent, { kind: "modify", capabilityId: "ui-counter" }), code("not_found"));
+    // Checked again when it's fetched: an agent that lost its scope (or the tool) gets nothing.
+    const later = await t.platform.pack(agent, { kind: "modify", capabilityId: "running-log" });
+    t.platform.agentStore.update(limited, { scopes: ["discover", "create"] });
+    assert.equal(await download(later), undefined);
+    const gone = await t.platform.pack(agent, { kind: "create" });
+    t.platform.agentStore.update(limited, "revoke");
+    assert.equal(await download(gone), undefined);
+    t.platform.packLinkMs = 0;
+    assert.equal(await download(await t.platform.pack(t.claude, { kind: "create" })), undefined, "expired");
+    assert.equal(await t.platform.packDownload("x".repeat(43)), undefined);
   });
 
   test("needs the scope the build would", async () => {

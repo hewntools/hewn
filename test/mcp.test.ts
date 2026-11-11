@@ -4,6 +4,7 @@ import type { Server } from "node:http";
 import { after, before, describe, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { readZip } from "@hewntools/core/bundle.ts";
 import { serverUrl } from "@hewntools/test-host/server.ts";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -174,6 +175,14 @@ describe("a client writes a tool over MCP: pack, check, submit", () => {
     const claude = await connect(url, TOKENS.claude);
     const pack = parse(await claude.callTool({ name: "capabilities_pack", arguments: { kind: "modify", capabilityId: "running-log" } }));
     assert.equal(pack.baseVersion, 1);
+    assert.deepEqual(pack.more.map((m: { path: string }) => m.path), ["PLATFORM_UI.css"], "the design system on the next page");
+    // The whole pack as a zip, on the address the client reached Hewn at: once.
+    assert.equal(pack.download.url.slice(0, url.length - "/mcp".length), url.slice(0, -"/mcp".length));
+    const zip = await fetch(pack.download.url);
+    assert.equal(zip.status, 200);
+    assert.equal(zip.headers.get("content-type"), "application/zip");
+    assert.ok("PLATFORM_UI.css" in readZip(new Uint8Array(await zip.arrayBuffer())));
+    assert.equal((await fetch(pack.download.url)).status, 404, "once");
     const own = pack.files.filter((f: { path: string }) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path));
     const files = own.map((f: { path: string; content: string }) => (f.path === "capability.json" ? { ...f, content: f.content.replace(/"purpose": "([^"]*)"/, '"purpose": "$1 (reworded)"') } : f));
 
@@ -184,7 +193,7 @@ describe("a client writes a tool over MCP: pack, check, submit", () => {
     assert.equal(content.filter((c) => c.type === "image" && c.mimeType === "image/png").length, 0, "Running Log has no screen to render");
     assert.equal((checked.structuredContent as { passed: boolean }).passed, true);
 
-    const refused = await claude.callTool({ name: "capabilities_submit", arguments: { files: pack.files, capabilityId: "running-log", request: "reword" } });
+    const refused = await claude.callTool({ name: "capabilities_submit", arguments: { files: [...files, { path: "PLATFORM_UI.css", content: "x" }], capabilityId: "running-log", request: "reword" } });
     assert.equal(refused.isError, true);
     assert.match(parse(refused).message, /PLATFORM_UI\.css: Hewn writes these for builders/);
 

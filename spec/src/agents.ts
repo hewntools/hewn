@@ -137,8 +137,17 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_pack",
     scopes: ["create", "modify"],
     description:
-      "To write a capability yourself instead of asking the platform's builder: first fetch what its builder finds in its workspace, and write these files into your folder. kind create: the user's other capabilities' contracts (CONTRACTS.md, .hewn-contracts/<id>.md), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. How to build one: hewn_docs (building tools, the manifest, the ABI). Then capabilities_check while you work, and capabilities_submit when the check passes.",
-    inputSchema: obj({ kind: { type: "string", enum: ["create", "modify"] }, capabilityId: str("The capability to change (kind modify)") }, ["kind"]),
+      "To write a capability yourself instead of asking the platform's builder: first fetch the pack, what its builder finds in its workspace besides the request. kind create: the user's other capabilities' contracts (CONTRACTS.md, and .hewn-contracts/<id>.md each one's in full), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. " +
+      "With a shell, download.url is the whole pack as a zip: fetch it (curl -fsSL -o pack.zip '<url>') and unzip it into your workspace; it works once, for 10 minutes. Without one: files is a page of the pack (about 40 KB), more lists the rest with their size, fetched with paths, a page at a time; read them, and write only the tool's own files into your workspace. A capability's full contract: capabilities_get. " +
+      "How to build one: hewn_docs (building tools, the manifest, the ABI). Then capabilities_check while you work, and capabilities_submit when the check passes.",
+    inputSchema: obj(
+      {
+        kind: { type: "string", enum: ["create", "modify"] },
+        capabilityId: str("The capability to change (kind modify)"),
+        paths: { type: "array", items: { type: "string" }, description: "Files from more to fetch, a page at a time (leave out for the first page)" },
+      },
+      ["kind"],
+    ),
   },
   {
     name: "capabilities_check",

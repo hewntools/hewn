@@ -4,12 +4,13 @@
 // them; Hewn validates the submission and holds it for the owner or promotes it, as any build.
 // Files travel as a list of { path, content, encoding? }; the gate itself is Builds.submit.
 import { type Agent, canSee, requireScope } from "../auth.ts";
-import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES } from "../bundle.ts";
+import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, writeZip } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { bytes, fromBase64, isArtefact, isBuilderConfig, isWorkspaceOnly, toBase64 } from "../files.ts";
+import { randomToken, sha256 } from "../sha256.ts";
 import type { CheckResult, Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
-import type { BuildView } from "./builds.ts";
+import { type BuildView, CONTRACTS_DIR } from "./builds.ts";
 import { Domain } from "./context.ts";
 
 /** A file as it travels over MCP: UTF-8 text, or base64 for anything that isn't. */
@@ -23,17 +24,41 @@ export interface FileEntry {
 export const CHECKS_PER_HOUR = 30;
 const HOUR = 3600_000;
 
+/**
+ * The most a `capabilities_pack` call sends of the pack's files (their content, in bytes); the rest
+ * are listed in `more`. About 10,000 tokens: well under what a client takes from one tool call
+ * (Claude Code: 25,000 by default).
+ */
+export const PACK_PAGE_BYTES = 40 * 1024;
+/** How long a pack's download link works (once). */
+export const PACK_LINK_MS = 10 * 60_000;
+/** Where a pack's download link points; the token follows. `/~` keeps the token out of the public listener's log. */
+export const PACK_PATH = "/_platform/pack/~";
+
 /** What `capabilities_pack` returns. */
 export interface Pack {
   kind: "create" | "modify";
   capabilityId?: string;
   /** For a change: the version its files are, to pass back as `baseVersion`. */
   baseVersion?: number;
+  /** As many of the pack's files as fit in a page (`PACK_PAGE_BYTES`); at least one. */
   files: FileEntry[];
+  /** The pack's files left out of this page, with their size: ask for them with `paths`. */
+  more?: { path: string; bytes: number }[];
+  /** The whole pack as a zip, the other tools' full contracts too: `path` (on this Hewn) works once, until `expiresAt`. Not on a call with `paths`. */
+  download?: { path: string; expiresAt: string };
   /** For a change: the owner's schedules on the tool, each running an operation by name. */
   schedules?: { operation: string; cadence: string; status: string }[];
   /** What to do next, in a line. */
   next: string;
+}
+
+/** A download link's holder: what it was minted for. Only the token's hash is kept. */
+interface PackLink {
+  agentId: string;
+  kind: "create" | "modify";
+  capabilityId?: string;
+  expires: number;
 }
 
 /**
@@ -129,6 +154,8 @@ export class Submissions extends Domain {
   private checked = new Map<string, number[]>();
   /** Each client's checks run one at a time. */
   private checking = new Map<string, Promise<unknown>>();
+  /** The pack's download links, by their token's hash, in memory: a restart ends them. */
+  private links = new Map<string, PackLink>();
 
   /**
    * What Hewn's builder finds in its workspace before it writes, for a client that writes the tool
@@ -137,27 +164,75 @@ export class Submissions extends Domain {
    * its schedules. Never the brief's request or the owner's words: the client has its own. Only the
    * tools the client may see.
    */
-  async pack(agent: Agent, req: { kind?: unknown; capabilityId?: unknown }): Promise<Pack> {
+  async pack(agent: Agent, req: { kind?: unknown; capabilityId?: unknown; paths?: unknown }): Promise<Pack> {
     if (req.kind !== "create" && req.kind !== "modify") throw new PlatformError("invalid_request", 'kind: "create" for a new tool, "modify" for a change');
     requireScope(agent, req.kind);
     if (req.kind === "create" && req.capabilityId !== undefined) throw new PlatformError("invalid_request", "a new tool has no capabilityId; leave it out, or use kind modify");
-    const visible = (id: string) => canSee(agent, id);
-    if (req.kind === "create") {
-      const files = await this.d.builds.packFiles(undefined, visible);
-      return { kind: "create", files: entries(files), next: "Write the tool in this folder, then capabilities_check it while you work and capabilities_submit it when the check passes." };
+    if (req.paths !== undefined && (!Array.isArray(req.paths) || !req.paths.length || req.paths.some((p) => typeof p !== "string"))) throw new PlatformError("invalid_request", "paths: the files to fetch, from the pack's more");
+    if (req.kind === "modify" && typeof req.capabilityId !== "string") throw new PlatformError("invalid_request", "capabilityId: the tool to change");
+    const cap = req.kind === "modify" ? this.visibleActive(agent, req.capabilityId as string) : undefined;
+    const all = await this.packOf(agent, cap?.id);
+    // The other tools' full contracts come with the download, or from capabilities_get: never in pages.
+    const paged = Object.fromEntries(Object.entries(all).filter(([p]) => !p.startsWith(`${CONTRACTS_DIR}/`)));
+    const asked = req.paths as string[] | undefined;
+    if (asked) {
+      const missing = asked.filter((p) => !(p in paged));
+      if (missing.length) throw new PlatformError("invalid_request", `not in the pack: ${missing.join(", ")}${missing.some((p) => p.startsWith(`${CONTRACTS_DIR}/`)) ? ` (a tool's full contract: capabilities_get it)` : ""}`);
     }
-    if (typeof req.capabilityId !== "string") throw new PlatformError("invalid_request", "capabilityId: the tool to change");
-    const cap = this.visibleActive(agent, req.capabilityId);
-    const files = await this.d.builds.packFiles(cap.id, visible);
+    const { files, more } = page(asked ?? packOrder(paged), paged, this.platform.packPageBytes);
+    const download = asked ? undefined : this.packLink(agent, req.kind, cap?.id);
+    const rest = more.length ? ` ${more.length} more of the pack's files: capabilities_pack with paths for them, a page at a time.` : "";
+    const head = { files, ...(more.length ? { more } : {}), ...(download ? { download } : {}) };
+    if (!cap) return { kind: "create", ...head, next: `Read these, write the tool in your workspace, then capabilities_check it while you work and capabilities_submit it when the check passes.${rest}` };
     const schedules = this.schedules.list(cap.id).map((s) => ({ operation: `${s.operation}@${s.operationVersion}`, cadence: s.cadence, status: s.status }));
     return {
       kind: "modify",
       capabilityId: cap.id,
       baseVersion: cap.activeVersion!,
-      files: entries(files),
+      ...head,
       ...(schedules.length ? { schedules } : {}),
-      next: `These are v${cap.activeVersion}'s files. Change them here, keep every operation version in schedules (each runs exactly that one), then capabilities_check with capabilityId while you work and capabilities_submit with capabilityId and baseVersion ${cap.activeVersion} when the check passes. Send the tool's files only, not the contracts, looks or design system.`,
+      next: `The tool's files are v${cap.activeVersion}'s. Change them in your workspace, keep every operation version in schedules (each runs exactly that one), then capabilities_check with capabilityId while you work and capabilities_submit with capabilityId and baseVersion ${cap.activeVersion} when the check passes. Send the tool's files only, not the contracts, looks or design system.${rest}`,
     };
+  }
+
+  /** The whole pack for `agent`: the other tools it may see, and for a change (`capabilityId`) the tool's files. */
+  private packOf(agent: Agent, capabilityId?: string): Promise<Files> {
+    return this.d.builds.packFiles(capabilityId, (id) => canSee(agent, id));
+  }
+
+  /** A download link for the pack: a fresh token, of which only the hash is kept, for `PACK_LINK_MS`. */
+  private packLink(agent: Agent, kind: "create" | "modify", capabilityId?: string): { path: string; expiresAt: string } {
+    const now = Date.now();
+    for (const [h, l] of this.links) if (l.expires <= now) this.links.delete(h);
+    // A handful a client at most: an older one goes.
+    const mine = [...this.links].filter(([, l]) => l.agentId === agent.id);
+    for (const [h] of mine.slice(0, Math.max(0, mine.length - 4))) this.links.delete(h);
+    const token = randomToken(32);
+    const expires = now + this.platform.packLinkMs;
+    this.links.set(sha256(token), { agentId: agent.id, kind, ...(capabilityId ? { capabilityId } : {}), expires });
+    return { path: `${PACK_PATH}${token}`, expiresAt: new Date(expires).toISOString() };
+  }
+
+  /**
+   * The pack a download link was minted for, as a zip, once: the link goes as it's used, and on
+   * expiry. Undefined when it isn't (or is no longer) a link, or its client may no longer have the
+   * pack (its scope, the tool, its grant), which is all the same to whoever asks.
+   */
+  async packDownload(token: string): Promise<Uint8Array | undefined> {
+    const h = sha256(token);
+    const link = this.links.get(h);
+    if (!link) return undefined;
+    this.links.delete(h);
+    if (link.expires <= Date.now()) return undefined;
+    const agent = this.agentStore.get(link.agentId);
+    if (!agent?.scopes.has(link.kind)) return undefined;
+    try {
+      const cap = link.capabilityId ? this.visibleActive(agent, link.capabilityId) : undefined;
+      return writeZip(await this.packOf(agent, cap?.id));
+    } catch (e) {
+      if (e instanceof PlatformError) return undefined;
+      throw e;
+    }
   }
 
   /**
@@ -236,7 +311,22 @@ export class Submissions extends Domain {
   }
 }
 
-const entries = (files: Files): FileEntry[] =>
-  Object.keys(files)
-    .sort()
-    .map((p) => entryOf(p, files[p]));
+/** A pack's files as a client reads them first: the other tools' contracts and looks, the tool's own files (smallest first), then the design system. */
+function packOrder(files: Files): string[] {
+  const rank = (p: string) => (p === "CONTRACTS.md" ? 0 : p === "OTHER_TOOLS.md" ? 1 : p === "PLATFORM_UI.css" ? 3 : 2);
+  return Object.keys(files).sort((a, b) => rank(a) - rank(b) || files[a].length - files[b].length || a.localeCompare(b));
+}
+
+/** `paths` of `files`, in order, as many as fit in `budget` bytes (at least one); the rest, with their size. */
+function page(paths: string[], files: Files, budget: number): { files: FileEntry[]; more: { path: string; bytes: number }[] } {
+  const taken: FileEntry[] = [];
+  const more: { path: string; bytes: number }[] = [];
+  let used = 0;
+  for (const path of [...new Set(paths)]) {
+    const e = entryOf(path, files[path]);
+    const size = e.content.length;
+    if (taken.length && used + size > budget) more.push({ path, bytes: size });
+    else (taken.push(e), (used += size));
+  }
+  return { files: taken, more };
+}
