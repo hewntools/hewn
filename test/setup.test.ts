@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import type { PendingRequest } from "@hewntools/core/agents.ts";
 import { openHome, type Home } from "@hewntools/cli/home.ts";
 import { MARKDOWN, removeBlock, SHELL, upsertBlock } from "@hewntools/cli/setup/blocks.ts";
-import { type Exec, harnesses } from "@hewntools/cli/setup/harnesses.ts";
+import { readSkill } from "@hewntools/cli/app-dir.ts";
+import { type Exec, harnesses, refreshSkill, SKILL_DIRS, skillDir } from "@hewntools/cli/setup/harnesses.ts";
 import { authorizeUrl } from "@hewntools/cli/setup/connect.ts";
 import { runSetup } from "@hewntools/cli/setup/wizard.ts";
 
@@ -137,6 +138,23 @@ describe("hewn setup", () => {
     await run({ agents: ["codex"], yes: true });
     assert.equal(readFileSync(profile, "utf8"), "alias x=y\nexport PATH=/x\n");
     assert.equal(removeBlock(profile, SHELL), false, "gone");
+  });
+
+  test("the Skill build-a-hewn-tool: into each agent's skills folder (Claude Code's own; ~/.agents for Codex and OpenCode), written again on every setup and on upgrade; nothing else there touched", async () => {
+    const mine = join(userHome, ".agents", "skills", "my-own", "SKILL.md");
+    mkdirSync(join(userHome, ".agents", "skills", "my-own"), { recursive: true });
+    writeFileSync(mine, "mine");
+    assert.deepEqual(refreshSkill(userHome, "next"), [], "an upgrade writes it only where setup put it");
+    await run({ agents: ["claude-code", "codex"], yes: true, pointer: false });
+    const skill = readSkill()!;
+    assert.match(skill, /^---\nname: build-a-hewn-tool\n/);
+    for (const dir of SKILL_DIRS(userHome)) assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), skill, dir);
+    writeFileSync(join(skillDir(userHome, "agents"), "SKILL.md"), "stale");
+    await run({ agents: ["codex"], yes: true });
+    assert.equal(readFileSync(join(skillDir(userHome, "agents"), "SKILL.md"), "utf8"), skill, "every setup writes it again");
+    assert.deepEqual(refreshSkill(userHome, "next"), SKILL_DIRS(userHome));
+    for (const dir of SKILL_DIRS(userHome)) assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), "next");
+    assert.equal(readFileSync(mine, "utf8"), "mine");
   });
 
   test("re-running is idempotent and keeps user edits", async () => {

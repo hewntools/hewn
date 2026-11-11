@@ -221,6 +221,9 @@ async function main() {
         if (!r.changed) return console.log(`✔ already on ${r.to}`);
         console.log(`✔ ${r.from} → ${r.to}`);
       }
+      // The Skill as this version ships it, wherever setup put it (read from the code on disk now).
+      const { refreshSkill } = await import("./setup/harnesses.ts");
+      for (const dir of refreshSkill(defaultHome())) console.log(`✔ the Skill build-a-hewn-tool updated in ${dir}`);
       const b = backupNow(home, backupLocation(home, readConfig(home).backupDir).dir);
       console.log(`✔ backed up: ${b.file}`);
       if (service.status().installed) {

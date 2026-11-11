@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { SKILL_NAME } from "@hewntools/core/skill.ts";
 import type { HarnessStatus } from "@hewntools/host-workerd/surface/host.ts";
+import { readSkill } from "../app-dir.ts";
 import { MARKDOWN, removeBlock, SHELL, writeBlock } from "./blocks.ts";
 import { CLI_AGENTS } from "../builders/cli-agents.ts";
 import { opencodeConfigDir, opencodeUserDirs } from "../builders/opencode-dirs.ts";
@@ -16,12 +18,14 @@ export interface SetupContext {
   home: string;
   /** Add the instruction-file pointer even where it is optional. */
   pointer: boolean;
+  /** SKILL.md of the Skill "build a Hewn tool", for the agent's skills folder (left out: the one this Hewn ships; empty: none). */
+  skill?: string;
 }
 
 export interface Step {
   describe: string;
   /** What the step does, for the web client to word plainly. */
-  kind: "register" | "pointer" | "cleanup";
+  kind: "register" | "pointer" | "skill" | "cleanup";
   /** File the step writes, if any. */
   file?: string;
   run: () => void;
@@ -114,7 +118,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
           const file = join(ctx.home, ".claude", "CLAUDE.md");
           steps.push({ describe: `add Hewn pointer block to ${file}`, kind: "pointer", file, run: () => writeBlock(file, AGENT_POINTER, MARKDOWN) });
         }
-        return steps;
+        return [...steps, ...skillSteps(ctx, "claude")];
       },
     },
     {
@@ -156,6 +160,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
             },
           },
           { describe: `add Hewn pointer block to ${agentsMd}`, kind: "pointer", file: agentsMd, run: () => writeBlock(agentsMd, AGENT_POINTER, MARKDOWN) },
+          ...skillSteps(ctx, "agents"),
         );
         return steps;
       },
@@ -188,11 +193,38 @@ export function harnesses(exec: Exec = realExec): Harness[] {
             },
           },
           { describe: `add Hewn pointer block to ${agentsMd}`, kind: "pointer", file: agentsMd, run: () => writeBlock(agentsMd, AGENT_POINTER, MARKDOWN) },
+          ...skillSteps(ctx, "agents"),
         ];
       },
     },
   ];
 }
+
+/**
+ * Where an agent loads the Skill from in your home: Claude Code from its own skills folder, Codex and
+ * OpenCode from `~/.agents/skills` (OpenCode reads Claude Code's too). Hewn only ever touches its own
+ * Skill's folder there.
+ */
+export const skillDir = (home: string, where: "claude" | "agents") => join(home, where === "claude" ? ".claude" : ".agents", "skills", SKILL_NAME);
+export const SKILL_DIRS = (home: string) => [skillDir(home, "claude"), skillDir(home, "agents")];
+
+/** The Skill into an agent's skills folder, replacing what was there (none when there's no Skill to give). */
+function skillSteps(ctx: SetupContext, where: "claude" | "agents"): Step[] {
+  const text = ctx.skill ?? readSkill();
+  if (!text) return [];
+  const dir = skillDir(ctx.home, where);
+  const file = join(dir, "SKILL.md");
+  return [{ describe: `write the Skill ${SKILL_NAME} to ${file}`, kind: "skill", file, run: () => (mkdirSync(dir, { recursive: true }), writeFileSync(file, text)) }];
+}
+
+/** After an upgrade: the Skill again wherever setup put it, as this Hewn now ships it. The folders it went to. */
+export function refreshSkill(home: string, text: string | undefined = readSkill()): string[] {
+  if (!text) return [];
+  return SKILL_DIRS(home).filter((dir) => existsSync(join(dir, "SKILL.md")) && (writeFileSync(join(dir, "SKILL.md"), text), true));
+}
+
+/** Uninstall: Hewn's Skill folders, where setup put them. */
+export const removeSkill = (dir: string) => rmSync(dir, { recursive: true, force: true });
 
 /** OpenCode's global config directory: `$XDG_CONFIG_HOME/opencode` for your own home, else `<home>/.config/opencode`. */
 export { opencodeConfigDir };
