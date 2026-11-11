@@ -9,7 +9,7 @@ import { PlatformError } from "@hewntools/core/errors.ts";
 import { MemorySecretStore } from "@hewntools/test-host/secrets.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { cssWithoutComments } from "@hewntools/core/platform/builds.ts";
-import { FIXTURES, OPENCODE_READ, type Script, setup } from "./helpers.ts";
+import { FIXTURES, OPENCODE_READ, type Script, settled, setup } from "./helpers.ts";
 
 /** The builder writes the site-connection fixture (a connection). */
 const writeConnection: Script = (ws) => cpSync(join(FIXTURES, "site-connection"), ws, { recursive: true });
@@ -47,8 +47,8 @@ describe("dependent builds", () => {
 
   test("a capability waits for the connection it calls, then builds", async () => {
     t.queue(writeConnection, writeConsumer);
-    const conn = await t.platform.create(t.claude, connReq);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const conn = await t.platform.create(USER, connReq);
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     assert.equal(consumer.status, "waiting");
     assert.equal(consumer.dependsOn, conn.buildId);
     assert.equal(consumer.step?.step, "waiting");
@@ -62,14 +62,34 @@ describe("dependent builds", () => {
     assert.ok(done.log.some((l) => /calls site-connection\/site@1/.test(l)));
   });
 
+  test("an agent's connection waits for the owner (approval mode wait), and so does what waits for it: turned down, it fails; approved, it builds", async () => {
+    t.queue(writeConnection);
+    const conn = await t.platform.create(t.claude, connReq);
+    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const held = await t.platform.settle(conn.buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    assert.equal(held.review!.connection, true);
+    assert.equal(t.platform.getBuild(t.claude, consumer.buildId).status, "waiting", "not before the owner decides");
+    await t.platform.rejectBuild(USER, conn.buildId);
+    assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
+
+    t.queue(writeConnection, writeConsumer);
+    const again = await t.platform.create(t.claude, connReq);
+    const next = await t.platform.create(t.claude, { ...consumerReq, after: again.buildId });
+    assert.equal((await t.platform.settle(again.buildId)).status, "review");
+    await t.platform.approveBuild(USER, again.buildId);
+    const done = await settled(t.platform, next.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+  });
+
   test("a new connection shows as a connection while it builds (Accounts, not Home)", async () => {
     let release!: () => void;
     t.queue(async (ws) => {
       await new Promise<void>((r) => (release = r));
       writeConnection(ws, undefined as never);
     }, writeConsumer);
-    const conn = await t.platform.create(t.claude, connReq);
-    const other = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const conn = await t.platform.create(USER, connReq);
+    const other = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     const active = t.platform.activeBuilds();
     assert.equal(active.find((b) => b.buildId === conn.buildId)?.connection, true);
     assert.equal(active.find((b) => b.buildId === other.buildId)?.connection, false);
@@ -84,7 +104,7 @@ describe("dependent builds", () => {
       css = readFileSync(join(ws, "PLATFORM_UI.css"), "utf8");
       writeConnection(ws, undefined as never);
     });
-    const done = await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    const done = await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     assert.match(css, /--field/, "the real ui.css");
     // Without its comments but the header and how to use a component (marked /*! … */), so a builder reads all of it; every rule kept.
     const ui = readFileSync(join(import.meta.dirname, "..", "packages", "ui", "src", "ui.css"), "utf8");
@@ -110,23 +130,23 @@ describe("dependent builds", () => {
       seen = JSON.stringify(JSON.parse(readFileSync(join(ws, "capability.json"), "utf8")));
       writeConnection(ws, undefined as never);
     });
-    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     assert.match(seen, /"abi":"2.1","kind":"connection"/);
   });
 
   test("when the dependency fails, the waiting build fails; retried in order, both promote", async () => {
     t.queue(broken);
-    const conn = await t.platform.create(t.claude, connReq);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const conn = await t.platform.create(USER, connReq);
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     assert.equal((await t.platform.settle(conn.buildId)).status, "failed");
     const failed = await t.platform.settle(consumer.buildId);
     assert.equal(failed.status, "failed");
     assert.match(failed.log.join("\n"), new RegExp(`build ${conn.buildId}, which it waited for, failed`));
-    await assert.rejects(t.platform.retryBuild(t.claude, consumer.buildId), /retry it first/);
+    await assert.rejects(t.platform.retryBuild(USER, consumer.buildId), /retry it first/);
 
     t.queue(writeConnection, writeConsumer);
-    const conn2 = await t.platform.retryBuild(t.claude, conn.buildId);
-    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    const conn2 = await t.platform.retryBuild(USER, conn.buildId);
+    const consumer2 = await t.platform.retryBuild(USER, consumer.buildId);
     assert.equal(consumer2.status, "waiting", "the retry waits for the dependency's retry");
     assert.equal(consumer2.dependsOn, conn2.buildId);
     assert.equal((await t.platform.settle(conn2.buildId)).status, "promoted");
@@ -135,27 +155,27 @@ describe("dependent builds", () => {
 
   test("when the dependency failed and a new create of its name went live, the waiting build's retry starts at once", async () => {
     t.queue(broken);
-    const conn = await t.platform.create(t.claude, connReq);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const conn = await t.platform.create(USER, connReq);
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
     t.queue(writeConnection, writeConsumer);
-    assert.equal((await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId)).status, "promoted");
-    await assert.rejects(t.platform.retryBuild(t.claude, conn.buildId), /has been created since/);
-    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    assert.equal((await t.platform.settle((await t.platform.create(USER, connReq)).buildId)).status, "promoted");
+    await assert.rejects(t.platform.retryBuild(USER, conn.buildId), /has been created since/);
+    const consumer2 = await t.platform.retryBuild(USER, consumer.buildId);
     assert.notEqual(consumer2.status, "waiting");
     assert.equal((await t.platform.settle(consumer2.buildId)).status, "promoted");
   });
 
   test("when the dependency failed and a new create of its name is on its way, the waiting build's retry waits for that one", async () => {
     t.queue(broken);
-    const conn = await t.platform.create(t.claude, connReq);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const conn = await t.platform.create(USER, connReq);
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     assert.equal((await t.platform.settle(consumer.buildId)).status, "failed");
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     t.queue(async (ws, job) => (await gate, writeConnection(ws, job)), writeConsumer);
-    const conn2 = await t.platform.create(t.claude, connReq);
-    const consumer2 = await t.platform.retryBuild(t.claude, consumer.buildId);
+    const conn2 = await t.platform.create(USER, connReq);
+    const consumer2 = await t.platform.retryBuild(USER, consumer.buildId);
     assert.equal(consumer2.status, "waiting");
     assert.equal(consumer2.dependsOn, conn2.buildId);
     release();
@@ -165,22 +185,22 @@ describe("dependent builds", () => {
 
   test("after a promoted build starts at once; after a failed one is refused", async () => {
     t.queue(writeConnection);
-    const conn = await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    const conn = await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     t.queue(writeConsumer);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     assert.notEqual(consumer.status, "waiting");
     assert.equal((await t.platform.settle(consumer.buildId)).status, "promoted");
 
     t.queue(broken);
-    const bad = await t.platform.settle((await t.platform.create(t.claude, { name: "Other", purpose: "p", requirements: "r" })).buildId);
-    await assert.rejects(t.platform.create(t.claude, { name: "Third", purpose: "p", requirements: "r", after: bad.buildId }), (e) => e instanceof PlatformError && e.code === "conflict");
+    const bad = await t.platform.settle((await t.platform.create(USER, { name: "Other", purpose: "p", requirements: "r" })).buildId);
+    await assert.rejects(t.platform.create(USER, { name: "Third", purpose: "p", requirements: "r", after: bad.buildId }), (e) => e instanceof PlatformError && e.code === "conflict");
   });
 
   test("a modify can wait for another build (the connection's new operation first)", async () => {
     t.queue(writeConnection);
-    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     t.queue(writeConsumer);
-    await t.platform.settle((await t.platform.create(t.claude, consumerReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, consumerReq)).buildId);
 
     t.queue(
       (ws) => {
@@ -204,16 +224,16 @@ describe("dependent builds", () => {
     assert.equal((await t.platform.settle(connChange.buildId)).status, "review");
     assert.equal(t.platform.getBuild(t.claude, change.buildId).status, "waiting");
     assert.equal((await t.platform.approveBuild(USER, connChange.buildId)).status, "promoted");
-    const done = await t.platform.settle(change.buildId);
+    const done = await settled(t.platform, change.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.ok(done.log.some((l) => /site-connection\/pages@1/.test(l)));
   });
 
   test("a change that waited for another build still takes its turn behind a change to the same capability", async () => {
     t.queue(writeConnection);
-    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     t.queue(writeConsumer);
-    await t.platform.settle((await t.platform.create(t.claude, consumerReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, consumerReq)).buildId);
 
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -224,7 +244,8 @@ describe("dependent builds", () => {
       async () => void (await connGate),
       () => {},
     );
-    const running = await t.platform.modify(t.claude, { capabilityId: "site-report", request: "reword" });
+    // The owner's: an agent's change would wait for the owner, and a change held for review holds nothing up.
+    const running = await t.platform.modify(USER, { capabilityId: "site-report", request: "reword" });
     const connChange = await t.platform.modify(USER, { capabilityId: "site-connection", request: "tidy" });
     const change = await t.platform.modify(t.claude, { capabilityId: "site-report", request: "after the connection", after: connChange.buildId });
     assert.equal(change.dependsOn, connChange.buildId);
@@ -237,13 +258,13 @@ describe("dependent builds", () => {
     assert.equal(queued.queued, true);
     release();
     assert.equal((await t.platform.settle(running.buildId)).status, "promoted");
-    const done = await t.platform.settle(change.buildId);
+    const done = await settled(t.platform, change.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
   });
 
   test("a change waiting for the owner's review doesn't hold up the next change to the capability", async () => {
     t.queue(writeConnection);
-    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     // An agent's change to a connection waits for the owner's review.
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -266,10 +287,10 @@ describe("dependent builds", () => {
       await new Promise<void>((r) => (release = r));
       writeConnection(ws, undefined as never);
     });
-    const conn = await t.platform.create(t.claude, connReq);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
-    const third = await t.platform.create(t.claude, { name: "Third", purpose: "p", requirements: "r", after: consumer.buildId });
-    assert.equal(t.platform.cancelBuild(t.claude, consumer.buildId).status, "cancelled");
+    const conn = await t.platform.create(USER, connReq);
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
+    const third = await t.platform.create(USER, { name: "Third", purpose: "p", requirements: "r", after: consumer.buildId });
+    assert.equal(t.platform.cancelBuild(USER, consumer.buildId).status, "cancelled");
     const f = await t.platform.settle(third.buildId);
     assert.equal(f.status, "failed");
     assert.match(f.log.join("\n"), /which it waited for, cancelled/);
@@ -288,7 +309,7 @@ describe("a queued change released while every build slot is taken", () => {
 
   test("it counts as started: the owner's answer to the review ahead of it doesn't start it again", async () => {
     t.queue(writeConnection);
-    await t.platform.settle((await t.platform.create(t.claude, connReq)).buildId);
+    await t.platform.settle((await t.platform.create(USER, connReq)).buildId);
     let releaseA!: () => void;
     let releaseX!: () => void;
     const gateA = new Promise<void>((r) => (releaseA = r));
@@ -304,7 +325,7 @@ describe("a queued change released while every build slot is taken", () => {
     const b = await t.platform.modify(USER, { capabilityId: "site-connection", request: "b" });
     assert.equal(b.queued, true);
     // X takes the slot A gives up, so B, released when A goes to review, waits for a slot.
-    const x = await t.platform.create(t.claude, consumerReq);
+    const x = await t.platform.create(USER, consumerReq);
     releaseA();
     assert.equal((await t.platform.settle(a.buildId)).status, "review");
     for (let i = 0; i < 200 && !t.platform.getBuild(USER, b.buildId).log.length; i++) await new Promise((r) => setTimeout(r, 10));
@@ -439,8 +460,8 @@ describe("dependent builds across a restart", () => {
     const t = setup();
     // The first platform's builder never finishes: Hewn "stops" mid-build.
     t.queue(() => new Promise<void>(() => {}));
-    const conn = await t.platform.create(t.claude, connReq);
-    const consumer = await t.platform.create(t.claude, { ...consumerReq, after: conn.buildId });
+    const conn = await t.platform.create(USER, connReq);
+    const consumer = await t.platform.create(USER, { ...consumerReq, after: conn.buildId });
     t.platform.close();
 
     const scripts: Script[] = [writeConnection, writeConsumer];

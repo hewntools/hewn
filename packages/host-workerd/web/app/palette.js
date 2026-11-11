@@ -23,7 +23,8 @@ export { commandPalette };
  */
 async function paletteItems() {
   const [capsMap, hub] = await Promise.all([caps().catch(() => new Map()), api("/hub").catch(() => ({ tools: [] }))]);
-  const all = [...capsMap.values()].filter((c) => c.version || c.building);
+  // A new tool held for the owner too: opening it shows its review card.
+  const all = [...capsMap.values()].filter((c) => c.version || c.building || c.held);
   const tools = all.filter((c) => c.kind !== "connection");
   const tile = (key) => glyphTile(PALETTE_GLYPHS[key], 24);
   const place = (label, href, words = "", glyph = "settings") => [label, "Go to", () => go(href), tile(glyph), words];

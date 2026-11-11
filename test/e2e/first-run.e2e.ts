@@ -93,11 +93,13 @@ const askToConnect = async () => {
   const html = await (await fetch(`${base}/authorize?${q}`)).text();
   agentReq = { id: /id:"([^"]+)"/.exec(html)![1], secret: /secret:"([^"]+)"/.exec(html)![1], clientId: reg.client_id };
 };
+let token: string | undefined;
 const agentToken = async () => {
+  if (token) return token;
   const poll = await (await fetch(`${base}/authorize/poll`, { method: "POST", body: new URLSearchParams({ id: agentReq!.id, secret: agentReq!.secret }) })).json();
   const code = new URL(poll.redirect).searchParams.get("code")!;
   const t = await (await fetch(`${base}/token`, { method: "POST", body: new URLSearchParams({ grant_type: "authorization_code", code, code_verifier: verifier, client_id: agentReq!.clientId, redirect_uri: redirect }) })).json();
-  return t.access_token as string;
+  return (token = t.access_token as string);
 };
 
 try {
@@ -117,9 +119,12 @@ try {
     await page.locator(".inbox-count:not([hidden])").waitFor({ timeout: 20_000 });
     await page.locator(".inbox-btn").click();
     const row = page.locator(".inbox-row", { hasText: "wants to connect" });
+    // "Claude Code (hewn)" is Claude Code: its logo, not the letters "CL".
+    await row.locator(".icon-mask.logo").waitFor();
     await row.click();
     const sheet = page.locator("dialog[open]", { hasText: "Claude Code (hewn) wants to connect" });
     await sheet.waitFor();
+    await sheet.locator(".app-icon .icon-mask.logo").first().waitFor();
     const code = (await sheet.locator(".user-code").textContent())!.trim();
     if (!/^[A-Z0-9]{3}-[A-Z0-9]{3}$/.test(code)) throw new Error(`code ${code}`);
     await sheet.getByRole("checkbox", { name: "Make new ones" }).uncheck();
@@ -430,6 +435,35 @@ export const operations = {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  await step("an agent's change waits for the owner: the tool's tile says so and opens it, Later opens the tool as it is, Allow puts it live", async () => {
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
+    const parse = (r: any) => JSON.parse(r.content[0].text);
+    const pack = parse(await client.callTool({ name: "capabilities_pack", arguments: { kind: "modify", capabilityId: "ui-counter" } }));
+    const files = pack.files
+      .filter((f: { path: string }) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path))
+      .map((f: { path: string; content: string }) => (f.path === "capability.json" ? { ...f, content: f.content.replace(/"purpose": "([^"]*)"/, '"purpose": "$1, and again"') } : f));
+    const b = parse(await client.callTool({ name: "capabilities_submit", arguments: { files, capabilityId: "ui-counter", request: "Reword its purpose", baseVersion: pack.baseVersion } }));
+    const held = parse(await client.callTool({ name: "builds_wait", arguments: { buildId: b.buildId, timeoutSeconds: 120 } }, undefined, { timeout: 150_000 }));
+    if (held.status !== "review") throw new Error(held.log?.join("\n") ?? JSON.stringify(held));
+    await client.close();
+    await page.goto(`${web}/#/`);
+    const tile = page.locator('.tile[aria-label="UI Counter, needs you"]');
+    await tile.click();
+    const card = page.locator(".card", { hasText: "It goes live only if you allow it." });
+    await card.waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-held.png" });
+    await card.getByRole("link", { name: "Later" }).click();
+    await page.waitForURL(/#\/app\/ui-counter/);
+    await page.goto(`${web}/#/`);
+    await tile.click();
+    await card.getByRole("button", { name: "Allow", exact: true }).click();
+    await page.locator(".card", { hasText: "UI Counter is ready" }).getByRole("button", { name: "Open" }).click();
+    await page.waitForURL(/#\/app\/ui-counter/);
+    const now = (await sv.admin("call", { method: "list", args: [] })).result.find((c: any) => c.id === "ui-counter");
+    if (!/, and again$/.test(now?.purpose)) throw new Error(`purpose ${now?.purpose}`);
+  });
+
   await step("a tool from a file: Share… shows its sample data, and opens on the version on screen", async () => {
     const files = { ...readTree(SEED), "sample/calls.json": Buffer.from(JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }])) };
     const zip = packBundle(files, { format: 1, hewn: "e2e", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 1, hash: "d".repeat(64) } });
@@ -535,6 +569,26 @@ export const operations = {
     const r = await asked;
     if (r.headers()["x-hewn-refresh"] !== "1") throw new Error("a refresh without the x-hewn-refresh header");
     page.off("request", watch);
+  });
+
+  await step("a failed build: Discard takes it off the Inbox; Activity keeps it, marked discarded", async () => {
+    // A tool whose own tests fail: installed from a directory, it fails on its own (no builder to ask).
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-broken-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "broken-counter", name: "Broken Counter" }));
+    writeFileSync(join(dir, "tests/cases.json"), JSON.stringify([{ name: "never", operation: "get", input: {}, expect: { count: 99 } }]));
+    const b = await sv.admin("install", { name: "Broken Counter", purpose: "Counts, wrongly", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (b.status !== "failed") throw new Error(`expected a failed build, got ${b.status}`);
+    const inInbox = () => page.evaluate(async (id: string) => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { buildId?: string }[]).some((n) => n.buildId === id), b.buildId);
+    if (!(await inInbox())) throw new Error("the failed build isn't in the Inbox");
+    await page.goto(`${web}/#/b/${b.buildId}`);
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page.getByText("Discarded: it's out of the Inbox, and stays in Activity.").waitFor();
+    if (await inInbox()) throw new Error("still in the Inbox after Discard");
+    await page.goto(`${web}/#/activity`);
+    // A create that never installed goes by its id.
+    await page.locator("li", { hasText: "broken-counter" }).filter({ hasText: "discarded" }).first().waitFor();
   });
 
   await step("New: Stop puts the message back with Stopped., which goes once the next one is sent", async () => {

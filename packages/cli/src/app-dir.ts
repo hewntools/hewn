@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Where this Hewn is installed. Two ways: a git checkout run from TypeScript (install.sh, for
 // contributors), or the npm package, bundled to JavaScript at publish time (scripts/build-npm.ts).
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SKILL_PATH } from "@hewntools/core/skill.ts";
 
 /** Defined (true) by the publish build only. */
 declare const __HEWN_BUNDLED__: boolean | undefined;
@@ -17,6 +19,15 @@ export const BUNDLED = typeof __HEWN_BUNDLED__ !== "undefined" && __HEWN_BUNDLED
  * dist/cli.js).
  */
 export const APP_DIR = fileURLToPath(new URL(BUNDLED ? "../" : "../../../", import.meta.url));
+
+/** The Agent Skill "build a Hewn tool" (SKILL.md) as this Hewn ships it: skills/ in a checkout, dist/skills/ in the npm package. */
+export function readSkill(): string | undefined {
+  try {
+    return readFileSync(join(APP_DIR, BUNDLED ? "dist" : "", SKILL_PATH), "utf8");
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The default data folder (HEWN_HOME overrides): data/ in a checkout (gitignored), ~/.hewn for the

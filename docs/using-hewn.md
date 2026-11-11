@@ -42,6 +42,7 @@ Press `⌘K` (or `Ctrl K`, or `/`), or click Search. Type to find a tool, a page
 
 The **Inbox** button on the right of the top bar holds everything that needs you, with a count:
 - tools waiting for your approval of what they need (a host, a key, another tool, a model)
+- an agent's change to a tool, waiting for your approval (opening the tool shows it too)
 - agents waiting to be approved
 - schedules an agent proposed
 - builds that failed, and builds a host's builder paused (**Continue** or **Stop**)
@@ -81,7 +82,7 @@ Agents can propose a schedule, but nothing runs until you enable it from the Inb
 
 ## Activity
 
-Everything that happened, newest first: builds, calls, and access changes (agents approved or disconnected, grants, secrets, destructive calls). Filter by kind (All, Builds, Calls, Access), by tool or by agent. Press `a` to open it.
+Everything that happened, newest first: builds, calls, and access changes (agents approved or disconnected, grants, secrets and settings, destructive calls, an agent's change you approved or declined, signing in to a connection). Filter by kind (All, Builds, Calls, Access), by tool or by agent. Press `a` to open it.
 
 ![Activity: today's calls, builds and access changes, newest first, each with who did it and when](images/activity.png)
 

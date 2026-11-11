@@ -16,7 +16,8 @@ When the user asks about their own data, activities or tools, check capabilities
 Use capabilities_get to read operation schemas, then capabilities_invoke. Raw storage is not
 accessible. Everything goes through operations.
 For how Hewn itself works (concepts, building tools, connections, grants, the manifest and the ABI),
-read hewn_docs instead of guessing.`;
+read hewn_docs instead of guessing. To write a capability yourself, read the Skill "build a Hewn tool":
+hewn_docs page skills/build-a-hewn-tool/SKILL.md.`;
 
 /** The MCP Apps resource that draws a widget in the chat (`widgets_show`). */
 export const WIDGET_APP_URI = "ui://hewn/widget";
@@ -36,6 +37,13 @@ export interface AgentTool {
 
 const obj = (properties: Record<string, JSONSchema>, required: string[] = []): JSONSchema => ({ type: "object", properties, required, additionalProperties: false });
 const str = (description?: string): JSONSchema => ({ type: "string", ...(description ? { description } : {}) });
+/** Files as they travel to and from the host: UTF-8 text, or base64 for anything that isn't (images, fonts). */
+const files: JSONSchema = {
+  type: "array",
+  maxItems: 1000,
+  description: "The tool's files, each { path, content, encoding? }: path relative to the tool's folder (capability.json, src/index.ts, tests/cases.json, ui/index.html …); content as UTF-8 text, or base64 with encoding \"base64\". 5 MB in all. Only the tool's own files: not the pack's CONTRACTS.md, .hewn-contracts/, OTHER_TOOLS.md or PLATFORM_UI.css, no screenshots/, no dotfiles, CLAUDE.md or AGENTS.md (refused, naming the rule).",
+  items: obj({ path: str(), content: str(), encoding: { type: "string", enum: ["utf-8", "base64"] } }, ["path", "content"]),
+};
 /** What a build runs on. The host appends the names this agent may ask for to the tool's description. */
 const buildModel = {
   model: str("The model to build it with, by name (e.g. 'fable', or 'default' for the builder's own). Leave it out to use the owner's choice; only names the owner allows are accepted."),
@@ -94,10 +102,10 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_create",
     scopes: ["create"],
     description:
-      "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. " +
+      "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. Once it passes validation it waits for the owner's approval (status review) while your approval mode is wait, which the owner sets in Hewn (always, for now): tell the owner. Its grants wait for the owner either way. " +
       "Only connections hold credentials: if it needs a service with a key, token or login (GitHub, Notion, a self-hosted server…), it must call a connection (kind 'connection') that wraps the service. " +
       "A connection signs in with a key or token the user pastes, or with a username-and-password sign-in step; services that only allow OAuth (Google Calendar, Gmail, Spotify…) can't be connected yet. " +
-      "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes. " +
+      "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes (the owner approves it first). " +
       "If the connection lacks an operation you need, capabilities_modify the connection first and pass its buildId as after.",
     inputSchema: obj(
       {
@@ -116,15 +124,60 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_modify",
     scopes: ["modify"],
     description:
-      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status review): tell the owner. Changes to one capability take turns: one asked for while another is queued or building waits for it (status waiting) and is built on the version it makes. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
+      "Request a change to an existing capability. The platform's builder implements it; follow it with builds_wait. Once it passes validation it waits for the owner's review (status review) while your approval mode is wait, which the owner sets in Hewn (always, for now), and a change to a connection or one that adds operations always does: tell the owner. Changes to one capability take turns: one asked for while another is queued or building waits for it (status waiting) and is built on the version it makes. Pass after: <buildId> to start only once that build promotes (e.g. a change to the connection this one calls).",
     inputSchema: obj({ capabilityId: str(), request: str("Desired change"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId", "request"]),
   },
   {
     name: "capabilities_add_widgets",
     scopes: ["modify"],
     description:
-      "Add widgets to an existing capability: glanceable cards (a number, a short list, a chart…) the owner can place on Hewn's Home and agents can show with widgets_show. A focused follow-up build that changes nothing but widgets, so it can't break the capability. Its new operations wait for the owner's review (status review), unless it follows the capability's own creation. Say what to show in request, or leave it out to let the builder propose 1–3. Follow it with builds_wait.",
+      "Add widgets to an existing capability: glanceable cards (a number, a short list, a chart…) the owner can place on Hewn's Home and agents can show with widgets_show. A focused follow-up build that changes nothing but widgets, so it can't break the capability. It waits for the owner's review (status review) while your approval mode is wait (always, for now), and whatever the mode when it adds operations, unless it follows the capability's own creation. Say what to show in request, or leave it out to let the builder propose 1–3. Follow it with builds_wait.",
     inputSchema: obj({ capabilityId: str(), request: str("What the widgets should show (optional)"), after: str("A buildId to wait for"), ...buildModel }, ["capabilityId"]),
+  },
+  {
+    name: "capabilities_pack",
+    scopes: ["create", "modify"],
+    description:
+      "To write a capability yourself instead of asking the platform's builder: first fetch the pack, what its builder finds in its workspace besides the request. kind create: the user's other capabilities' contracts (CONTRACTS.md, and .hewn-contracts/<id>.md each one's in full), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. " +
+      "With a shell, download.url is the whole pack as a zip: fetch it (curl -fsSL -o pack.zip '<url>') and unzip it into your workspace; it works once, for 10 minutes, so fetch it once, yourself (not through a tool that may fetch it first); if it answers 404, call capabilities_pack again. Without one: files is a page of the pack (about 40 KB), more lists the rest with their size, fetched with paths, a page at a time; read them, and write only the tool's own files into your workspace. A capability's full contract: capabilities_get. " +
+      "How to build one: the Skill \"build a Hewn tool\" (hewn_docs page skills/build-a-hewn-tool/SKILL.md). Then capabilities_check while you work, and capabilities_submit when the check passes.",
+    inputSchema: obj(
+      {
+        kind: { type: "string", enum: ["create", "modify"] },
+        capabilityId: str("The capability to change (kind modify)"),
+        paths: { type: "array", items: { type: "string" }, description: "Files from more to fetch, a page at a time (leave out for the first page)" },
+      },
+      ["kind"],
+    ),
+  },
+  {
+    name: "capabilities_check",
+    scopes: ["create", "modify"],
+    description:
+      "Check a capability you wrote as validation will, without submitting it: the manifest, bundling, contract compatibility (with capabilityId), migrations (on empty tables: on a copy of the capability's own data they run when you submit), tests/cases.json, sample/calls.json, and the UI rendered at 1280 and 390 px wide in light and dark with what to fix measured on it. Returns PASS or FAIL with every failure, and the four screenshots as images, a long page's top part (screenshots: \"all\" adds its further parts after them; structuredContent.screenshots names the images sent). Fix what it shows and check again; 30 checks an hour. Promotes nothing.",
+    inputSchema: obj(
+      {
+        files,
+        capabilityId: str("The capability these files change; leave it out for a new one"),
+        screenshots: { anyOf: [{ type: "boolean" }, { type: "string", enum: ["all"] }], description: 'true (the default): the four screenshots, a long page\'s top part. "all": a long page\'s further parts too. false: no images (the UI is still rendered and measured)' },
+      },
+      ["files"],
+    ),
+  },
+  {
+    name: "capabilities_submit",
+    scopes: ["create", "modify"],
+    description:
+      "Hand over a capability you wrote (create scope for a new one, modify with capabilityId for a change). The platform validates it as any build (the contracts, the tests and migrations on a copy of the user's data, the UI) and returns a build: follow it with builds_wait. Once it passes, a new capability or a change waits for the owner's approval (status review) while your approval mode is wait (always, for now): tell the owner. A new one's grants wait for the owner either way. A change is refused while another change to it is on its way, or if baseVersion (from capabilities_pack) is no longer its version. No builder runs, so builds_retry doesn't apply: submit again.",
+    inputSchema: obj(
+      {
+        files,
+        capabilityId: str("The capability these files change; leave it out for a new one"),
+        request: str("What the capability is, or what the change does, in a sentence or two (kept with the build, shown to the owner)"),
+        baseVersion: { type: "integer", minimum: 1, description: "The version your files are a change of (capabilities_pack's baseVersion)" },
+      },
+      ["files", "request"],
+    ),
   },
   {
     name: "capabilities_request_access",

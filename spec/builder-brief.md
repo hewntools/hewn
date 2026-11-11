@@ -1,6 +1,6 @@
 ## Implementation contract
 
-Write a **candidate** in this workspace; the platform owns validation and promotion. Passing candidates become immutable versions; an agent-requested change to a connection or adding operations waits for owner review. The current version serves until promotion.
+Write a **candidate** in this workspace; the platform owns validation and promotion. Passing candidates become immutable versions; an agent's new tool or change waits for the owner's review. The current version serves until promotion.
 
 {{SUBMIT}} If you have a `check` tool, use it before you stop (see the end).
 

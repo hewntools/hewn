@@ -19,13 +19,14 @@ import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
 import * as service from "./service.ts";
-import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
+import { defaultHome, harnesses, realExec, refreshSkill } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
 import { hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
 import { checkFormat, writeFormat } from "./supervisor/format.ts";
 import { renderUnicodeCompact } from "uqr";
 import { dnsRecords, localSite, publicSite } from "@hewntools/host-workerd/surface/site.ts";
 import { webOrigin } from "@hewntools/host-workerd/surface/web.ts";
+import { SKILL_NAME } from "@hewntools/core/skill.ts";
 import { APP_DIR, BUNDLED, NPM_PREFIX } from "./app-dir.ts";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -211,16 +212,21 @@ async function main() {
       // Move the checkout to the newest release (or --to <tag>), install it, check it builds.
       // Then: data is migrated by the new code at start (with a backup first).
       const { isCheckout, upgradeCheckout, upgradeNpm } = await import("./upgrade.ts");
+      // The Skill as the code now on disk ships it (readSkill reads the file), for every agent set up with Hewn.
+      const skill = () => {
+        for (const dir of refreshSkill(defaultHome(), harnesses())) console.log(`✔ the Skill ${SKILL_NAME} written to ${dir}`);
+      };
       if (BUNDLED && !flag("restart-only")) {
         const r = upgradeNpm({ to: option("to"), log: (l) => console.log(`  ${l}`) });
         if (r.command) return console.log(`Hewn ${r.to} is out. npm needs more rights here; run:\n  ${r.command}\nthen: hewn upgrade --restart-only`);
-        if (!r.changed) return console.log(`✔ already on ${r.to}`);
+        if (!r.changed) return (console.log(`✔ already on ${r.to}`), skill());
         console.log(`✔ ${r.from} → ${r.to}`);
       } else if (isCheckout() && !flag("restart-only")) {
         const r = await upgradeCheckout({ to: option("to"), log: (l) => console.log(`  ${l}`) });
-        if (!r.changed) return console.log(`✔ already on ${r.to}`);
+        if (!r.changed) return (console.log(`✔ already on ${r.to}`), skill());
         console.log(`✔ ${r.from} → ${r.to}`);
       }
+      skill();
       const b = backupNow(home, backupLocation(home, readConfig(home).backupDir).dir);
       console.log(`✔ backed up: ${b.file}`);
       if (service.status().installed) {
@@ -372,6 +378,9 @@ async function main() {
       const body = link ? { url: given, ...shared } : zip ? { bundle: readFileSync(dir).toString("base64"), ...shared } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
       const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
+      // A deleted tool has that id: how to bring it back, or to install this one beside it.
+      const archived = result.details?.archived;
+      if (!res.ok && archived) throw new Error(`${archived.name} (${archived.id}) was deleted and is kept with its data: hewn restore ${archived.id} brings it back, hewn purge ${archived.id} deletes it for good, or install this one under another name (${zip ? "--name <name>" : "another id in its capability.json"})`);
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
       process.exitCode = result.status === "promoted" ? 0 : 1;
@@ -405,7 +414,7 @@ async function main() {
         if (action === "approve" || action === "reject") {
           if (!id) throw new Error(`usage: hewn review ${action} <buildId>`);
           const b = await c.call(action === "approve" ? "approveBuild" : "rejectBuild", id);
-          console.log(b.status === "promoted" ? `✔ ${b.capabilityId}: v${b.resultVersion} is live` : b.status === "cancelled" ? `✔ turned down: ${b.capabilityId} is unchanged` : `✖ ${b.log.at(-1)}`);
+          console.log(b.status === "promoted" ? `✔ ${b.capabilityId}: v${b.resultVersion} is live` : b.status === "cancelled" ? `✔ turned down: ${b.kind === "create" ? `${b.capabilityId} never went live` : `${b.capabilityId} is unchanged`}` : `✖ ${b.log.at(-1)}`);
           return;
         }
         if (action) throw new Error("usage: hewn review [approve|reject <buildId>]");
@@ -414,7 +423,8 @@ async function main() {
         const verb: Record<string, string> = { read: "READ", write: "CHANGE", destructive: "DELETE" };
         for (const b of list) {
           const r = b.review;
-          console.log(`${b.buildId}  ${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"} ${b.capabilityId}`);
+          const what = b.kind === "create" ? (b.submittedBy ? `${b.submittedBy} wrote and submitted a new tool,` : `${b.requestedBy} asked for a new tool,`) : b.submittedBy ? `${b.submittedBy} wrote and submitted a change to` : `${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"}`;
+          console.log(`${b.buildId}  ${what} ${b.capabilityId}`);
           if (r.connection) console.log("    it's a connection: this code holds your sign-in for that service");
           for (const o of r.newOperations) {
             console.log(`    + ${o.key}: agents can then ${verb[o.sideEffect] ?? o.sideEffect}: ${o.description}`);
@@ -425,7 +435,7 @@ async function main() {
             const also = [c.ui && "the screen", c.migrations.length && `data (${c.migrations.join(", ")})`, c.newGrants.length && `new access (${c.newGrants.join(", ")})`, c.changedOperations.length && `updates ${c.changedOperations.join(", ")}`, c.removedOperations.length && `removes ${c.removedOperations.join(", ")}`].filter(Boolean);
             console.log(`    ${also.length ? `also changes: ${also.join("; ")}` : "nothing else changes"}`);
           }
-          console.log(`    asked: "${String(b.request.request ?? "").slice(0, 160)}"`);
+          console.log(`    ${b.submittedBy ? "says" : "asked"}: "${String(b.request.request ?? "").slice(0, 160)}"`);
         }
         console.log("\nAllow: hewn review approve <buildId>   Don't allow: hewn review reject <buildId>");
       });

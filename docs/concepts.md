@@ -41,7 +41,7 @@ When you (or an agent) ask for a new tool or a change, the builder writes it. He
 4. for a new tool with a screen, has the builder look at it again on screenshots filled with sample data: it reviews the design, then fixes the details (a tool you have already gets the same with [Polish](building-tools.md#polishing-a-tool))
 5. makes it live if all of that passes
 
-What you ask for goes live right after the checks. A change an **agent** asks for that adds operations, or touches a [connection](#connections), waits for you to approve it first (the Inbox, or `hewn review`). Either way, a tool can't reach anything new until you approve its [grants](#grants).
+What you ask for goes live right after the checks. A change an **agent** makes to a tool you have waits for you to approve it first (the Inbox, or `hewn review`), with the files it changes and its screen to look at. Either way, a tool can't reach anything new until you approve its [grants](#grants).
 
 If it fails, you see why, and you can ask the builder to fix it. See [Building tools](building-tools.md).
 

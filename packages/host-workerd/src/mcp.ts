@@ -6,8 +6,10 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { type DocPage, docsText } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { JSONSchema } from "@hewntools/core/manifest.ts";
-import type { CapabilitySummary, Platform } from "@hewntools/core/platform.ts";
+import type { CapabilitySummary, ClientCheck, Platform } from "@hewntools/core/platform.ts";
+import { toBase64 } from "@hewntools/core/files.ts";
 import { viewText } from "@hewntools/core/widgets.ts";
+import { SKILL_PATH } from "@hewntools/core/skill.ts";
 import { AGENT_TOOLS, SERVER_INSTRUCTIONS } from "@hewntools/spec/agents.ts";
 import { WIDGET_APP_MIME, WIDGET_APP_URI } from "./surface/widget-app.ts";
 
@@ -26,8 +28,12 @@ interface Tool {
   /** Tool `_meta` (MCP Apps: the UI resource that renders the result). */
   meta?: Record<string, unknown>;
   /** Shape the result (default: its JSON as text). */
-  format?: (result: any) => { content: { type: "text"; text: string }[]; structuredContent?: Record<string, unknown> };
+  format?: (result: any) => { content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[]; structuredContent?: Record<string, unknown> };
 }
+
+/** A call's arguments for the log: a file list as its count and size, never the files. */
+const logArgs = (args: Record<string, unknown>) =>
+  JSON.stringify(Array.isArray(args.files) ? { ...args, files: `${args.files.length} files, ${Math.round(args.files.reduce((n: number, f: { content?: unknown }) => n + (typeof f?.content === "string" ? f.content.length : 0), 0) / 1024)} KB` } : args);
 
 
 /**
@@ -64,7 +70,7 @@ async function widgetIcon(platform: Platform, id: string) {
 /** Hewn's docs, from the host (its assets); undefined where it has none. */
 type Docs = () => Promise<DocPage[]>;
 
-function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs): Tool[] {
+function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs, origin?: () => string | undefined): Tool[] {
   const known = `\n\n${catalog(caps)}`;
   // The tools themselves (names, scopes, descriptions, input schemas) are the spec's; these run them.
   const run: Record<string, Pick<Tool, "handler" | "format">> = {
@@ -103,8 +109,32 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     },
     builds_retry: { handler: (a) => platform.retryBuild(agent, a.buildId) },
     builds_cancel: { handler: (a) => platform.cancelBuild(agent, a.buildId) },
+    capabilities_pack: {
+      // The download link on the address the client reached this Hewn at (else its path only).
+      handler: async (a) => {
+        const p = await platform.pack(agent, a);
+        const at = origin?.();
+        return p.download && at ? { ...p, download: { url: `${at}${p.download.path}`, expiresAt: p.download.expiresAt } } : p;
+      },
+    },
+    capabilities_check: {
+      handler: (a) => platform.checkFiles(agent, a),
+      // The check's text first (what passed and failed, what to fix), then its renders as images; their names, in that order, in structuredContent (no image data there: a client may show it to the model as text).
+      format: (r: ClientCheck) => ({
+        content: [{ type: "text", text: r.text }, ...r.images.map((i) => ({ type: "image" as const, data: toBase64(i.png), mimeType: "image/png" }))],
+        structuredContent: { passed: r.passed, failures: r.failures, defects: r.defects, screenshots: r.images.map((i) => i.name) },
+      }),
+    },
+    capabilities_submit: { handler: (a) => platform.submitFiles(agent, a) },
     hewn_docs: {
-      handler: async (a) => docsText(docs ? await docs() : [], { query: a.query, page: a.page }),
+      // The Skill is a page of its own (listed, and read by name), out of the search: its text is the brief's, which is searched already.
+      handler: async (a) => {
+        const pages = docs ? await docs() : [];
+        // Made from the brief only when it's read: a search never needs it.
+        let text: string | undefined;
+        const skill = { name: SKILL_PATH, get text() { return (text ??= platform.skill()); } };
+        return docsText(a.query && !a.page ? pages : [...pages, ...(pages.length ? [skill] : [])], { query: a.query, page: a.page });
+      },
       format: (text: string) => ({ content: [{ type: "text", text }] }),
     },
   };
@@ -126,9 +156,9 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
 }
 
 /** The agent's tools right now: filtered by scope, with its visible capabilities in the descriptions. */
-export function toolsFor(platform: Platform, agent: Agent, docs?: Docs): Tool[] {
+export function toolsFor(platform: Platform, agent: Agent, docs?: Docs, origin?: () => string | undefined): Tool[] {
   const caps = agent.scopes.has("discover") ? platform.list(agent) : [];
-  return platformTools(platform, agent, caps, docs).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
+  return platformTools(platform, agent, caps, docs, origin).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
 }
 
 /** What the agent's tool list looks like: when it changes, the session gets tools/list_changed. */
@@ -138,7 +168,7 @@ export const toolSignature = (platform: Platform, agent: Agent) => JSON.stringif
  * One MCP server per session, for the authenticated agent. `agent()` is read per request, so
  * scope changes apply mid-session; tools are listed fresh each time.
  */
-export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs } = {}): Server {
+export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs; origin?: () => string | undefined } = {}): Server {
   const caps = agent().scopes.has("discover") ? platform.list(agent()) : [];
   const instructions = `${SERVER_INSTRUCTIONS}\n\n${catalog(caps)}`;
   // cfworker validation: no eval, so the same server runs on workerd.
@@ -166,8 +196,8 @@ export function createMcpServer(platform: Platform, agent: () => Agent, log: (li
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const { name, arguments: args = {} } = req.params;
     const who = agent();
-    log(`[${new Date().toISOString()}] ${who.id} ${name} ${JSON.stringify(args)}`);
-    const tool = toolsFor(platform, who, opts.docs).find((t) => t.name === name);
+    log(`[${new Date().toISOString()}] ${who.id} ${name} ${logArgs(args)}`);
+    const tool = toolsFor(platform, who, opts.docs, opts.origin).find((t) => t.name === name);
     try {
       if (!tool) throw new PlatformError("not_found", `unknown tool ${name}`);
       const token = req.params._meta?.progressToken;

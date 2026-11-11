@@ -12,6 +12,7 @@ import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
@@ -152,11 +153,16 @@ function recentCalls(platform: Platform, owner: Agent, limit: number, perCapabil
   return calls.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
 
+/** The Agent Skill "build a Hewn tool" (SKILL_URL), public like the design system: any agent may load it, here or where it reaches MCP. */
+export const skillResponse = (platform: Platform) =>
+  new Response(platform.skill(), { status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "x-content-type-options": "nosniff", "cache-control": "no-cache", "access-control-allow-origin": "*" } });
+
 export async function handleWeb(platform: Platform, host: SurfaceHost, site: Site, req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const asset = await platformAsset(host, path);
   if (asset) return asset;
+  if (path === SKILL_URL && req.method === "GET") return skillResponse(platform);
   const command = site.kind === "public" ? "hewn open --print" : "hewn open";
   /** Signed out: the command to run, or (hosted) the host's sign-in, after `hostedLead`. */
   const signIn = (status: number, title: string, line: string, cmd: string, hostedLead = "") =>
@@ -511,8 +517,15 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
+    if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
+    // A held build's review card: its files against the version it was built on (or one file, ?path=), and its four renders.
+    if (sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.reviewFile(owner, id, path) : platform.reviewCode(owner, id);
+    }
+    if (sub === "shots" && arg && method === "GET") return new Response(body(await platform.reviewShot(owner, id, arg)), { status: 200, headers: { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" } });
     if (sub === "screenshot") {
       platform.getBuild(owner, id);
       // ?scheme=dark: the dark-mode render, if the build has one (older builds have only light).
@@ -672,7 +685,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     }
     if (method === "PUT") {
       const b = await readJson(req);
-      return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}) });
+      return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}), ...(b.approvalMode !== undefined ? { approvalMode: b.approvalMode } : {}) });
     }
     if (method === "DELETE") return platform.updateAgent(owner, id, "revoke");
   }
@@ -845,6 +858,8 @@ async function capabilityList(platform: Platform, owner: Agent) {
     const b = active.find((x) => x.capabilityId === capId);
     return b ? { buildId: b.buildId, progress: b.state.progress, step: b.state.step, tests: b.state.tests ?? null } : null;
   };
+  // A build held for the owner, per tool (the newest): opening the tool shows it, whatever was built since.
+  const held = new Map(platform.registry.buildsInReview().map((b) => [b.capabilityId, b.id]));
   const order = (id: string) => platform.registry.getCapability(id)?.homeOrder ?? Number.MAX_SAFE_INTEGER;
   const caps: Record<string, any>[] = [];
   // Unplaced tiles follow in creation order, so a new capability lands last (next to "New").
@@ -866,34 +881,43 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
+      // A failed build the owner discarded isn't shown on the tool (Home's badge, Info's notice): it's put aside.
+      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
+      held: held.get(c.id) ?? null,
     });
   }
+  // Tools that aren't one yet: being built, or an agent's new tool held for the owner (its tile opens the review card).
+  const unbuilt = (o: { id: string; name: string; purpose: string; buildId: string; status: string; glyph?: { hue: number | null; saturation: number | null }; connection: boolean }) => ({
+    id: o.id,
+    name: o.name,
+    purpose: o.purpose,
+    tags: [],
+    operations: [],
+    ready: false,
+    hasIcon: !!o.glyph,
+    iconKind: o.glyph ? "glyph" : null,
+    iconUrl: o.glyph ? `/api/builds/${o.buildId}/icon` : null,
+    hue: o.glyph?.hue ?? null,
+    saturation: o.glyph?.saturation ?? null,
+    ui: false,
+    version: null,
+    requests: 0,
+    lastBuild: { buildId: o.buildId, status: o.status },
+    building: building(o.id),
+    held: o.status === "review" ? o.buildId : null,
+    // A new connection belongs under Accounts, not on Home.
+    ...(o.connection ? { kind: "connection" } : {}),
+  });
   const pending: Record<string, any>[] = [];
   for (const b of active.filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
     // The builder writes the icon first, so a new capability has its own tile while it builds.
-    const glyph = await platform.buildGlyph(b.buildId);
-    pending.push({
-      id: b.capabilityId,
-      name: b.name,
-      purpose: b.purpose,
-      tags: [],
-      operations: [],
-      ready: false,
-      hasIcon: !!glyph,
-      iconKind: glyph ? "glyph" : null,
-      iconUrl: glyph ? `/api/builds/${b.buildId}/icon` : null,
-      hue: glyph?.hue ?? null,
-      saturation: glyph?.saturation ?? null,
-      ui: false,
-      version: null,
-      requests: 0,
-      lastBuild: { buildId: b.buildId, status: "building" },
-      building: building(b.capabilityId),
-      // A new connection belongs under Accounts while it builds, not on Home.
-      ...(b.connection ? { kind: "connection" } : {}),
-    });
+    pending.push(unbuilt({ id: b.capabilityId, name: b.name, purpose: b.purpose, buildId: b.buildId, status: "building", glyph: await platform.buildGlyph(b.buildId), connection: b.connection }));
+  }
+  for (const b of platform.registry.buildsInReview().filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
+    const req = b.request as { name?: string; purpose?: string; kind?: string };
+    const name = platform.registry.getCapability(b.capabilityId)?.name ?? req.name ?? b.capabilityId;
+    pending.push(unbuilt({ id: b.capabilityId, name, purpose: req.purpose ?? "", buildId: b.id, status: "review", connection: !!b.review?.connection || req.kind === "connection" }));
   }
   return [...caps, ...pending];
 }
@@ -901,13 +925,14 @@ async function capabilityList(platform: Platform, owner: Agent) {
 const LIVE = new Set(["waiting", "open", "building", "validating"]);
 
 /**
- * Failed builds nobody has dealt with: not retried, and nothing of that capability promoted since
- * (a later change replaced it).
+ * Failed builds nobody has dealt with: not retried or discarded, and nothing of that capability
+ * promoted since (a later change replaced it).
  */
-export function unresolvedFailures<T extends { buildId: string; capabilityId: string; kind: string; status: string; createdAt: string; request: Record<string, unknown> }>(builds: T[]): T[] {
+export function unresolvedFailures<T extends { buildId: string; capabilityId: string; kind: string; status: string; createdAt: string; request: Record<string, unknown>; discardedAt?: string }>(builds: T[]): T[] {
   return builds.filter(
     (b) =>
       b.status === "failed" &&
+      !b.discardedAt &&
       !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) &&
       !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt),
   );
@@ -955,7 +980,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const p of platform.pendingAgents(owner))
     needs.push({ kind: "agent", id: p.id, title: p.clientName, detail: p.reconnects ? `wants to connect again as ${p.reconnects}` : "wants to connect", severity: "warn", action: "Review", at: p.createdAt });
   for (const b of builds.filter((x) => x.status === "review"))
-    needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} changed it: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
+    needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} ${b.kind === "create" ? "made it" : "changed it"}: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
   for (const b of unresolvedFailures(builds))
     needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), ...(b.failure?.paused ? { detail: `Paused · ${b.failure.detail}`, severity: "warn" as const, action: "Continue…" } : { detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger" as const, action: "Show" }), at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
@@ -1067,10 +1092,13 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       builder: b.builder,
       // An install: "from a file", "from <host>", "from Hewn's tools" (Activity says "Installed from a file · v1").
       ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
+      // A client's submission: "submitted by Claude Code".
+      ...(b.submittedBy ? { submittedBy: b.submittedBy } : {}),
       ...(b.model ? { buildModel: b.model } : {}),
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,
       ...(b.failure ? { failure: b.failure, reason: failureReason(b.failure) } : {}),
+      ...(b.discardedAt ? { discarded: true } : {}),
     });
   }
   for (const c of recentCalls(platform, owner, 5000, 2000)) {

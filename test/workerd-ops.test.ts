@@ -45,7 +45,8 @@ describe("operations on the workerd host", () => {
     let builds: any[] = [];
     await until(async () => {
       builds = (await h.sv.admin("status")).builds;
-      return builds.some((b) => (b.request as any).autoRetryOf === opened.buildId && b.status === "promoted");
+      // An agent's change: it finishes held for the owner (its approval mode: wait).
+      return builds.some((b) => (b.request as any).autoRetryOf === opened.buildId && b.status === "review");
     }, 30_000);
     assert.match(builds.find((b) => b.buildId === opened.buildId).log.join("\n"), /interrupted/);
   });

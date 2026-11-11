@@ -44,8 +44,15 @@ export async function api(path, { method = "GET", body, refresh = false } = {}) 
   });
   checkBuild(res);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.message || data.error || res.statusText), { data, status: res.status });
+  if (!res.ok) throw Object.assign(new Error(ownersWords(data) || data.message || data.error || res.statusText), { data, status: res.status });
   return data;
+}
+
+/** An error as the owner reads it here, where Hewn's own words are an agent's (or a command's). */
+function ownersWords(data) {
+  const archived = data?.details?.archived;
+  if (archived) return `${archived.name} was deleted and is kept with its data. Bring it back or delete it for good in Settings › Data › Deleted tools, or give the new one another name.`;
+  return "";
 }
 
 /** Server-sent events over a POST (EventSource is GET-only). Calls onEvent(name, data) per event; `signal` stops it. */

@@ -3,6 +3,8 @@
 // the OAuth endpoints, share links (/share/<token>) and robots.txt answer on any host; the web
 // client and capability UIs only on the public URL's hosts (the surface decides, see index.ts).
 // Admin never answers here. Requests are rate limited per client address (and in total).
+import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import { OAUTH_PATHS } from "./oauth.ts";
 
 /** Header the public listener sets on everything it forwards (local requests never need it). */
@@ -14,7 +16,7 @@ export const CLIENT_IP_HEADER = "x-hewn-client-ip";
  */
 export const PROXY_SECRET_HEADER = "x-hewn-proxy-secret";
 
-export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS]);
+export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS, SKILL_URL]);
 
 /** Share links: `/share/<token>`, the bundle of one version, for anyone with the link. */
 export const SHARE_PREFIX = "/share/";
@@ -42,6 +44,8 @@ export const RULES: Record<string, Rule> = {
   token: { perClient: 60, total: 300, windowMs: MIN },
   metadata: { perClient: 60, total: 600, windowMs: MIN },
   mcp: { perClient: 600, total: 2000, windowMs: MIN },
+  /** A pack's download link (capabilities_pack): one per pack an agent fetches; the total only a backstop, so a few clients can't use it up for a real one. */
+  pack: { perClient: 30, total: 3000, windowMs: 10 * MIN },
   /** Sign-in links and passkey sign-in: nobody needs many. */
   signin: { perClient: 30, total: 120, windowMs: 10 * MIN },
   /** The web client and capability UIs on the public URL. */
@@ -56,7 +60,7 @@ export const RULES: Record<string, Rule> = {
 };
 
 const ruleFor = (path: string) =>
-  path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
+  path.startsWith(PACK_PATH) ? "pack" : path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
   : path === "/auth" || path.startsWith("/passkey/") ? "signin" : path.startsWith(SHARE_PREFIX) ? "share" : PUBLIC_PATHS.has(path) ? "metadata" : "web";
 
 /** Fixed-window counters, in memory (one process serves the public path). */

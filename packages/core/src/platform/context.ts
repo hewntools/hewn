@@ -22,6 +22,7 @@ import type { Models } from "./models.ts";
 import type { Invocation } from "./invocation.ts";
 import type { Schedules } from "./schedules.ts";
 import type { Sharing } from "./sharing.ts";
+import type { Submissions } from "./submissions.ts";
 import type { Builds } from "./builds.ts";
 import type { Validation } from "./validation.ts";
 import type { Widgets } from "./widgets.ts";
@@ -69,6 +70,7 @@ export interface Domains {
   schedules: Schedules;
   sharing: Sharing;
   sessions: Sessions;
+  submissions: Submissions;
   validation: Validation;
   widgets: Widgets;
 }

@@ -33,6 +33,8 @@ export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, 
 
 async function openCapability(c) {
   if (c.building && !c.version) return go(`#/b/${c.building.buildId}`);
+  // A change waiting for the owner comes up first, as what a tool asks for does (Later on it opens the tool as it is).
+  if (c.held) return go(`#/b/${enc(c.held)}`);
   if (!c.ready && !(await grantsSheet(c.id))) return;
   go(c.ui ? `#/app/${enc(c.id)}` : `#/run/${enc(c.id)}`);
 }

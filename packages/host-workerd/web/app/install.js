@@ -241,8 +241,11 @@ function installSheet(p, { from }) {
           close();
           go(`#/b/${enc(b.buildId)}`);
         } catch (e) {
-          status.textContent = e.message;
+          // A deleted tool has this name: where to bring it back, or a new name here.
+          const archived = e.data?.details?.archived;
+          put(status, e.message, archived && [" ", h("a", { href: "#/settings/data", onclick: () => close() }, "Deleted tools ›")]);
           install.disabled = false;
+          if (archived) name.focus();
         }
       });
       const flags = (p.summary?.findings ?? []).filter((f) => f.kind === "warn");

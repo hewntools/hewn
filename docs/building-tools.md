@@ -46,7 +46,7 @@ Then Hewn:
 - **Fixing details:** fresh screenshots, with what Hewn measured on them (what sticks out past the phone's edge, text cut short, things drawn over each other, buttons that break the page): it fixes those without redesigning anything.
 
 Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** or **Ask builder to fix** builds it again. A build the host pauses during one is paused as at any other point. Changes and installs don't get one; a tool you already have gets one when you [polish it](#polishing-a-tool). The build's steps show each as it runs ([A build](using-hewn.md#a-build)).
-What you ask for goes live right after the checks. A change an agent asks for that adds operations or touches a [connection](connections.md) waits for your approval first: see [Changes made by agents](#changing-a-tool).
+What you ask for goes live right after the checks. A change an agent makes to a tool you have waits for your approval first: see [Changes made by agents](#changing-a-tool).
 
 Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes; a new tool's second look adds about as much again, in time and in your builder's usage.
 
@@ -72,7 +72,7 @@ A tool without a screen of its own shows its operations as forms. **Give it a pr
 
 Some changes need no builder: picking another model tier, for example, is a new version right away.
 
-**Changes made by agents:** an agent's change that adds operations, or changes a connection, waits for you to approve it (the Inbox, or `hewn review`). You see what it adds before it goes live. Other changes go live after their checks, and any new grants still wait for you.
+**New tools and changes made by agents:** a new tool an agent makes, or its change to a tool you have, waits for you once it passes its checks (the Inbox, or `hewn review`), whether Hewn's builder wrote it for the agent or the agent wrote it itself ([agents.md](agents.md#tools-an-agent-writes-itself)). Its card shows what it adds, what else changes, the files it changes and the screen after the change (a desktop and a phone, light and dark); **Allow** makes it live, **Don't allow** leaves the tool as it is. Opening the tool shows the card too. This is the agent's **approval mode**, under its row on Agents: in this release its new tools and changes always wait, and **go live after the checks** comes once Hewn's own tests guard your data. Whatever the mode, what a tool asks for (a host, a key, a model) still waits for you.
 
 ## Polishing a tool
 
@@ -98,6 +98,8 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
 
+**Discard** puts a failed build aside, when you'd rather not try again: it leaves the Inbox, and Activity keeps it, marked discarded. Nothing about the tool changes (a failed new tool installed nothing; a failed change left your tool on its version), and the files the build left go with it.
+
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
@@ -122,7 +124,7 @@ Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@
 
 ## Deleting a tool
 
-**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back.
+**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back. While it's deleted, its name stays its own: installing or building a tool by that name says so and points you to Deleted tools (or to `hewn restore`, `hewn purge` and `--name` in the terminal), or install the new one under another name.
 
 ## From the terminal
 
