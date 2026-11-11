@@ -240,6 +240,13 @@ describe("submit: the same gate as any build", () => {
     await assert.rejects(t.platform.retryBuild(t.claude, b.buildId), code("conflict"));
   });
 
+  test("a new tool on the id of one the owner deleted: refused, as an install is, the check too", async () => {
+    t.platform.archive(USER, "running-log");
+    const archived = (e: unknown) => e instanceof PlatformError && e.code === "conflict" && /was deleted by the owner/.test(e.message) && (e.details as { archived?: { id: string } })?.archived?.id === "running-log";
+    await assert.rejects(t.platform.submitFiles(t.claude, { files: entriesOf(SEED), request: "again" }), archived);
+    await assert.rejects(t.platform.checkFiles(t.claude, { files: entriesOf(SEED) }), archived);
+  });
+
   test("a held new tool keeps its id from a retry of an older create too", async () => {
     t.queue(...[1, 2, 3].map(() => (ws: string) => writeFileSync(join(ws, "capability.json"), "{ not json")));
     const failed = await t.platform.settle((await t.platform.create(t.claude, { name: "UI Counter", purpose: "p", requirements: "r" })).buildId);

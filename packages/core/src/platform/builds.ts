@@ -839,7 +839,7 @@ export class Builds extends Domain {
     const name = entry.name ?? manifest.name;
     if (typeof name !== "string" || !name.trim()) throw new PlatformError("invalid_request", "capability.json needs a name");
     const existing = this.registry.getCapability(id);
-    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn, or pick another id`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
     if (existing?.activeVersion) throw new PlatformError("conflict", entry.builder === "submitted" ? `'${id}' already exists; to change it, submit with capabilityId '${id}' (and its files from capabilities_pack)` : `capability '${id}' already exists`);
     // A create that never promoted keeps its id for a retry; this takes it over, unless one is being built (as a create does).
     if (existing) this.oneCreateAtATime(actor, id);
