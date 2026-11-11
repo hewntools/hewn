@@ -75,12 +75,13 @@ export function privateHost(hostname: string): boolean {
   if (!g) return true;
   const v4of = (hi: number, lo: number) => [hi >> 8, hi & 255, lo >> 8, lo & 255];
   const zeros = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
-  // An IPv4 address inside: mapped (::ffff:a.b.c.d), compatible (::a.b.c.d, :: and ::1 among them), NAT64 (64:ff9b::a.b.c.d), 6to4 (2002:aabb:ccdd::).
+  // An IPv4 address inside: mapped (::ffff:a.b.c.d), compatible (::a.b.c.d, :: and ::1 among them), SIIT (::ffff:0:a.b.c.d), NAT64 (64:ff9b::a.b.c.d), 6to4 (2002:aabb:ccdd::).
   if (zeros(0, 5) && (g[5] === 0xffff || g[5] === 0)) return privateV4(v4of(g[6], g[7]));
+  if (zeros(0, 4) && g[4] === 0xffff && g[5] === 0) return privateV4(v4of(g[6], g[7]));
   if (g[0] === 0x64 && g[1] === 0xff9b && zeros(2, 6)) return privateV4(v4of(g[6], g[7]));
   if (g[0] === 0x2002) return privateV4(v4of(g[1], g[2]));
-  // Local-use NAT64, unique local, link-local, site-local and multicast.
-  return (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) || (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00;
+  // Local-use NAT64, Teredo (its IPv4 hidden), unique local, link-local, site-local and multicast.
+  return (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) || (g[0] === 0x2001 && g[1] === 0) || (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00;
 }
 
 /** An IPv6 address's eight 16-bit groups (a dotted IPv4 tail read as two), or null if it doesn't read as one. */
