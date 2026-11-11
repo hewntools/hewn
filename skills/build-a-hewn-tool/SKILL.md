@@ -40,13 +40,13 @@ Call chains have 30 seconds, with up to 120 seconds of model waiting excluded; w
 
 ### capability.json
 
-Set `"abi"` to the lowest Hewn ABI (`major.minor`) whose features you use; this Hewn implements 2.5. Features after 2.0 are marked "(ABI 2.x)"; if you use none, write `"abi": "2.0"`. Using a feature newer than you declare fails validation.
+Set `"abi"` to the lowest Hewn ABI (`major.minor`) whose features you use; this Hewn implements 2.6. Features after 2.0 are marked "(ABI 2.x)"; if you use none, write `"abi": "2.0"`. Using a feature newer than you declare fails validation.
 
 Keep `id` equal to the tool's id: for a change, the `capabilityId` you packed; for a new tool, its name in lowercase letters, digits and dashes ("Plant Care" → `plant-care`). Each operation has `name` (snake_case), `description`, `version` (contract major, integer ≥1), `inputSchema` and `outputSchema` (JSON Schema 2020-12; input must be `type: object`), and `sideEffect`:
 
 - `read`: changes nothing.
 - `write`: records or changes data.
-- `destructive`: removes or irreversibly overwrites data. Agent calls require owner confirmation, including through other capabilities; these operations cannot be scheduled.
+- `destructive`: removes or irreversibly overwrites data. Agent calls require owner confirmation, including through other capabilities; these operations cannot be scheduled. An operation that deletes rows and adds none to that table (also as a side effect, like clearing a list) must be `destructive`: validation counts each table's rows around every test case and sample call. Replacing rows with new ones is a write. Don't prune caches in a write: filter old rows when you read them.
 
 Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g. 145 plants or money, 295 sleep, 240 water, 25 workouts, 75 for books). A subject without one (people, plans, words, time) takes a hue at least 40° from every hue in `OTHER_TOOLS.md` (hues wrap: 350 and 10 are 20° apart), or, when none is that far, the middle of the widest gap, which `OTHER_TOOLS.md` names. The hue colours the icon tile and leads the UI palette; the design system derives light and dark shades from it.
 
@@ -232,7 +232,7 @@ A connection wraps **one** credentialed service (GitHub, Notion, a self-hosted s
 - **Generic API operations only** (`list_files`, `upload_file`, `create_issue`…). Use-case logic (a weekly digest) belongs in the capability calling the connection. Leave operations out to restrict it (no `delete_file`: nothing can delete).
 - **`health@1` is required:** a `read` operation with no required input, returning `{ "status": "connected" | "expired" | "broken", "detail"?: string }` for the owner's Accounts view. Keep it cheap: one authenticated request, or none without credentials.
 - **Credentials live only in the secret store:** refreshed tokens go back via `ctx.updateSecret`, never the database.
-- **Config (any tool, ABI 2.1):** settings the owner fills in that aren't secret, with unique names matching `^[A-Z][A-Z0-9_]*$`, read as `ctx.config.SERVER_URL`. `"config:SERVER_URL"` in `requires.hosts` means the host in that value. Test cases pass fakes: `"config": { "SERVER_URL": "https://cloud.example.com" }`.
+- **Config (any tool, ABI 2.1):** settings the owner fills in that aren't secret, with unique names matching `^[A-Z][A-Z0-9_]*$`, read as `ctx.config.SERVER_URL`. `"config:SERVER_URL"` in `requires.hosts` means the host in that value. Test cases pass fakes: `"config": { "SERVER_URL": "https://cloud.example.com" }`. A setting with an obvious answer gets `"suggested": "<value>"` (ABI 2.6: set `"abi": "2.6"`): the setup form opens with it and the owner confirms. Never `"default"` (refused), never in the description, and never on a setting `requires.hosts` names as `config:NAME` (the owner types the host).
 - **Sign-in step (optional):** for a login rather than a pasted key, add a `connect` operation (`write`). Only the owner runs it, in Hewn (never agents or schedules). It may run before secrets exist, but other grants, config and dependencies must be ready. Its input is the sign-in form (passwords `"format": "password"`); it signs in, stores tokens with `ctx.updateSecret` and returns `{ "status": "connected" }`. For a second step (a code from email or an app), return
   `{ "status": "needs_input", "message": "Enter the code we sent you", "inputSchema": { …the next fields… }, "state": "<opaque>" }`;
   the owner's next call carries your `state` plus the new fields. Ask only what's needed up front. Its secrets arrive only through it, so describe them as "stored by signing in".
