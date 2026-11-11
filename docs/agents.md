@@ -20,7 +20,7 @@ Or, in the web client: **Agents → Add… → An agent that uses your tools**. 
 - **Codex:** adds a pointer to `~/.codex/AGENTS.md` (Codex needs it to think of Hewn), then `codex mcp add hewn --url …`, which signs it in.
 - **OpenCode:** registers Hewn in its global config (`opencode mcp add hewn --url …`, in `~/.config/opencode/opencode.json`), adds a pointer to `~/.config/opencode/AGENTS.md` (OpenCode reads that, not Hewn's own description), then signs it in (`opencode mcp auth hewn`). If you had no `~/.config/opencode/AGENTS.md` before, OpenCode now reads it instead of `~/.claude/CLAUDE.md`: move any rules you kept there.
 
-Each one also gets the Skill **build a Hewn tool** (see [Tools an agent writes itself](#tools-an-agent-writes-itself)) in its skills folder: Claude Code in `~/.claude/skills/build-a-hewn-tool/`, Codex and OpenCode in `~/.agents/skills/build-a-hewn-tool/`. Setup writes it again each time, and so does `hewn upgrade`, so it matches your Hewn; Hewn never touches the other skills there.
+Each one also gets the Skill **build a Hewn tool** (see [Tools an agent writes itself](#tools-an-agent-writes-itself)) in its skills folder: Claude Code in `~/.claude/skills/build-a-hewn-tool/`, Codex and OpenCode in `~/.agents/skills/build-a-hewn-tool/`. Setup writes it again each time, and so does `hewn upgrade` for every agent set up with Hewn, so it matches your Hewn; Hewn never touches the other skills there. An agent set up by an older Hewn gets it when you set it up again (or on the next upgrade).
 
 Start a new agent session afterwards, so it sees the tools.
 

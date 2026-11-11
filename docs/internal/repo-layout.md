@@ -9,6 +9,7 @@ packages/
   cli/                    AGPL         @hewntools/cli           `hewn`: CLI, supervisor, setup, builders, intake
   test-host/              AGPL         @hewntools/test-host     the core on Node, for fast tests
 seeds/                    Apache-2.0                            example tools
+skills/                   AGPL                                  the Agent Skill "build a Hewn tool", made from spec/builder-brief.md (npm run skill)
 test/                                                           integration tests across packages
 scripts/                                                        the npm build, and the one-line install served by hewn.tools
 docs/                                                           user docs; docs/internal/ for contributors

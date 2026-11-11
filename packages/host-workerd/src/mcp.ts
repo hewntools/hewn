@@ -130,7 +130,9 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
       // The Skill is a page of its own (listed, and read by name), out of the search: its text is the brief's, which is searched already.
       handler: async (a) => {
         const pages = docs ? await docs() : [];
-        const skill = { name: SKILL_PATH, text: platform.skill() };
+        // Made from the brief only when it's read: a search never needs it.
+        let text: string | undefined;
+        const skill = { name: SKILL_PATH, get text() { return (text ??= platform.skill()); } };
         return docsText(a.query && !a.page ? pages : [...pages, ...(pages.length ? [skill] : [])], { query: a.query, page: a.page });
       },
       format: (text: string) => ({ content: [{ type: "text", text }] }),

@@ -96,7 +96,7 @@ describe("service and doctor", () => {
         home: t.home,
         port: 1,
         userHome: t.home.root,
-        harnesses: [{ agentId: "codex", label: "Codex", pointerRequired: true, pointerNote: "", detect: () => true, registered: () => false, steps: () => [], login: () => ["codex"], loginFix: () => "" }],
+        harnesses: [{ agentId: "codex", label: "Codex", pointerRequired: true, skills: "agents", pointerNote: "", detect: () => true, registered: () => false, steps: () => [], login: () => ["codex"], loginFix: () => "" }],
         which: (bin) => bin === "claude",
         health: async () => false,
         service: () => ({ installed: false, running: false }),

@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ABI } from "@hewntools/core/manifest.ts";
 import { SKILL_PATH, SKILL_URL, skillText } from "@hewntools/core/skill.ts";
-import { SERVER_INSTRUCTIONS } from "@hewntools/spec/agents.ts";
+import { AGENT_TOOLS, SERVER_INSTRUCTIONS } from "@hewntools/spec/agents.ts";
 import { serverUrl } from "@hewntools/test-host/server.ts";
 import { serve, setup, TOKENS } from "./helpers.ts";
 
@@ -45,6 +45,7 @@ describe("the Skill: build a Hewn tool", () => {
 
   test("the server instructions and capabilities_pack point at it", () => {
     assert.ok(SERVER_INSTRUCTIONS.includes(SKILL_PATH));
+    assert.ok(AGENT_TOOLS.find((t) => t.name === "capabilities_pack")!.description.includes(SKILL_PATH));
   });
 });
 

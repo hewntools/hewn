@@ -7,7 +7,7 @@
 import { ABI } from "./manifest.ts";
 
 export const SKILL_NAME = "build-a-hewn-tool";
-/** Where it is in the repo and the npm package, and its name as a hewn_docs page. */
+/** Where it is in the repo (in the npm package, under `dist/`), and its name as a hewn_docs page. */
 export const SKILL_PATH = `skills/${SKILL_NAME}/SKILL.md`;
 /** Where a Hewn serves it (public, like the design system). */
 export const SKILL_URL = `/_platform/${SKILL_PATH}`;
@@ -46,6 +46,8 @@ const SWAPS: [string, string][] = [
   ["after reading `BUILDER.md`, this brief, and any `OWNERS_WORDS.md` and `OTHER_TOOLS.md`,", "after reading this brief and the pack's `OTHER_TOOLS.md`,"],
   ["The owner's other capabilities are named at the end of `BUILDER.md`; `CONTRACTS.md` lists their operations,", "The owner's other capabilities are in the pack's `CONTRACTS.md`, which lists their operations,"],
   [" A widgets or Polish build's narrower scope in `BUILDER.md` wins.", ""],
+  // Hewn's Home draws a build's icon while its builder works; nothing shows a client's work until it's handed in.
+  ["your first implementation changes: Home shows them while you build.", "part of the tool from the start: the owner's review card and Home show them."],
 ];
 
 /** The brief's own section on the builder's `check` tool, to its end: the Skill's says `capabilities_check`. */

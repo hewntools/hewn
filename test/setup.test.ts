@@ -8,8 +8,8 @@ import type { PendingRequest } from "@hewntools/core/agents.ts";
 import { openHome, type Home } from "@hewntools/cli/home.ts";
 import { MARKDOWN, removeBlock, SHELL, upsertBlock } from "@hewntools/cli/setup/blocks.ts";
 import { readSkill } from "@hewntools/cli/app-dir.ts";
-import { type Exec, harnesses, refreshSkill, SKILL_DIRS, skillDir } from "@hewntools/cli/setup/harnesses.ts";
-import { authorizeUrl } from "@hewntools/cli/setup/connect.ts";
+import { type Exec, harnesses, refreshSkill, skillDir, skillDirs } from "@hewntools/cli/setup/harnesses.ts";
+import { authorizeUrl, connectHarness } from "@hewntools/cli/setup/connect.ts";
 import { runSetup } from "@hewntools/cli/setup/wizard.ts";
 
 describe("managed blocks", () => {
@@ -144,17 +144,36 @@ describe("hewn setup", () => {
     const mine = join(userHome, ".agents", "skills", "my-own", "SKILL.md");
     mkdirSync(join(userHome, ".agents", "skills", "my-own"), { recursive: true });
     writeFileSync(mine, "mine");
-    assert.deepEqual(refreshSkill(userHome, "next"), [], "an upgrade writes it only where setup put it");
+    assert.deepEqual(refreshSkill(userHome, harnesses(exec), "next"), [], "no agent set up with Hewn: nowhere");
     await run({ agents: ["claude-code", "codex"], yes: true, pointer: false });
     const skill = readSkill()!;
     assert.match(skill, /^---\nname: build-a-hewn-tool\n/);
-    for (const dir of SKILL_DIRS(userHome)) assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), skill, dir);
+    for (const dir of skillDirs(userHome)) assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), skill, dir);
     writeFileSync(join(skillDir(userHome, "agents"), "SKILL.md"), "stale");
     await run({ agents: ["codex"], yes: true });
     assert.equal(readFileSync(join(skillDir(userHome, "agents"), "SKILL.md"), "utf8"), skill, "every setup writes it again");
-    assert.deepEqual(refreshSkill(userHome, "next"), SKILL_DIRS(userHome));
-    for (const dir of SKILL_DIRS(userHome)) assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), "next");
+    assert.deepEqual(refreshSkill(userHome, harnesses(exec), "next"), skillDirs(userHome));
+    for (const dir of skillDirs(userHome)) assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), "next");
     assert.equal(readFileSync(mine, "utf8"), "mine");
+  });
+
+  test("an upgrade gives the Skill to an agent set up with Hewn before there was one", () => {
+    // Codex, set up by an older Hewn: registered, no Skill yet.
+    mkdirSync(join(userHome, ".codex"), { recursive: true });
+    writeFileSync(join(userHome, ".codex", "config.toml"), '[mcp_servers.hewn]\nurl = "http://127.0.0.1:7717/mcp"\n');
+    assert.deepEqual(refreshSkill(userHome, harnesses(exec), "skill"), [skillDir(userHome, "agents")]);
+    assert.equal(readFileSync(join(skillDir(userHome, "agents"), "SKILL.md"), "utf8"), "skill");
+    assert.ok(!existsSync(skillDir(userHome, "claude")), "not for an agent Hewn isn't set up with");
+  });
+
+  test("connecting from the web (Agents → Add…) gives the agent the Skill too", async () => {
+    const h = harnesses(exec).find((x) => x.agentId === "codex")!;
+    const events: [string, any][] = [];
+    const ok = await connectHarness(h, { url: "http://127.0.0.1:7717/mcp", userHome }, (name, data) => void events.push([name, data]), { login: async () => 0 });
+    assert.ok(ok, JSON.stringify(events));
+    const plan = events.find(([n]) => n === "plan")![1].steps;
+    assert.ok(plan.some((s: { kind: string; file?: string }) => s.kind === "skill" && s.file === "~/.agents/skills/build-a-hewn-tool/SKILL.md"), JSON.stringify(plan));
+    assert.equal(readFileSync(join(skillDir(userHome, "agents"), "SKILL.md"), "utf8"), readSkill());
   });
 
   test("re-running is idempotent and keeps user edits", async () => {

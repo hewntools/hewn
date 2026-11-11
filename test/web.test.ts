@@ -118,6 +118,7 @@ describe("web client (owner surface)", () => {
             agentId: "fake-agent",
             label: "Fake Agent",
             pointerRequired: true,
+            skills: "agents",
             pointerNote: "",
             detect: () => true,
             registered: () => setupRan.length > 0,

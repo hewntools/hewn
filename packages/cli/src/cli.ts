@@ -19,13 +19,14 @@ import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
 import * as service from "./service.ts";
-import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
+import { defaultHome, harnesses, realExec, refreshSkill } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
 import { hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
 import { checkFormat, writeFormat } from "./supervisor/format.ts";
 import { renderUnicodeCompact } from "uqr";
 import { dnsRecords, localSite, publicSite } from "@hewntools/host-workerd/surface/site.ts";
 import { webOrigin } from "@hewntools/host-workerd/surface/web.ts";
+import { SKILL_NAME } from "@hewntools/core/skill.ts";
 import { APP_DIR, BUNDLED, NPM_PREFIX } from "./app-dir.ts";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -211,19 +212,21 @@ async function main() {
       // Move the checkout to the newest release (or --to <tag>), install it, check it builds.
       // Then: data is migrated by the new code at start (with a backup first).
       const { isCheckout, upgradeCheckout, upgradeNpm } = await import("./upgrade.ts");
+      // The Skill as the code now on disk ships it (readSkill reads the file), for every agent set up with Hewn.
+      const skill = () => {
+        for (const dir of refreshSkill(defaultHome(), harnesses())) console.log(`✔ the Skill ${SKILL_NAME} written to ${dir}`);
+      };
       if (BUNDLED && !flag("restart-only")) {
         const r = upgradeNpm({ to: option("to"), log: (l) => console.log(`  ${l}`) });
         if (r.command) return console.log(`Hewn ${r.to} is out. npm needs more rights here; run:\n  ${r.command}\nthen: hewn upgrade --restart-only`);
-        if (!r.changed) return console.log(`✔ already on ${r.to}`);
+        if (!r.changed) return (console.log(`✔ already on ${r.to}`), skill());
         console.log(`✔ ${r.from} → ${r.to}`);
       } else if (isCheckout() && !flag("restart-only")) {
         const r = await upgradeCheckout({ to: option("to"), log: (l) => console.log(`  ${l}`) });
-        if (!r.changed) return console.log(`✔ already on ${r.to}`);
+        if (!r.changed) return (console.log(`✔ already on ${r.to}`), skill());
         console.log(`✔ ${r.from} → ${r.to}`);
       }
-      // The Skill as this version ships it, wherever setup put it (read from the code on disk now).
-      const { refreshSkill } = await import("./setup/harnesses.ts");
-      for (const dir of refreshSkill(defaultHome())) console.log(`✔ the Skill build-a-hewn-tool updated in ${dir}`);
+      skill();
       const b = backupNow(home, backupLocation(home, readConfig(home).backupDir).dir);
       console.log(`✔ backed up: ${b.file}`);
       if (service.status().installed) {

@@ -14,7 +14,7 @@ Hewn holds the user's tools: durable capabilities with their own state, typed op
 
 ## Implementation contract
 
-Write a **candidate** in your workspace; Hewn owns validation and promotion. Passing candidates become immutable versions; an agent-requested change waits for owner review. The current version serves until promotion.
+Write a **candidate** in your workspace; Hewn owns validation and promotion. Passing candidates become immutable versions; an agent's new tool or change waits for the owner's review. The current version serves until promotion.
 
 When the tool is complete, check it with `capabilities_check` until it passes, then submit it with `capabilities_submit` (above). Hewn validates it again; if that fails, the build says why: fix it and submit again.
 
@@ -56,7 +56,7 @@ Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabil
 
 ### Icon
 
-**New tools:** after reading this brief and the pack's `OTHER_TOOLS.md`, make `ui/icon.svg` and `"hue"` your first implementation changes: Home shows them while you build. On retries and changes, preserve the existing icon and hue unless the request asks for a new identity; add a missing icon when the build scope allows it.
+**New tools:** after reading this brief and the pack's `OTHER_TOOLS.md`, make `ui/icon.svg` and `"hue"` part of the tool from the start: the owner's review card and Home show them. On retries and changes, preserve the existing icon and hue unless the request asks for a new identity; add a missing icon when the build scope allows it.
 
 Ship `ui/icon.svg` as a **5×5 pixel glyph**, even with no other UI:
 
