@@ -38,7 +38,8 @@ export async function runOperation(
   const updateSecret = (name: string, value: string) => void (env.readOnly || (secretUpdates[name] = value));
   const inserted = new Set<string>();
   const ctx: AbiContext = {
-    db: env.readOnly ? readOnlyDb(env.db) : insertsInto(env.db, inserted),
+    // Only validation's calls (tests, sample data) note what they insert: the delete check reads it; live calls skip it.
+    db: env.readOnly ? readOnlyDb(env.db) : env.caller?.kind === "test" ? insertsInto(env.db, inserted) : env.db,
     secrets: { ...(env.secrets ?? {}) },
     config: { ...(env.config ?? {}) },
     updateSecret,
@@ -54,18 +55,21 @@ export async function runOperation(
 }
 
 /**
- * The tables a statement inserts into (INSERT, INSERT OR …, REPLACE INTO; also inside WITH or a trigger-less upsert),
- * lowercased: validation's delete check tells a replace (fewer rows, but new ones added) from a delete.
+ * The tables a statement inserts into (INSERT, INSERT OR …, REPLACE INTO, also after WITH), lowercased:
+ * validation's delete check tells a replace (fewer rows, but new ones added) from a delete.
  */
 export function insertTargets(sql: string): string[] {
   const s = sql.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/'(?:[^']|'')*'/g, "''");
   // A table name, bare or quoted ("…", `…`, […]); optionally after a schema ("main.").
-  const name = '(?:"((?:[^"]|"")+)"|\\x60([^\\x60]+)\\x60|\\[([^\\]]+)\\]|([\\w$]+))';
-  const re = new RegExp(`\\b(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into\\s+${name}(?:\\s*\\.\\s*${name})?`, "gi");
+  const name = '(?:"((?:[^"]|"")+)"|\\x60([^\\x60]+)\\x60|\\[([^\\]]+)\\]|([\\p{L}\\p{N}_$]+))';
+  const re = new RegExp(`\\b(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into\\s+${name}(?:\\s*\\.\\s*${name})?`, "giu");
   return [...s.matchAll(re)].map((m) => (m[5] ?? m[6] ?? m[7] ?? m[8] ?? m[1] ?? m[2] ?? m[3] ?? m[4]).replace(/""/g, '"').toLowerCase());
 }
 
-/** The db an operation gets, noting each table a statement that ran inserted into. */
+/**
+ * The db an operation gets in validation, noting each table a statement that ran inserted into: for run(), only when
+ * it changed a row (an INSERT OR IGNORE or DO NOTHING that added none isn't a replace).
+ */
 function insertsInto(db: AbiDb, into: Set<string>): AbiDb {
   const note = (sql: string) => insertTargets(sql).forEach((t) => into.add(t));
   return {
@@ -73,7 +77,15 @@ function insertsInto(db: AbiDb, into: Set<string>): AbiDb {
     prepare: (sql) => {
       const st = db.prepare(sql);
       const ran = <T>(r: T) => (note(sql), r);
-      return { run: (...p) => ran(st.run(...p)), all: (...p) => ran(st.all(...p)), get: (...p) => ran(st.get(...p)) };
+      return {
+        run: (...p) => {
+          const r = st.run(...p);
+          if (Number(r.changes) > 0) note(sql);
+          return r;
+        },
+        all: (...p) => ran(st.all(...p)),
+        get: (...p) => ran(st.get(...p)),
+      };
     },
     transaction: (fn) => db.transaction(fn),
   };

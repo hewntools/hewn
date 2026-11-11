@@ -182,15 +182,11 @@ export class Validation extends Domain {
       onTests(0, cases.length);
       for (const [i, c] of cases.entries()) {
         try {
-          const op = manifest.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
+          const op = caseOperation(manifest, c);
           const before = await this.runtime.countState(testState, code);
-          let ran: { result: unknown; inserted: string[] } = { result: undefined, inserted: [] };
-          try {
-            ran = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
-          } finally {
-            if (op) undeclaredDelete(op, before, await this.runtime.countState(testState, code), ran.inserted, `test '${c.name}'`);
-          }
-          const result = ran.result;
+          const { result, inserted } = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
+          // A case that passed (one that expects an error is about the error, not what the call left behind).
+          if (op && !c.expectError) undeclaredDelete(op, { before, after: await this.runtime.countState(testState, code), inserted }, `test '${c.name}'`);
           if (op && !c.expectError && !views.has(opKey(op.name, op.version))) views.set(opKey(op.name, op.version), result);
         } catch (e) {
           failed.push((e as Error).message);
@@ -217,13 +213,20 @@ export class Validation extends Domain {
         await this.runtime.migrate(sampleState, migrations, code);
         let replayed = true;
         for (const [i, c] of sample.entries()) {
+          const before = await this.runtime.countState(sampleState, code);
+          let inserted: string[];
           try {
-            const before = await this.runtime.countState(sampleState, code);
-            const { inserted } = await this.replayCall(manifest, sampleTarget, c);
-            const op = manifest.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
-            if (op) undeclaredDelete(op, before, await this.runtime.countState(sampleState, code), inserted);
+            ({ inserted } = await this.replayCall(manifest, sampleTarget, c));
           } catch (e) {
             softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
+            replayed = false;
+            break;
+          }
+          const op = caseOperation(manifest, c);
+          try {
+            if (op) undeclaredDelete(op, { before, after: await this.runtime.countState(sampleState, code), inserted });
+          } catch (e) {
+            softFail(`${SAMPLE_FILE}: call ${i + 1} (${c.operation}): ${(e as Error).message}`);
             replayed = false;
             break;
           }
@@ -576,12 +579,18 @@ export class Validation extends Domain {
  * replace (a tag set swapped for a smaller one, delete-then-insert, INSERT OR REPLACE), a normal write. Not caught: an
  * overwrite that keeps the count, or a delete that also inserts into the same table.
  */
-export function undeclaredDelete(op: OperationManifest, before: Record<string, number>, after: Record<string, number>, inserted: string[], label?: string) {
+function undeclaredDelete(op: OperationManifest, call: { before: Record<string, number>; after: Record<string, number>; inserted: string[] }, label?: string) {
   if (op.sideEffect === "destructive") return;
-  const added = new Set(inserted.map((t) => t.toLowerCase()));
-  const fewer = Object.keys(before).filter((t) => (after[t] ?? 0) < before[t] && !added.has(t.toLowerCase()));
+  const { before, after } = call;
+  const added = new Set(call.inserted);
+  // Fewer rows, or gone (dropped, even empty).
+  const fewer = Object.keys(before).filter((t) => (!(t in after) || after[t] < before[t]) && !added.has(t.toLowerCase()));
   if (fewer.length) throw new Error(`${label ? `${label}: ` : ""}${op.name} leaves ${fewer.join(", ")} with fewer rows and adds none: declare it destructive`);
 }
+
+/** The operation a test case or sample call runs: its version, or the highest. */
+const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
+  m.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
 
 function readCases(files: Files): TestCase[] {
   const raw = files["tests/cases.json"];

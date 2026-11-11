@@ -72,7 +72,6 @@ describe("an operation that deletes must be declared destructive", () => {
     assert.equal(b.status, "promoted", b.log.join("\n"));
   });
 
-
   test("a smaller set swapped in (fewer rows, but new ones added) is a replace", async () => {
     withOperation(dir, "keep_runs", "write", swap, [...twice, { name: "keep one", operation: "keep_runs", input: { keep: 1 } }]);
     const b = await install();
@@ -86,18 +85,33 @@ describe("an operation that deletes must be declared destructive", () => {
     assert.match(b.log.join("\n"), /keep_runs leaves runs with fewer rows and adds none: declare it destructive/);
   });
 
+  test("a test that fails says why, even when its call also deleted", async () => {
+    withOperation(dir, "clear_runs", "write", `db.prepare("DELETE FROM runs").run()`, [record, { name: "clear", operation: "clear_runs", input: {}, expect: { nope: 1 } }]);
+    const log = (await install()).log.join("\n");
+    assert.match(log, /test 'clear': expected \{"nope":1\}/);
+    assert.doesNotMatch(log, /declare it destructive/);
+  });
+
+  test("an INSERT that added nothing isn't a replace", async () => {
+    withOperation(dir, "clear_runs", "write", `db.prepare("DELETE FROM runs").run(); db.prepare("INSERT INTO runs (id, date, distance_km, duration_seconds, notes, recorded_at) SELECT id, date, distance_km, duration_seconds, notes, recorded_at FROM runs WHERE 0").run()`, [record, { name: "clear", operation: "clear_runs", input: {} }]);
+    const b = await install();
+    assert.equal(b.status, "failed");
+    assert.match(b.log.join("\n"), /clear_runs leaves runs with fewer rows and adds none/);
+  });
+
   test("a delete in the sample replay fails the same way", async () => {
     withOperation(dir, "clear_runs", "write", `db.prepare("DELETE FROM runs").run()`, [], [{ operation: "record_run", version: 1, input: { distanceKm: 2, durationSeconds: 600 } }, { operation: "clear_runs", version: 1, input: {} }]);
     const b = await install();
     assert.equal(b.status, "failed");
-    assert.match(b.log.join("\n"), /call 2 \(clear_runs\): clear_runs leaves runs with fewer rows and adds none: declare it destructive/);
+    assert.match(b.log.join("\n"), /sample\/calls\.json: call 2 \(clear_runs\): clear_runs leaves runs with fewer rows and adds none: declare it destructive/);
+    assert.doesNotMatch(b.log.join("\n"), /doesn't replay/);
   });
 });
 
 test("the tables a statement inserts into: bare, quoted, after a schema, in WITH, OR REPLACE; never in a literal", () => {
   assert.deepEqual(
-    ["INSERT INTO idea_tags (a) VALUES (?)", 'insert or replace into "Night Log" values (1)', "REPLACE INTO main.nights VALUES (1)", "WITH x AS (SELECT 1) INSERT INTO [t] SELECT * FROM x", "SELECT 'insert into fake' FROM t", "INSERT INTO `b` VALUES (1); INSERT INTO c VALUES (2)"].map(insertTargets),
-    [["idea_tags"], ["night log"], ["nights"], ["t"], [], ["b", "c"]],
+    ["INSERT INTO nätter (a) VALUES (?)", "INSERT INTO idea_tags (a) VALUES (?)", 'insert or replace into "Night Log" values (1)', "REPLACE INTO main.nights VALUES (1)", "WITH x AS (SELECT 1) INSERT INTO [t] SELECT * FROM x", "SELECT 'insert into fake' FROM t", "INSERT INTO `b` VALUES (1); INSERT INTO c VALUES (2)"].map(insertTargets),
+    [["nätter"], ["idea_tags"], ["night log"], ["nights"], ["t"], [], ["b", "c"]],
   );
 });
 
