@@ -336,7 +336,7 @@ describe("web client (owner surface)", () => {
       assert.equal(del.status, 200, JSON.stringify(del.json));
       assert.ok(!(await api("/capabilities")).json.some((c: any) => c.id === "secret-echo"));
       assert.ok(!platform.list(t.codex).some((c) => c.id === "secret-echo"));
-      await assert.rejects(platform.create(USER, { name: "Secret Echo", purpose: "x", requirements: "x" }), /archived/);
+      await assert.rejects(platform.create(USER, { name: "Secret Echo", purpose: "x", requirements: "x" }), (e: any) => /was deleted by the owner and is kept with its data/.test(e.message) && e.details?.archived?.id === "secret-echo");
       platform.restore(USER, "secret-echo");
       assert.ok((await api("/capabilities")).json.some((c: any) => c.id === "secret-echo"));
     });

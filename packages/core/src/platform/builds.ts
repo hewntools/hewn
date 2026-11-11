@@ -166,6 +166,14 @@ export interface BuildReport {
 /** The longest structured reply kept with an intake turn (as JSON). */
 const MAX_REPLY_CHARS = 100_000;
 
+/**
+ * A new tool on the id of one the owner deleted (kept with its data, Settings › Data › Deleted tools). The message is
+ * an agent's; `details.archived` lets the web client and the CLI say it their own way (where to bring it back, or
+ * which command).
+ */
+export const archivedConflict = (c: { id: string; name: string; displayName?: string | null }) =>
+  new PlatformError("conflict", `'${c.id}' was deleted by the owner and is kept with its data; use another id, or ask the owner to restore it`, { archived: { id: c.id, name: c.displayName ?? c.name } });
+
 export class Builds extends Domain {
   private buildModelFor: (builder: string) => { model?: string; effort?: string };
   private agentBuildModels?: (builder: string) => string[];
@@ -468,7 +476,7 @@ export class Builds extends Domain {
     if (!id) throw new PlatformError("invalid_request", "name must contain letters or digits");
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     const existing = this.registry.getCapability(id);
-    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn (Settings › Data › Deleted tools), or pick another id`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
     if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
     // A create that never promoted (it failed or was cancelled) keeps its id for a retry; a new
     // create of the same name takes it over instead (as `hewn install` does), unless one is being built.
@@ -747,7 +755,8 @@ export class Builds extends Domain {
     requireOwner(owner);
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
-    if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
+    if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
     // Takes over an id a create never promoted (as createBuild does), unless one is being built.
     if (existing) this.oneCreateAtATime(owner, id);
     const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };

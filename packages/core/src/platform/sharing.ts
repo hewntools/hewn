@@ -12,7 +12,7 @@ import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PRO
 import type { Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
 import { randomToken } from "../sha256.ts";
-import { type BuildView, RESERVED_IDS, slugify } from "./builds.ts";
+import { archivedConflict, type BuildView, RESERVED_IDS, slugify } from "./builds.ts";
 import { Domain } from "./context.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
@@ -282,7 +282,10 @@ export class Sharing extends Domain {
     const id = slugify(name);
     if (!id) throw new PlatformError("invalid_request", "the name needs a letter or a digit");
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
-    if (this.registry.getCapability(id)) throw new PlatformError("conflict", `You already have a tool called ${name}. Pick another name.`);
+    const taken = this.registry.getCapability(id);
+    // A deleted one keeps its name while it's kept: say so, and where to bring it back.
+    if (taken?.archivedAt) throw archivedConflict(taken);
+    if (taken) throw new PlatformError("conflict", `You already have a tool called ${name}. Pick another name.`);
     const source: ToolSource = { id: s.sidecar.tool.id, name: s.manifest.name, version: s.sidecar.tool.version, hash: s.sidecar.tool.hash, from: s.staged.from, ...(s.staged.host ? { host: s.staged.host } : {}) };
     const manifest = stampSource({ ...s.manifest, id, name }, source);
     const seed: Files = { ...s.files, "capability.json": bytes(JSON.stringify(manifest, null, 2) + "\n") };
