@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A build: its page, or the panel in the change drawer.
-import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf } from "../kit.js";
+import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
 import { AGENT_CATALOG, agentTile, catalogOf } from "./agents.js";
 import { shotUrl } from "./appearance.js";
 import { go, hues, moment, onLeave, put, sandboxNotice, topBar, view } from "./frame.js";
@@ -66,11 +66,11 @@ const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
 const kindWord = (b) => (b.builder === "keep" || b.request?.manifestOnly ? "quick change" : b.request?.polish ? "polish" : BUILD_KIND[b.kind] ?? b.kind);
 
 /**
- * Failed builds nobody has dealt with yet: not retried, and nothing of that tool promoted since (a
- * later change replaced it). These are what "needs you" means for builds.
+ * Failed builds nobody has dealt with yet: not retried or discarded, and nothing of that tool promoted
+ * since (a later change replaced it). These are what "needs you" means for builds.
  */
 const unresolvedFailures = (builds) =>
-  builds.filter((b) => b.status === "failed" && !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) && !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt));
+  builds.filter((b) => b.status === "failed" && !b.discardedAt && !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) && !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt));
 
 /** V6 A build that waits its turn says for what, the same in the drawer, the Inbox and Activity. */
 const waitingPill = (b) => kindTag(b.queued ? "waiting for the change before it" : "waiting", "warn");
@@ -360,6 +360,21 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       };
       if (fix) fix.addEventListener("click", again("fix", fix));
       if (retry) retry.addEventListener("click", again("retry", retry));
+      // Discard: off the Inbox, kept in Activity. Nothing about the tool changes.
+      const discard = !b.discardedAt && h("button", {}, "Discard");
+      if (discard)
+        discard.addEventListener("click", async () => {
+          discard.disabled = true;
+          try {
+            b = await api(`/builds/${enc(id)}/discard`, { method: "POST" });
+            pollInbox();
+            toast("Discarded: it stays in Activity");
+            failed();
+          } catch (e) {
+            discard.disabled = false;
+            fail(e);
+          }
+        });
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
@@ -369,7 +384,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         convoView,
         specView,
-        retry ? h("div", { class: "row tight" }, fix, retry) : h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more."),
+        retry ? h("div", { class: "row tight" }, fix, retry, discard) : [h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more."), discard && h("div", { class: "row tight" }, discard)],
+        b.discardedAt && h("div", { class: "small muted" }, "Discarded: it's out of the Inbox, and stays in Activity."),
         logBlock(true),
       );
       requestAnimationFrame(keepScroll);

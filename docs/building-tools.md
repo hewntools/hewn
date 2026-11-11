@@ -98,6 +98,8 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
 
+**Discard** puts a failed build aside, when you'd rather not try again: it leaves the Inbox, and Activity keeps it, marked discarded. Nothing about the tool changes (a failed new tool installed nothing; a failed change left your tool on its version), and the files the build left go with it.
+
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
@@ -122,7 +124,7 @@ Operations are versioned too (`list_runs@1`). A breaking change adds `list_runs@
 
 ## Deleting a tool
 
-**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back.
+**Delete…** in the tool's menu removes it from Hewn and from agents, but keeps its data (you type its id to confirm). Settings › Data › Deleted tools lists what you deleted: **Restore** brings it back with its data, and **Delete forever** removes the code, versions, data, logs and secrets (you type its name to confirm). After that, only a backup can bring it back. While it's deleted, its name stays its own: installing or building a tool by that name says so and points you to Deleted tools (or to `hewn restore`, `hewn purge` and `--name` in the terminal), or install the new one under another name.
 
 ## From the terminal
 
