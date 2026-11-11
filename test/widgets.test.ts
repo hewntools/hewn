@@ -441,14 +441,19 @@ describe("create with widgets", () => {
   beforeEach(() => (t = setup()));
   afterEach(() => t.cleanup());
 
-  test("widgets: true chains a widgets build after the capability promotes", async () => {
+  test("widgets: true chains a widgets build after the capability promotes; an agent's waits for the owner too (approval mode wait)", async () => {
     t.queue((ws) => cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true }), addCountWidget);
     const b = await t.platform.create(t.claude, { name: "UI Counter", purpose: "Count taps.", requirements: "A counter.", widgets: true });
     assert.ok(b.widgetsBuildId);
     assert.equal(t.platform.getBuild(t.claude, b.widgetsBuildId!).status, "waiting");
-    assert.equal((await settled(t.platform, b.buildId)).status, "promoted");
-    const w = await settled(t.platform, b.widgetsBuildId!);
-    assert.equal(w.status, "promoted", w.log.join("\n"));
+    assert.equal((await t.platform.settle(b.buildId)).status, "review");
+    assert.equal(t.platform.getBuild(t.claude, b.widgetsBuildId!).status, "waiting", "not before the owner approves the tool");
+    assert.equal((await t.platform.approveBuild(USER, b.buildId)).status, "promoted");
+    const w = await t.platform.settle(b.widgetsBuildId!);
+    assert.equal(w.status, "review", w.log.join("\n"));
+    assert.equal(w.review!.approval, "wait");
+    assert.equal(t.platform.activeManifest("ui-counter").widgets, undefined, "not live before the owner approves it");
+    assert.equal((await t.platform.approveBuild(USER, w.buildId)).status, "promoted");
     assert.deepEqual(t.platform.activeManifest("ui-counter").widgets?.map((x) => x.name), ["count"]);
     await assert.rejects(t.platform.create(t.claude, { name: "Conn", purpose: "p", requirements: "r", kind: "connection", widgets: true }), /connection has no widgets/);
   });
@@ -469,7 +474,7 @@ describe("create with widgets across a restart", () => {
       assert.ok(retry, "the widgets build waiting for it doesn't stop the retry");
       assert.equal(fresh.registry.getBuild(b.widgetsBuildId!)!.dependsOn, retry, "re-pointed to the retry");
       assert.equal((await settled(fresh, retry)).status, "promoted");
-      const w = await fresh.settle(b.widgetsBuildId!);
+      const w = await settled(fresh, b.widgetsBuildId!);
       assert.equal(w.status, "promoted", w.log.join("\n"));
     } finally {
       await fresh.drain();

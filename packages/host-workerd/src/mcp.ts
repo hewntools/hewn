@@ -70,7 +70,7 @@ async function widgetIcon(platform: Platform, id: string) {
 /** Hewn's docs, from the host (its assets); undefined where it has none. */
 type Docs = () => Promise<DocPage[]>;
 
-function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs, origin?: () => string): Tool[] {
+function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs, origin?: () => string | undefined): Tool[] {
   const known = `\n\n${catalog(caps)}`;
   // The tools themselves (names, scopes, descriptions, input schemas) are the spec's; these run them.
   const run: Record<string, Pick<Tool, "handler" | "format">> = {
@@ -110,10 +110,11 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     builds_retry: { handler: (a) => platform.retryBuild(agent, a.buildId) },
     builds_cancel: { handler: (a) => platform.cancelBuild(agent, a.buildId) },
     capabilities_pack: {
-      // The download link on the address the client reached this Hewn at.
+      // The download link on the address the client reached this Hewn at (else its path only).
       handler: async (a) => {
         const p = await platform.pack(agent, a);
-        return p.download && origin ? { ...p, download: { url: `${origin()}${p.download.path}`, expiresAt: p.download.expiresAt } } : p;
+        const at = origin?.();
+        return p.download && at ? { ...p, download: { url: `${at}${p.download.path}`, expiresAt: p.download.expiresAt } } : p;
       },
     },
     capabilities_check: {
@@ -153,7 +154,7 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
 }
 
 /** The agent's tools right now: filtered by scope, with its visible capabilities in the descriptions. */
-export function toolsFor(platform: Platform, agent: Agent, docs?: Docs, origin?: () => string): Tool[] {
+export function toolsFor(platform: Platform, agent: Agent, docs?: Docs, origin?: () => string | undefined): Tool[] {
   const caps = agent.scopes.has("discover") ? platform.list(agent) : [];
   return platformTools(platform, agent, caps, docs, origin).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
 }
@@ -165,7 +166,7 @@ export const toolSignature = (platform: Platform, agent: Agent) => JSON.stringif
  * One MCP server per session, for the authenticated agent. `agent()` is read per request, so
  * scope changes apply mid-session; tools are listed fresh each time.
  */
-export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs; origin?: () => string } = {}): Server {
+export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs; origin?: () => string | undefined } = {}): Server {
   const caps = agent().scopes.has("discover") ? platform.list(agent()) : [];
   const instructions = `${SERVER_INSTRUCTIONS}\n\n${catalog(caps)}`;
   // cfworker validation: no eval, so the same server runs on workerd.

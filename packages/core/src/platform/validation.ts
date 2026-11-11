@@ -469,12 +469,13 @@ export class Validation extends Domain {
     await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
     this.loaded.set(code.hash, { files, bundle: code.js });
-    // A follow-up chained to the creation of the same capability (create with widgets) is part of that creation.
+    // A follow-up chained to the creation of the same capability (create with widgets) is part of that
+    // creation; an agent's waits for the owner all the same while its approval mode says so.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
     const owners = build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
     const held = !owners && this.agentStore.approvalMode(build.requestedBy) === "wait";
-    const review = partOfCreate ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? { contentHash: code.hash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" as const } : undefined;
+    const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? { contentHash: code.hash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" as const } : undefined;
     if (review) {
       const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
       for (const s of shots) await this.blobs.put(reviewShotKey(build.id, s.name), s.png);

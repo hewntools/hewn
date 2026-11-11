@@ -34,8 +34,8 @@ export const RULES: Record<string, Rule> = {
   token: { perClient: 60, total: 300, windowMs: MIN },
   metadata: { perClient: 60, total: 600, windowMs: MIN },
   mcp: { perClient: 600, total: 2000, windowMs: MIN },
-  /** A pack's download link (capabilities_pack): one per pack an agent fetches. */
-  pack: { perClient: 30, total: 120, windowMs: 10 * MIN },
+  /** A pack's download link (capabilities_pack): one per pack an agent fetches; the total only a backstop, so a few clients can't use it up for a real one. */
+  pack: { perClient: 30, total: 3000, windowMs: 10 * MIN },
   /** Sign-in links and passkey sign-in: nobody needs many. */
   signin: { perClient: 30, total: 120, windowMs: 10 * MIN },
   /** The web client and capability UIs on the public URL. */

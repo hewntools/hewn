@@ -89,6 +89,19 @@ async function answer(platform: Platform, sessions: McpSessions, host: SurfaceHo
 }
 
 /**
+ * Where a link given to an agent (a pack's download) points: the local address it reached (its host
+ * is a loopback name, checked above), or on the public listener the public URL when there is one,
+ * else the host the request was forwarded for, if that is a host name (and a port). Undefined: the
+ * agent gets the link's path only.
+ */
+export function linkOrigin(origin: string, isPublic: boolean, publicUrl: string | undefined): string | undefined {
+  if (!isPublic) return origin;
+  if (publicUrl) return publicUrl;
+  const host = origin.replace(/^https:\/\//, "");
+  return /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::\d{1,5})?$/i.test(host) && !host.includes("..") ? origin : undefined;
+}
+
+/**
  * A pack's download link (capabilities_pack's `download`): the token is the key, minted for one
  * agent's pack inside its authenticated call, good once and for minutes. Anything else is a 404,
  * the same whether the token never was, was used, ran out or its agent lost the pack.
@@ -127,5 +140,5 @@ async function route(platform: Platform, sessions: McpSessions, host: SurfaceHos
   const token = /^Bearer\s+(.+)$/i.exec(req.headers.get("authorization") ?? "")?.[1];
   const agent = platform.agentStore.authenticate(token);
   if (!agent) return challenge(origin);
-  return sessions.handle(req, agent, origin.url);
+  return sessions.handle(req, agent, linkOrigin(origin.url, isPublic, platform.publicUrl()));
 }
