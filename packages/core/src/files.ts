@@ -9,6 +9,8 @@ export const bytes = (s: string) => utf8(s);
 
 /** Files that are build/runtime artefacts, never part of a version's identity. */
 export const ARTEFACTS = new Set([".venv", "__pycache__", "node_modules", ".DS_Store", ".pytest_cache"]);
+/** The workspace folder with each other capability's contract in full: a dot-folder, which no version can hold. */
+export const CONTRACTS_DIR = ".hewn-contracts";
 /** Workspace-only files (the build's request and brief, the design system, the other tools' looks and contracts, the owner's words) that never become part of a version. */
 export const WORKSPACE_ONLY = new Set(["BUILDER.md", "BRIEF.md", "PLATFORM_UI.css", "OTHER_TOOLS.md", "CONTRACTS.md", "OWNERS_WORDS.md"]);
 /** Workspace-only directories: what the owner attached for the builder to look at, and its UI's screenshots. */

@@ -445,7 +445,7 @@ export class Validation extends Domain {
    * (`note`: a check's copy has none to keep).
    */
   private async ownersDetail(build: BuildRow, detail: string, generic: string, { note = true } = {}): Promise<string> {
-    if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return detail;
+    if (byOwner(build)) return detail;
     if (note) await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${detail}`).catch(() => {});
     return generic;
   }
@@ -473,9 +473,8 @@ export class Validation extends Domain {
     // creation; an agent's waits for the owner all the same while its approval mode says so.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
-    const owners = build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
-    const held = !owners && this.agentStore.approvalMode(build.requestedBy) === "wait";
-    const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? { contentHash: code.hash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" as const } : undefined;
+    const held = !byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait";
+    const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? newToolReview(manifest, code.hash, views) : undefined;
     if (review) {
       const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
       for (const s of shots) await this.blobs.put(reviewShotKey(build.id, s.name), s.png);
@@ -652,6 +651,12 @@ export function matches(expected: unknown, actual: unknown): boolean {
   return expected === actual;
 }
 
+/** A build the owner started (the web client or the CLI): never held, and its log says things as they are. */
+const byOwner = (build: BuildRow) => build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
+
+/** An agent's new tool held for the owner: everything in it is new. */
+const newToolReview = (manifest: CapabilityManifest, contentHash: string, views: Map<string, unknown>): BuildReview => ({ contentHash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" });
+
 /** Operations as a review card shows them: what each takes, and what it returned in its first passing test. */
 function reviewOps(ops: OperationManifest[], views: Map<string, unknown>): BuildReview["newOperations"] {
   const key = (o: OperationManifest) => opKey(o.name, o.version);
@@ -665,7 +670,7 @@ function reviewOps(ops: OperationManifest[], views: Map<string, unknown>): Build
  * new tool waits while its mode says to: `promote`.)
  */
 function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>, held: boolean): BuildReview | undefined {
-  if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return undefined;
+  if (byOwner(build)) return undefined;
   const key = (o: OperationManifest) => opKey(o.name, o.version);
   const had = new Map(base.manifest.operations.map((o) => [key(o), o]));
   const newOperations = reviewOps(candidate.manifest.operations.filter((o) => !had.has(key(o))), views);

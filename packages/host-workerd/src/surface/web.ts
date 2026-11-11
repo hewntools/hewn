@@ -832,6 +832,8 @@ async function capabilityList(platform: Platform, owner: Agent) {
     const b = active.find((x) => x.capabilityId === capId);
     return b ? { buildId: b.buildId, progress: b.state.progress, step: b.state.step, tests: b.state.tests ?? null } : null;
   };
+  // A build held for the owner, per tool (the newest): opening the tool shows it, whatever was built since.
+  const held = new Map(platform.registry.buildsInReview().map((b) => [b.capabilityId, b.id]));
   const order = (id: string) => platform.registry.getCapability(id)?.homeOrder ?? Number.MAX_SAFE_INTEGER;
   const caps: Record<string, any>[] = [];
   // Unplaced tiles follow in creation order, so a new capability lands last (next to "New").
@@ -855,54 +857,40 @@ async function capabilityList(platform: Platform, owner: Agent) {
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
       lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
+      held: held.get(c.id) ?? null,
     });
   }
+  // Tools that aren't one yet: being built, or an agent's new tool held for the owner (its tile opens the review card).
+  const unbuilt = (o: { id: string; name: string; purpose: string; buildId: string; status: string; glyph?: { hue: number | null; saturation: number | null }; connection: boolean }) => ({
+    id: o.id,
+    name: o.name,
+    purpose: o.purpose,
+    tags: [],
+    operations: [],
+    ready: false,
+    hasIcon: !!o.glyph,
+    iconKind: o.glyph ? "glyph" : null,
+    iconUrl: o.glyph ? `/api/builds/${o.buildId}/icon` : null,
+    hue: o.glyph?.hue ?? null,
+    saturation: o.glyph?.saturation ?? null,
+    ui: false,
+    version: null,
+    requests: 0,
+    lastBuild: { buildId: o.buildId, status: o.status },
+    building: building(o.id),
+    held: o.status === "review" ? o.buildId : null,
+    // A new connection belongs under Accounts, not on Home.
+    ...(o.connection ? { kind: "connection" } : {}),
+  });
   const pending: Record<string, any>[] = [];
   for (const b of active.filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
     // The builder writes the icon first, so a new capability has its own tile while it builds.
-    const glyph = await platform.buildGlyph(b.buildId);
-    pending.push({
-      id: b.capabilityId,
-      name: b.name,
-      purpose: b.purpose,
-      tags: [],
-      operations: [],
-      ready: false,
-      hasIcon: !!glyph,
-      iconKind: glyph ? "glyph" : null,
-      iconUrl: glyph ? `/api/builds/${b.buildId}/icon` : null,
-      hue: glyph?.hue ?? null,
-      saturation: glyph?.saturation ?? null,
-      ui: false,
-      version: null,
-      requests: 0,
-      lastBuild: { buildId: b.buildId, status: "building" },
-      building: building(b.capabilityId),
-      // A new connection belongs under Accounts while it builds, not on Home.
-      ...(b.connection ? { kind: "connection" } : {}),
-    });
+    pending.push(unbuilt({ id: b.capabilityId, name: b.name, purpose: b.purpose, buildId: b.buildId, status: "building", glyph: await platform.buildGlyph(b.buildId), connection: b.connection }));
   }
-  // An agent's new tool held for the owner: its tile opens the review card.
   for (const b of platform.registry.buildsInReview().filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
     const req = b.request as { name?: string; purpose?: string; kind?: string };
-    pending.push({
-      id: b.capabilityId,
-      name: platform.registry.getCapability(b.capabilityId)?.name ?? req.name ?? b.capabilityId,
-      purpose: req.purpose ?? "",
-      tags: [],
-      operations: [],
-      ready: false,
-      hasIcon: false,
-      iconKind: null,
-      hue: null,
-      saturation: null,
-      ui: false,
-      version: null,
-      requests: 0,
-      lastBuild: { buildId: b.id, status: "review", builder: b.builder },
-      building: null,
-      ...(b.review?.connection || req.kind === "connection" ? { kind: "connection" } : {}),
-    });
+    const name = platform.registry.getCapability(b.capabilityId)?.name ?? req.name ?? b.capabilityId;
+    pending.push(unbuilt({ id: b.capabilityId, name, purpose: req.purpose ?? "", buildId: b.id, status: "review", connection: !!b.review?.connection || req.kind === "connection" }));
   }
   return [...caps, ...pending];
 }

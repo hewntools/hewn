@@ -96,6 +96,7 @@ describe("the pack: what a client builds from", () => {
     await assert.rejects(t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log", paths: ["nope.md"] }), code("invalid_request", /not in the pack: nope\.md/));
     await assert.rejects(t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log", paths: [".hewn-contracts/ui-counter.md"] }), code("invalid_request", /capabilities_get/));
     await assert.rejects(t.platform.pack(t.claude, { kind: "create", paths: "CONTRACTS.md" }), code("invalid_request", /paths/));
+    for (const name of ["toString", "constructor", "__proto__"]) await assert.rejects(t.platform.pack(t.claude, { kind: "create", paths: [name] }), code("invalid_request", /not in the pack/), name);
   });
 
   test("a client sees only the tools its grant shows it, in its pages and its download; a link is its own, once and for minutes", async () => {
@@ -239,6 +240,29 @@ describe("submit: the same gate as any build", () => {
     await assert.rejects(t.platform.retryBuild(t.claude, b.buildId), code("conflict"));
   });
 
+  test("a held new tool keeps its id from a retry of an older create too", async () => {
+    t.queue(...[1, 2, 3].map(() => (ws: string) => writeFileSync(join(ws, "capability.json"), "{ not json")));
+    const failed = await t.platform.settle((await t.platform.create(t.claude, { name: "UI Counter", purpose: "p", requirements: "r" })).buildId);
+    assert.equal(failed.status, "failed");
+    const held = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: counter(), request: "A counter" })).buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    await assert.rejects(t.platform.retryBuild(t.claude, failed.buildId), code("conflict", /waits for the owner's approval/));
+  });
+
+  test("a held change that can no longer go live fails on approval, and its renders go all the same", async () => {
+    await installFrom(t.platform, join(FIXTURES, "ui-counter"));
+    const files = edit(counter(), "ui/index.html", (s) => s.replace("</main>", "<p>new</p></main>"));
+    const held = await t.platform.settle((await t.platform.submitFiles(t.claude, { files, capabilityId: "ui-counter", request: "a line", baseVersion: 1 })).buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    assert.ok(await t.platform.blobs.get(`screenshots/${held.buildId}/mobile-dark.png`));
+    const own = reworded(counter());
+    assert.equal((await t.platform.settle((await t.platform.submit(USER, { files: Object.fromEntries(own.map((f) => [f.path, bytes(f.content)])), capabilityId: "ui-counter", builder: "submitted", request: "mine" })).buildId)).status, "promoted");
+    const done = await t.platform.approveBuild(USER, held.buildId);
+    assert.equal(done.status, "failed");
+    assert.match(done.log.at(-1)!, /changed since this build was checked/);
+    assert.equal(await t.platform.blobs.get(`screenshots/${held.buildId}/mobile-dark.png`), undefined, "the card's renders go");
+  });
+
   test("a new tool the owner turns down never goes live; its id is free for the next", async () => {
     const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: counter(), request: "A counter" })).buildId);
     assert.equal((await t.platform.rejectBuild(USER, b.buildId)).status, "cancelled");
@@ -285,6 +309,7 @@ describe("submit: the same gate as any build", () => {
     await assert.rejects(t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: " " }), code("invalid_request", /request/));
     await assert.rejects(t.platform.submitFiles(t.codex, { files, capabilityId: "running-log", request: "x" }), code("forbidden"));
     await assert.rejects(t.platform.submitFiles(t.claude, { files: [...files, { path: ".npmrc", content: "x" }], capabilityId: "running-log", request: "x" }), code("invalid_request", /\.npmrc: Hewn never keeps/));
+    await assert.rejects(t.platform.submitFiles(t.claude, { files: [...files, { path: "__proto__", content: "x" }], capabilityId: "running-log", request: "x" }), code("invalid_request", /"__proto__" isn't a path Hewn accepts/));
   });
 
   test("files that fail validation fail once, saying why: a submission, an install from a file, one from a folder", async () => {

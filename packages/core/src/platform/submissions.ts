@@ -6,11 +6,11 @@
 import { type Agent, canSee, requireScope } from "../auth.ts";
 import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, writeZip } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
-import { bytes, fromBase64, isArtefact, isBuilderConfig, isWorkspaceOnly, toBase64 } from "../files.ts";
+import { bytes, CONTRACTS_DIR, fromBase64, isArtefact, isBuilderConfig, isWorkspaceOnly, toBase64 } from "../files.ts";
 import { randomToken, sha256 } from "../sha256.ts";
 import type { CheckResult, Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
-import { type BuildView, CONTRACTS_DIR } from "./builds.ts";
+import type { BuildView } from "./builds.ts";
 import { Domain } from "./context.ts";
 
 /** A file as it travels over MCP: UTF-8 text, or base64 for anything that isn't. */
@@ -107,7 +107,7 @@ export function candidateFiles(files: Files): Files {
     if (rule) refused.push({ path, rule });
     total += files[path].length;
   }
-  if (total > MAX_BUNDLE_BYTES) bad.push(`the files come to ${Math.round(total / 104857.6) / 10} MB; a tool may be at most 5 MB`);
+  if (total > MAX_BUNDLE_BYTES) bad.push(`the files come to ${Math.round((total / MB) * 10) / 10} MB; a tool may be at most ${MAX_BUNDLE_BYTES / MB} MB`);
   if (bad.length || refused.length) {
     const byRule = Object.values(RULES).flatMap((rule) => {
       const named = refused.filter((r) => r.rule === rule).map((r) => r.path);
@@ -128,6 +128,8 @@ export function filesFromEntries(list: unknown): Files {
     if (!e || typeof e.path !== "string" || typeof e.content !== "string") throw new PlatformError("invalid_request", `files[${i}]: needs a path and a content (text)`);
     if (e.encoding !== undefined && e.encoding !== "utf-8" && e.encoding !== "base64") throw new PlatformError("invalid_request", `files[${i}] (${e.path}): encoding is "utf-8" (the default) or "base64"`);
     if (Object.hasOwn(out, e.path)) throw new PlatformError("invalid_request", `${e.path} is in the list twice`);
+    // An object key that isn't one (it would set the list's prototype, and the file be dropped unseen).
+    if (e.path === "__proto__") throw new PlatformError("invalid_request", `${JSON.stringify(e.path)} isn't a path Hewn accepts`);
     if (e.encoding === "base64") {
       if (!/^[A-Za-z0-9+/]*={0,2}$/.test(e.content.replace(/\s+/g, ""))) throw new PlatformError("invalid_request", `${e.path}: its content isn't base64`);
       out[e.path] = fromBase64(e.content.replace(/\s+/g, ""));
@@ -136,7 +138,9 @@ export function filesFromEntries(list: unknown): Files {
   return out;
 }
 
+const MB = 1024 * 1024;
 const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const utf8 = new TextEncoder();
 /** A file as it travels: as text when it is UTF-8 without NULs, else base64. */
 export function entryOf(path: string, b: Uint8Array): FileEntry {
   if (!b.includes(0)) {
@@ -176,7 +180,7 @@ export class Submissions extends Domain {
     const paged = Object.fromEntries(Object.entries(all).filter(([p]) => !p.startsWith(`${CONTRACTS_DIR}/`)));
     const asked = req.paths as string[] | undefined;
     if (asked) {
-      const missing = asked.filter((p) => !(p in paged));
+      const missing = asked.filter((p) => !Object.hasOwn(paged, p));
       if (missing.length) throw new PlatformError("invalid_request", `not in the pack: ${missing.join(", ")}${missing.some((p) => p.startsWith(`${CONTRACTS_DIR}/`)) ? ` (a tool's full contract: capabilities_get it)` : ""}`);
     }
     const { files, more } = page(asked ?? packOrder(paged), paged, this.platform.packPageBytes);
@@ -317,14 +321,15 @@ function packOrder(files: Files): string[] {
   return Object.keys(files).sort((a, b) => rank(a) - rank(b) || files[a].length - files[b].length || a.localeCompare(b));
 }
 
-/** `paths` of `files`, in order, as many as fit in `budget` bytes (at least one); the rest, with their size. */
+/** `paths` of `files`, in order, as many as fit in `budget` bytes as sent (at least one); the rest, with their size. */
 function page(paths: string[], files: Files, budget: number): { files: FileEntry[]; more: { path: string; bytes: number }[] } {
   const taken: FileEntry[] = [];
   const more: { path: string; bytes: number }[] = [];
   let used = 0;
   for (const path of [...new Set(paths)]) {
     const e = entryOf(path, files[path]);
-    const size = e.content.length;
+    // The content as it travels (UTF-8 text, or base64), in bytes.
+    const size = utf8.encode(e.content).length;
     if (taken.length && used + size > budget) more.push({ path, bytes: size });
     else (taken.push(e), (used += size));
   }
