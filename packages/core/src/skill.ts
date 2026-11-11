@@ -14,17 +14,17 @@ export const SKILL_URL = `/_platform/${SKILL_PATH}`;
 
 const HEAD = `---
 name: ${SKILL_NAME}
-description: Build or change a tool (a capability) in the user's Hewn yourself, in a folder of your own, then hand it to Hewn, which checks it and goes live or holds it for the owner. Use when the user asks you to write a Hewn tool instead of asking Hewn's builder. Needs Hewn's MCP tools capabilities_pack, capabilities_check and capabilities_submit.
+description: Build or change a tool (a capability) in the user's Hewn yourself, in a workspace of your own, then hand it to Hewn, which checks it and goes live or holds it for the owner. Use when the user asks you to write a Hewn tool instead of asking Hewn's builder. Needs Hewn's MCP tools capabilities_pack, capabilities_check and capabilities_submit.
 ---
 
 # Build a Hewn tool
 
 Hewn holds the user's tools: durable capabilities with their own state, typed operations and an optional screen. You can write one yourself and hand it to Hewn, which validates it exactly as it validates its own builder's work (the contracts, the tests, the migrations on a copy of the owner's data, the screen) and decides what goes live. You never promote anything.
 
-1. **Fetch the pack:** \`capabilities_pack\` with \`kind: "create"\`, or \`kind: "modify"\` and the tool's \`capabilityId\`. Write every file it returns into your folder: the owner's other tools' contracts (\`CONTRACTS.md\`, \`.hewn-contracts/<id>.md\`), their looks (\`OTHER_TOOLS.md\`) and the design system (\`PLATFORM_UI.css\`); for a change, the tool's current files too. A change's pack also has \`schedules\`, the owner's schedules on the tool, each \`{ operation, cadence, status }\` with \`operation\` as \`name@version\`: a schedule runs exactly that operation version, so keep each one in \`capability.json\`, whatever its \`status\` (Hewn's checks fail a version without one). For a contract the pack didn't carry, \`capabilities_get\`.
+1. **Fetch the pack:** \`capabilities_pack\` with \`kind: "create"\`, or \`kind: "modify"\` and the tool's \`capabilityId\`. The pack is what Hewn's builder finds in its workspace besides the request: the owner's other tools' contracts (\`CONTRACTS.md\`, and \`.hewn-contracts/<id>.md\` with each one in full), their looks (\`OTHER_TOOLS.md\`) and the design system (\`PLATFORM_UI.css\`); for a change, the tool's current files too. With a shell, download the pack (\`download.url\`) and unzip it into your workspace, the folder you write the tool in: \`curl -fsSL -o pack.zip '<download.url>'\`, then unzip it there. The link works once, for 10 minutes (\`capabilities_pack\` again gives a new one). Without a shell, page the pack: \`files\` is a page, \`more\` lists the rest, and \`capabilities_pack\` with \`paths\` fetches them a page at a time. Read its reference files there and write only the tool's own files into your workspace. A paged pack leaves out \`.hewn-contracts/\`: \`capabilities_get\` has a tool's contract. A change's pack also has \`schedules\`, the owner's schedules on the tool, each \`{ operation, cadence, status }\` with \`operation\` as \`name@version\`: a schedule runs exactly that operation version, so keep each one in \`capability.json\`, whatever its \`status\` (Hewn's checks fail a version without one). For a contract the pack didn't carry, \`capabilities_get\`.
 2. **Write the tool** by the contract below. What to build comes from the person you're talking to.
 3. **Check it** with \`capabilities_check\` while you work, until it passes (the end of this file says how).
-4. **Submit it** with \`capabilities_submit\`: the tool's own files only, a \`request\` saying what it is or what the change does, and for a change \`capabilityId\` and the pack's \`baseVersion\`. Not the pack's files, \`screenshots/\`, dotfiles or a builder's instructions (\`CLAUDE.md\` and the like): Hewn refuses them, naming the rule. Follow the build with \`builds_wait\`. A new tool goes live once it passes (what it needs from the owner, a host or a key, they approve in Hewn); a change waits for the owner's approval: tell them.
+4. **Submit it** with \`capabilities_submit\`: the tool's own files only, a \`request\` saying what it is or what the change does, and for a change \`capabilityId\` and the pack's \`baseVersion\`. Not the pack's files, \`screenshots/\`, dotfiles or a builder's instructions (\`CLAUDE.md\` and the like): Hewn refuses them, naming the rule. Follow the build with \`builds_wait\`. Once it passes, a new tool waits for the owner's approval, and so does a change (status \`review\`): tell them. What a new tool needs from the owner, a host or a key, they approve in Hewn too.
 
 `;
 
@@ -40,7 +40,7 @@ Fix failures and measured defects, then look at every screenshot and fix what lo
 
 /** What changes from the brief, each found exactly once (a brief edit that moves one fails the build of the Skill, and its test). */
 const SWAPS: [string, string][] = [
-  ["Write a **candidate** in this workspace; the platform owns validation and promotion.", "Write a **candidate** in your folder; Hewn owns validation and promotion."],
+  ["Write a **candidate** in this workspace; the platform owns validation and promotion.", "Write a **candidate** in your workspace; Hewn owns validation and promotion."],
   ["{{SUBMIT}} If you have a `check` tool, use it before you stop (see the end).", SUBMIT],
   ["Keep `id` equal to the capability id in `BUILDER.md`.", 'Keep `id` equal to the tool\'s id: for a change, the `capabilityId` you packed; for a new tool, its name in lowercase letters, digits and dashes ("Plant Care" → `plant-care`).'],
   ["after reading `BUILDER.md`, this brief, and any `OWNERS_WORDS.md` and `OTHER_TOOLS.md`,", "after reading this brief and the pack's `OTHER_TOOLS.md`,"],
