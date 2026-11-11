@@ -207,6 +207,8 @@ describe("a client writes a tool over MCP: pack, check, submit", () => {
     assert.equal(content.filter((c) => c.type === "image" && c.mimeType === "image/png").length, 4, JSON.stringify(content[0]));
     assert.deepEqual((checked.structuredContent as { screenshots: string[] }).screenshots, SHOTS);
     assert.ok(JSON.stringify(checked.structuredContent).length < 2000, "no base64 in structuredContent");
+    const all = await claude.callTool({ name: "capabilities_check", arguments: { files, screenshots: "all" } });
+    assert.deepEqual((all.structuredContent as { screenshots: string[] }).screenshots, SHOTS, "a page no longer than the screen has no further parts");
     const bare = await claude.callTool({ name: "capabilities_check", arguments: { files, screenshots: false } });
     assert.deepEqual((bare.content as { type: string }[]).map((c) => c.type), ["text"]);
     assert.deepEqual((bare.structuredContent as { screenshots: string[] }).screenshots, []);
