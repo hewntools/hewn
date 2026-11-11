@@ -453,6 +453,26 @@ export const operations = {
     page.off("request", watch);
   });
 
+  await step("a failed build: Discard takes it off the Inbox; Activity keeps it, marked discarded", async () => {
+    // A tool whose own tests fail: installed from a directory, it fails on its own (no builder to ask).
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-broken-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "broken-counter", name: "Broken Counter" }));
+    writeFileSync(join(dir, "tests/cases.json"), JSON.stringify([{ name: "never", operation: "get", input: {}, expect: { count: 99 } }]));
+    const b = await sv.admin("install", { name: "Broken Counter", purpose: "Counts, wrongly", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (b.status !== "failed") throw new Error(`expected a failed build, got ${b.status}`);
+    const inInbox = () => page.evaluate(async (id: string) => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { buildId?: string }[]).some((n) => n.buildId === id), b.buildId);
+    if (!(await inInbox())) throw new Error("the failed build isn't in the Inbox");
+    await page.goto(`${web}/#/b/${b.buildId}`);
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page.getByText("Discarded: it's out of the Inbox, and stays in Activity.").waitFor();
+    if (await inInbox()) throw new Error("still in the Inbox after Discard");
+    await page.goto(`${web}/#/activity`);
+    // A create that never installed goes by its id.
+    await page.locator("li", { hasText: "broken-counter" }).filter({ hasText: "discarded" }).first().waitFor();
+  });
+
   await step("New: Stop puts the message back with Stopped., which goes once the next one is sent", async () => {
     // The intake never answers here (no CLI runs): each turn waits until it's stopped.
     await page.route("**/api/intake", () => {});
