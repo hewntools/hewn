@@ -449,7 +449,7 @@ async function connectionPage(c, cap, all) {
   const healthLine = h("div", { class: "muted row tight" }, skeleton("40%"));
   const healthRow = h("li", {}, h("div", { class: "grow" }, h("span", { class: "mono" }, "health"), h("span", { class: "sub" }, "Checking…")));
   const config = cap.authorization?.config ?? [];
-  const inputs = config.map((x) => ({ x, input: h("input", { type: "text", value: x.value ?? x.suggested ?? "", placeholder: x.description, autocomplete: "off" }) }));
+  const inputs = config.map((x) => ({ x, input: h("input", { type: "text", value: x.value ?? "", placeholder: x.description, autocomplete: "off" }) }));
   const save = h("button", { class: "primary sm" }, "Save");
   save.addEventListener("click", async () => {
     try {

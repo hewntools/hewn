@@ -196,13 +196,15 @@ async function grantsSheet(capId) {
           control: sw,
         };
       };
+      // The rows first: their fields (a suggested value already in one) decide whether Authorize starts enabled.
+      const rows = requestRows([...missingConfig.map(configRow), ...pending.map(row)]);
       check();
       return [
         sheetHead(appIcon(c, { size: 48 }), `${c.name} wants to`, requestedBy && `Requested by ${actorLabel(requestedBy, all)}`),
         requests[0]?.note && h("div", { class: "small quote" }, `“${requests[0].note}”`),
         cap.status.missingDependencies?.length > 0 && h("div", { class: "notice danger" }, h("span", {}, "Depends on operations that no longer exist. ", h("a", { href: changeHref(c) }, "Change it"))),
         cap.status.unsupportedAbi && h("div", { class: "notice danger" }, h("span", {}, `This version ${cap.status.unsupportedAbi}. Upgrade Hewn, or roll it back.`)),
-        requestRows([...missingConfig.map(configRow), ...pending.map(row)]),
+        rows,
         keyBlock,
         h(
           "div",

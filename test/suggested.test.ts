@@ -34,6 +34,13 @@ describe("a suggested value on a config entry", () => {
   test("a secret can't carry one", () => {
     const errors = validateManifest(manifest({ kind: "connection", operations: [{ ...op, name: "health", outputSchema: { type: "object", required: ["status"], properties: { status: { type: "string", enum: ["connected", "expired", "broken"] } } } }], requires: { secrets: [{ name: "API_TOKEN", description: "t", suggested: "x" }] } }), "x");
     assert.deepEqual(errors, ['requires.secrets API_TOKEN: a secret can\'t carry "suggested" (only a config entry can)']);
+    // Before 2.6 a secret's extra properties were allowed, and still are (the ABI only adds).
+    const older = manifest({ abi: "2.5", kind: "connection", operations: [{ ...op, name: "health", outputSchema: { type: "object", required: ["status"], properties: { status: { type: "string", enum: ["connected", "expired", "broken"] } } } }], requires: { secrets: [{ name: "API_TOKEN", description: "t", suggested: "x" }] } });
+    assert.deepEqual(validateManifest(older, "x"), []);
+  });
+
+  test("an empty suggested value is refused", () => {
+    assert.match(validateManifest(manifest({ config: [{ ...repo, suggested: "" }] }), "x").join(), /\/config\/0\/suggested/);
   });
 });
 

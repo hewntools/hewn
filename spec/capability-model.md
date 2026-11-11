@@ -326,7 +326,7 @@ interface OperationManifest {
 
 ### `requires`
 
-- **`hosts`**: hostnames reachable over HTTP or HTTPS. `*.example.com` matches its subdomains. `config:NAME` (since 2.1) means the host in that config value (the config must be declared).
+- **`hosts`**: hostnames reachable over HTTP or HTTPS. `*.example.com` matches its subdomains. `config:NAME` (since 2.1) means the host in that config value (the config must be declared, and can't carry `suggested`: the owner types the host).
 - **`secrets`**: credentials, `name` matching `^[A-Z][A-Z0-9_]*$`. Only a connection may declare them.
 - **`capabilities`**: other capabilities' operations this one calls through `ctx.call`, pinned as `name@N` (at least one per entry).
 - **`model`** (since 2.2): a model the platform runs for it through `ctx.model.generate`. Exactly one of `tier` (`light` | `standard` | `strong` | `max`, mapped to a model by the owner) or `model` (pinned `<provider>/<model-id>`, provider `anthropic` | `openai` | `openrouter`). `input` lists what prompts carry (`text`, `image`).
