@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
@@ -52,39 +52,39 @@ describe("instructions: the owner's standing rules for building", () => {
     assert.deepEqual(t.platform.instructions(USER), ["Metric units"], "the rules for every tool stay");
   });
 
-  test("a build runs with the instructions as they are when it opens: in BUILDER.md, recorded with the build", async () => {
+  test("a build runs with the instructions as they are when it opens: in owner-instructions/, BUILDER.md and AGENTS.md pointing there, recorded with the build", async () => {
     t.platform.setInstructions(USER, undefined, ["Swedish copy in every screen"]);
-    let brief = "";
+    const read = (ws: string, f: string) => (existsSync(join(ws, f)) ? readFileSync(join(ws, f), "utf8") : undefined);
+    let seen: Record<string, string | undefined> = {};
+    const look = (ws: string) => void (seen = Object.fromEntries(["BUILDER.md", "AGENTS.md", "owner-instructions/every-tool.md", "owner-instructions/this-tool.md"].map((f) => [f, read(ws, f)])));
     const b = await t.build(
       () => t.platform.create(USER, { name: "Running Log", purpose: "runs", requirements: "r" }),
       (ws) => {
-        brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+        look(ws);
         seed(ws);
       },
     );
     assert.equal(b.status, "promoted", b.log.join("\n"));
-    assert.match(brief, /Requirements: r\n\n## Owner's instructions\n\n[^]*For every tool:\n- Swedish copy in every screen\n\nNow read `BRIEF\.md`/);
-    assert.doesNotMatch(brief, /For this tool/);
-    assert.match(t.platform.buildContext(USER, b.buildId).instructions!, /Swedish copy/);
+    assert.equal(seen["owner-instructions/every-tool.md"], "# The owner's instructions for every tool\n\nThe owner's standing rules for how their tools are built. Follow them wherever they apply; the contract in the brief still holds.\n\n- Swedish copy in every screen\n");
+    assert.equal(seen["owner-instructions/this-tool.md"], undefined, "a new tool has none of its own");
+    assert.match(seen["BUILDER.md"]!, /Requirements: r\n\n## Owner's instructions\n\nThe owner's standing rules for how their tools are built are in `owner-instructions\/every-tool\.md`: read it before you write anything[^]*\n\nNow read `BRIEF\.md`/);
+    assert.doesNotMatch(seen["BUILDER.md"]!, /Swedish copy/, "the rules are in their file, not BUILDER.md");
+    assert.match(seen["AGENTS.md"]!, /`owner-instructions\/every-tool\.md`/);
+    assert.deepEqual(t.platform.buildContext(USER, b.buildId).ownerInstructions, { everyTool: ["Swedish copy in every screen"], thisTool: [] });
+    assert.ok(!(await t.platform.versionCode(USER, "running-log", 1)).files.some((f) => f.path.startsWith("owner-instructions/")), "never part of a version");
 
     t.platform.setInstructions(USER, "running-log", ["One screen only"]);
-    const m = await t.build(
-      () => t.platform.modify(USER, { capabilityId: "running-log", request: "add notes" }),
-      (ws) => {
-        brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
-      },
-    );
-    assert.match(brief, /For every tool:\n- Swedish copy in every screen\n\nFor this tool:\n- One screen only\n/);
-    assert.match(t.platform.buildContext(USER, m.buildId).instructions!, /One screen only/);
-    // None: no section at all.
+    const m = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add notes" }), look);
+    assert.match(seen["owner-instructions/this-tool.md"]!, /^# The owner's instructions for this tool\n[^]*\n- One screen only\n$/);
+    assert.match(seen["owner-instructions/every-tool.md"]!, /- Swedish copy in every screen/);
+    assert.match(seen["BUILDER.md"]!, /in `owner-instructions\/every-tool\.md` and `owner-instructions\/this-tool\.md`: read them/);
+    assert.deepEqual(t.platform.buildContext(USER, m.buildId).ownerInstructions, { everyTool: ["Swedish copy in every screen"], thisTool: ["One screen only"] });
+    // None: no files, no section.
     t.platform.setInstructions(USER, undefined, []);
     t.platform.setInstructions(USER, "running-log", []);
-    await t.build(
-      () => t.platform.modify(USER, { capabilityId: "running-log", request: "add more" }),
-      (ws) => {
-        brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
-      },
-    );
-    assert.doesNotMatch(brief, /Owner's instructions/);
+    await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add more" }), look);
+    assert.doesNotMatch(seen["BUILDER.md"]!, /Owner's instructions/);
+    assert.doesNotMatch(seen["AGENTS.md"]!, /owner-instructions/);
+    assert.equal(seen["owner-instructions/every-tool.md"], undefined);
   });
 });

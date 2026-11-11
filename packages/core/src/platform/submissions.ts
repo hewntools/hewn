@@ -76,7 +76,7 @@ export interface ClientCheck {
 /** Each refused path with the rule it breaks, so a client learns the rule. */
 const RULES = {
   config: "Hewn never keeps a builder's own configuration in a tool (dotfiles and dot-folders, CLAUDE.md, AGENTS.md, opencode.json)",
-  workspace: "Hewn writes these for builders and never keeps them in a tool (BUILDER.md, BRIEF.md, CONTRACTS.md, OTHER_TOOLS.md, PLATFORM_UI.css, OWNERS_WORDS.md, attachments/, screenshots/)",
+  workspace: "Hewn writes these for builders and never keeps them in a tool (BUILDER.md, BRIEF.md, CONTRACTS.md, OTHER_TOOLS.md, PLATFORM_UI.css, OWNERS_WORDS.md, attachments/, screenshots/, owner-instructions/)",
   artefact: "build output is never part of a tool (node_modules, .venv, __pycache__, .DS_Store, .pytest_cache)",
 } as const;
 
@@ -316,9 +316,9 @@ export class Submissions extends Domain {
   }
 }
 
-/** A pack's files as a client reads them first: the other tools' contracts and looks, the tool's own files (smallest first), then the design system. */
+/** A pack's files as a client reads them first: the owner's instructions, the other tools' contracts and looks, the tool's own files (smallest first), then the design system. */
 function packOrder(files: Files): string[] {
-  const rank = (p: string) => (p === "CONTRACTS.md" ? 0 : p === "OTHER_TOOLS.md" ? 1 : p === "PLATFORM_UI.css" ? 3 : 2);
+  const rank = (p: string) => (p.startsWith("owner-instructions/") ? -1 : p === "CONTRACTS.md" ? 0 : p === "OTHER_TOOLS.md" ? 1 : p === "PLATFORM_UI.css" ? 3 : 2);
   return Object.keys(files).sort((a, b) => rank(a) - rank(b) || files[a].length - files[b].length || a.localeCompare(b));
 }
 

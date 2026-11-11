@@ -116,11 +116,17 @@ export interface BuildFeedback {
 }
 
 /** What led to a build, kept with it for the capability's life (`build_context`). */
+/** The owner's instructions for building, as a build runs with them: one rule per line. */
+export interface OwnerInstructions {
+  everyTool: string[];
+  thisTool: string[];
+}
+
 export interface BuildContext {
   /** The web client's conversation; an agent's build has none (its request is on the build). */
   conversation?: BuildTurn[];
-  /** The owner's instructions the build ran with. */
-  instructions?: string;
+  /** The owner's instructions the build ran with: its rules for every tool, and this tool's (a build of an existing tool only). */
+  ownerInstructions?: OwnerInstructions;
   /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
   brief?: string;
 }
@@ -732,13 +738,15 @@ export class Registry {
     const next = { ...this.buildContext(buildId), ...c };
     this.db
       .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, instructions, brief) VALUES (?, ?, ?, ?)")
-      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.instructions ?? null, next.brief ?? null);
+      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.ownerInstructions ? JSON.stringify(next.ownerInstructions) : null, next.brief ?? null);
   }
 
   buildContext(buildId: string): BuildContext | undefined {
     const r = this.db.prepare("SELECT conversation, instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
     if (!r) return undefined;
-    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.instructions ? { instructions: r.instructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
+    // `instructions` holds the lines as JSON; a build from before 0.4.11 kept BUILDER.md's section there, read as none.
+    const ownerInstructions = typeof r.instructions === "string" && r.instructions.startsWith("{") ? (JSON.parse(r.instructions) as OwnerInstructions) : undefined;
+    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(ownerInstructions ? { ownerInstructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
   }
 
   insertAttachment(a: AttachmentRef & { session: string }) {

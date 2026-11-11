@@ -4,6 +4,8 @@ Write a **candidate** in this workspace; the platform owns validation and promot
 
 {{SUBMIT}} If you have a `check` tool, use it before you stop (see the end).
 
+**The owner's instructions:** when your workspace has `owner-instructions/` (`every-tool.md`, the owner's rules for every tool; `this-tool.md`, for this one), read it before you write anything and follow it wherever it applies; this contract still holds.
+
 Workspace layout:
 
 ```

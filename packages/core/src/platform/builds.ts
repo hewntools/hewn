@@ -19,6 +19,7 @@ import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReview, B
 import { sha256 } from "../sha256.ts";
 import { MAX_SATURATION } from "./presentation.ts";
 import { attachmentRefs } from "./attachments.ts";
+import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
 import { type Candidate, reviewShotKey } from "./validation.ts";
@@ -475,14 +476,14 @@ export class Builds extends Domain {
   }
 
   /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
-  private contextFor(capabilityId: string, conversation?: BuildTurn[]): BuildContext {
-    const instructions = this.d.instructions.instructionsForBuild(capabilityId);
-    return { brief: this.briefId, ...(instructions ? { instructions } : {}), ...(conversation ? { conversation } : {}) };
+  private contextFor(capabilityId: string, kind: BuildKind, conversation?: BuildTurn[]): BuildContext {
+    const ownerInstructions = this.d.instructions.instructionsForBuild(capabilityId, kind);
+    return { brief: this.briefId, ...(ownerInstructions ? { ownerInstructions } : {}), ...(conversation ? { conversation } : {}) };
   }
 
-  /** Record what a new build ran with, and keep the attachments its conversation carried. */
+  /** Record what a new build (just inserted) ran with, and keep the attachments its conversation carried. */
   private recordContext(buildId: string, capabilityId: string, conversation?: BuildTurn[]) {
-    this.registry.setBuildContext(buildId, this.contextFor(capabilityId, conversation));
+    this.registry.setBuildContext(buildId, this.contextFor(capabilityId, this.mustBuild(buildId).kind, conversation));
     if (conversation) this.registry.claimAttachments(attachmentRefs(conversation), buildId);
   }
 
@@ -782,6 +783,7 @@ export class Builds extends Domain {
             "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
             ...this.briefFile(),
             ...this.ownersWordsFile(buildId),
+            ...ownerInstructionFiles(this.registry.buildContext(buildId)?.ownerInstructions),
             ...this.contractFiles(id),
             ...(connection ? {} : await this.looksFile(id, "create")),
             ...attached.files,
@@ -879,7 +881,8 @@ export class Builds extends Domain {
 
   /**
    * What `capabilities_pack` hands a client: what Hewn's builder finds in its workspace besides the
-   * brief, the request and the owner's words. The other tools' contracts and looks (only those
+   * brief, the request and the owner's words. The owner's instructions (for every tool; for a change
+   * the tool's own too, when the client may see it), the other tools' contracts and looks (only those
    * `visible` lets the client see) and the design system; for a change (`capabilityId`), the tool's
    * active version's files too.
    */
@@ -888,7 +891,8 @@ export class Builds extends Domain {
     const base = cap?.activeVersion ? versionFiles((await this.loadVersion(cap.id, cap.activeVersion, { keep: false })).files) : {};
     const connection = cap?.activeVersion ? isConnection(this.activeManifest(cap.id)) : false;
     const exclude = capabilityId ?? "";
-    return { ...base, ...this.contractFiles(exclude, visible), ...(connection ? {} : await this.looksFile(exclude, cap ? "modify" : "create", visible)), ...(await this.designSystemFile()) };
+    const rules = this.d.instructions.instructionsForBuild(exclude, cap && visible(cap.id) ? "modify" : "create");
+    return { ...base, ...ownerInstructionFiles(rules), ...this.contractFiles(exclude, visible), ...(connection ? {} : await this.looksFile(exclude, cap ? "modify" : "create", visible)), ...(await this.designSystemFile()) };
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). `marks`: a retry's, from `retryBuild`. */
@@ -1024,7 +1028,7 @@ export class Builds extends Domain {
     const ask = `${requestText}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it. A Polish's
     // request says where its owner's words are (BUILDER.md's own note on them is for a single conversation).
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.builderText(b.kind, cap.id, ask, polish && context ? { ...context, conversation: undefined } : context)), ...this.briefFile(), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.builderText(b.kind, cap.id, ask, polish && context ? { ...context, conversation: undefined } : context)), ...this.briefFile(), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...ownerInstructionFiles(context?.ownerInstructions), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
     if (this.cancelledWhileOpening(buildId)) return;
     this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
@@ -1812,12 +1816,12 @@ export class Builds extends Domain {
 
   /**
    * AGENTS.md for a workspace, for builders that read it on their own (Codex, OpenCode): where the
-   * request and the brief are, and the owner's instructions the build runs with. Never part of a version (`isBuilderConfig`).
+   * request and the brief are, and where the owner's instructions the build runs with are. Never part of a version (`isBuilderConfig`).
    */
   private agentsFile(buildId: string): Files {
-    const instructions = this.registry.buildContext(buildId)?.instructions;
+    const instructions = ownerInstructionsNote(this.registry.buildContext(buildId)?.ownerInstructions);
     return {
-      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first (the request and the owner's other tools), then \`BRIEF.md\`, all of it, before you write anything: it is the implementation contract, how to build for Hewn. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}` : ""}`),
+      "AGENTS.md": bytes(`# Building for Hewn\n\nRead \`BUILDER.md\` first (the request and the owner's other tools), then \`BRIEF.md\`, all of it, before you write anything: it is the implementation contract, how to build for Hewn. Change files only inside this directory; when the candidate is complete, stop. The platform validates it.\n${instructions ? `\n${instructions}\n` : ""}`),
     };
   }
 
@@ -1871,11 +1875,11 @@ export class Builds extends Domain {
 
   /**
    * BUILDER.md: the request, first saying to read BRIEF.md whole before writing anything; where the
-   * owner's own words are and how they count, the owner's instructions (as the build recorded them,
-   * `build_context`), the other capabilities' names, and the order to read the brief again.
+   * owner's own words are and how they count, where the owner's instructions are (as the build recorded
+   * them, `build_context`), the other capabilities' names, and the order to read the brief again.
    */
   private builderText(kind: BuildKind, id: string, request: string, context?: BuildContext): string {
-    const instructions = context?.instructions;
+    const instructions = ownerInstructionsNote(context?.ownerInstructions);
     const parts = [`# Build: ${kind} \`${id}\``, READ_BRIEF, `${request}${ownersWordsNote(context?.conversation)}`, instructions, this.catalogForBuilder(id), READ_BRIEF_NOW];
     return shortLines(`${parts.flatMap((p) => p?.trim() || []).join("\n\n")}\n`);
   }

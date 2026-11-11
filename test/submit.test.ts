@@ -74,6 +74,26 @@ describe("the pack: what a client builds from", () => {
     assert.ok(!(".hewn-contracts/running-log.md" in zip), "not its own contract");
   });
 
+  test("the owner's instructions as files, first: every tool's in any pack, a tool's own in its change's pack; in the zip too; never in a submission", async () => {
+    t.platform.setInstructions(USER, undefined, ["Swedish copy"]);
+    t.platform.setInstructions(USER, "running-log", ["One screen only"]);
+    const create = await t.platform.pack(t.claude, { kind: "create" });
+    assert.equal(create.files[0].path, "owner-instructions/every-tool.md");
+    assert.match(create.files[0].content, /- Swedish copy\n$/);
+    assert.ok(!allPaths(create).includes("owner-instructions/this-tool.md"), "a new tool has no rules of its own");
+    const change = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
+    assert.deepEqual(change.files.slice(0, 2).map((f) => f.path), ["owner-instructions/every-tool.md", "owner-instructions/this-tool.md"]);
+    assert.match(change.files[1].content, /- One screen only\n$/);
+    const zip = readZip((await download(change))!);
+    assert.ok("owner-instructions/every-tool.md" in zip && "owner-instructions/this-tool.md" in zip);
+    // A tool's rules only for a client that may see the tool: another tool's change pack doesn't carry them.
+    const other = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "ui-counter" });
+    assert.match(allPaths(other).join(), /every-tool\.md/);
+    assert.match(other.files.find((f) => f.path === "owner-instructions/this-tool.md")?.content ?? "", /^$/, "ui-counter has none");
+    const files = entriesOf(SEED).concat({ path: "owner-instructions/every-tool.md", content: "x" });
+    await assert.rejects(t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: "x", baseVersion: 1 }), code("invalid_request", /owner-instructions\/every-tool\.md: Hewn writes these for builders/));
+  });
+
   test("a page at a time: what doesn't fit is listed with its size and fetched with paths; only the pack's own, never a contract in full", async () => {
     t.platform.packPageBytes = 3000;
     const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });

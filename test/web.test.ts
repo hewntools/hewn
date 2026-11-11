@@ -432,10 +432,10 @@ describe("web client (owner surface)", () => {
       assert.deepEqual(m.json.saved.remember, [{ scope: "tool", text: "One screen only" }]);
       assert.deepEqual(intakeCalls.at(-1)!.instructions, { global: ["Swedish copy in every screen"], tool: [] });
       assert.deepEqual((await api("/capabilities/running-log/instructions")).json, { lines: ["One screen only"] });
-      // A build records them in BUILDER.md's "Owner's instructions".
+      // A build records them (its builder reads them in owner-instructions/).
       const b = await api("/capabilities/running-log/modify", { method: "POST", body: { request: "add a note field" } });
       await platform.settle(b.json.buildId);
-      assert.match((await api(`/builds/${b.json.buildId}/context`)).json.instructions, /## Owner's instructions[^]*For every tool:\n- Swedish copy in every screen[^]*For this tool:\n- One screen only/);
+      assert.deepEqual((await api(`/builds/${b.json.buildId}/context`)).json.ownerInstructions, { everyTool: ["Swedish copy in every screen"], thisTool: ["One screen only"] });
       // Dropping one, and editing by hand (a text, one per line; blanks and bullets cleaned up).
       const f = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "drop the Swedish rule" }] } });
       assert.deepEqual(f.json.saved, { remember: [], forget: [{ scope: "global", text: "Swedish copy in every screen" }] });
