@@ -50,3 +50,5 @@ hewn config <id> [NAME value]  a tool's settings that aren't secret
 ```
 
 `hewn secrets set` asks for the value with a hidden prompt, or reads it from a file with `--from`, so it never lands in your shell history.
+
+`hewn config <id>` lists a tool's settings, with the value a setting suggests if it has one. `hewn config <id> NAME` (and `hewn connect`) asks for the value and offers that suggestion in brackets: Enter takes it, or type another. Nothing is stored until you answer.

@@ -42,6 +42,8 @@ export interface BuildView {
   createdAt: string;
   /** Last status change (when it finished, for a finished build). */
   updatedAt: string;
+  /** A failed build the owner discarded: gone from the Inbox, kept in Activity. */
+  discardedAt?: string;
   /** Liveness of a platform builder while it works. No transcript content (that would leak source). */
   progress?: BuildProgress;
   /** The version it produced, once promoted. */
@@ -199,6 +201,14 @@ export interface BuildReport {
 
 /** The longest structured reply kept with an intake turn (as JSON). */
 const MAX_REPLY_CHARS = 100_000;
+
+/**
+ * A new tool on the id of one the owner deleted (kept with its data, Settings › Data › Deleted tools). The message is
+ * an agent's; `details.archived` lets the web client and the CLI say it their own way (where to bring it back, or
+ * which command).
+ */
+export const archivedConflict = (c: { id: string; name: string; displayName?: string | null }) =>
+  new PlatformError("conflict", `'${c.id}' was deleted by the owner and is kept with its data; use another id, or ask the owner to restore it`, { archived: { id: c.id, name: c.displayName ?? c.name } });
 
 export class Builds extends Domain {
   private buildModelFor: (builder: string) => { model?: string; effort?: string };
@@ -502,7 +512,7 @@ export class Builds extends Domain {
     if (!id) throw new PlatformError("invalid_request", "name must contain letters or digits");
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
     const existing = this.registry.getCapability(id);
-    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn (Settings › Data › Deleted tools), or pick another id`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
     if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
     // A create that never promoted (it failed or was cancelled) keeps its id for a retry; a new
     // create of the same name takes it over instead (as `hewn install` does), unless one is being built.
@@ -794,7 +804,8 @@ export class Builds extends Domain {
     requireOwner(owner);
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
-    if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `capability '${id}' already exists`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
+    if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
     // Takes over an id a create never promoted (as createBuild does), unless one is being built.
     if (existing) this.oneCreateAtATime(owner, id);
     const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };
@@ -829,7 +840,7 @@ export class Builds extends Domain {
     const name = entry.name ?? manifest.name;
     if (typeof name !== "string" || !name.trim()) throw new PlatformError("invalid_request", "capability.json needs a name");
     const existing = this.registry.getCapability(id);
-    if (existing?.archivedAt) throw new PlatformError("conflict", `'${id}' exists but is deleted (archived); the owner restores it in Hewn, or pick another id`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
     if (existing?.activeVersion) throw new PlatformError("conflict", entry.builder === "submitted" ? `'${id}' already exists; to change it, submit with capabilityId '${id}' (and its files from capabilities_pack)` : `capability '${id}' already exists`);
     // A create that never promoted keeps its id for a retry; this takes it over, unless one is being built (as a create does).
     if (existing) this.oneCreateAtATime(actor, id);
@@ -1120,6 +1131,26 @@ export class Builds extends Domain {
       this.events.emit(`${buildId}:state`);
       this.events.emit(`${buildId}:done`);
       void this.releaseDependents(buildId);
+    }
+    return this.buildView(this.mustBuild(buildId));
+  }
+
+  /**
+   * Discard a failed build (owner only): it leaves the Inbox and stays in Activity, marked discarded. Nothing about
+   * the tool changes (a failed create installed nothing, a failed change left the active version as it was); the
+   * workspace it left goes now rather than after a day. Not a paused one (Continue or Stop it), nor one retried.
+   */
+  async discardBuild(owner: Agent, buildId: string): Promise<BuildView> {
+    requireOwner(owner);
+    const build = this.mustBuild(buildId);
+    if (build.status !== "failed") throw new PlatformError("conflict", `only a failed build can be discarded; this one is ${build.status}`);
+    if (isPaused(build)) throw new PlatformError("conflict", "a paused build is continued or stopped, not discarded");
+    const next = this.registry.retryOf(build.id);
+    if (next) throw new PlatformError("conflict", `build ${buildId} was retried as ${next}`);
+    if (!build.discardedAt) {
+      this.registry.discardBuild(buildId);
+      await this.workbench.remove(buildId).catch(() => {});
+      this.logger(`build ${buildId} [${build.kind} ${build.capabilityId}] discarded by ${owner.id}`);
     }
     return this.buildView(this.mustBuild(buildId));
   }
@@ -1878,6 +1909,7 @@ export class Builds extends Domain {
     if (b.builder === "submitted" && typeof b.request.submittedBy === "string") view.submittedBy = b.request.submittedBy;
     if (b.resultVersion) view.resultVersion = b.resultVersion;
     if (b.dependsOn) view.dependsOn = b.dependsOn;
+    if (b.discardedAt) view.discardedAt = b.discardedAt;
     // Builds made on a 0.4.9 pre-release logged "(screenshot with the sample data)", and their logs keep it.
     if (b.log.some((l) => /\(screenshot (attached|with the sample data)/.test(l))) view.screenshot = true;
     const step = this.stepState(b.id);

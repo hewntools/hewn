@@ -387,6 +387,7 @@ export class Platform {
   changesComing(agent: Agent, capabilityId: string): { buildId: string; kind: BuildKind; status: BuildRow["status"]; request: string }[] { return this.d.builds.changesComing(agent, capabilityId); }
   retryBuild(agent: Agent, buildId: string, opts?: { fix?: boolean; auto?: boolean }): Promise<BuildView> { return this.d.builds.retryBuild(agent, buildId, opts); }
   cancelBuild(agent: Agent, buildId: string): BuildView { return this.d.builds.cancelBuild(agent, buildId); }
+  discardBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.discardBuild(owner, buildId); }
   getBuild(agent: Agent, buildId: string): BuildView { return this.d.builds.getBuild(agent, buildId); }
   buildContext(owner: Agent, buildId: string): BuildContext & { feedback?: BuildFeedback } { return this.d.builds.buildContext(owner, buildId); }
   setBuildFeedback(owner: Agent, buildId: string, f: { score?: unknown; note?: unknown }): BuildFeedback { return this.d.builds.setBuildFeedback(owner, buildId, f); }

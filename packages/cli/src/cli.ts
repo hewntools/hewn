@@ -375,6 +375,9 @@ async function main() {
       const body = zip ? { bundle: readFileSync(dir).toString("base64"), ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
       const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
+      // A deleted tool has that id: how to bring it back, or to install this one beside it.
+      const archived = result.details?.archived;
+      if (!res.ok && archived) throw new Error(`${archived.name} (${archived.id}) was deleted and is kept with its data: hewn restore ${archived.id} brings it back, hewn purge ${archived.id} deletes it for good, or install this one under another name (${zip ? "--name <name>" : "another id in its capability.json"})`);
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
       process.exitCode = result.status === "promoted" ? 0 : 1;
@@ -928,7 +931,7 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
       const value = secret ? (st.missingSecrets.includes(secret) ? " (value missing)" : " (value set)") : "";
       console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : st.declinedGrants?.includes(i.grant) ? "  [you said no]" : "  [not authorized]"}`);
     }
-    for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? "(not set)"}  ${x.description}`);
+    for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? (x.suggested !== undefined ? `(not set; suggested: ${x.suggested})` : "(not set)")}  ${x.description}`);
     for (const d of st.missingDependencies) console.log(`  ✖ depends on ${d}, which no longer exists`);
     if (st.retiredModel) console.log(`  ✖ ${st.retiredModel.model} is no longer available: hewn models set ${id} ${st.retiredModel.successor ?? "<provider/model>"}`);
     else if (st.missingModel) console.log(`  ✖ model: ${st.missingModel}${/provider is set up/.test(st.missingModel) ? " (hewn models key <provider>)" : ""}`);
@@ -965,7 +968,11 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     return;
   }
   const setConfig = async (id: string, name: string, value?: string) => {
-    const v = value ?? (await rl.question(`${name} for ${id}: `)).trim();
+    // A setting not set yet offers its suggested value in the prompt: Enter takes it, as Save does in Hewn. Nothing
+    // is stored before. One already set offers nothing (Enter doesn't swap the owner's value for the suggestion).
+    const entry = value === undefined ? ((await c.call("authorization", id)).config ?? []).find((x: { name: string }) => x.name === name) : undefined;
+    const suggested = entry?.value === null ? entry.suggested : undefined;
+    const v = value ?? ((await rl.question(`${name} for ${id}${suggested !== undefined ? ` [${suggested}]` : ""}: `)).trim() || suggested);
     if (!v) throw new Error("empty value, nothing stored");
     await c.call("setConfig", id, name, v);
     console.log(`✔ ${name} set`);

@@ -87,7 +87,7 @@ function activityRow(g, all, showCap) {
     if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], g.submittedBy ? h("span", { class: "faint" }, `· submitted by ${g.submittedBy}`) : ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "review") (dot = "warn"), (text = on(g.submittedBy ? `Submitted by ${g.submittedBy}: waits for you` : "Waits for your review", ref && ["·", ref]));
     else if (g.outcome === "failed" && g.failure?.paused) (dot = "warn"), (text = on("Build paused", ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
-    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
+    else if (g.outcome === "failed") (dot = g.discarded ? "" : "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.discarded && h("span", { class: "faint" }, "· discarded"), g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
   } else if (g.kind === "lifecycle") {
@@ -108,6 +108,10 @@ function activityRow(g, all, showCap) {
       agent_approval_mode: () => on(g.detail === "live" ? `${subject}'s changes go live after the checks` : `${subject}'s changes wait for your approval`),
       secret_set: () => on("Set secret", h("span", { class: "mono" }, g.subject), ref && ["·", ref]),
       secret_removed: () => ((dot = "warn"), on("Removed secret", h("span", { class: "mono" }, g.subject), ref && ["·", ref])),
+      config_set: () => on("Set", h("span", { class: "mono" }, g.subject), ref && ["·", ref]),
+      build_approved: () => ((dot = "ok"), on(`Approved ${subject}'s change`, ref && ["to", ref])),
+      build_rejected: () => on(`Declined ${subject}'s change`, ref && ["to", ref]),
+      signed_in: () => ((dot = "ok"), on("Signed in", ref && ["to", ref])),
       destructive_confirmed: () => ((dot = "warn"), on(`Let ${subject} run`, h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), ref && ["on", ref])),
       destructive_rejected: () => on(`Stopped ${subject} running`, h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), ref && ["on", ref]),
       models_set: () => on("Changed model settings", h("span", { class: "faint" }, g.detail)),
@@ -234,7 +238,9 @@ async function buildsView(head, only, all0) {
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
-          ? failed.has(b.buildId) && retryable(b)
+          ? b.discardedAt
+            ? kindTag("discarded")
+            : failed.has(b.buildId) && retryable(b)
             ? b.failure?.paused
               ? h("a", { class: "btn sm", href: `#/b/${enc(b.buildId)}`, onclick: (e) => e.stopPropagation() }, "Continue…")
               : h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")

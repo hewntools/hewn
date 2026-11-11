@@ -10,7 +10,7 @@ import { bytes, CONTRACTS_DIR, fromBase64, isArtefact, isBuilderConfig, isWorksp
 import { randomToken, sha256 } from "../sha256.ts";
 import type { CheckResult, Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
-import type { BuildView } from "./builds.ts";
+import { archivedConflict, type BuildView } from "./builds.ts";
 import { Domain } from "./context.ts";
 
 /** A file as it travels over MCP: UTF-8 text, or base64 for anything that isn't. */
@@ -264,7 +264,7 @@ export class Submissions extends Domain {
     if (recent.length >= limit) throw new PlatformError("conflict", `No checks left this hour (${limit}). The next one frees up in ${Math.ceil((recent[0] + HOUR - now) / 60_000)} min; capabilities_submit runs the same validation.`);
     this.checked.set(agent.id, [...recent, now]);
     const run = async (): Promise<ClientCheck> => {
-      const build: BuildRow = { id: `chk-${crypto.randomUUID().slice(0, 8)}`, capabilityId: id, kind: cap ? "modify" : "create", request: {}, requestedBy: agent.id, builder: "submitted", status: "open", baseVersion: cap?.activeVersion ?? null, resultVersion: null, dependsOn: null, review: null, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const build: BuildRow = { id: `chk-${crypto.randomUUID().slice(0, 8)}`, capabilityId: id, kind: cap ? "modify" : "create", request: {}, requestedBy: agent.id, builder: "submitted", status: "open", baseVersion: cap?.activeVersion ?? null, resultVersion: null, dependsOn: null, review: null, discardedAt: null, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await this.workbench.open(build.id, files);
       let r: CheckResult;
       try {
@@ -310,7 +310,8 @@ export class Submissions extends Domain {
     if (!files["capability.json"]) throw new PlatformError("invalid_request", "capability.json is missing");
     if (typeof id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new PlatformError("invalid_request", "capability.json needs an id: lowercase letters, digits and dashes");
     const existing = this.registry.getCapability(id);
-    if (existing?.activeVersion || existing?.archivedAt) throw new PlatformError("conflict", `'${id}' is already a tool here: pass capabilityId '${id}' to check a change to it, or give the new tool another id`);
+    if (existing?.archivedAt) throw archivedConflict(existing);
+    if (existing?.activeVersion) throw new PlatformError("conflict", `'${id}' is already a tool here: pass capabilityId '${id}' to check a change to it, or give the new tool another id`);
     return id;
   }
 }
