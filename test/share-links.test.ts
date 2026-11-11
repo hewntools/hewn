@@ -53,6 +53,14 @@ describe("share links: one version, until it expires or is revoked", () => {
     assert.deepEqual(t.platform.shareLinks(USER, "running-log").map((l) => l.version), [2, 1], "newest first");
   });
 
+  test("only a file served is a download: a fetch that can't be served isn't counted", async () => {
+    const { token, link } = await t.platform.createShareLink(USER, "running-log", {});
+    // Its version gone from under a working link (no path in Hewn does this; a broken store might).
+    t.platform.registry.db.prepare("DELETE FROM capability_versions WHERE capability_id = ? AND version = ?").run("running-log", 1);
+    await assert.rejects(t.platform.sharedBundle(token), (e: any) => e.code === "not_found");
+    assert.equal((t.platform.registry.db.prepare("SELECT downloads FROM share_links WHERE id = ?").get(link.id) as { downloads: number }).downloads, 0);
+  });
+
   test("expiry: 1, 7 or 30 days, or never; anything else is refused; an expired link is gone", async () => {
     for (const [expires, days] of [["1d", 1], ["30d", 30]] as const) {
       const { link } = await t.platform.createShareLink(USER, "running-log", { expires });
@@ -365,11 +373,12 @@ describe("fetchLink: what Hewn fetches when it installs from a link", () => {
   const redirect = (to: string, status = 302) => () => new Response(null, { status, headers: { location: to } });
 
   test("names and addresses on this machine or its network are refused, public ones aren't", () => {
-    for (const h of ["localhost", "a.localhost", "printer.local", "app.internal", "box.home.arpa", "intranet", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.169.254", "100.64.0.1", "127.0.0.1", "0.0.0.0", "224.0.0.1", "[::1]", "[::]", "[fd00::1]", "[fc00::1]", "[fe80::1]", "[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:a00:1]"]) assert.equal(privateHost(h), true, h);
-    for (const h of ["example.com", "hewn.example.com", "8.8.8.8", "172.32.0.1", "100.128.0.1", "[2606:4700:4700::1111]", "[::ffff:808:808]"]) assert.equal(privateHost(h), false, h);
+    for (const h of ["localhost", "a.localhost", "printer.local", "app.internal", "box.home.arpa", "intranet", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.169.254", "100.64.0.1", "127.0.0.1", "0.0.0.0", "224.0.0.1", "[::1]", "[::]", "[fd00::1]", "[fc00::1]", "[fe80::1]", "[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:a00:1]", "198.18.0.1", "198.19.255.255", "[::7f00:1]", "[::127.0.0.1]", "[64:ff9b::7f00:1]", "[64:ff9b::a9fe:a9fe]", "[64:ff9b:1::1]", "[2002:7f00:1::]", "[2002:c0a8:101::1]", "[fec0::1]", "[ff02::1]", "[1:2:3:4:5:6:7:8:9]", "[::g]"]) assert.equal(privateHost(h), true, h);
+    for (const h of ["example.com", "hewn.example.com", "8.8.8.8", "172.32.0.1", "100.128.0.1", "[2606:4700:4700::1111]", "[::ffff:808:808]", "198.20.0.1", "[64:ff9b::808:808]", "[2002:808:808::1]", "[2001:db8:1::ffff:7f00:1]"]) assert.equal(privateHost(h), false, h);
     // URL parsing turns other spellings of an address into the dotted one first.
     assert.equal(privateHost(new URL("https://0x7f000001/").hostname), true);
     assert.equal(privateHost(new URL("https://[::FFFF:127.0.0.1]/").hostname), true);
+    assert.equal(privateHost(new URL("https://[64:ff9b::127.0.0.1]/").hostname), true);
   });
 
   test("every redirect is checked as the first link is: https, public, at most 5", async () => {
@@ -377,8 +386,7 @@ describe("fetchLink: what Hewn fetches when it installs from a link", () => {
     const ok = stub({ "https://a.example/x": redirect("/y"), "https://a.example/y": redirect("https://cdn.example/z", 307), "https://cdn.example/z": () => new Response(zip) });
     const got = await fetchLink("https://a.example/x", ok.f);
     assert.deepEqual([...got.bytes], [...zip]);
-    assert.equal(got.host, "cdn.example", "where the file came from: the last redirect's host");
-    assert.equal(got.linkHost, "a.example", "the link's own host");
+    assert.deepEqual(got.origin, { from: "link", host: "cdn.example", linkHost: "a.example" }, "where the file came from (the last redirect's host), and the link's own host");
     assert.deepEqual(ok.asked, ["https://a.example/x", "https://a.example/y", "https://cdn.example/z"]);
     await assert.rejects(fetchLink("https://a.example/x", stub({ "https://a.example/x": redirect("http://a.example/x") }).f), /redirects to a link that isn't https/);
     const inside = stub({ "https://a.example/x": redirect("https://169.254.169.254/latest/meta-data") });
@@ -411,5 +419,8 @@ describe("fetchLink: what Hewn fetches when it installs from a link", () => {
     await assert.rejects(fetchLink("https://a.example/gone", stub({ "https://a.example/gone": () => new Response("no", { status: 404 }) }).f), /nothing at that link \(404\): it may have expired or been revoked/);
     await assert.rejects(fetchLink("https://a.example/err", stub({ "https://a.example/err": () => new Response("no", { status: 500 }) }).f), /a\.example answered 500/);
     await assert.rejects(fetchLink("https://nowhere.example/x", stub({}).f), /couldn't reach nowhere\.example/);
+    // A file that breaks off midway: said under the field, as any link Hewn couldn't fetch.
+    const cut = stub({ "https://a.example/cut": () => new Response(new ReadableStream({ start: (c) => (c.enqueue(new Uint8Array(10)), c.error(new TypeError("terminated"))) })) });
+    await assert.rejects(fetchLink("https://a.example/cut", cut.f), (e: any) => e.details?.refusal === "link" && /^The download from a\.example broke off \(terminated\)\.$/.test(e.message));
   });
 });

@@ -576,7 +576,7 @@ export class HewnDO extends DurableObject<Env> {
           // A shared tool's file or link (hewn install <file.hewn.zip | https://…>): staged, then installed under its name (or the given one), with its sample data unless told not to.
           if (body.bundle || body.url) {
             const fetched = body.url ? await fetchLink(String(body.url)) : null;
-            const preview = await this.platform.stageBundle(USER, fetched ? fetched.bytes : fromBase64(body.bundle), fetched ? { from: "link", host: fetched.host, ...(fetched.linkHost !== fetched.host ? { linkHost: fetched.linkHost } : {}) } : { from: "file" });
+            const preview = await this.platform.stageBundle(USER, fetched ? fetched.bytes : fromBase64(body.bundle), fetched ? fetched.origin : { from: "file" });
             const started = await this.platform.installBundle(USER, preview.token, { name: body.name ?? preview.suggestedName, sample: body.sample !== false });
             return Response.json(body.wait ? await this.platform.settle(started.buildId) : started);
           }

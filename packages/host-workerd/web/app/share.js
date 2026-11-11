@@ -130,8 +130,10 @@ async function shareSheet(c, { version } = {}) {
 /** How long a link still works: "6 days left", "5 hours left", or "until you revoke it". */
 function timeLeft(expiresAt) {
   if (!expiresAt) return "until you revoke it";
+  // Rounded: a 7-day link made a moment ago has 7 days left, not 6.
   const hours = (new Date(expiresAt).getTime() - Date.now()) / 3600_000;
-  return hours >= 48 ? `${Math.floor(hours / 24)} days left` : hours >= 1 ? `${plural(Math.floor(hours), "hour")} left` : "less than an hour left";
+  const days = Math.round(hours / 24);
+  return days >= 2 ? `${days} days left` : hours >= 1 ? `${plural(Math.round(hours), "hour")} left` : "less than an hour left";
 }
 
 /** What each choice in Expires sends, and says. */

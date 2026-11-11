@@ -21,10 +21,10 @@ export const SHARE_PREFIX = "/share/";
 /** What search engines are told on every share link's response, a refusal included. */
 export const SHARE_ROBOTS = { "x-robots-tag": "noindex, nofollow" };
 /** The public listener's robots.txt: share links stay out of search engines. */
-export const ROBOTS_TXT = "User-agent: *\nDisallow: /share/\n";
+export const ROBOTS_TXT = `User-agent: *\nDisallow: ${SHARE_PREFIX}\n`;
 const robotsFor = (path: string): Record<string, string> => (path.startsWith(SHARE_PREFIX) ? SHARE_ROBOTS : {});
 /** A path as it goes in a log: a share link's token and a capability UI's ticket left out. */
-export const loggedPath = (path: string) => path.replace(/^\/share\/.*/, "/share/…").replace(/\/~[^/]+/, "/~…");
+export const loggedPath = (path: string) => (path.startsWith(SHARE_PREFIX) ? `${SHARE_PREFIX}…` : path.replace(/\/~[^/]+/, "/~…"));
 
 interface Rule {
   /** Requests allowed per window, per client address. */
@@ -51,8 +51,8 @@ export const RULES: Record<string, Rule> = {
    * this keeps anyone from trying. The total is only a backstop, so busy addresses can't use it up.
    */
   share: { perClient: 30, total: 3000, windowMs: 10 * MIN },
-  /** And per link (its path stands for the client): one link fetched this often is being hammered. */
-  shareLink: { perClient: 30, total: 3000, windowMs: 10 * MIN },
+  /** And per link (its path stands for the client): one link fetched this often is being hammered. No total of its own: share's counts the same requests. */
+  shareLink: { perClient: 30, total: Infinity, windowMs: 10 * MIN },
 };
 
 const ruleFor = (path: string) =>

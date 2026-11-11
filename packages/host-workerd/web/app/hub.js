@@ -4,7 +4,7 @@
 // needs, Source code, Install (or Open and Install a copy). Installing opens the one install sheet.
 // (The file keeps the name of the Hub tab it was until 0.4.11.)
 import { api, enc, fail, h, modal, setWallpaper, sheetActions, skeleton } from "../kit.js";
-import { brandTile, HEWNS_TOOLS, hues, put, sandboxNotice, settings, stillHere, topBar, view } from "./frame.js";
+import { brandTile, HEWNS_TOOLS, hues, page, put, settings, stillHere, topBar, view } from "./frame.js";
 import { bundleTile, installFromFileOrLink, installSheet, sourceSheet } from "./install.js";
 import { titleCase } from "./models.js";
 import { openCapability } from "./tool-actions.js";
@@ -61,13 +61,13 @@ async function installFromHub(id) {
   return installSheet(preview, { from: "From Hewn's tools · Official" });
 }
 
-/** A page one step into + New: its back button goes to New. */
-const newPage = (back, width, ...content) => view(topBar("", { back }), sandboxNotice(), h("main", { class: "column", style: { "--w": `${width}px` } }, content));
+/** Hewn's tools are a step into + New: their back button goes to New. */
+const TO_NEW = { back: ["New", "#/new"] };
 
 /** Q2 Hewn's tools: search, Install from a file or link, All · Official · popular tags, one grid, paging. */
 async function hubPage(q) {
   const here = stillHere();
-  newPage(["New", "#/new"], 960, skeleton("30%", "90%", "90%"));
+  page(TO_NEW, 960, skeleton("30%", "90%", "90%"));
   const [{ tools }, modelReady] = await Promise.all([api("/hub"), modelIsReady()]);
   if (!here()) return;
   let filter = q?.get("tag") ?? "all";
@@ -95,8 +95,8 @@ async function hubPage(q) {
     );
   };
   draw();
-  newPage(
-    ["New", "#/new"],
+  page(
+    TO_NEW,
     960,
     h("div", { class: "row hub-head" }, h("h1", { class: "flush" }, "Hewn's tools"), search, h("button", { onclick: () => installFromFileOrLink().catch(fail) }, "Install from a file or link…")),
     h("div", { class: "row" }, chips),

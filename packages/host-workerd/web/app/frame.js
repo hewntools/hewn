@@ -181,8 +181,8 @@ const topBar = (active, { back } = {}) => {
 /** Moment screens and Info: a back button, optional actions on the right. */
 const backBar = (label, href, right) => bar({ left: glassBack(label, href), right });
 
-/** A standard page: top bar, notices, a centred column of the given width. */
-const page = (active, width, ...content) => view(topBar(active), sandboxNotice(), h("main", { class: "column", style: { "--w": `${width}px` } }, content));
+/** A standard page: top bar (its tab active, or `{ back: [label, href] }` for a page a step in), notices, a centred column of the given width. */
+const page = (active, width, ...content) => view(typeof active === "string" ? topBar(active) : topBar("", active), sandboxNotice(), h("main", { class: "column", style: { "--w": `${width}px` } }, content));
 
 /** The ASCII H, only on moment screens. Returns [field, ...rest] wrapper so the rest sits above it. */
 function moment(asciiPos, ...content) {

@@ -23,9 +23,10 @@ import { MODEL_KEYS } from "./models.ts";
 const STAGED_MS = 24 * 3600_000;
 
 /** How long a share link works, in days, as picked in Share… (null: until revoked). */
-export const LINK_DAYS = { "1d": 1, "7d": 7, "30d": 30, never: null } as const;
-export type LinkExpiry = keyof typeof LINK_DAYS;
-/** A share link's token: 24 random bytes as base64url (32 characters); anything else is no link. */
+const LINK_DAYS = { "1d": 1, "7d": 7, "30d": 30, never: null } as const;
+type LinkExpiry = keyof typeof LINK_DAYS;
+const isLinkExpiry = (e: string): e is LinkExpiry => Object.hasOwn(LINK_DAYS, e);
+/** A share link's token: Hewn makes 24 random bytes as base64url (32 characters); a token of another shape is no link. */
 const SHARE_TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 
 export interface ShareCheck {
@@ -99,11 +100,15 @@ export interface BundlePreview {
   icon: { hue: number | null; saturation: number | null; glyph: Cells | null };
 }
 
-interface Staged {
-  at: number;
+/** Where a tool's file came from: a file, one of Hewn's tools, or a link (`host` the file's, and `linkHost` the link's own when it redirected elsewhere). */
+export interface BundleOrigin {
   from: ToolSource["from"];
   host?: string;
   linkHost?: string;
+}
+
+interface Staged extends BundleOrigin {
+  at: number;
   /** The owner's own reading of it (the intake's summary), once asked for. */
   summary?: BundleSummary;
 }
@@ -172,9 +177,9 @@ export class Sharing extends Domain {
    */
   async createShareLink(owner: Agent, capabilityId: string, req: { version?: number; expires?: string }): Promise<{ token: string; link: ShareLink }> {
     const expires = req.expires ?? "7d";
-    if (!Object.hasOwn(LINK_DAYS, expires)) throw new PlatformError("invalid_request", `expires must be ${Object.keys(LINK_DAYS).join(", ")}`);
+    if (!isLinkExpiry(expires)) throw new PlatformError("invalid_request", `expires must be ${Object.keys(LINK_DAYS).join(", ")}`);
     const check = refuseBlocked(await this.shareCheck(owner, capabilityId, req.version));
-    const days = LINK_DAYS[expires as LinkExpiry];
+    const days = LINK_DAYS[expires];
     const token = randomToken(24);
     const id = randomToken(9);
     this.registry.insertShareLink({ id, tokenHash: sha256(token), capabilityId, version: check.version, expiresAt: days === null ? null : new Date(Date.now() + days * 86400_000).toISOString() });
@@ -201,14 +206,16 @@ export class Sharing extends Domain {
 
   /**
    * What `/share/<token>` serves: the bundle of the version the link was made for. No owner: the
-   * token is the authority, so anything that isn't a working link is the same not_found. Each fetch
-   * is counted, never who made it.
+   * token is the authority, so anything that isn't a working link is the same not_found. Each file
+   * served is counted, never who fetched it.
    */
   async sharedBundle(token: string): Promise<{ name: string; bundle: Uint8Array }> {
-    const link = SHARE_TOKEN.test(token) ? this.registry.takeShareLink(sha256(token)) : undefined;
+    const link = SHARE_TOKEN.test(token) ? this.registry.workingShareLink(sha256(token)) : undefined;
     const cap = link && this.registry.getCapability(link.capabilityId);
     if (!link || !cap?.activeVersion || cap.archivedAt || !this.registry.getVersion(link.capabilityId, link.version)) throw new PlatformError("not_found", "no such link");
-    return this.packShare(link.capabilityId, link.version);
+    const shared = await this.packShare(link.capabilityId, link.version);
+    this.registry.countShareDownload(link.id);
+    return shared;
   }
 
   /** A version's files as they travel: its own `source` goes (an install writes its own). */
@@ -246,7 +253,7 @@ export class Sharing extends Domain {
   // ---------- Install from a file ----------
 
   /** Stage an uploaded bundle: checked (format, size, ABI), kept until installed or a day old. */
-  async stageBundle(owner: Agent, zip: Uint8Array, origin: { from: ToolSource["from"]; host?: string; linkHost?: string } = { from: "file" }): Promise<BundlePreview> {
+  async stageBundle(owner: Agent, zip: Uint8Array, origin: BundleOrigin = { from: "file" }): Promise<BundlePreview> {
     requireOwner(owner);
     const { files, sidecar, manifest } = refuseUnreadable(zip);
     await this.dropOldStaged();

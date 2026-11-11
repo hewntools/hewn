@@ -16,6 +16,7 @@ import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
 import { fetchLink } from "./fetch-link.ts";
+import { SHARE_PREFIX } from "./public.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
 
@@ -348,17 +349,17 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "GET share": {
         const v = url.searchParams.get("version");
         const version = v ? Number(v) : undefined;
-        if (arg !== "download") return { ...(await platform.shareCheck(owner, id, version)), links: platform.shareLinks(owner, id), address: await publicAddress(platform, host) };
+        if (arg !== "download") return { ...(await platform.shareCheck(owner, id, version)), links: platform.shareLinks(owner, id), address: publicAddress(platform, await tunnelNow(host)) };
         const { name, bundle } = await platform.shareBundle(owner, id, version);
         return new Response(body(bundle), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
       }
       // Share… › Link: one version, for anyone with the link, until it expires or is revoked. Needs a public address.
       case "POST links": {
-        const address = await publicAddress(platform, host);
+        const address = publicAddress(platform, await tunnelNow(host));
         if (!address) throw new PlatformError("conflict", "Links need a public address. Set up remote access first (Settings › Remote access).");
         const b = await readJson(req);
         const { token, link } = await platform.createShareLink(owner, id, { version: b.version === undefined ? undefined : Number(b.version), expires: b.expires === undefined ? undefined : String(b.expires) });
-        return { url: `${address}/share/${token}`, link };
+        return { url: `${address}${SHARE_PREFIX}${token}`, link };
       }
       case "DELETE links":
         platform.revokeShareLink(owner, id, String(arg ?? ""));
@@ -450,7 +451,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       if (b.url === undefined) return platform.stageBundle(owner, fromBase64(String(b.data ?? "")), { from: "file" });
       platform.agents(owner); // owner only, before anything is fetched
       const fetched = await fetchLink(String(b.url), host.fetch);
-      return platform.stageBundle(owner, fetched.bytes, { from: "link", host: fetched.host, ...(fetched.linkHost !== fetched.host ? { linkHost: fetched.linkHost } : {}) });
+      return platform.stageBundle(owner, fetched.bytes, fetched.origin);
     }
     if (id && !sub && method === "GET") return platform.stagedBundle(owner, id);
     if (id && sub === "code" && method === "GET") {
@@ -1096,17 +1097,14 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
   return { items: page, next: filtered.length > page.length ? page.at(-1)!.at : null };
 }
 
+/** The tunnel's status, or null (no tunnel on this host, or it can't say). */
+const tunnelNow = (host: SurfaceHost): Promise<TunnelStatus | null> => (host.tunnel ? host.tunnel().catch(() => null) : Promise.resolve(null));
+
 /**
  * Where this Hewn is reachable from the internet: its public URL, else the tunnel's address once
  * it's up; null when neither. What MCP's public address and share links are built on.
  */
-function publicAddress(platform: Platform, host: SurfaceHost, tunnel: TunnelStatus | null): string | null;
-function publicAddress(platform: Platform, host: SurfaceHost): Promise<string | null>;
-function publicAddress(platform: Platform, host: SurfaceHost, tunnel?: TunnelStatus | null): string | null | Promise<string | null> {
-  const pick = (t: TunnelStatus | null) => platform.publicUrl() ?? (t?.state === "up" && t.url ? t.url : null);
-  if (tunnel !== undefined) return pick(tunnel);
-  return platform.publicUrl() ? Promise.resolve(platform.publicUrl()!) : (host.tunnel?.() ?? Promise.resolve(null)).catch(() => null).then(pick);
-}
+const publicAddress = (platform: Platform, tunnel: TunnelStatus | null): string | null => platform.publicUrl() ?? (tunnel?.state === "up" && tunnel.url ? tunnel.url : null);
 
 /**
  * Connect an agent (owner only). `manual`: the addresses an MCP client connects to (it signs
@@ -1118,8 +1116,8 @@ async function setupRoute(platform: Platform, host: SurfaceHost, owner: Agent, r
   const mcpUrl = `http://127.0.0.1:${host.port}/mcp`;
   const method = req.method;
   if (id === "manual") {
-    const tunnel = host.tunnel ? await host.tunnel().catch(() => null) : null;
-    const reachable = publicAddress(platform, host, tunnel);
+    const tunnel = await tunnelNow(host);
+    const reachable = publicAddress(platform, tunnel);
     return { url: mcpUrl, publicUrl: reachable ? `${reachable}/mcp` : null, tunnel, pointer: AGENT_POINTER };
   }
   if (!host.setup) throw new PlatformError("not_found", host.hosted ? "there are no local agents to connect here: connect claude.ai, ChatGPT or another agent through your address" : "connecting agents from the web is not available here; run: hewn setup");

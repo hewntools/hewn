@@ -823,12 +823,15 @@ export class Registry {
     return this.db.prepare("SELECT * FROM share_links WHERE capability_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC, rowid DESC").all(capabilityId, now()).map((r) => toShareLink(r as Row));
   }
 
-  /** The link a token opens, if it still works; its fetch counted. */
-  takeShareLink(tokenHash: string): ShareLink | undefined {
+  /** The link a token opens, if it still works. */
+  workingShareLink(tokenHash: string): ShareLink | undefined {
     const r = this.db.prepare("SELECT * FROM share_links WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)").get(tokenHash, now()) as Row | undefined;
-    if (!r) return undefined;
-    this.db.prepare("UPDATE share_links SET downloads = downloads + 1 WHERE id = ?").run(r.id);
-    return toShareLink({ ...r, downloads: r.downloads + 1 });
+    return r && toShareLink(r);
+  }
+
+  /** A link's file was served: one more download. */
+  countShareDownload(id: string) {
+    this.db.prepare("UPDATE share_links SET downloads = downloads + 1 WHERE id = ?").run(id);
   }
 
   /** Stop a link (or, without `id`, every link of the tool). How many that still worked were stopped. */
