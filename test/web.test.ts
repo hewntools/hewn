@@ -748,7 +748,7 @@ describe("web client (owner surface)", () => {
 
     test("settings: read and write platform.json, validated; no discovery option", async () => {
       const s = (await api("/settings")).json;
-      assert.deepEqual(Object.keys(s).sort(), ["buildPasses", "builder", "intake", "logRetentionDays", "maxBuildAttempts", "sandbox"]);
+      assert.deepEqual(Object.keys(s).sort(), ["buildPasses", "builder", "intake", "logRetentionDays", "maxBuildAttempts", "sandbox", "toolDataLimitMB"]);
       assert.deepEqual(s.buildPasses, ["critique", "craft"]);
       assert.equal((await api("/settings", { method: "PUT", body: { buildPasses: ["polish"] } })).status, 400);
       assert.deepEqual((await api("/settings", { method: "PUT", body: { buildPasses: ["craft"] } })).json.buildPasses, ["craft"]);
@@ -757,6 +757,12 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/settings", { method: "PUT", body: { logRetentionDays: -1 } })).status, 400);
       assert.equal((await api("/settings", { method: "PUT", body: { logRetentionDays: 0 } })).json.logRetentionDays, 0);
       await api("/settings", { method: "PUT", body: { logRetentionDays: 14 } });
+      assert.equal(s.toolDataLimitMB, 100);
+      assert.equal((await api("/settings", { method: "PUT", body: { toolDataLimitMB: 0 } })).status, 400);
+      assert.equal((await api("/settings", { method: "PUT", body: { toolDataLimitsMB: { "Not an id": 5 } } })).status, 400);
+      const limits = (await api("/settings", { method: "PUT", body: { toolDataLimitMB: 250, toolDataLimitsMB: { "running-log": 20 } } })).json;
+      assert.deepEqual([limits.toolDataLimitMB, limits.toolDataLimitsMB], [250, { "running-log": 20 }]);
+      await api("/settings", { method: "PUT", body: { toolDataLimitMB: 100, toolDataLimitsMB: {} } });
       assert.equal((await api("/settings", { method: "PUT", body: { maxBuildAttempts: 9 } })).status, 400);
       const next = (await api("/settings", { method: "PUT", body: { maxBuildAttempts: 2, discovery: "tools" } })).json;
       assert.equal(next.maxBuildAttempts, 2);

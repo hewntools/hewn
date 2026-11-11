@@ -428,7 +428,7 @@ interface Db {
 }
 ```
 
-- **`db`**: the capability's own private SQLite database, synchronous, and its only state. `transaction(fn)` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed.
+- **`db`**: the capability's own private SQLite database, synchronous, and its only state. `transaction(fn)` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed. Its size has a limit the owner sets (on Hewn, 100 MB unless they change it): a write that needs more room fails (`SQLITE_FULL`), and so does the operation. What it deletes makes room again.
 - **`secrets`**: the granted values of `requires.secrets`, per call (connections only).
 - **`updateSecret(name, value)`**: stores a new value for a declared secret, e.g. a refreshed token. Updates are kept only when the operation succeeds.
 - **`config`**: the owner's values for the manifest's `config`.

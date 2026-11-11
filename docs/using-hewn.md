@@ -116,7 +116,7 @@ Each step shows how long it took, by Hewn's clock, so it's the same whenever you
 - **General:** appearance (system, light or dark; a tool open in Hewn follows it too, if its screen uses Hewn's styles or handles light and dark itself: [Tool UIs](../spec/tools.md#tool-uis)), your time zone, and whether the sandbox is on.
 - **AI:** who does [Hewn's two jobs](concepts.md#hewns-two-jobs) (builds tools, on which model, and thinks inside tools), which models agents may ask for, your [instructions for building](building-tools.md#instructions), and the Models page ([Models](models.md)).
 - **Remote access:** the public URL, your passkeys and signed-in browsers ([Using Hewn from anywhere](remote-access.md)).
-- **Data:** backups and their folder, how long call logs are kept, and deleted tools ([Your data](data.md)).
+- **Data:** backups and their folder, how long call logs are kept, how big each tool's data can get, and deleted tools ([Your data](data.md)).
 - **About:** the version, whether a newer one is out (with the command to upgrade), and shortcuts.
 
 ![Settings › AI: Builds tools set to Claude Code on the default model, the models agents may ask for, Instructions for building (none yet), and Thinks inside tools with no provider yet](images/settings-ai.png)

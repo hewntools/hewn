@@ -86,6 +86,8 @@ Use it (as the owner; talks to the running Hewn)
   data reset <id> [--sample]
                       Start over: empty a tool's data and keep the tool (a backup is kept; asks you to
                       type the id); --sample replays its sample data after
+  data limit [<MB>] | data limit <id> <MB>|default
+                      how big each tool's data may grow (100 MB unless you change it), or one tool's own
   purge <id>          permanently delete a deleted tool (asks you to type the id)
   backup now|list|restore <date|file>|dir <path>
                       zipped snapshots (never secrets in plain text, never agent tokens)
@@ -501,8 +503,12 @@ async function main() {
     }
 
     case "data": {
-      const [sub, id] = positional();
-      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample]");
+      const [sub, id, mb] = positional();
+      if (sub === "limit") {
+        await owner((c) => dataLimit(c, id, mb));
+        return;
+      }
+      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample] | hewn data limit [<MB>] | hewn data limit <id> <MB>|default");
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const typed = (await rl.question(`Start ${id} over: its data is emptied (a backup is kept), the tool stays.\nType ${id} to confirm: `)).trim();
       rl.close();
@@ -775,6 +781,20 @@ async function agentsCommand(c: PlatformClient) {
     default:
       throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | tool <agent> <tool> on|off | revoke <agent>]");
   }
+}
+
+/** `hewn data limit`: how big each tool's data may grow; with <MB>, everyone's; with <id> <MB>|default, one tool's own. */
+async function dataLimit(c: PlatformClient, first?: string, second?: string) {
+  let s = await c.settings();
+  if (first !== undefined && second === undefined) s = await c.settings({ toolDataLimitMB: Number(first) });
+  else if (first !== undefined) {
+    const own: Record<string, number> = { ...s.toolDataLimitsMB };
+    if (second === "default") delete own[first];
+    else own[first] = Number(second);
+    s = await c.settings({ toolDataLimitsMB: own });
+  }
+  console.log(`Each tool's data: up to ${s.toolDataLimitMB} MB`);
+  for (const [id, n] of Object.entries((s.toolDataLimitsMB ?? {}) as Record<string, number>)) console.log(`  ${id}: up to ${n} MB`);
 }
 
 /** hewn url: the public URL (where the owner reaches Hewn from anywhere), its DNS records and proxy. */

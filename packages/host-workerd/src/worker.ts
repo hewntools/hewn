@@ -23,7 +23,7 @@ import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
 import { defaultPasses } from "@hewntools/core/passes.ts";
-import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
+import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost, TOOL_DATA_LIMIT_MB, toolDataLimitMB } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 import { fetchLink } from "./surface/fetch-link.ts";
 // Text modules, embedded by the supervisor's config.
@@ -31,6 +31,8 @@ import { fetchLink } from "./surface/fetch-link.ts";
 import BRIEF from "./builder-brief.md";
 // @ts-expect-error text module
 import RUNTIME from "./capability-runtime.js";
+// @ts-expect-error text module
+import GUARD from "./capability-guard.js";
 
 interface Env {
   HEWN: DurableObjectNamespace;
@@ -307,10 +309,32 @@ function diskBlobs(env: Env): Blobs {
   };
 }
 
+/**
+ * How big a capability's states may grow (bytes; 0: not at all), and what to say when a call needed
+ * more: the owner's limit, or none while the disk is nearly full.
+ */
+interface DataLimits {
+  limit(capabilityId: string): number;
+  full(capabilityId: string, limit: number): string;
+}
+
+/** SQLite's error for a write past a state's limit (or a full disk). */
+const isFull = (message: string | undefined) => /SQLITE_FULL/.test(message ?? "");
+
 /** The runtime port: capability code runs in its CapabilityHost, isolated, with its own state. */
-function workerdRuntime(env: Env): CapabilityRuntime {
+function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
   // RPC stub of a CapabilityHost (typed loosely: the generated stub types are too deep for tsc).
   const host = (capabilityId: string) => env.CAPS.get(env.CAPS.idFromName(capabilityId)) as unknown as CapabilityHostApi;
+  /** Run against a state with its limit; a write past it fails saying so. */
+  const limited = async <T>(capabilityId: string, run: (limit: number) => Promise<T>): Promise<T> => {
+    const limit = data.limit(capabilityId);
+    try {
+      return await run(limit);
+    } catch (e) {
+      if (isFull((e as Error).message)) throw new PlatformError("operation_failed", data.full(capabilityId, limit));
+      throw e;
+    }
+  };
   return {
     async invoke(target, key, input, onCall, onModel) {
       const call = async (capabilityId: string, operation: string, callInput: unknown) => {
@@ -327,32 +351,33 @@ function workerdRuntime(env: Env): CapabilityRuntime {
         await host(target.capabilityId).stop(target.state.scratch ?? null, `stopped: ${target.capabilityId}/${key} ran past its deadline`).catch(() => {});
         throw e;
       });
+      const limit = data.limit(target.capabilityId);
       try {
         const r = await Promise.race([
-          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly),
+          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit),
           expired,
         ]);
-        if (!r.ok) throw new PlatformError("operation_failed", `${key} failed: ${r.error}`, { logs: r.logs });
+        if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
         return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs, inserted: r.inserted };
       } catch (e) {
         // Out of time: whatever came back once it was stopped, it timed out.
         if (late) throw late;
         if (e instanceof PlatformError) throw e;
-        throw new PlatformError("operation_failed", `${key} failed: ${(e as Error).message}`);
+        throw new PlatformError("operation_failed", isFull((e as Error).message) ? data.full(target.capabilityId, limit) : `${key} failed: ${(e as Error).message}`);
       } finally {
         timer.clear();
       }
     },
     // Describing only loads code; any capability id's host can do it.
     describe: (code) => host("_describe").describe(code),
-    migrate: (state, migrations, code) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code),
+    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit)),
     hasState: (state) => host(state.capabilityId).hasState(state.scratch ?? null),
     copyState: (from, to) => host(from.capabilityId).copyState(from.scratch ?? null, to.scratch ?? null),
     dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
     listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
-    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code),
-    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code),
-    loadState: (state, tables, code) => host(state.capabilityId).load(state.scratch ?? null, tables, code),
+    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId)),
+    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId)),
+    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit)),
   };
 }
 
@@ -362,7 +387,11 @@ type CapabilityHostApi = {
 
 // ---------- HewnDO: the owner's platform ----------
 
-const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses() };
+const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses(), toolDataLimitMB: TOOL_DATA_LIMIT_MB };
+
+const MB = 1024 * 1024;
+/** "100 MB", "2 GB". */
+const sizeText = (bytes: number) => (bytes >= 1024 * MB && bytes % (1024 * MB) === 0 ? `${bytes / (1024 * MB)} GB` : `${Math.round(bytes / MB)} MB`);
 
 export class HewnDO extends DurableObject<Env> {
   private platform!: Platform;
@@ -370,6 +399,8 @@ export class HewnDO extends DurableObject<Env> {
   private secrets!: EncryptedSecretStore;
   private visualInvokers = new Map<string, VisualInvoke>();
   private sql: Sql;
+  /** The supervisor's word that the disk with Hewn's data is nearly full: tools' data doesn't grow while it is. */
+  private diskLow: { floor: number } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -381,7 +412,7 @@ export class HewnDO extends DurableObject<Env> {
       this.platform = new Platform({
         sql: this.sql,
         blobs: diskBlobs(env),
-        runtime: workerdRuntime(env),
+        runtime: workerdRuntime(env, { limit: (id) => this.dataLimit(id), full: (id, limit) => this.dataFull(id, limit) }),
         workbench: remoteWorkbench(env, this.visualInvokers),
         secrets: this.secrets,
         brief: BRIEF,
@@ -427,6 +458,21 @@ export class HewnDO extends DurableObject<Env> {
     });
   }
 
+  /** How big a capability's states may grow, in bytes: its limit, or 0 while the disk is nearly full. */
+  private dataLimit(capabilityId: string): number {
+    return this.diskLow ? 0 : toolDataLimitMB(this.settings(), capabilityId) * MB;
+  }
+
+  /** What a call that needed more room than `limit` gives fails with; the owner's log says so too. */
+  private dataFull(capabilityId: string, limit: number): string {
+    const name = this.platform.registry.getCapability(capabilityId)?.name ?? capabilityId;
+    const message = limit
+      ? `${name}'s data is at its ${sizeText(limit)} limit, so it can't save more. The limit is in Settings › Data.`
+      : `${name} can't save more: the disk with Hewn's data has less than ${sizeText(this.diskLow?.floor ?? 1024 * MB)} free.`;
+    console.log(`[${new Date().toISOString()}] ${capabilityId}: ${message}`);
+    return message;
+  }
+
   /** One DO alarm for the next due schedule (re-armed whenever that may change). */
   private async armAlarm() {
     const next = this.platform.nextScheduleAt();
@@ -462,7 +508,7 @@ export class HewnDO extends DurableObject<Env> {
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"] as const)
+    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"] as const)
       if (k in change && next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
   }
@@ -574,6 +620,10 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/changed":
           // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });
+        case "/_admin/disk":
+          // The supervisor checks the disk with Hewn's data: while it's nearly full, tools' data doesn't grow.
+          this.diskLow = body.low === true ? { floor: Number.isFinite(body.floor) ? body.floor : 1024 * MB } : null;
+          return Response.json({ ok: true });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.
           const invoke = this.visualInvokers.get(body.buildId);
@@ -676,7 +726,7 @@ export class HewnDO extends DurableObject<Env> {
 }
 
 /** Admin routes that change nothing a backup keeps (`/_admin/invoke` counts its own writes). */
-const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed"]);
+const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed", "/_admin/disk"]);
 
 /** Whether an admin request changes what a backup keeps (the idle report's backup reason). */
 function adminChanges(path: string, body: any): boolean {
@@ -741,9 +791,9 @@ export class CapabilityHost extends DurableObject<Env> {
    * Work on a facet. When the last piece of work on it ends, the facet is stopped, so nothing a call
    * leaves behind (a timer, a promise it didn't await) runs on after it.
    */
-  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], work: (facet: any) => Promise<T>): Promise<T> {
+  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], limit: number, work: (facet: any) => Promise<T>): Promise<T> {
     const name = facetName(scratch);
-    const facet = this.facet(scratch, code, hosts);
+    const facet = this.facet(scratch, code, hosts, limit);
     this.busy.set(name, (this.busy.get(name) ?? 0) + 1);
     try {
       return await work(facet);
@@ -757,53 +807,62 @@ export class CapabilityHost extends DurableObject<Env> {
     }
   }
 
-  private worker(code: CodeRef, hosts: string[]) {
-    const key = `${code.hash}|${hosts.join(",")}`;
+  /**
+   * The isolate for `code` with these hosts and this size limit (bytes) for each state it runs.
+   * "experimental" is for the limit's setter, sql.setMaxPageCountForTest: hewn-guard.js
+   * (capability-guard.ts) takes it, with what else the flag adds to storage, out of the
+   * capability's reach before its code can use any.
+   */
+  private worker(code: CodeRef, hosts: string[], limit: number) {
+    const bytes = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
+    const key = `${code.hash}|${hosts.join(",")}|${bytes}`;
     return {
       key,
       stub: this.env.LOADER.get(key, () => ({
         compatibilityDate: COMPAT_DATE,
-        compatibilityFlags: ["nodejs_compat"],
+        compatibilityFlags: ["nodejs_compat", "experimental"],
+        allowExperimental: true,
         mainModule: "hewn-runtime.js",
-        modules: { "hewn-runtime.js": RUNTIME, "capability.js": code.js },
+        modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
         env: {},
         globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts } }),
       })),
     };
   }
 
-  /** The facet for a state, running `code` (restarted if it was running other code). */
-  private facet(scratch: string | null, code: CodeRef, hosts: string[]) {
+  /** The facet for a state, running `code` with `limit` (restarted if it was running other code or another limit). */
+  private facet(scratch: string | null, code: CodeRef, hosts: string[], limit: number) {
     const name = facetName(scratch);
-    const w = this.worker(code, hosts);
+    const w = this.worker(code, hosts, limit);
     if (this.running.has(name) && this.running.get(name) !== w.key) this.ctx.facets.abort(name, new Error("new version"));
     this.running.set(name, w.key);
     this.ctx.storage.sql.exec("INSERT OR IGNORE INTO states (name) VALUES (?)", name);
     return this.ctx.facets.get(name, () => ({ class: w.stub.getDurableObjectClass("Capability") })) as any;
   }
 
-  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false) {
-    return this.on(scratch, code, hosts, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
+  // `limit`: how big the state may grow, in bytes (0: not at all; workerdRuntime passes the owner's).
+  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0) {
+    return this.on(scratch, code, hosts, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
   }
 
   async describe(code: CodeRef): Promise<string[]> {
-    return (this.worker(code, []).stub.getEntrypoint() as any).describe();
+    return (this.worker(code, [], 0).stub.getEntrypoint() as any).describe();
   }
 
-  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef): Promise<string[]> {
-    return this.on(scratch, code, [], (f) => f.migrate(migrations));
+  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0): Promise<string[]> {
+    return this.on(scratch, code, [], limit, (f) => f.migrate(migrations));
   }
 
-  async dump(scratch: string | null, code: CodeRef) {
-    return this.on(scratch, code, [], (f) => f.dump());
+  async dump(scratch: string | null, code: CodeRef, limit = 0) {
+    return this.on(scratch, code, [], limit, (f) => f.dump());
   }
 
-  async count(scratch: string | null, code: CodeRef): Promise<Record<string, number>> {
-    return this.on(scratch, code, [], (f) => f.count());
+  async count(scratch: string | null, code: CodeRef, limit = 0): Promise<Record<string, number>> {
+    return this.on(scratch, code, [], limit, (f) => f.count());
   }
 
-  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef): Promise<number> {
-    return this.on(scratch, code, [], (f) => f.load(tables));
+  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0): Promise<number> {
+    return this.on(scratch, code, [], limit, (f) => f.load(tables));
   }
 
   hasState(scratch: string | null): boolean {
