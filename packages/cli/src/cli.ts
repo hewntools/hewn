@@ -402,7 +402,7 @@ async function main() {
         if (action === "approve" || action === "reject") {
           if (!id) throw new Error(`usage: hewn review ${action} <buildId>`);
           const b = await c.call(action === "approve" ? "approveBuild" : "rejectBuild", id);
-          console.log(b.status === "promoted" ? `✔ ${b.capabilityId}: v${b.resultVersion} is live` : b.status === "cancelled" ? `✔ turned down: ${b.capabilityId} is unchanged` : `✖ ${b.log.at(-1)}`);
+          console.log(b.status === "promoted" ? `✔ ${b.capabilityId}: v${b.resultVersion} is live` : b.status === "cancelled" ? `✔ turned down: ${b.kind === "create" ? `${b.capabilityId} never went live` : `${b.capabilityId} is unchanged`}` : `✖ ${b.log.at(-1)}`);
           return;
         }
         if (action) throw new Error("usage: hewn review [approve|reject <buildId>]");
@@ -411,7 +411,8 @@ async function main() {
         const verb: Record<string, string> = { read: "READ", write: "CHANGE", destructive: "DELETE" };
         for (const b of list) {
           const r = b.review;
-          console.log(`${b.buildId}  ${b.submittedBy ? `${b.submittedBy} wrote and submitted a change to` : `${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"}`} ${b.capabilityId}`);
+          const what = b.kind === "create" ? (b.submittedBy ? `${b.submittedBy} wrote and submitted a new tool,` : `${b.requestedBy} asked for a new tool,`) : b.submittedBy ? `${b.submittedBy} wrote and submitted a change to` : `${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"}`;
+          console.log(`${b.buildId}  ${what} ${b.capabilityId}`);
           if (r.connection) console.log("    it's a connection: this code holds your sign-in for that service");
           for (const o of r.newOperations) {
             console.log(`    + ${o.key}: agents can then ${verb[o.sideEffect] ?? o.sideEffect}: ${o.description}`);

@@ -13,7 +13,7 @@ import { DOC_PAGES } from "@hewntools/core/docs.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor, type Supervisor } from "@hewntools/cli/supervisor/index.ts";
 import { editJson, editText, type Script, SEED } from "./helpers.ts";
-import { oauthToken, onFreePorts, waitBuild } from "./workerd-helpers.ts";
+import { oauthToken, onFreePorts, waitApproved } from "./workerd-helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 const parse = (r: any) => JSON.parse(r.content[0].text);
@@ -68,7 +68,7 @@ describe("workerd host (integration)", () => {
     });
     const opened = parse(await client.callTool({ name: "capabilities_create", arguments: { name: "Bike Log", purpose: "rides", requirements: "like running log" } }));
     assert.equal(opened.status, "building");
-    const done = await waitBuild(client, opened.buildId, 60);
+    const done = await waitApproved(client, sv, opened.buildId, 60);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     const list = parse(await client.callTool({ name: "capabilities_list", arguments: {} }));
     assert.deepEqual(list.capabilities.map((c: any) => c.id).sort(), ["bike-log", "running-log"]);

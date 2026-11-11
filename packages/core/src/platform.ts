@@ -391,7 +391,7 @@ export class Platform {
   buildsInReview(owner: Agent): BuildView[] { return this.d.builds.buildsInReview(owner); }
   approveBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.approveBuild(owner, buildId); }
   rejectBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.rejectBuild(owner, buildId); }
-  reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number; files: CodeFile[] }> { return this.d.builds.reviewCode(owner, buildId); }
+  reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number | null; files: CodeFile[] }> { return this.d.builds.reviewCode(owner, buildId); }
   reviewFile(owner: Agent, buildId: string, path: string): Promise<CodeText> { return this.d.builds.reviewFile(owner, buildId, path); }
   reviewShot(owner: Agent, buildId: string, name: string): Promise<Uint8Array> { return this.d.builds.reviewShot(owner, buildId, name); }
   /** The one gate for a candidate handed over ready-made (a client's submission, an install): see SubmitEntry. */

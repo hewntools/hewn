@@ -101,10 +101,10 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_create",
     scopes: ["create"],
     description:
-      "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. " +
+      "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. Once it passes validation it waits for the owner's approval (status review) while your approval mode is wait, which the owner sets in Hewn (always, for now): tell the owner. Its grants wait for the owner either way. " +
       "Only connections hold credentials: if it needs a service with a key, token or login (GitHub, Notion, a self-hosted server…), it must call a connection (kind 'connection') that wraps the service. " +
       "A connection signs in with a key or token the user pastes, or with a username-and-password sign-in step; services that only allow OAuth (Google Calendar, Gmail, Spotify…) can't be connected yet. " +
-      "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes. " +
+      "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes (the owner approves it first). " +
       "If the connection lacks an operation you need, capabilities_modify the connection first and pass its buildId as after.",
     inputSchema: obj(
       {
@@ -158,7 +158,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_submit",
     scopes: ["create", "modify"],
     description:
-      "Hand over a capability you wrote (create scope for a new one, modify with capabilityId for a change). The platform validates it as any build (the contracts, the tests and migrations on a copy of the user's data, the UI) and returns a build: follow it with builds_wait. A new capability goes live once it passes (its grants wait for the owner); a change waits for the owner's review (status review) while your approval mode is wait (always, for now): tell the owner. A change is refused while another change to it is on its way, or if baseVersion (from capabilities_pack) is no longer its version. No builder runs, so builds_retry doesn't apply: submit again.",
+      "Hand over a capability you wrote (create scope for a new one, modify with capabilityId for a change). The platform validates it as any build (the contracts, the tests and migrations on a copy of the user's data, the UI) and returns a build: follow it with builds_wait. Once it passes, a new capability or a change waits for the owner's approval (status review) while your approval mode is wait (always, for now): tell the owner. A new one's grants wait for the owner either way. A change is refused while another change to it is on its way, or if baseVersion (from capabilities_pack) is no longer its version. No builder runs, so builds_retry doesn't apply: submit again.",
     inputSchema: obj(
       {
         files,

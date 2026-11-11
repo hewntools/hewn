@@ -523,13 +523,15 @@ export class Builds extends Domain {
   }
 
   /**
-   * One create of an id at a time: refused while another is waiting or being built, or paused with
-   * its work kept (taking the id over would strand it). Not a widgets build chained after it (create
+   * One create of an id at a time: refused while another is waiting, being built or held for the
+   * owner, or paused with its work kept (taking the id over would strand it). Not a widgets build chained after it (create
    * with widgets): that one waits for it.
    */
   private oneCreateAtATime(agent: Agent, id: string) {
     const building = this.registry.unfinishedBuild(id, { kind: "create" });
     if (building) throw new PlatformError("conflict", `'${id}' is already being built${this.buildRef(agent, building)}; wait for it, or cancel it`);
+    const held = this.registry.buildsInReview().find((b) => b.capabilityId === id && b.kind === "create");
+    if (held) throw new PlatformError("conflict", `'${id}' is built and waits for the owner's approval${this.buildRef(agent, held)}`);
     const paused = this.pausedBuild(id, "create");
     if (paused) throw this.pausedFirst(agent, `'${id}'`, paused);
   }
@@ -1269,7 +1271,7 @@ export class Builds extends Domain {
     try {
       const r = await this.d.validation.promote(build, candidate, step);
       if ("review" in r) {
-        step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review)})`);
+        step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review, build.kind)})`);
         return { review: r.review, log };
       }
       step(`promoted: implementation v${r.version} is now active`);
@@ -1418,7 +1420,7 @@ export class Builds extends Domain {
     run.history.push(...log.map((l) => `${best.label}: ${l}`));
     if (review) {
       this.registry.updateBuild(build.id, { status: "review", review, log: run.history });
-      this.logger(`${run.tag} waits for the owner's review (${reviewReason(review)})`);
+      this.logger(`${run.tag} waits for the owner's review (${reviewReason(review, build.kind)})`);
       return undefined;
     }
     if (version) {
@@ -1596,8 +1598,8 @@ export class Builds extends Domain {
   }
 
   /**
-   * The owner lets an agent's change go live: exactly the candidate that passed validation. If the
-   * capability changed meanwhile, the build fails (retry it to build on the new version).
+   * The owner lets an agent's change, or new tool, go live: exactly the candidate that passed
+   * validation. If the capability changed meanwhile, the build fails (retry it to build on the new version).
    */
   async approveBuild(owner: Agent, buildId: string): Promise<BuildView> {
     requireOwner(owner);
@@ -1608,7 +1610,8 @@ export class Builds extends Domain {
     const step = (message: string) => (log.push(message), this.buildEvent(buildId, message, `build ${buildId} [${build.kind} ${build.capabilityId}, approved by ${owner.id}]`));
     this.registry.addAuthorityEvent({ actor: owner.id, action: "build_approved", subject: build.requestedBy, capabilityId: build.capabilityId, detail: buildId });
     try {
-      if (!cap?.activeVersion || cap.archivedAt || cap.activeVersion !== build.baseVersion) throw new Error("the capability changed since this build was checked; retry it to build on the current version");
+      const moved = build.baseVersion === null ? !cap || !!cap.activeVersion || !!cap.archivedAt : !cap?.activeVersion || !!cap.archivedAt || cap.activeVersion !== build.baseVersion;
+      if (moved) throw new Error("the capability changed since this build was checked; retry it to build on the current version");
       const v = await this.loadCandidate(build.review.contentHash);
       const manifest = JSON.parse(text(v.files["capability.json"])) as CapabilityManifest;
       step(`approved by ${owner.id}`);
@@ -1626,7 +1629,7 @@ export class Builds extends Domain {
     return this.buildView(this.mustBuild(buildId));
   }
 
-  /** The owner turns an agent's change down: nothing changes. */
+  /** The owner turns an agent's change (or new tool) down: nothing changes. */
   async rejectBuild(owner: Agent, buildId: string): Promise<BuildView> {
     requireOwner(owner);
     const build = this.mustBuild(buildId);
@@ -1651,24 +1654,29 @@ export class Builds extends Domain {
   }
 
   /** A held build, for the owner's review card; else not found. */
-  private heldBuild(owner: Agent, buildId: string): BuildRow & { review: BuildReview; baseVersion: number } {
+  private heldBuild(owner: Agent, buildId: string): BuildRow & { review: BuildReview } {
     requireOwner(owner);
     const b = this.mustBuild(buildId);
-    if (b.status !== "review" || !b.review || b.baseVersion === null) throw new PlatformError("not_found", `build ${buildId} isn't waiting for your review`);
-    return b as BuildRow & { review: BuildReview; baseVersion: number };
+    if (b.status !== "review" || !b.review) throw new PlatformError("not_found", `build ${buildId} isn't waiting for your review`);
+    return b as BuildRow & { review: BuildReview };
   }
 
-  /** The review card's diff: a held build's files against the version it was built on, or one file of them (`path`). Owner only. */
-  async reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number; files: CodeFile[] }> {
+  /** The files a held build was built on: none for a new tool. */
+  private async heldBase(b: BuildRow): Promise<Files | null> {
+    return b.baseVersion === null ? null : (await this.loadVersion(b.capabilityId, b.baseVersion, { keep: false })).files;
+  }
+
+  /** The review card's diff: a held build's files against the version it was built on (a new tool's, as they are), or one file of them (`path`). Owner only. */
+  async reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number | null; files: CodeFile[] }> {
     const b = this.heldBuild(owner, buildId);
-    const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.loadVersion(b.capabilityId, b.baseVersion, { keep: false })]);
-    return { version: b.baseVersion + 1, base: b.baseVersion, files: codeFiles(candidate.files, base.files) };
+    const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.heldBase(b)]);
+    return { version: (b.baseVersion ?? 0) + 1, base: b.baseVersion, files: codeFiles(candidate.files, base) };
   }
 
   async reviewFile(owner: Agent, buildId: string, path: string): Promise<CodeText> {
     const b = this.heldBuild(owner, buildId);
-    const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.loadVersion(b.capabilityId, b.baseVersion, { keep: false })]);
-    return codeText(path, candidate.files, base.files);
+    const [candidate, base] = await Promise.all([this.loadCandidate(b.review.contentHash), this.heldBase(b)]);
+    return codeText(path, candidate.files, base);
   }
 
   /** One of the review card's four renders (`REVIEW_SHOTS`). Owner only. */
@@ -1886,7 +1894,7 @@ export class Builds extends Domain {
     }
     if (b.status === "review" && b.review) {
       view.review = b.review;
-      view.instructions = `The change passed validation and waits for the owner's review in Hewn before it goes live (${reviewReason(b.review)}). Tell the owner; once they approve, it is promoted. Call builds_get later to see the outcome.`;
+      view.instructions = `The ${b.kind === "create" ? "new tool" : "change"} passed validation and waits for the owner's review in Hewn before it goes live (${reviewReason(b.review, b.kind)}). Tell the owner; once they approve, it is promoted. Call builds_get later to see the outcome.`;
     }
     if (b.status === "building" || b.status === "validating") {
       view.progress = this.progressOf(b.id);
@@ -2322,5 +2330,7 @@ const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKin
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";
 
-const reviewReason = (r: BuildReview) =>
-  [r.approval === "wait" && "the agent's changes wait for the owner's approval", r.connection && "it changes a connection", r.newOperations.length && `it adds ${r.newOperations.map((o) => `${o.key} (${o.sideEffect})`).join(", ")}`].filter(Boolean).join("; ");
+const reviewReason = (r: BuildReview, kind: BuildKind) =>
+  kind === "create"
+    ? "the agent's new tools wait for the owner's approval"
+    : [r.approval === "wait" && "the agent's changes wait for the owner's approval", r.connection && "it changes a connection", r.newOperations.length && `it adds ${r.newOperations.map((o) => `${o.key} (${o.sideEffect})`).join(", ")}`].filter(Boolean).join("; ");

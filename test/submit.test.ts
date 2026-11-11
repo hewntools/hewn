@@ -171,16 +171,36 @@ describe("submit: the same gate as any build", () => {
   afterEach(() => t.cleanup());
   const counter = () => entriesOf(join(FIXTURES, "ui-counter"));
 
-  test("a new tool goes live once it passes, submitted by the client", async () => {
+  test("a new tool the client submits waits for the owner (approval mode wait), its id kept; approved, it goes live", async () => {
     const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: counter(), request: "A counter with a screen" })).buildId);
-    assert.equal(b.status, "promoted", b.log.join("\n"));
+    assert.equal(b.status, "review", b.log.join("\n"));
     assert.equal(b.builder, "submitted");
     assert.equal(b.submittedBy, "claude-code");
     assert.equal(b.kind, "create");
     assert.equal(b.request.requirements, "A counter with a screen");
+    assert.equal(b.review!.approval, "wait");
+    assert.deepEqual(b.review!.newOperations.map((o) => o.key), ["increment@1", "get@1"]);
+    assert.deepEqual(b.review!.shots, SHOTS);
+    assert.equal(t.platform.registry.getCapability("ui-counter")!.activeVersion, null, "not live");
+    // Its files as they are: nothing to compare with.
+    const diff = await t.platform.reviewCode(USER, b.buildId);
+    assert.equal(diff.base, null);
+    assert.ok(diff.files.some((f) => f.path === "ui/index.html"));
+    await assert.rejects(t.platform.submitFiles(t.claude, { files: counter(), request: "again" }), (e) => e instanceof PlatformError && /waits for the owner's approval \(build /.test(e.message));
+    const live = await t.platform.approveBuild(USER, b.buildId);
+    assert.equal(live.status, "promoted", live.log.join("\n"));
     assert.equal(t.platform.registry.getCapability("ui-counter")!.activeVersion, 1);
     await assert.rejects(t.platform.retryBuild(t.claude, b.buildId), code("conflict"));
   });
+
+  test("a new tool the owner turns down never goes live; its id is free for the next", async () => {
+    const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: counter(), request: "A counter" })).buildId);
+    assert.equal((await t.platform.rejectBuild(USER, b.buildId)).status, "cancelled");
+    assert.equal(t.platform.registry.getCapability("ui-counter")?.activeVersion ?? null, null);
+    const again = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: counter(), request: "A counter, again" })).buildId);
+    assert.equal(again.status, "review", again.log.join("\n"));
+  });
+
 
   test("a change by an agent is held for the owner (approval mode wait), with the diff and the four renders", async () => {
     await installFrom(t.platform, join(FIXTURES, "ui-counter"));
