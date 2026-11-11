@@ -3,6 +3,7 @@
 // and the OAuth endpoints answer on any host; the web client and capability UIs only on the
 // public URL's hosts (the surface decides, see index.ts). Admin never answers here. Requests are
 // rate limited per client address (and in total).
+import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
 import { OAUTH_PATHS } from "./oauth.ts";
 
@@ -33,6 +34,8 @@ export const RULES: Record<string, Rule> = {
   token: { perClient: 60, total: 300, windowMs: MIN },
   metadata: { perClient: 60, total: 600, windowMs: MIN },
   mcp: { perClient: 600, total: 2000, windowMs: MIN },
+  /** A pack's download link (capabilities_pack): one per pack an agent fetches. */
+  pack: { perClient: 30, total: 120, windowMs: 10 * MIN },
   /** Sign-in links and passkey sign-in: nobody needs many. */
   signin: { perClient: 30, total: 120, windowMs: 10 * MIN },
   /** The web client and capability UIs on the public URL. */
@@ -40,7 +43,7 @@ export const RULES: Record<string, Rule> = {
 };
 
 const ruleFor = (path: string) =>
-  path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
+  path.startsWith(PACK_PATH) ? "pack" : path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
   : path === "/auth" || path.startsWith("/passkey/") ? "signin" : PUBLIC_PATHS.has(path) ? "metadata" : "web";
 
 /** Fixed-window counters, in memory (one process serves the public path). */

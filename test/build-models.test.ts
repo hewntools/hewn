@@ -18,7 +18,7 @@ import { builderProfile } from "@hewntools/cli/builders/sandbox.ts";
 import { intakeJob, type ModelCatalog, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
 import { toolsFor } from "@hewntools/host-workerd/mcp.ts";
 import { notesSince } from "@hewntools/cli/upgrade.ts";
-import { platformWith, SEED, serve, setup } from "./helpers.ts";
+import { platformWith, SEED, serve, settled, setup } from "./helpers.ts";
 
 /** A builder that records each job and writes the seed (or does what `run` says). */
 function recorder(name = "fake", run?: (job: BuildJob) => Promise<void> | void): CapabilityBuilder & { jobs: BuildJob[] } {
@@ -54,7 +54,7 @@ describe("models for builds", () => {
   test("nothing asked: the owner's model and effort for that builder (Settings › AI)", async () => {
     writeConfig(t.home, { jobModels: { builder: { fake: { model: "fable", effort: "high" } } } });
     use(recorder());
-    const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, ask)).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.equal(b.jobs[0].model, "fable");
     assert.equal(b.jobs[0].effort, "high");
@@ -63,7 +63,7 @@ describe("models for builds", () => {
 
   test("no setting: the builder's own default (no model passed)", async () => {
     use(recorder());
-    const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, ask)).buildId);
     assert.equal(b.jobs[0].model, undefined);
     assert.equal(done.model, undefined);
   });
@@ -71,10 +71,10 @@ describe("models for builds", () => {
   test("the owner may ask for any model; 'default' means the builder's own", async () => {
     writeConfig(t.home, { jobModels: { builder: { fake: { model: "fable" } } } });
     use(recorder());
-    await platform.settle((await platform.create(WEB_USER, { ...ask, model: "claude-opus-4-1", effort: "max" })).buildId);
+    await settled(platform, (await platform.create(WEB_USER, { ...ask, model: "claude-opus-4-1", effort: "max" })).buildId);
     assert.equal(b.jobs[0].model, "claude-opus-4-1");
     assert.equal(b.jobs[0].effort, "max");
-    await platform.settle((await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", model: "default" })).buildId);
+    await settled(platform, (await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", model: "default" })).buildId);
     assert.equal(b.jobs[1].model, undefined, "default: no --model at all, not the owner's setting");
   });
 
@@ -84,13 +84,13 @@ describe("models for builds", () => {
     assert.equal(b.jobs.length, 0, "nothing was built");
     writeConfig(t.home, { agentModels: { fake: ["default", "opus"] } });
     assert.deepEqual(platform.agentModelChoices(), ["default", "opus"]);
-    const done = await platform.settle((await platform.create(t.claude, { ...ask, model: "opus", effort: "low" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { ...ask, model: "opus", effort: "low" })).buildId);
     assert.equal(done.status, "promoted");
     assert.equal(b.jobs[0].model, "opus");
     assert.deepEqual(done.model, { model: "opus", effort: "low" });
     // An effort alone keeps the owner's model.
     writeConfig(t.home, { jobModels: { builder: { fake: { model: "sonnet" } } } });
-    await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "x", effort: "high" })).buildId);
+    await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "x", effort: "high" })).buildId);
     assert.equal(b.jobs[1].model, "sonnet");
     assert.equal(b.jobs[1].effort, "high");
   });
@@ -106,13 +106,13 @@ describe("models for builds", () => {
     await assert.rejects(platform.create(t.claude, { ...ask, model: "opus", effort: "high" }), (e: Error) => /opus doesn't take effort 'high'; it takes: low, max$/.test(e.message));
     await assert.rejects(platform.create(t.claude, { ...ask, effort: "max" }), /default doesn't take effort 'max'; it takes: low, high$/);
     assert.equal(b.jobs.length, 0, "nothing was built");
-    const done = await platform.settle((await platform.create(t.claude, { ...ask, model: "opus", effort: "max" })).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, { ...ask, model: "opus", effort: "max" })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     await assert.rejects(platform.addWidgets(t.claude, { capabilityId: "running-log", effort: "max" }), /it takes: low, high/);
-    await platform.settle((await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", effort: "xhigh" })).buildId);
+    await settled(platform, (await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", effort: "xhigh" })).buildId);
     assert.equal(b.jobs.at(-1)!.effort, "xhigh", "the owner may ask for any level");
     readable = false;
-    await platform.settle((await platform.modify(t.claude, { capabilityId: "running-log", request: "y", effort: "max" })).buildId);
+    await settled(platform, (await platform.modify(t.claude, { capabilityId: "running-log", request: "y", effort: "max" })).buildId);
     assert.equal(b.jobs.at(-1)!.effort, "max", "no list: not checked");
   });
 
@@ -129,13 +129,13 @@ describe("models for builds", () => {
       if (fail) throw new Error("boom");
       cpSync(SEED, job.workspace, { recursive: true });
     }));
-    const first = await platform.settle((await platform.create(t.claude, { ...ask, model: "opus" })).buildId);
+    const first = await settled(platform, (await platform.create(t.claude, { ...ask, model: "opus" })).buildId);
     assert.equal(first.status, "failed");
     writeConfig(t.home, { agentModels: { fake: ["default"] } });
     fail = false;
     await assert.rejects(platform.retryBuild(t.claude, first.buildId), /doesn't let agents ask for 'opus'/, "the owner unticked it since");
     // The owner's retry, and an automatic one after a restart, run on what was asked.
-    const again = await platform.settle((await platform.retryBuild(USER, first.buildId)).buildId);
+    const again = await settled(platform, (await platform.retryBuild(USER, first.buildId)).buildId);
     assert.equal(again.status, "promoted", again.log.join("\n"));
     assert.equal(b.jobs.at(-1)!.model, "opus");
   });
@@ -147,10 +147,10 @@ describe("models for builds", () => {
       job.onModel?.("claude-fable-5-5");
       cpSync(SEED, job.workspace, { recursive: true });
     }), { attempts: 3 });
-    const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, ask)).buildId);
     assert.equal(done.status, "promoted");
     assert.equal(done.model!.ran, "claude-fable-5-5");
-    const gone = await platform.settle((await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", model: "gone-1" })).buildId);
+    const gone = await settled(platform, (await platform.modify(WEB_USER, { capabilityId: "running-log", request: "x", model: "gone-1" })).buildId);
     assert.equal(gone.status, "failed");
     assert.equal(b.jobs.length, 2, "not retried");
     assert.equal(gone.failure!.title, "Model not available");
@@ -166,7 +166,7 @@ describe("models for builds", () => {
       if (n++ === 0) return; // the first attempt writes nothing: validation fails, attempt 2 runs
       cpSync(SEED, job.workspace, { recursive: true });
     }), { attempts: 2 });
-    const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, ask)).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.deepEqual(done.charge, { amount: 8, unit: "points" });
   });
@@ -175,7 +175,7 @@ describe("models for builds", () => {
     use(recorder("fake", () => {
       throw Object.assign(new Error("You've used this month's 40 builds; more on 1 November."), { refused: true });
     }), { attempts: 3 });
-    const done = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    const done = await settled(platform, (await platform.create(t.claude, ask)).buildId);
     assert.equal(done.status, "failed");
     assert.equal(b.jobs.length, 1, "not retried");
     assert.equal(done.failure!.title, "Not built");
@@ -188,7 +188,7 @@ describe("models for builds", () => {
       throw Object.assign(new Error("This build has used 300 points and isn't finished. Its work is kept: Continue lets it go on for up to 300 more, or Stop it."), { paused: true });
     };
     use(recorder("fake", pause), { attempts: 3 });
-    const first = await platform.settle((await platform.create(t.claude, ask)).buildId);
+    const first = await settled(platform, (await platform.create(t.claude, ask)).buildId);
     assert.equal(first.status, "failed", "final for agents and waits");
     assert.equal(b.jobs.length, 1, "not retried by Hewn");
     assert.equal(first.failure!.title, "Paused");
@@ -199,7 +199,7 @@ describe("models for builds", () => {
     await assert.rejects(platform.retryBuild(t.claude, first.buildId), /the owner continues a paused build in Hewn/);
     await assert.rejects(platform.retryBuild(t.claude, first.buildId, { fix: true }), /the owner continues a paused build in Hewn/);
     // Continue: a retry of it, which the host picks up from the kept work.
-    const second = await platform.settle((await platform.retryBuild(USER, first.buildId)).buildId);
+    const second = await settled(platform, (await platform.retryBuild(USER, first.buildId)).buildId);
     assert.equal(b.jobs.at(-1)!.retryOf, first.buildId);
     const continued = platform.getBuild(t.claude, first.buildId);
     assert.equal(continued.continuedAs, second.buildId);
@@ -209,13 +209,13 @@ describe("models for builds", () => {
     assert.throws(() => platform.cancelBuild(t.claude, second.buildId), /only the owner or user can cancel/, "the owner continued it");
     assert.equal(platform.cancelBuild(USER, second.buildId).status, "cancelled");
     assert.match(platform.getBuild(USER, second.buildId).log.at(-1)!, /CANCELLED by user \(stopped while paused\)/);
-    const third = await platform.settle((await platform.create(t.claude, { ...ask, name: "Bike Log" })).buildId);
+    const third = await settled(platform, (await platform.create(t.claude, { ...ask, name: "Bike Log" })).buildId);
     assert.equal(platform.cancelBuild(t.claude, third.buildId).status, "cancelled");
     assert.match(platform.getBuild(t.claude, third.buildId).log.at(-1)!, /CANCELLED by claude-code \(stopped while paused\)/);
     use(recorder("fake", () => {
       throw Object.assign(new Error("You've used this month's 40 builds."), { refused: true });
     }), { attempts: 1 });
-    const refused = await platform.settle((await platform.create(t.claude, { ...ask, name: "Other Log" })).buildId);
+    const refused = await settled(platform, (await platform.create(t.claude, { ...ask, name: "Other Log" })).buildId);
     assert.throws(() => platform.cancelBuild(t.claude, refused.buildId), /already failed/);
     assert.deepEqual(explainFailure(["attempt 1: …", "FAILED: 1 of 2 test cases failed", "PAUSED: kept"]), { title: "Paused", detail: "kept", attempt: 1, paused: true });
   });
@@ -237,11 +237,11 @@ describe("models for builds", () => {
     assert.match((await platform.workbench.transcript(two.buildId)) ?? "", /queued: 1 builds are running/);
     platform.cancelBuild(USER, three.buildId);
     gates.shift()!();
-    assert.equal((await platform.settle(one.buildId)).status, "promoted");
+    assert.equal((await settled(platform, one.buildId)).status, "promoted");
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(b.jobs.length, 2, "the next one started once a place was free");
     gates.shift()!();
-    const second = await platform.settle(two.buildId);
+    const second = await settled(platform, two.buildId);
     assert.equal(second.status, "promoted", second.log.join("\n"));
     assert.equal(platform.getBuild(USER, three.buildId).status, "cancelled");
     assert.equal(b.jobs.length, 2, "the cancelled one never ran");
@@ -447,7 +447,7 @@ describe("web: models for building", () => {
 
   test("a schedule that paused itself after failing is in the Inbox; one the owner paused isn't", async () => {
     const b = (await api("/capabilities", { method: "POST", body: { name: "Run Log", purpose: "p", requirements: "r" } })).json;
-    assert.equal((await platform.settle(b.buildId)).status, "promoted");
+    assert.equal((await settled(platform, b.buildId)).status, "promoted");
     const sch = platform.createSchedule(USER, { capabilityId: b.capabilityId, operation: "list_runs", cadence: "daily 12:30" } as any);
     platform.schedules.update(sch.id, { status: "paused", failures: 3, pausedReason: "paused after 3 failures in a row" });
     const need = (await api("/inbox")).json.needs.find((n: { id: string }) => n.id === sch.id);
@@ -460,10 +460,10 @@ describe("web: models for building", () => {
 
   test("a paused build: the Inbox asks to continue it (not a failure), Home and Info know; once continued, it's dealt with", async () => {
     const b = (await api("/capabilities", { method: "POST", body: { name: "Run Log", purpose: "p", requirements: "r" } })).json;
-    assert.equal((await platform.settle(b.buildId)).status, "promoted");
+    assert.equal((await settled(platform, b.buildId)).status, "promoted");
     pause = "This build has used 300 points and isn't finished.";
     const change = (await api(`/capabilities/${b.capabilityId}/modify`, { method: "POST", body: { request: "group by week" } })).json;
-    assert.equal((await platform.settle(change.buildId)).status, "failed");
+    assert.equal((await settled(platform, change.buildId)).status, "failed");
     const need = (await api("/inbox")).json.needs.find((n: { buildId?: string }) => n.buildId === change.buildId);
     assert.deepEqual([need.detail, need.severity, need.action], ["Paused · This build has used 300 points and isn't finished.", "warn", "Continue…"]);
     const tool = async () => (await api("/capabilities")).json.find((c: { id: string }) => c.id === b.capabilityId);
@@ -471,7 +471,7 @@ describe("web: models for building", () => {
     // Continued: the build that carries it on is the last one, and the Inbox has nothing more to ask.
     pause = undefined;
     const next = (await api(`/builds/${change.buildId}/retry`, { method: "POST" })).json;
-    await platform.settle(next.buildId);
+    await settled(platform, next.buildId);
     assert.equal((await api(`/builds/${change.buildId}`)).json.continuedAs, next.buildId);
     assert.ok(!(await api("/inbox")).json.needs.some((n: { buildId?: string }) => n.buildId === change.buildId));
     assert.equal((await tool()).lastBuild.buildId, next.buildId);
@@ -497,7 +497,7 @@ describe("web: models for building", () => {
   test("a client may pass a model for one build; the build page and Activity say what it ran on", async () => {
     const b = (await api("/capabilities", { method: "POST", body: { name: "Model Pick", purpose: "p", requirements: "r", model: "opus", effort: "low" } })).json;
     assert.deepEqual(b.model, { model: "opus", effort: "low" });
-    await platform.settle(b.buildId);
+    await settled(platform, b.buildId);
     const items = (await api("/activity?kinds=build")).json.items;
     assert.deepEqual(items.find((i: { buildId: string }) => i.buildId === b.buildId).buildModel, { model: "opus", effort: "low" });
   });

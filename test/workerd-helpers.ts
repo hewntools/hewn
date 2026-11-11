@@ -35,6 +35,12 @@ export const parse = (r: any) => JSON.parse(r.content[0].text);
 export const waitBuild = async (client: Client, buildId: string, seconds: number) =>
   parse(await client.callTool({ name: "builds_wait", arguments: { buildId, timeoutSeconds: seconds } }, CallToolResultSchema, { timeout: (seconds + 15) * 1000 }));
 
+/** waitBuild, with an agent's build held for the owner (approval mode wait) approved as the owner: for tests about something else. */
+export const waitApproved = async (client: Client, sv: Supervisor, buildId: string, seconds: number) => {
+  const b = await waitBuild(client, buildId, seconds);
+  return b.status === "review" ? (await sv.admin("call", { method: "approveBuild", args: [buildId] })).result : b;
+};
+
 /**
  * Start a supervisor on two ports that were free a moment ago. On a busy machine another process can
  * take one before workerd binds it: workerd then exits at once, again and again, and the start fails

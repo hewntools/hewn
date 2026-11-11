@@ -102,10 +102,10 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_create",
     scopes: ["create"],
     description:
-      "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. " +
+      "Request a new capability for the user. The platform's builder implements it (returns status 'building'); follow it with builds_wait. Once it passes validation it waits for the owner's approval (status review) while your approval mode is wait, which the owner sets in Hewn (always, for now): tell the owner. Its grants wait for the owner either way. " +
       "Only connections hold credentials: if it needs a service with a key, token or login (GitHub, Notion, a self-hosted server…), it must call a connection (kind 'connection') that wraps the service. " +
       "A connection signs in with a key or token the user pastes, or with a username-and-password sign-in step; services that only allow OAuth (Google Calendar, Gmail, Spotify…) can't be connected yet. " +
-      "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes. " +
+      "If none exists, create the connection first (kind: 'connection', generic API operations only), then this capability with after: <the connection's buildId>; it starts once the connection promotes (the owner approves it first). " +
       "If the connection lacks an operation you need, capabilities_modify the connection first and pass its buildId as after.",
     inputSchema: obj(
       {
@@ -138,8 +138,17 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_pack",
     scopes: ["create", "modify"],
     description:
-      "To write a capability yourself instead of asking the platform's builder: first fetch what its builder finds in its workspace, and write these files into your folder. kind create: the user's other capabilities' contracts (CONTRACTS.md, .hewn-contracts/<id>.md), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. How to build one: the Skill \"build a Hewn tool\" (hewn_docs page skills/build-a-hewn-tool/SKILL.md). Then capabilities_check while you work, and capabilities_submit when the check passes.",
-    inputSchema: obj({ kind: { type: "string", enum: ["create", "modify"] }, capabilityId: str("The capability to change (kind modify)") }, ["kind"]),
+      "To write a capability yourself instead of asking the platform's builder: first fetch the pack, what its builder finds in its workspace besides the request. kind create: the user's other capabilities' contracts (CONTRACTS.md, and .hewn-contracts/<id>.md each one's in full), their looks to stay clear of (OTHER_TOOLS.md) and the design system (PLATFORM_UI.css). kind modify with capabilityId: also the capability's current files (its version, sample data included), its baseVersion and its schedules. " +
+      "With a shell, download.url is the whole pack as a zip: fetch it (curl -fsSL -o pack.zip '<url>') and unzip it into your workspace; it works once, for 10 minutes. Without one: files is a page of the pack (about 40 KB), more lists the rest with their size, fetched with paths, a page at a time; read them, and write only the tool's own files into your workspace. A capability's full contract: capabilities_get. " +
+      "How to build one: the Skill \"build a Hewn tool\" (hewn_docs page skills/build-a-hewn-tool/SKILL.md). Then capabilities_check while you work, and capabilities_submit when the check passes.",
+    inputSchema: obj(
+      {
+        kind: { type: "string", enum: ["create", "modify"] },
+        capabilityId: str("The capability to change (kind modify)"),
+        paths: { type: "array", items: { type: "string" }, description: "Files from more to fetch, a page at a time (leave out for the first page)" },
+      },
+      ["kind"],
+    ),
   },
   {
     name: "capabilities_check",
@@ -159,7 +168,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_submit",
     scopes: ["create", "modify"],
     description:
-      "Hand over a capability you wrote (create scope for a new one, modify with capabilityId for a change). The platform validates it as any build (the contracts, the tests and migrations on a copy of the user's data, the UI) and returns a build: follow it with builds_wait. A new capability goes live once it passes (its grants wait for the owner); a change waits for the owner's review (status review) while your approval mode is wait (always, for now): tell the owner. A change is refused while another change to it is on its way, or if baseVersion (from capabilities_pack) is no longer its version. No builder runs, so builds_retry doesn't apply: submit again.",
+      "Hand over a capability you wrote (create scope for a new one, modify with capabilityId for a change). The platform validates it as any build (the contracts, the tests and migrations on a copy of the user's data, the UI) and returns a build: follow it with builds_wait. Once it passes, a new capability or a change waits for the owner's approval (status review) while your approval mode is wait (always, for now): tell the owner. A new one's grants wait for the owner either way. A change is refused while another change to it is on its way, or if baseVersion (from capabilities_pack) is no longer its version. No builder runs, so builds_retry doesn't apply: submit again.",
     inputSchema: obj(
       {
         files,

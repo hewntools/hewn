@@ -19,6 +19,8 @@ function reviewTitle(b, all) {
   const who = actorLabel(b.requestedBy, all);
   const ref = capRef(all.get(b.capabilityId), b.capabilityId);
   const ops = b.review.newOperations.map((o) => `“${opLabel(o.key)}”`);
+  // A new tool: everything in it is new.
+  if (b.kind === "create") return h("span", { class: "title-ref" }, b.builder === "submitted" ? `${who} wrote a new tool, ` : `${who} asked for a new tool, `, ref);
   // A change the agent wrote itself (submitted) says so; else it asked Hewn's builder for it.
   if (b.builder === "submitted") return h("span", { class: "title-ref" }, ops.length ? [`${who} wrote a change that adds ${andList(ops)} to `, ref] : [`${who} wrote a change to `, ref]);
   return h("span", { class: "title-ref" }, ops.length ? [`${who} wants to add ${andList(ops)} to `, ref] : [`${who} wants to change `, ref]);

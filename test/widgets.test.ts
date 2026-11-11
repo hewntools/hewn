@@ -12,7 +12,7 @@ import type { Server } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { serverUrl } from "@hewntools/test-host/server.ts";
-import { editJson, editText, FIXTURES, installFrom, platformWith, type Script, serve, setup, TOKENS } from "./helpers.ts";
+import { editJson, editText, FIXTURES, installFrom, platformWith, serve, settled, setup, TOKENS, type Script } from "./helpers.ts";
 
 const op = (name: string, sideEffect = "read") => ({ name, description: "d", version: 1, inputSchema: { type: "object" }, outputSchema: { type: "object" }, sideEffect });
 const manifest = (extra: Record<string, unknown> = {}, widget: Record<string, unknown> = {}) => ({
@@ -257,17 +257,17 @@ describe("widgets: running", () => {
     const change = await t.platform.modify(USER, { capabilityId: "widget-counter", request: "x" });
     await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), /a change to widget-counter is on its way/);
     release();
-    await t.platform.settle(change.buildId);
+    await settled(t.platform, change.buildId);
     // So would a paused change's Continue (it carries on from work kept before this version): it waits until that one is stopped.
     t.queue(() => {
       throw Object.assign(new Error("used its allowance"), { paused: true });
     });
-    const paused = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "widget-counter", request: "y" })).buildId);
+    const paused = await settled(t.platform, (await t.platform.modify(USER, { capabilityId: "widget-counter", request: "y" })).buildId);
     await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), {
       message: `a change to widget-counter is paused (build ${paused.buildId}); delete the widget once it's continued and done, or stopped`,
     });
     t.platform.cancelBuild(USER, paused.buildId);
-    const b = await t.platform.settle((await t.platform.removeWidget(USER, "widget-counter", "count")).buildId);
+    const b = await settled(t.platform, (await t.platform.removeWidget(USER, "widget-counter", "count")).buildId);
     assert.equal(b.status, "promoted", b.log.join("\n"));
     assert.equal(b.builder, "keep");
     assert.equal(t.platform.activeManifest("widget-counter").widgets, undefined);
@@ -430,7 +430,7 @@ describe("widgets builds (kind widgets)", () => {
     assert.equal(failed.status, "failed");
     t.queue(addCountWidget);
     const retry = await t.platform.retryBuild(USER, failed.buildId, { fix: true });
-    const done = await t.platform.settle(retry.buildId);
+    const done = await settled(t.platform, retry.buildId);
     assert.equal(done.kind, "widgets");
     assert.equal(done.status, "promoted", done.log.join("\n"));
   });
@@ -446,8 +446,8 @@ describe("create with widgets", () => {
     const b = await t.platform.create(t.claude, { name: "UI Counter", purpose: "Count taps.", requirements: "A counter.", widgets: true });
     assert.ok(b.widgetsBuildId);
     assert.equal(t.platform.getBuild(t.claude, b.widgetsBuildId!).status, "waiting");
-    assert.equal((await t.platform.settle(b.buildId)).status, "promoted");
-    const w = await t.platform.settle(b.widgetsBuildId!);
+    assert.equal((await settled(t.platform, b.buildId)).status, "promoted");
+    const w = await settled(t.platform, b.widgetsBuildId!);
     assert.equal(w.status, "promoted", w.log.join("\n"));
     assert.deepEqual(t.platform.activeManifest("ui-counter").widgets?.map((x) => x.name), ["count"]);
     await assert.rejects(t.platform.create(t.claude, { name: "Conn", purpose: "p", requirements: "r", kind: "connection", widgets: true }), /connection has no widgets/);
@@ -468,7 +468,7 @@ describe("create with widgets across a restart", () => {
       const [retry] = await fresh.recoverInterruptedBuilds();
       assert.ok(retry, "the widgets build waiting for it doesn't stop the retry");
       assert.equal(fresh.registry.getBuild(b.widgetsBuildId!)!.dependsOn, retry, "re-pointed to the retry");
-      assert.equal((await fresh.settle(retry)).status, "promoted");
+      assert.equal((await settled(fresh, retry)).status, "promoted");
       const w = await fresh.settle(b.widgetsBuildId!);
       assert.equal(w.status, "promoted", w.log.join("\n"));
     } finally {
@@ -487,7 +487,7 @@ describe("widgets: building", () => {
     const f = fixtureCopy(edit);
     try {
       const b = await t.platform.install(USER, { name: "Widget Counter", purpose: "p", builder: `copy:${f.dir}` });
-      return await t.platform.settle(b.buildId);
+      return await settled(t.platform, b.buildId);
     } finally {
       f.remove();
     }

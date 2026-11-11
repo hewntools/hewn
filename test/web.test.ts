@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, cpSync, readdirSync, readFileSync } from "node:fs";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
@@ -13,7 +13,7 @@ import type { Platform } from "@hewntools/core/platform.ts";
 import { WEB_CODE } from "@hewntools/host-workerd/surface/web.ts";
 import { packBundle } from "@hewntools/core/bundle.ts";
 import { readTree } from "@hewntools/cli/workbench.ts";
-import { installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
+import { editJson, installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 /** The web client's JavaScript: app.js, the kit, and its modules in app/. */
@@ -80,6 +80,8 @@ describe("web client (owner surface)", () => {
         appendFileSync(job.logPath, "00:00:00 → Write src/index.ts\n");
         job.onActivity?.("→ Write src/index.ts");
         cpSync(SEED, job.workspace, { recursive: true });
+        // An agent's new tool (held for the owner): the seed under its own id.
+        if (job.capabilityId === "agent-log") editJson(join(job.workspace, "capability.json"), (m) => Object.assign(m, { id: "agent-log", name: "Agent Log" }));
       },
     };
     platform = platformWith(t.home, () => builder);
@@ -325,6 +327,18 @@ describe("web client (owner surface)", () => {
       assert.equal((await api(`/builds/${held.buildId}/code`, { cookie: "", headers: { authorization: `Bearer ${TOKENS.claude}` } })).status, 401, "the owner's only");
       await api(`/builds/${held.buildId}/reject`, { method: "POST" });
       assert.equal((await api(`/builds/${held.buildId}/code`)).status, 404, "once decided, no card");
+    });
+
+    test("an agent's new tool waits for the owner: on Home, its tile to the review; in the Inbox as made; approved, it's a tool", async () => {
+      const claude = platform.agentStore.authenticate(TOKENS.claude)!;
+      const held = await platform.settle((await platform.create(claude, { name: "Agent Log", purpose: "p", requirements: "r" })).buildId);
+      assert.equal(held.status, "review", held.log.join("\n"));
+      const tile = (await api("/capabilities")).json.find((c: any) => c.id === "agent-log");
+      assert.deepEqual([tile.version, tile.ready, tile.building, tile.lastBuild], [null, false, null, { buildId: held.buildId, status: "review", builder: "fake" }]);
+      assert.match((await api("/inbox")).json.needs.find((n: any) => n.buildId === held.buildId).detail, / made it: it waits for you$/);
+      assert.equal((await api(`/builds/${held.buildId}/code`)).json.base, null, "a new tool: nothing to compare with");
+      assert.equal((await api(`/builds/${held.buildId}/approve`, { method: "POST" })).status, 200);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "agent-log").version, 1);
     });
 
     test("open a capability UI: returns a single-use link under /tools/<id>/", async () => {

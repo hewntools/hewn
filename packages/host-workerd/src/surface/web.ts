@@ -888,6 +888,28 @@ async function capabilityList(platform: Platform, owner: Agent) {
       ...(b.connection ? { kind: "connection" } : {}),
     });
   }
+  // An agent's new tool held for the owner: its tile opens the review card.
+  for (const b of platform.registry.buildsInReview().filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
+    const req = b.request as { name?: string; purpose?: string; kind?: string };
+    pending.push({
+      id: b.capabilityId,
+      name: platform.registry.getCapability(b.capabilityId)?.name ?? req.name ?? b.capabilityId,
+      purpose: req.purpose ?? "",
+      tags: [],
+      operations: [],
+      ready: false,
+      hasIcon: false,
+      iconKind: null,
+      hue: null,
+      saturation: null,
+      ui: false,
+      version: null,
+      requests: 0,
+      lastBuild: { buildId: b.id, status: "review", builder: b.builder },
+      building: null,
+      ...(b.review?.connection || req.kind === "connection" ? { kind: "connection" } : {}),
+    });
+  }
   return [...caps, ...pending];
 }
 
@@ -948,7 +970,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const p of platform.pendingAgents(owner))
     needs.push({ kind: "agent", id: p.id, title: p.clientName, detail: p.reconnects ? `wants to connect again as ${p.reconnects}` : "wants to connect", severity: "warn", action: "Review", at: p.createdAt });
   for (const b of builds.filter((x) => x.status === "review"))
-    needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} changed it: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
+    needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} ${b.kind === "create" ? "made it" : "changed it"}: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
   for (const b of unresolvedFailures(builds))
     needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), ...(b.failure?.paused ? { detail: `Paused · ${b.failure.detail}`, severity: "warn" as const, action: "Continue…" } : { detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger" as const, action: "Show" }), at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))

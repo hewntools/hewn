@@ -412,19 +412,20 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const shots = b.review.shots ?? [];
       const shot = !shots.length && b.screenshot && (!changes || b.review.changes.ui);
       // The files against the version it's built on, opened on demand (the code browser).
-      const files = h("details", { class: "small review-files" }, h("summary", {}, "The files it changes"));
+      const create = b.kind === "create";
+      const files = h("details", { class: "small review-files" }, h("summary", {}, create ? "Its files" : "The files it changes"));
       files.addEventListener("toggle", () => files.open && !files.querySelector(".code-browser") && files.append(codeBrowser({ label: "the change", list: () => api(`/builds/${enc(id)}/code`), file: (p) => api(`/builds/${enc(id)}/code?path=${enc(p)}`) })), { once: false });
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), "It passed its checks. It goes live only if you allow it."),
-        b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, "New"),
+        b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, create ? "What agents can do with it" : "New"),
         ...b.review.newOperations.map((o) => reviewOp(o, { full: true })),
         changes && [h("div", { class: "eyebrow" }, changes.every(([ok]) => ok) ? "Nothing else changes" : "Also"), changeList(changes)],
-        shots.length > 0 && [h("div", { class: "eyebrow" }, "The screen after the change"), h("div", { class: "review-shots" }, shots.map((n) => h("a", { href: `/api/builds/${enc(id)}/shots/${enc(n)}`, target: "_blank", rel: "noopener" }, h("img", { class: "build-shot", src: `/api/builds/${enc(id)}/shots/${enc(n)}`, alt: `The screen after the change: ${n.replace("-", ", ")}`, loading: "lazy" }))))],
+        shots.length > 0 && [h("div", { class: "eyebrow" }, create ? "Its screen" : "The screen after the change"), h("div", { class: "review-shots" }, shots.map((n) => h("a", { href: `/api/builds/${enc(id)}/shots/${enc(n)}`, target: "_blank", rel: "noopener" }, h("img", { class: "build-shot", src: `/api/builds/${enc(id)}/shots/${enc(n)}`, alt: `The screen after the change: ${n.replace("-", ", ")}`, loading: "lazy" }))))],
         shot && [h("div", { class: "eyebrow" }, "The screen after the change (rendered with no data)"), h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" })],
-        b.review.changes && files,
+        (b.review.changes || create) && files,
         reviewRequest(b, all),
-        h("div", { class: "row tight" }, yes, no),
+        h("div", { class: "row tight" }, yes, no, cap().version && h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
         logBlock(false),
       );
     };

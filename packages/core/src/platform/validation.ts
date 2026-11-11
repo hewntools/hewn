@@ -457,8 +457,8 @@ export class Validation extends Domain {
   }
 
   /**
-   * 7. freeze a validated candidate; an agent's change to an existing tool waits for the owner while its
-   * approval mode says so (in 0.4.11, always), as does one that adds operations or changes a
+   * 7. freeze a validated candidate; an agent's new tool or change waits for the owner while its
+   * approval mode says so (in 0.4.11, always), as does a change that adds operations or changes a
    * connection; anything else is promoted (8). A held one keeps its four renders for the review card.
    */
   async promote(build: BuildRow, candidate: Candidate, step: (message: string) => void): Promise<{ version: number } | { review: BuildReview }> {
@@ -474,7 +474,7 @@ export class Validation extends Domain {
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
     const owners = build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
     const held = !owners && this.agentStore.approvalMode(build.requestedBy) === "wait";
-    const review = partOfCreate || !base ? undefined : reviewFor(build, base, { manifest, files }, code.hash, views, held);
+    const review = partOfCreate ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? { contentHash: code.hash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" as const } : undefined;
     if (review) {
       const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
       for (const s of shots) await this.blobs.put(reviewShotKey(build.id, s.name), s.png);
@@ -651,19 +651,23 @@ export function matches(expected: unknown, actual: unknown): boolean {
   return expected === actual;
 }
 
+/** Operations as a review card shows them: what each takes, and what it returned in its first passing test. */
+function reviewOps(ops: OperationManifest[], views: Map<string, unknown>): BuildReview["newOperations"] {
+  const key = (o: OperationManifest) => opKey(o.name, o.version);
+  return ops.map((o) => ({ key: key(o), description: o.description, sideEffect: o.sideEffect, inputs: Object.keys((o.inputSchema as { properties?: object }).properties ?? {}), ...(views.has(key(o)) ? { example: shortJson(views.get(key(o))) } : {}) }));
+}
+
 /**
- * Whether a candidate waits for the owner: an agent's change (not the owner's, and not a new
- * capability, which has no data yet) while its approval mode says to wait (`held`), and whatever its
- * mode, one to a connection or one that adds operations. An agent with `modify` otherwise decides what
- * the code does with the capability's data and credentials.
+ * Whether a change waits for the owner: an agent's (not the owner's) while its approval mode says to
+ * wait (`held`), and whatever its mode, one to a connection or one that adds operations. An agent with
+ * `modify` otherwise decides what the code does with the capability's data and credentials. (An agent's
+ * new tool waits while its mode says to: `promote`.)
  */
 function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>, held: boolean): BuildReview | undefined {
   if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return undefined;
   const key = (o: OperationManifest) => opKey(o.name, o.version);
   const had = new Map(base.manifest.operations.map((o) => [key(o), o]));
-  const newOperations = candidate.manifest.operations
-    .filter((o) => !had.has(key(o)))
-    .map((o) => ({ key: key(o), description: o.description, sideEffect: o.sideEffect, inputs: Object.keys((o.inputSchema as { properties?: object }).properties ?? {}), ...(views.has(key(o)) ? { example: shortJson(views.get(key(o))) } : {}) }));
+  const newOperations = reviewOps(candidate.manifest.operations.filter((o) => !had.has(key(o))), views);
   const connection = isConnection(candidate.manifest);
   if (!connection && !newOperations.length && !held) return undefined;
   const ui = (f: Files) => Object.keys(f).filter((p) => p.startsWith("ui/")).sort();

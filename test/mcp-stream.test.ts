@@ -10,7 +10,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { serverUrl } from "@hewntools/test-host/server.ts";
-import { platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
+import { platformWith, SEED, serve, settled, setup, TOKENS } from "./helpers.ts";
 
 const parse = (r: any) => JSON.parse(r.content[0].text);
 
@@ -73,10 +73,12 @@ describe("builds_wait streams progress over MCP", () => {
       resetTimeoutOnProgress: true,
     });
     const final = parse(r);
-    assert.equal(final.status, "promoted", JSON.stringify(final));
+    // An agent's new tool: it waits for the owner (approval mode wait), and says so.
+    assert.equal(final.status, "review", JSON.stringify(final));
+    assert.match(final.instructions, /^The new tool passed validation and waits for the owner's review/);
     assert.ok(messages.includes("→ Write src/index.ts"), messages.join("\n"));
     assert.ok(messages.some((m) => m === "[platform] validating candidate"));
-    assert.ok(messages.some((m) => m.startsWith("[platform] promoted")));
+    assert.ok(messages.some((m) => m.startsWith("[platform] passed; waiting for the owner's review")), messages.join("\n"));
   });
 
   test("returns current status when the wait times out", async () => {
@@ -89,7 +91,7 @@ describe("builds_wait streams progress over MCP", () => {
   test("finished builds return immediately", async () => {
     const { buildId } = await create();
     open();
-    await platform.settle(buildId);
+    await settled(platform, buildId);
     const r = parse(await client.callTool({ name: "builds_wait", arguments: { buildId } }));
     assert.equal(r.status, "promoted");
   });

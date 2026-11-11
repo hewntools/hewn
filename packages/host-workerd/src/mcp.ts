@@ -70,7 +70,7 @@ async function widgetIcon(platform: Platform, id: string) {
 /** Hewn's docs, from the host (its assets); undefined where it has none. */
 type Docs = () => Promise<DocPage[]>;
 
-function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs): Tool[] {
+function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary[], docs?: Docs, origin?: () => string): Tool[] {
   const known = `\n\n${catalog(caps)}`;
   // The tools themselves (names, scopes, descriptions, input schemas) are the spec's; these run them.
   const run: Record<string, Pick<Tool, "handler" | "format">> = {
@@ -109,7 +109,13 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
     },
     builds_retry: { handler: (a) => platform.retryBuild(agent, a.buildId) },
     builds_cancel: { handler: (a) => platform.cancelBuild(agent, a.buildId) },
-    capabilities_pack: { handler: (a) => platform.pack(agent, a) },
+    capabilities_pack: {
+      // The download link on the address the client reached this Hewn at.
+      handler: async (a) => {
+        const p = await platform.pack(agent, a);
+        return p.download && origin ? { ...p, download: { url: `${origin()}${p.download.path}`, expiresAt: p.download.expiresAt } } : p;
+      },
+    },
     capabilities_check: {
       handler: (a) => platform.checkFiles(agent, a),
       // The check's text first (what passed and failed, what to fix), then its renders as images; their names, in that order, in structuredContent (no image data there: a client may show it to the model as text).
@@ -147,9 +153,9 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
 }
 
 /** The agent's tools right now: filtered by scope, with its visible capabilities in the descriptions. */
-export function toolsFor(platform: Platform, agent: Agent, docs?: Docs): Tool[] {
+export function toolsFor(platform: Platform, agent: Agent, docs?: Docs, origin?: () => string): Tool[] {
   const caps = agent.scopes.has("discover") ? platform.list(agent) : [];
-  return platformTools(platform, agent, caps, docs).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
+  return platformTools(platform, agent, caps, docs, origin).filter((t) => t.scopes.some((s) => agent.scopes.has(s)));
 }
 
 /** What the agent's tool list looks like: when it changes, the session gets tools/list_changed. */
@@ -159,7 +165,7 @@ export const toolSignature = (platform: Platform, agent: Agent) => JSON.stringif
  * One MCP server per session, for the authenticated agent. `agent()` is read per request, so
  * scope changes apply mid-session; tools are listed fresh each time.
  */
-export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs } = {}): Server {
+export function createMcpServer(platform: Platform, agent: () => Agent, log: (line: string) => void = (l) => console.error(l), opts: { widgetHtml?: () => Promise<string>; docs?: Docs; origin?: () => string } = {}): Server {
   const caps = agent().scopes.has("discover") ? platform.list(agent()) : [];
   const instructions = `${SERVER_INSTRUCTIONS}\n\n${catalog(caps)}`;
   // cfworker validation: no eval, so the same server runs on workerd.
@@ -188,7 +194,7 @@ export function createMcpServer(platform: Platform, agent: () => Agent, log: (li
     const { name, arguments: args = {} } = req.params;
     const who = agent();
     log(`[${new Date().toISOString()}] ${who.id} ${name} ${logArgs(args)}`);
-    const tool = toolsFor(platform, who, opts.docs).find((t) => t.name === name);
+    const tool = toolsFor(platform, who, opts.docs, opts.origin).find((t) => t.name === name);
     try {
       if (!tool) throw new PlatformError("not_found", `unknown tool ${name}`);
       const token = req.params._meta?.progressToken;
