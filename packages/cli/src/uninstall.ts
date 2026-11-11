@@ -3,7 +3,8 @@ import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from "node:
 import { join } from "node:path";
 import type { KeySource } from "./supervisor/master-key.ts";
 import { MARKDOWN, removeBlock } from "./setup/blocks.ts";
-import { type Exec, type Harness, opencodeConfigDir, opencodeForget, opencodeHewnEntry } from "./setup/harnesses.ts";
+import { SKILL_NAME } from "@hewntools/core/skill.ts";
+import { type Exec, type Harness, opencodeConfigDir, opencodeForget, opencodeHewnEntry, skillDirs } from "./setup/harnesses.ts";
 
 /**
  * `hewn uninstall`: what Hewn put outside its own folders, undone. The service, the agents'
@@ -49,6 +50,7 @@ export function uninstallPlan(o: {
       steps.push({ describe: `remove the Hewn pointer block from ${file}`, run: () => void removeBlock(file, MARKDOWN) });
     }
   }
+  for (const dir of skillDirs(o.userHome)) if (existsSync(dir)) steps.push({ describe: `remove the Skill ${SKILL_NAME} (${dir})`, run: () => rmSync(dir, { recursive: true, force: true }) });
 
   // A checkout's `hewn` is install.sh's symlink to cli.ts; the npm package's is npm's own (npm uninstall removes it).
   const cli = o.bundled ? undefined : realpathSync(join(o.appDir, "packages", "cli", "src", "cli.ts"));

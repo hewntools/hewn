@@ -20,6 +20,8 @@ Or, in the web client: **Agents → Add… → An agent that uses your tools**. 
 - **Codex:** adds a pointer to `~/.codex/AGENTS.md` (Codex needs it to think of Hewn), then `codex mcp add hewn --url …`, which signs it in.
 - **OpenCode:** registers Hewn in its global config (`opencode mcp add hewn --url …`, in `~/.config/opencode/opencode.json`), adds a pointer to `~/.config/opencode/AGENTS.md` (OpenCode reads that, not Hewn's own description), then signs it in (`opencode mcp auth hewn`). If you had no `~/.config/opencode/AGENTS.md` before, OpenCode now reads it instead of `~/.claude/CLAUDE.md`: move any rules you kept there.
 
+Each one also gets the Skill **build a Hewn tool** (see [Tools an agent writes itself](#tools-an-agent-writes-itself)) in its skills folder: Claude Code in `~/.claude/skills/build-a-hewn-tool/`, Codex and OpenCode in `~/.agents/skills/build-a-hewn-tool/`. Setup writes it again each time, and so does `hewn upgrade` for every agent set up with Hewn, so it matches your Hewn; Hewn never touches the other skills there. An agent set up by an older Hewn gets it when you set it up again (or on the next upgrade).
+
 Start a new agent session afterwards, so it sees the tools.
 
 The same agent can also [build your tools](concepts.md#hewns-two-jobs). The last step of connecting it offers that, or choose later in Settings › AI.
@@ -94,6 +96,8 @@ An agent with **Make** or **Change** can write a tool in its own folder instead 
 1. **The pack** (`capabilities_pack`): what Hewn's builder finds in its workspace besides your request. Your other tools' contracts (only the tools the agent may see), their looks, so the new one looks different, and Hewn's design system; for a change, the tool's files as they are now and its schedules. Never your conversations with Hewn or your data. An agent with a shell downloads the pack as a zip and unzips it into its workspace (its own folder): the link is made for that agent inside its signed-in call and works once, for 10 minutes. One without a shell reads the pack a page at a time.
 2. **The check** (`capabilities_check`), as often as it likes while it works, up to 30 an hour: the checks a build gets, with what failed and pictures of its screen at 1280 and 390 px, light and dark (the top of a long page, the rest if it asks). Nothing goes live. Its migrations run on a copy of your data only once it submits.
 3. **The submission** (`capabilities_submit`): a build like any other, with "submitted by" and the agent's name on its page, in Activity and on the version. Once it passes, a new tool or a change waits for your approval (above).
+
+Agents learn how from the Skill **build a Hewn tool**: the brief Hewn's own builder works from, with these three steps in place of its folder. An agent you set up from Hewn has it in its skills folder (above); any agent connected to Hewn finds it through `hewn_docs`; another that loads skills from files can take it from `<your Hewn>/_platform/skills/build-a-hewn-tool/SKILL.md`, or from the npm package (`dist/skills/`).
 
 A submission carries the tool's own files only. Files Hewn never keeps in a tool (a builder's settings such as `.claude/` or `CLAUDE.md`, `AGENTS.md`, other dotfiles, the pack's own files, screenshots) are refused with the rule named, never dropped quietly, and so is anything over 5 MB. A change is refused while another change to the tool is on its way, or when the tool has moved on since the agent's pack.
 

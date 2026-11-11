@@ -157,7 +157,7 @@ describe("docs: hewn_docs", () => {
 
       const agent = await connect(TOKENS.codex);
       const list = text(await agent.callTool({ name: "hewn_docs", arguments: {} }));
-      assert.match(list, new RegExp(`^Hewn's docs: ${DOC_PAGES.length} pages`));
+      assert.match(list, new RegExp(`^Hewn's docs: ${DOC_PAGES.length + 1} pages`), "the pages and the Skill");
       assert.match(list, /docs\/concepts\.md: Concepts\n  Tools · Agents · Hewn's two jobs/);
       const found = text(await agent.callTool({ name: "hewn_docs", arguments: { query: "how do grants work?" } }));
       assert.match(found, /--- docs\/concepts\.md#grants \(Concepts › Grants\) ---\n## Grants\n/);

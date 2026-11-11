@@ -49,6 +49,8 @@ async function cli() {
   copyFileSync(join(ROOT, "spec", "LICENSE"), join(out, "dist", "docs", "spec", "LICENSE"));
   // The Official shelf the Hub shows (each tool's source and its .hub/ listing and images), and its license.
   cpSync(join(ROOT, "seeds"), join(out, "dist", "seeds"), { recursive: true, filter: (src) => !/(^|\/)(node_modules|\.DS_Store)$/.test(src) });
+  // The Agent Skill "build a Hewn tool" (generated from the brief: npm run skill), for agents that load skills from files.
+  cpSync(join(ROOT, "skills"), join(out, "dist", "skills"), { recursive: true });
   for (const f of ["LICENSE", "LICENSING.md"]) copyFileSync(join(ROOT, f), join(out, f));
   for (const f of ["README.md", "CHANGELOG.md"]) write(join(out, f), absoluteLinks(readFileSync(join(ROOT, f), "utf8")));
 

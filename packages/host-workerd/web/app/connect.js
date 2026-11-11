@@ -104,7 +104,7 @@ function connectDialog(agentId) {
       };
 
       const connecting = async (x) => {
-        const words = (s) => (s.kind === "cleanup" ? "Removing the old token" : s.kind === "register" ? `Adding ${BRAND} to ${x.label}` : s.kind === "pointer" ? `Telling ${x.label} where to look` : `${x.label} signs in`);
+        const words = (s) => (s.kind === "cleanup" ? "Removing the old token" : s.kind === "register" ? `Adding ${BRAND} to ${x.label}` : s.kind === "pointer" ? `Telling ${x.label} where to look` : s.kind === "skill" ? `Giving ${x.label} the Skill to build tools` : `${x.label} signs in`);
         let plan = [];
         const state = []; // per step: done | live | fail
         let error = null;

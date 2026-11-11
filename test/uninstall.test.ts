@@ -21,6 +21,8 @@ test("hewn uninstall: removes the service, registrations, pointers and its own h
     symlinkSync(join(other, "packages", "cli", "src", "cli.ts"), join(root, "bin2", "hewn")); // another install's: left alone
     writeFileSync(join(user, ".claude.json"), JSON.stringify({ mcpServers: { hewn: { url: "x" } } }));
     writeFileSync(join(user, ".claude", "CLAUDE.md"), `# Mine\n\n${MARKDOWN.begin}\nuse hewn\n${MARKDOWN.end}\n`);
+    // The Skill setup gave Claude Code; another skill of the owner's beside it stays.
+    for (const name of ["build-a-hewn-tool", "my-own"]) mkdirSync(join(user, ".claude", "skills", name), { recursive: true }), writeFileSync(join(user, ".claude", "skills", name, "SKILL.md"), name);
     const ran: string[] = [];
     let serviceRemoved = false;
     const plan = uninstallPlan({
@@ -39,6 +41,7 @@ test("hewn uninstall: removes the service, registrations, pointers and its own h
       "stop and remove the background service",
       "remove Hewn from Claude Code",
       `remove the Hewn pointer block from ${join(user, ".claude", "CLAUDE.md")}`,
+      "remove the Skill build-a-hewn-tool",
       "remove the hewn command",
     ]);
     for (const s of plan.steps) s.run();
@@ -46,6 +49,8 @@ test("hewn uninstall: removes the service, registrations, pointers and its own h
     assert.deepEqual(ran, ["claude mcp remove --scope user hewn"]);
     assert.equal(readFileSync(join(user, ".claude", "CLAUDE.md"), "utf8"), "# Mine\n");
     assert.ok(!existsSync(join(root, "bin", "hewn")));
+    assert.ok(!existsSync(join(user, ".claude", "skills", "build-a-hewn-tool")));
+    assert.ok(existsSync(join(user, ".claude", "skills", "my-own", "SKILL.md")), "the owner's own skills stay");
     assert.ok(existsSync(join(root, "bin2", "hewn")), "another checkout's hewn stays");
     assert.ok(existsSync(join(app, "packages", "cli", "src", "cli.ts")), "Hewn never deletes itself or data");
     assert.match(plan.leftovers.join("\n"), /rm -rf '.*data'[\s\S]*security delete-generic-password -s hewn-master/);

@@ -4,6 +4,7 @@
 // public URL's hosts (the surface decides, see index.ts). Admin never answers here. Requests are
 // rate limited per client address (and in total).
 import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import { OAUTH_PATHS } from "./oauth.ts";
 
 /** Header the public listener sets on everything it forwards (local requests never need it). */
@@ -15,7 +16,7 @@ export const CLIENT_IP_HEADER = "x-hewn-client-ip";
  */
 export const PROXY_SECRET_HEADER = "x-hewn-proxy-secret";
 
-export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS]);
+export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS, SKILL_URL]);
 
 interface Rule {
   /** Requests allowed per window, per client address. */

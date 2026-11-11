@@ -401,6 +401,8 @@ export class Platform {
   reviewShot(owner: Agent, buildId: string, name: string): Promise<Uint8Array> { return this.d.builds.reviewShot(owner, buildId, name); }
   /** The one gate for a candidate handed over ready-made (a client's submission, an install): see SubmitEntry. */
   submit(actor: Agent, entry: SubmitEntry): Promise<BuildView> { return this.d.builds.submit(actor, entry); }
+  /** The Agent Skill "build a Hewn tool" (SKILL.md), from this Hewn's brief. */
+  skill(): string { return this.d.builds.skill(); }
 
   // ---------- builds from anywhere: pack, check, submit for a client (platform/submissions.ts) ----------
 

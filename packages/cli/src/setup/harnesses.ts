@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { SKILL_NAME } from "@hewntools/core/skill.ts";
 import type { HarnessStatus } from "@hewntools/host-workerd/surface/host.ts";
+import { readSkill } from "../app-dir.ts";
 import { MARKDOWN, removeBlock, SHELL, writeBlock } from "./blocks.ts";
 import { CLI_AGENTS } from "../builders/cli-agents.ts";
 import { opencodeConfigDir, opencodeUserDirs } from "../builders/opencode-dirs.ts";
@@ -21,7 +23,7 @@ export interface SetupContext {
 export interface Step {
   describe: string;
   /** What the step does, for the web client to word plainly. */
-  kind: "register" | "pointer" | "cleanup";
+  kind: "register" | "pointer" | "skill" | "cleanup";
   /** File the step writes, if any. */
   file?: string;
   run: () => void;
@@ -37,6 +39,8 @@ export interface Harness {
   label: string;
   /** Whether the harness needs the instruction-file pointer to find Hewn at all. */
   pointerRequired: boolean;
+  /** Where it loads the Skill from (`skillDir`). */
+  skills: SkillsAt;
   pointerNote: string;
   detect(): boolean;
   /** Whether the harness has Hewn registered (reads its own config; never runs it). */
@@ -77,6 +81,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
       label: CLI_AGENTS.claude.label,
       pointerRequired: false,
       pointerNote: "optional: Claude Code shows MCP server instructions, which already describe Hewn",
+      skills: "claude",
       detect: () => onPath(CLI_AGENTS.claude.bin),
       registered: (home) => {
         try {
@@ -114,7 +119,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
           const file = join(ctx.home, ".claude", "CLAUDE.md");
           steps.push({ describe: `add Hewn pointer block to ${file}`, kind: "pointer", file, run: () => writeBlock(file, AGENT_POINTER, MARKDOWN) });
         }
-        return steps;
+        return [...steps, ...skillSteps(ctx.home, "claude")];
       },
     },
     {
@@ -122,6 +127,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
       label: CLI_AGENTS.codex.label,
       pointerRequired: true,
       pointerNote: "required: Codex defers MCP tools and ignores server instructions",
+      skills: "agents",
       detect: () => onPath(CLI_AGENTS.codex.bin),
       registered: (home) => {
         const config = join(home, ".codex", "config.toml");
@@ -156,6 +162,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
             },
           },
           { describe: `add Hewn pointer block to ${agentsMd}`, kind: "pointer", file: agentsMd, run: () => writeBlock(agentsMd, AGENT_POINTER, MARKDOWN) },
+          ...skillSteps(ctx.home, "agents"),
         );
         return steps;
       },
@@ -165,6 +172,7 @@ export function harnesses(exec: Exec = realExec): Harness[] {
       label: CLI_AGENTS.opencode.label,
       pointerRequired: true,
       pointerNote: "required: OpenCode reads its global AGENTS.md, not MCP server instructions",
+      skills: "agents",
       detect: () => onPath(CLI_AGENTS.opencode.bin),
       registered: (home) => !!opencodeMcpUrl(home),
       registeredUrl: (home) => opencodeMcpUrl(home),
@@ -188,10 +196,44 @@ export function harnesses(exec: Exec = realExec): Harness[] {
             },
           },
           { describe: `add Hewn pointer block to ${agentsMd}`, kind: "pointer", file: agentsMd, run: () => writeBlock(agentsMd, AGENT_POINTER, MARKDOWN) },
+          ...skillSteps(ctx.home, "agents"),
         ];
       },
     },
   ];
+}
+
+/**
+ * Where an agent loads the Skill from in your home: Claude Code from its own skills folder, Codex and
+ * OpenCode from `~/.agents/skills` (OpenCode reads Claude Code's too). Hewn only ever touches its own
+ * Skill's folder there.
+ */
+export type SkillsAt = "claude" | "agents";
+export const skillDir = (home: string, at: SkillsAt) => join(home, at === "claude" ? ".claude" : ".agents", "skills", SKILL_NAME);
+/** Both of Hewn's Skill folders in `home` (uninstall removes what's there). */
+export const skillDirs = (home: string) => [skillDir(home, "claude"), skillDir(home, "agents")];
+
+/** The Skill into an agent's skills folder, replacing what was there (none when this Hewn ships none). */
+function skillSteps(home: string, at: SkillsAt): Step[] {
+  const text = readSkill();
+  if (!text) return [];
+  const dir = skillDir(home, at);
+  const file = join(dir, "SKILL.md");
+  return [{ describe: `write the Skill ${SKILL_NAME} to ${file}`, kind: "skill", file, run: () => (mkdirSync(dir, { recursive: true }), writeFileSync(file, text)) }];
+}
+
+/**
+ * On upgrade: the Skill as this Hewn now ships it, for every agent set up with Hewn (`list`, those
+ * Hewn is registered with), and wherever setup put it before. The folders it went to.
+ */
+export function refreshSkill(home: string, list: Harness[], text: string | undefined = readSkill()): string[] {
+  if (!text) return [];
+  const dirs = new Set([...list.filter((h) => h.registered(home)).map((h) => skillDir(home, h.skills)), ...skillDirs(home).filter((d) => existsSync(join(d, "SKILL.md")))]);
+  for (const dir of dirs) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), text);
+  }
+  return [...dirs];
 }
 
 /** OpenCode's global config directory: `$XDG_CONFIG_HOME/opencode` for your own home, else `<home>/.config/opencode`. */

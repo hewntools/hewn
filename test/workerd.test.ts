@@ -83,7 +83,8 @@ describe("workerd host (integration)", () => {
     const client = new Client({ name: "test", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${sv.url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     const text = async (args: Record<string, string>) => ((await client.callTool({ name: "hewn_docs", arguments: args })) as any).content[0].text as string;
-    assert.match(await text({}), new RegExp(`^Hewn's docs: ${DOC_PAGES.length} pages[^]*docs/concepts\\.md: Concepts[^]*spec/builder-brief\\.md:`));
+    // The pages, and the Skill made from the brief on the workerd host too.
+    assert.match(await text({}), new RegExp(`^Hewn's docs: ${DOC_PAGES.length + 1} pages[^]*docs/concepts\\.md: Concepts[^]*spec/builder-brief\\.md:[^]*skills/build-a-hewn-tool/SKILL\\.md: Build a Hewn tool`));
     assert.match(await text({ query: "how do grants work?" }), /--- docs\/concepts\.md#grants \(Concepts › Grants\) ---/);
     assert.match(await text({ page: "spec/agents.md#hewns-docs" }), /^spec\/agents\.md#hewns-docs\n\n## Hewn's docs\n/);
     await client.close();

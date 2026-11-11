@@ -3,4 +3,5 @@
 /** Static, capability-agnostic pointer: the platform's own discovery does the rest. */
 export const AGENT_POINTER = `## Hewn
 My personal data and tools (e.g. activity logs, trackers) live in the \`hewn\` MCP server.
-When I ask about myself, my activities or my records, look there first: search for and use the hewn tools.`;
+When I ask about myself, my activities or my records, look there first: search for and use the hewn tools.
+To build or change a Hewn tool yourself, use the Skill build-a-hewn-tool (also in hewn_docs).`;

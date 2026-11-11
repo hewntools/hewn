@@ -13,7 +13,8 @@ import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
 import { CLIENT_IP_HEADER, PUBLIC_HEADER, PUBLIC_PATHS } from "./public.ts";
 import { localSite, publicSite, requestHost, type Site, uiPath } from "./site.ts";
 import { handleUi } from "./ui.ts";
-import { handleWeb, PUBLIC_FILES } from "./web.ts";
+import { handleWeb, PUBLIC_FILES, skillResponse } from "./web.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 
 export type { SurfaceHost } from "./host.ts";
 export { McpSessions } from "./mcp-sessions.ts";
@@ -34,12 +35,12 @@ export const REFRESH_HEADER = "x-hewn-refresh";
 /**
  * The idle report (core platform/activity.ts) counts the owner and their agents: a request once answered, unless it
  * was refused (anyone not signed in gets a 401 or a 404) or is one anyone may make (the files the sign-in page loads,
- * the OAuth endpoints and their metadata: what a scanner on a public address reaches); a stream each time it writes;
+ * the Agent Skill, the OAuth endpoints and their metadata: what a scanner on a public address reaches); a stream each time it writes;
  * and a change made in the web client (any request that isn't a GET) as one a backup should keep. A tool call counts
  * itself.
  */
 function counted(activity: Platform["activity"], req: Request, url: URL, res: Response): Response {
-  if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
+  if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || url.pathname === SKILL_URL || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
   activity.request();
   if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") activity.changed();
   if (!res.body || !/^(text\/event-stream|application\/x-ndjson)/.test(res.headers.get("content-type") ?? "")) return res;
@@ -131,6 +132,8 @@ function browser(platform: Platform, host: SurfaceHost, site: Site, req: Request
 
 async function route(platform: Platform, sessions: McpSessions, host: SurfaceHost, req: Request, url: URL, isPublic: boolean, site?: Site): Promise<Response> {
   const origin = originOf(req, isPublic);
+  // Where an agent reaches MCP, it finds the Skill too.
+  if (url.pathname === SKILL_URL) return req.method === "GET" ? skillResponse(platform) : json(405, { error: "method_not_allowed" });
   if (OAUTH_PATHS.has(url.pathname)) return handleOAuth(platform, req, origin, { webUrl: (site ?? localSite(host.port)).web, hosted: !!host.hosted, log: host.log });
   if (url.pathname.startsWith(PACK_PATH)) return packDownload(platform, req, url.pathname.slice(PACK_PATH.length));
   if (url.pathname !== "/mcp") return json(404, { error: "not_found" });

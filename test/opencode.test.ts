@@ -440,8 +440,10 @@ describe("OpenCode as an MCP client", () => {
     const root = mkdtempSync(join(tmpdir(), "hewn-oc-setup-"));
     try {
       const steps = h.steps({ url: "http://127.0.0.1:7717/mcp", home: root, pointer: true });
-      assert.deepEqual(steps.map((s) => s.kind), ["register", "pointer"]);
+      assert.deepEqual(steps.map((s) => s.kind), ["register", "pointer", "skill"]);
       for (const s of steps) s.run();
+      // OpenCode reads the Skill from ~/.agents/skills, as Codex does.
+      assert.match(readFileSync(join(root, ".agents", "skills", "build-a-hewn-tool", "SKILL.md"), "utf8"), /^---\nname: build-a-hewn-tool/);
       assert.deepEqual(calls, [{ argv: ["opencode", "mcp", "add", "hewn", "--url", "http://127.0.0.1:7717/mcp"], cwd: join(root, ".config", "opencode") }]);
       assert.match(readFileSync(join(root, ".config", "opencode", "AGENTS.md"), "utf8"), /live in the `hewn` MCP server/);
       assert.deepEqual(h.login("http://127.0.0.1:7717/mcp"), ["opencode", "mcp", "auth", "hewn"]);
@@ -454,7 +456,11 @@ describe("OpenCode as an MCP client", () => {
       writeFileSync(join(root, ".local", "share", "opencode", "mcp-auth.json"), JSON.stringify({ hewn: { tokens: { access: "t" } }, other: { tokens: {} } }));
       const plan = uninstallPlan({ homeRoot: join(root, "data"), backupDir: join(root, "backups"), appDir: root, bundled: true, userHome: root, harnesses: harnesses(), exec: () => {}, service: { installed: false, uninstall: () => {} }, binDirs: [], keySource: "file", linux: false });
       const cfgFile = join(root, ".config", "opencode", "opencode.json");
-      assert.deepEqual(plan.steps.map((s) => s.describe), [`remove Hewn from OpenCode (take "hewn" out of "mcp" in ${cfgFile}, and its sign-in to Hewn)`, `remove the Hewn pointer block from ${join(root, ".config", "opencode", "AGENTS.md")}`]);
+      assert.deepEqual(plan.steps.map((s) => s.describe), [
+        `remove Hewn from OpenCode (take "hewn" out of "mcp" in ${cfgFile}, and its sign-in to Hewn)`,
+        `remove the Hewn pointer block from ${join(root, ".config", "opencode", "AGENTS.md")}`,
+        `remove the Skill build-a-hewn-tool (${join(root, ".agents", "skills", "build-a-hewn-tool")})`,
+      ]);
       assert.doesNotMatch(plan.leftovers.join("\n"), /OpenCode/);
       plan.steps[0].run();
       assert.deepEqual(JSON.parse(readFileSync(cfgFile, "utf8")), { mcp: { other: { type: "remote", url: "http://x/mcp" } }, theme: "dark" }, "the rest of the config stays");
