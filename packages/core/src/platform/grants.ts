@@ -150,7 +150,7 @@ export class Grants extends Domain {
       const label = req.model.tier ? `use a ${req.model.tier} model${images} (${"model" in r ? r.model : "not set yet"})` : `use ${req.model.model}${images}`;
       items.push({ grant: g, kind: "model", approved: granted.has(g), label, description: "Spends from your model budget (Settings › AI › Models)" });
     }
-    const config = (manifest.config ?? []).map((c) => ({ name: c.name, description: c.description, value: values[c.name] ?? null }));
+    const config = (manifest.config ?? []).map((c) => ({ name: c.name, description: c.description, value: values[c.name] ?? null, ...(c.suggested !== undefined ? { suggested: c.suggested } : {}) }));
     return { items, config, requests: this.registry.accessRequests(capabilityId) };
   }
 
