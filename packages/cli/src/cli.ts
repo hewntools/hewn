@@ -958,8 +958,10 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     return;
   }
   const setConfig = async (id: string, name: string, value?: string) => {
-    // A suggested value is offered in the prompt: Enter takes it, as Save does in Hewn. Nothing is stored before.
-    const suggested = value === undefined ? ((await c.call("authorization", id)).config ?? []).find((x: { name: string }) => x.name === name)?.suggested : undefined;
+    // A setting not set yet offers its suggested value in the prompt: Enter takes it, as Save does in Hewn. Nothing
+    // is stored before. One already set offers nothing (Enter doesn't swap the owner's value for the suggestion).
+    const entry = value === undefined ? ((await c.call("authorization", id)).config ?? []).find((x: { name: string }) => x.name === name) : undefined;
+    const suggested = entry?.value === null ? entry.suggested : undefined;
     const v = value ?? ((await rl.question(`${name} for ${id}${suggested !== undefined ? ` [${suggested}]` : ""}: `)).trim() || suggested);
     if (!v) throw new Error("empty value, nothing stored");
     await c.call("setConfig", id, name, v);

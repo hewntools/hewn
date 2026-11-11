@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// `hewn grants deny` as typed: the real CLI against a stand-in for the running Hewn's admin channel.
+// `hewn grants deny` and `hewn config` as typed: the real CLI against a stand-in for the running Hewn's admin channel.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -74,9 +74,13 @@ test("hewn config: a suggested value is shown, and Enter at the prompt takes it;
     const hewn = (input: string, ...a: string[]) =>
       new Promise<string>((resolve, reject) => {
         const p = execFile(process.execPath, ["--disable-warning=ExperimentalWarning", CLI, ...a], { env: { ...process.env, HEWN_HOME: home } }, (e, out, err) => (e ? reject(new Error(`hewn ${a.join(" ")}: ${err || out}`)) : resolve(out)));
-        // Answered once it asks (an early end of input would close the prompt before it's shown).
+        // Answered once it asks (an early end of input would close the prompt before it's shown); a prompt that never
+        // comes fails the test in seconds, not at the suite's timeout.
         if (!input) return void p.stdin!.end();
-        p.stdout!.on("data", (d) => / for reviews.*: $/.test(String(d)) && p.stdin!.end(input));
+        let out = "";
+        const kill = setTimeout(() => p.kill(), 10_000);
+        p.on("exit", () => clearTimeout(kill));
+        p.stdout!.on("data", (d) => / for reviews[^\n]*: $/.test((out += String(d))) && p.stdin!.end(input));
       });
     const sets = () => calls.filter((c) => c.method === "setConfig");
 
@@ -85,6 +89,12 @@ test("hewn config: a suggested value is shown, and Enter at the prompt takes it;
     assert.deepEqual(sets().at(-1)!.args, ["reviews", "REPO", "hewntools/hewn"], "Enter takes the suggestion");
     await hewn("hewntools/other\n", "config", "reviews", "REPO");
     assert.deepEqual(sets().at(-1)!.args, ["reviews", "REPO", "hewntools/other"], "typing replaces it");
+    // Once set, the prompt offers nothing: Enter doesn't swap the owner's value for the suggestion.
+    (results.authorization as any).config[0].value = "hewntools/other";
+    const n = sets().length;
+    await assert.rejects(hewn("\n", "config", "reviews", "REPO"), /empty value, nothing stored/);
+    assert.equal(sets().length, n);
+    (results.authorization as any).config[0].value = null;
     const before = sets().length;
     await assert.rejects(hewn("\n", "config", "reviews", "REVIEWER"), /empty value, nothing stored/);
     assert.equal(sets().length, before, "no suggestion, nothing typed: nothing stored");
