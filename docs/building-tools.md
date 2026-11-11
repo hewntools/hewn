@@ -98,6 +98,8 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
 
+**Discard** puts a failed build aside, when you'd rather not try again: it leaves the Inbox, and Activity keeps it, marked discarded. Nothing about the tool changes (a failed new tool installed nothing; a failed change left your tool on its version), and the files the build left go with it.
+
 A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)

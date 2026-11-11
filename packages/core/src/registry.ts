@@ -139,6 +139,8 @@ export interface BuildRow {
   log: string[];
   createdAt: string;
   updatedAt: string;
+  /** When the owner discarded it (a failed build put aside: gone from the Inbox, kept in Activity). */
+  discardedAt: string | null;
 }
 
 const SCHEMA = `
@@ -443,6 +445,7 @@ const toBuild = (r: Row): BuildRow => ({
   log: JSON.parse(r.log),
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+  discardedAt: r.discarded_at ?? null,
 });
 
 const passkeyRow = (r: Row) => ({
@@ -459,6 +462,7 @@ const passkeyRow = (r: Row) => ({
 const ADDED_COLUMNS: [string, string, string][] = [
   ["capabilities", "saturation", "INTEGER"],
   ["capabilities", "source", "TEXT"],
+  ["builds", "discarded_at", "TEXT"],
 ];
 
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
@@ -1245,6 +1249,11 @@ export class Registry {
     this.db
       .prepare("UPDATE builds SET status = ?, result_version = ?, log = ?, base_version = ?, depends_on = ?, review = ?, updated_at = ? WHERE id = ?")
       .run(next.status, next.resultVersion, JSON.stringify(next.log), next.baseVersion, next.dependsOn, next.review ? JSON.stringify(next.review) : null, now(), id);
+  }
+
+  /** Put a failed build aside (its status and time stay as they were: Activity shows it where it ended). */
+  discardBuild(id: string) {
+    this.db.prepare("UPDATE builds SET discarded_at = ? WHERE id = ?").run(now(), id);
   }
 
   /** Whether any version (of any capability) is stored under this content hash. */

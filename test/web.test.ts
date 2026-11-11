@@ -637,6 +637,29 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/activity")).json.items.find((i: any) => i.buildId === last).reason, title);
     });
 
+    test("Discard: a failed build leaves the Inbox and stays in Activity, marked; only a failed one, only the owner", async () => {
+      const b = await api("/capabilities", { method: "POST", body: { name: "Stops Early", purpose: "p", requirements: "r" } });
+      const id = b.json.buildId;
+      await platform.settle(id);
+      assert.ok((await api("/inbox")).json.needs.some((n: any) => n.buildId === id), "failed: in the Inbox");
+      await assert.rejects(platform.discardBuild(t.claude, id), /owner/, "an agent can't");
+      const r = await api(`/builds/${id}/discard`, { method: "POST" });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.ok(r.json.discardedAt);
+      assert.equal(r.json.status, "failed", "still what it was");
+      assert.ok(!(await api("/inbox")).json.needs.some((n: any) => n.buildId === id), "gone from the Inbox");
+      const row = (await api("/activity")).json.items.find((i: any) => i.buildId === id);
+      assert.equal(row.outcome, "failed");
+      assert.equal(row.discarded, true, "kept in Activity, marked");
+      assert.equal(platform.registry.getCapability("stops-early")?.activeVersion ?? null, null, "nothing installed");
+      // Twice is fine; something that isn't a failed build isn't discarded.
+      assert.equal((await api(`/builds/${id}/discard`, { method: "POST" })).status, 200);
+      const promoted = (await api("/builds?n=50&brief=1")).json.find((x: any) => x.status === "promoted");
+      const no = await api(`/builds/${promoted.buildId}/discard`, { method: "POST" });
+      assert.equal(no.status, 409);
+      assert.match(no.json.message, /only a failed build can be discarded/);
+    });
+
     test("home data: hue, icon kind, last build, in-flight builds", async () => {
       const list = (await api("/capabilities")).json;
       const rl = list.find((c: any) => c.id === "running-log");

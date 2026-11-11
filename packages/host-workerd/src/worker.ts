@@ -670,7 +670,7 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
   setSecret: { owner: true, changes: true }, deleteSecret: { owner: true, changes: true }, setConfig: { owner: true, changes: true }, connect: { owner: true, changes: true }, accounts: { owner: true }, approveGrants: { owner: true, changes: true }, approveGrant: { owner: true, changes: true }, revokeGrant: { owner: true, changes: true }, declineGrant: { owner: true, changes: true },
   archive: { owner: true, changes: true }, restore: { owner: true, changes: true }, archived: { owner: true }, rollback: { owner: true, changes: true }, exportData: { owner: true }, importData: { owner: true, changes: true }, purge: { owner: true, changes: true }, startOver: { owner: true, changes: true },
-  logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
+  logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true }, discardBuild: { owner: true, changes: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
   buildReport: { owner: true },
   cleanup: { owner: false },

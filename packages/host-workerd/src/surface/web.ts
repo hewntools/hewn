@@ -492,6 +492,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
+    if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
     if (sub === "screenshot") {
@@ -882,13 +883,14 @@ async function capabilityList(platform: Platform, owner: Agent) {
 const LIVE = new Set(["waiting", "open", "building", "validating"]);
 
 /**
- * Failed builds nobody has dealt with: not retried, and nothing of that capability promoted since
- * (a later change replaced it).
+ * Failed builds nobody has dealt with: not retried or discarded, and nothing of that capability
+ * promoted since (a later change replaced it).
  */
-export function unresolvedFailures<T extends { buildId: string; capabilityId: string; kind: string; status: string; createdAt: string; request: Record<string, unknown> }>(builds: T[]): T[] {
+export function unresolvedFailures<T extends { buildId: string; capabilityId: string; kind: string; status: string; createdAt: string; request: Record<string, unknown>; discardedAt?: string }>(builds: T[]): T[] {
   return builds.filter(
     (b) =>
       b.status === "failed" &&
+      !b.discardedAt &&
       !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) &&
       !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt),
   );
@@ -1052,6 +1054,7 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,
       ...(b.failure ? { failure: b.failure, reason: failureReason(b.failure) } : {}),
+      ...(b.discardedAt ? { discarded: true } : {}),
     });
   }
   for (const c of recentCalls(platform, owner, 5000, 2000)) {
