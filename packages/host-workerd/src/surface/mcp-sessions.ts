@@ -21,8 +21,8 @@ interface Session {
   transport: WebStandardStreamableHTTPServerTransport;
   signature: string;
   lastSeen: number;
-  /** Where the client reached this Hewn (its last request), for links it's given. */
-  origin: string;
+  /** Where links given to the client point (from its last request; see linkOrigin). */
+  origin?: string;
 }
 
 const IDLE_MS = 2 * 60 * 60 * 1000;
@@ -84,7 +84,7 @@ export class McpSessions {
     }
   }
 
-  async handle(req: Request, agent: Agent, origin: string): Promise<Response> {
+  async handle(req: Request, agent: Agent, origin: string | undefined): Promise<Response> {
     const id = req.headers.get("mcp-session-id");
     if (id) {
       const s = this.sessions.get(id);
