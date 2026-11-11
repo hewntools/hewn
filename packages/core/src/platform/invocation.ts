@@ -137,7 +137,8 @@ export class Invocation extends Domain {
       endCall?.();
       if (sideEffect !== "read") this.platform.activity.changed();
     }
-    const { secretUpdates, logs: rawLogs, ...rest } = executed;
+    // `inserted` is validation's, not the caller's.
+    const { secretUpdates, logs: rawLogs, inserted: _inserted, ...rest } = executed;
     for (const [name, value] of Object.entries(secretUpdates)) {
       if (declared.includes(name) && typeof value === "string") {
         this.secrets.set(cap.id, name, value);
@@ -169,12 +170,12 @@ export class Invocation extends Domain {
     const input = req.input ?? {};
     const checkIn = compileSchema(op.inputSchema);
     if (!checkIn(input)) throw inputMismatch(key, schemaErrors(checkIn));
-    const { output: result, secretUpdates, logs } = await this.runtime.invoke(target, key, input, onCall, onModel);
+    const { output: result, secretUpdates, logs, inserted = [] } = await this.runtime.invoke(target, key, input, onCall, onModel);
     const checkOut = compileSchema(op.outputSchema);
     if (!checkOut(result)) {
       throw new PlatformError("invalid_output", `implementation returned output violating ${key} outputSchema`, schemaErrors(checkOut));
     }
-    return { capabilityId: manifest.id, operation: key, result, secretUpdates, logs };
+    return { capabilityId: manifest.id, operation: key, result, secretUpdates, logs, inserted };
   }
 
   /** Per-capability call log (user-facing). Records who/what/outcome, never inputs or outputs. */

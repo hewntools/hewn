@@ -52,6 +52,10 @@
           "description": {
             "type": "string",
             "minLength": 1
+          },
+          "suggested": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }

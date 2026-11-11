@@ -318,7 +318,7 @@ function workerdRuntime(env: Env): CapabilityRuntime {
           timer.expired,
         ]);
         if (!r.ok) throw new PlatformError("operation_failed", `${key} failed: ${r.error}`, { logs: r.logs });
-        return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs };
+        return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs, inserted: r.inserted };
       } catch (e) {
         if (e instanceof PlatformError) throw e;
         throw new PlatformError("operation_failed", `${key} failed: ${(e as Error).message}`);

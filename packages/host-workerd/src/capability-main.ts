@@ -74,10 +74,10 @@ export class Capability extends DurableObject {
   async invoke(key: string, input: unknown, secrets: Record<string, string>, caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: unknown) => Promise<any>) | null = null, readOnly = false) {
     const lines: string[] = [];
     try {
-      const { output, secretUpdates } = await logs.run(lines, () =>
+      const { output, secretUpdates, inserted } = await logs.run(lines, () =>
         runOperation(mod, key, input, { db: this.db(), secrets, config, caller, call: (id, op, i) => call(id, op, i), ...(model ? { model: (req) => model(req) } : {}), readOnly }),
       );
-      return { ok: true as const, output, secretUpdates, logs: capLines(lines) };
+      return { ok: true as const, output, secretUpdates, logs: capLines(lines), inserted };
     } catch (e) {
       return { ok: false as const, error: (e as Error)?.message ?? String(e), logs: capLines(lines) };
     }

@@ -24,7 +24,7 @@ export const MANIFEST_SCHEMA: JSONSchema = {
         type: "object",
         required: ["name", "description"],
         additionalProperties: false,
-        properties: { name: { type: "string", pattern: "^[A-Z][A-Z0-9_]*$" }, description: { type: "string", minLength: 1 } },
+        properties: { name: { type: "string", pattern: "^[A-Z][A-Z0-9_]*$" }, description: { type: "string", minLength: 1 }, suggested: { type: "string", minLength: 1 } },
       },
     },
     runtime: { enum: [...RUNTIME_PROFILES] },
