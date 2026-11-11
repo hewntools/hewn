@@ -49,7 +49,7 @@
       "name": "undo_check_in",
       "description": "Take back a check-in for a day (default today).",
       "version": 1,
-      "sideEffect": "write",
+      "sideEffect": "destructive",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

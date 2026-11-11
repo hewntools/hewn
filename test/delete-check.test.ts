@@ -2,7 +2,7 @@
 // Hewn's own check that an operation deleting rows is declared destructive, whatever the tool's tests expect: rows
 // counted per table before and after each call, in the test cases and the sample replay.
 import assert from "node:assert/strict";
-import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -130,4 +130,33 @@ test("on the workerd host too: a delete fails, a replace passes", async () => {
     rmSync(dir, { recursive: true, force: true });
     await h.stop();
   }
+});
+
+describe("Hewn's own tools", () => {
+  test("Habits: undoing a real check-in deletes it, so undo_check_in is destructive; declared write, the check fails it", async () => {
+    // Cases can't pass one call's id to the next: a migration of the copy's own puts a habit and a check-in in place.
+    const copy = (sideEffect: string) => {
+      const dir = mkdtempSync(join(tmpdir(), "hewn-habits-"));
+      cpSync(join(import.meta.dirname, "../seeds/habits"), dir, { recursive: true });
+      writeFileSync(join(dir, "migrations/999_fixture.sql"), "INSERT INTO habits (id, name, created_at) VALUES ('h1', 'Stretch', '2026-10-01T08:00:00Z');\nINSERT INTO check_ins (habit_id, date) VALUES ('h1', '2026-10-01');\n");
+      // Its own cases: the seed's assume an empty start. The widget still needs one.
+      writeFileSync(join(dir, "tests/cases.json"), JSON.stringify([{ name: "the widget", operation: "widget_today", input: {} }, { name: "undo a real check-in", operation: "undo_check_in", input: { habitId: "h1", date: "2026-10-01" }, expect: { undone: true } }]));
+      editJson(join(dir, "capability.json"), (m) => (m.operations.find((o: { name: string }) => o.name === "undo_check_in").sideEffect = sideEffect));
+      return dir;
+    };
+    for (const [sideEffect, status] of [["destructive", "promoted"], ["write", "failed"]] as const) {
+      const t = setup();
+      const dir = copy(sideEffect);
+      try {
+        const b = await t.platform.settle((await t.platform.install(USER, { name: "Habits", purpose: "x", builder: `copy:${dir}` })).buildId);
+        assert.equal(b.status, status, `${sideEffect}: ${b.log.join("\n")}`);
+        if (status === "failed") assert.match(b.log.join("\n"), /undo_check_in leaves check_ins with fewer rows and adds none: declare it destructive/);
+      } finally {
+        t.cleanup();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    const seed = JSON.parse(readFileSync(join(import.meta.dirname, "../seeds/habits/capability.json"), "utf8"));
+    assert.equal(seed.operations.find((o: { name: string }) => o.name === "undo_check_in").sideEffect, "destructive", "the seed itself");
+  });
 });
