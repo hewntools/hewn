@@ -82,6 +82,8 @@ export interface InvocationResult {
   secretUpdates: Record<string, string>;
   /** The capability's own console lines ("| " / "! " prefixed), capped. */
   logs: string[];
+  /** The tables a statement inserted into during the call, lowercased (validation's delete check). */
+  inserted?: string[];
 }
 
 export interface CapabilityRuntime {

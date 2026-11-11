@@ -4,7 +4,7 @@ A tool is a small program its owner keeps: typed operations over its own private
 
 This page is for writing one by hand. On Hewn, a builder agent usually writes tools from a description; it gets the same contract as a prompt, [`builder-brief.md`](builder-brief.md). The concepts and invariants behind it are in [`capability-model.md`](capability-model.md). The exact types are in [`src/`](src) and the JSON Schemas in [`schemas/`](schemas).
 
-Everything here is [ABI](README.md#versions) 2.5. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
+Everything here is [ABI](README.md#versions) 2.6. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
 
 ## Layout
 
@@ -35,7 +35,7 @@ Widgets have no files of their own: they are declared in the manifest and backed
 | `description` | no | 2.0 | Longer description. |
 | `abi` | no | 2.0 | Lowest ABI it needs, `major.minor`. Missing means `"2.0"`. |
 | `kind` | no | 2.1 | `"capability"` (default) or `"connection"`. See [Connections](#connections-since-21). |
-| `config` | no | 2.1 | Non-secret settings the owner fills in: `[{ name, description }]`. See [Config](#config-since-21). |
+| `config` | no | 2.1 | Non-secret settings the owner fills in: `[{ name, description, suggested? }]` (`suggested` since 2.6). See [Config](#config-since-21). |
 | `runtime` | no | 2.0 | Leave it out. The only profile is `"isolate"`. |
 | `hue` | no | 2.0 | Tile colour for the icon: an OKLCH hue, integer 0–359. |
 | `saturation` | no | 2.4 | How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. `0` draws the icon black or white on grey (for a black-and-white brand). |
@@ -68,6 +68,7 @@ The `abi` field says which version of the contract the tool is written against. 
 | 2.3 | `widgets`, and the view models widget operations return |
 | 2.4 | `saturation` |
 | 2.5 | `source`, `requires.capabilities[]` `hub` and `minVersion` (both the host's to write), `sample/calls.json` |
+| 2.6 | `config[].suggested` |
 
 Declare the lowest version whose features you use. The history is also in [`src/abi.ts`](src/abi.ts) (`ABI_HISTORY`).
 
@@ -93,7 +94,7 @@ The host validates every call's input against `inputSchema` before the code runs
 
 - **`read`:** changes nothing. Only read operations can back a widget, and widget runs may call only read operations of other tools.
 - **`write`:** records or changes data.
-- **`destructive`:** removes or overwrites data in a way that can't be undone. When an agent calls one, the host holds the call until the owner confirms it (see [agents.md](agents.md#invoking-operations)). Destructive operations can't be scheduled.
+- **`destructive`:** removes or overwrites data in a way that can't be undone. When an agent calls one, the host holds the call until the owner confirms it (see [agents.md](agents.md#invoking-operations)). Destructive operations can't be scheduled. Hewn checks the one it can measure: an operation that leaves a table with fewer rows (or drops one), and adds no rows to it, in the test cases or the sample replay fails validation unless it's declared `destructive`. Swapping rows for new ones (a tag set replaced by a smaller one, delete-then-insert, `INSERT OR REPLACE`) adds rows and is a write.
 
 ### Changing a published operation
 
@@ -219,7 +220,7 @@ A host validates a new version, then promotes it. Hewn does this, in order:
 3. Every operation contract is compatible with the active version (see [Changing a published operation](#changing-a-published-operation)).
 4. Every operation in `requires.capabilities` exists.
 5. Migrations are append-only and non-destructive.
-6. All test cases pass. Every widget's operation needs a case, and its output must be a view a template can draw. Since 2.5: if there's `sample/calls.json`, it replays in order on a fresh database, every call without an error.
+6. All test cases pass. Every widget's operation needs a case, and its output must be a view a template can draw. Since 2.5: if there's `sample/calls.json`, it replays in order on a fresh database, every call without an error. In both (since Hewn 0.4.11), an operation not declared `destructive` that leaves a table with fewer rows (or drops it) and adds none to it fails (`set_place leaves nights with fewer rows and adds none: declare it destructive`).
 7. If there's a UI, it's rendered headlessly on an empty database, in light and dark mode, on a desktop screen (1280 px wide) and a phone's (390 px), and (since 2.5, with sample data) again on a database filled with it; an uncaught error, a `console.error` or a failed request on either screen fails the version. The owner's screenshot is the filled one. Changed widgets are drawn in every size they offer, showing what they'd show with the sample data when there is some.
 8. Migrations are dry-run on a copy of the live database.
 9. The version is frozen (immutable). If an agent asked for a change to an existing tool, or wrote and submitted one, it waits for the owner's review (build status `review`) while the agent's approval mode is wait (in this release, always), and whatever the mode when the change is to a connection or adds operations; the owner approves or rejects exactly this version, looking at its diff and its renders.
@@ -282,6 +283,12 @@ Keep connections generic (`list_issues`, `create_issue`); use-case logic belongs
 ## Config (since 2.1)
 
 Config is non-secret settings the owner fills in, such as a server address. Declare it in `config` (names `^[A-Z][A-Z0-9_]*$`, unique) and read it as `ctx.config.NAME`. A tool isn't ready until every declared config has a value. In `requires.hosts`, `"config:NAME"` means "the host in that config value", and the owner's value must then be a URL or host name. Any tool may declare config; only connections hold secrets.
+
+Since 2.6, a setting with an obvious answer (the repository almost everyone keeps, a name the owner told the builder) can carry `suggested`: the setup form opens with that value in the field, and the owner confirms it with Save or types another. Nothing is stored until they save, so the tool stays not ready until then, and an agent's call still gets `not_ready` naming the setting. There is no `default`: Hewn never fills a setting in by itself (validation refuses `default` and points to `suggested`). A secret never carries one, and neither does a setting a host comes from (`config:NAME` in `requires.hosts`): the owner types the host.
+
+```json
+"config": [{ "name": "REPO", "description": "The GitHub repository to review, owner/name", "suggested": "hewntools/hewn" }]
+```
 
 ## Using a model (since 2.2)
 
