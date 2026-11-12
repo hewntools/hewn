@@ -374,10 +374,34 @@ CREATE TABLE IF NOT EXISTS host_charges (
   unit           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS host_charges_by_month ON host_charges (month);
+-- Share links (/share/<token>): the version each serves, until when, and how often it was fetched
+-- (a count, never who). Only the token's hash is kept: the link is shown once, when it's made.
+CREATE TABLE IF NOT EXISTS share_links (
+  id             TEXT PRIMARY KEY,
+  token_hash     TEXT NOT NULL UNIQUE,
+  capability_id  TEXT NOT NULL,
+  version        INTEGER NOT NULL,
+  created_at     TEXT NOT NULL,
+  expires_at     TEXT,
+  revoked_at     TEXT,
+  downloads      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS share_links_by_cap ON share_links (capability_id);
 `;
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
+
+/** A share link as the owner sees it in Share…: never its token. `expiresAt` null: until revoked. */
+export interface ShareLink {
+  id: string;
+  capabilityId: string;
+  version: number;
+  createdAt: string;
+  expiresAt: string | null;
+  downloads: number;
+}
+const toShareLink = (r: Row): ShareLink => ({ id: r.id, capabilityId: r.capability_id, version: r.version, createdAt: r.created_at, expiresAt: r.expires_at ?? null, downloads: r.downloads });
 
 export interface Confirmation {
   id: string;
@@ -804,6 +828,35 @@ export class Registry {
     this.db.prepare("DELETE FROM attachments WHERE ref = ?").run(ref);
   }
 
+  // ---------- share links ----------
+
+  insertShareLink(l: { id: string; tokenHash: string; capabilityId: string; version: number; expiresAt: string | null }) {
+    this.db.prepare("INSERT INTO share_links (id, token_hash, capability_id, version, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)").run(l.id, l.tokenHash, l.capabilityId, l.version, now(), l.expiresAt);
+  }
+
+  /** A tool's links that still work (not revoked, not expired), newest first. */
+  shareLinks(capabilityId: string): ShareLink[] {
+    return this.db.prepare("SELECT * FROM share_links WHERE capability_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC, rowid DESC").all(capabilityId, now()).map((r) => toShareLink(r as Row));
+  }
+
+  /** The link a token opens, if it still works. */
+  workingShareLink(tokenHash: string): ShareLink | undefined {
+    const r = this.db.prepare("SELECT * FROM share_links WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)").get(tokenHash, now()) as Row | undefined;
+    return r && toShareLink(r);
+  }
+
+  /** A link's file was served: one more download. */
+  countShareDownload(id: string) {
+    this.db.prepare("UPDATE share_links SET downloads = downloads + 1 WHERE id = ?").run(id);
+  }
+
+  /** Stop a link (or, without `id`, every link of the tool). How many that still worked were stopped. */
+  revokeShareLinks(capabilityId: string, id?: string): number {
+    const live = this.shareLinks(capabilityId).filter((l) => !id || l.id === id);
+    for (const l of live) this.db.prepare("UPDATE share_links SET revoked_at = ? WHERE id = ?").run(now(), l.id);
+    return live.length;
+  }
+
   /** The owner's answer to "Got what you asked for?" on a build; a later answer replaces it. */
   setBuildFeedback(buildId: string, f: { score: BuildFeedbackScore; note?: string }) {
     this.db.prepare("INSERT OR REPLACE INTO build_feedback (build_id, score, note, at) VALUES (?, ?, ?, ?)").run(buildId, f.score, f.note ?? null, now());
@@ -1195,7 +1248,7 @@ export class Registry {
     this.transaction(() => {
       // Attachments go first (`releaseAttachments`): shared ones move to a sibling build, the rest with their blobs.
       for (const table of ["build_context", "build_feedback"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
-      for (const table of ["grants", "grant_declines", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
+      for (const table of ["grants", "grant_declines", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations", "share_links"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);

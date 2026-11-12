@@ -46,6 +46,7 @@ You need Node.js 24 and Claude Code, Codex or OpenCode, signed in. macOS, Linux 
 - [Building tools](docs/building-tools.md)
 - [Connecting agents](docs/agents.md)
 - [Connections](docs/connections.md)
+- [Sharing tools](docs/sharing.md)
 - [Models](docs/models.md)
 - [Your data](docs/data.md)
 - [Using Hewn from anywhere](docs/remote-access.md)

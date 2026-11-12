@@ -1,41 +1,75 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// R1–R4, R7 Install: one sheet for a file (and, as they arrive, a link and the Hub); only the
-// "From …" line changes. R1 choose the file; R2 your builder reads the code first (the sheet fills
-// in with what it found); R3 the sheet: what it does, its flags, Source code, what it will ask for
-// (a preview: grants still happen after install), Name, Start with sample data; R4 the build
-// page; R7 one reason and one way forward when it can't be installed.
+// R1–R4, R7 Install: one sheet for a file, a link and Hewn's own tools; only the "From …" line
+// changes. R1 choose the file or paste its link; R2 your builder reads the code first (the sheet
+// fills in with what it found); R3 the sheet: what it does, its flags, Source code, what it will
+// ask for (a preview: grants still happen after install), Name, Start with sample data; R4 the
+// build page; R7 one reason and one way forward when it can't be installed.
 import { api, appIcon, builderLabel, commandBlock, enc, fail, h, hueOf, kindTag, modal, pixelGlyph, postStream, satOf, sheetActions, sheetHead } from "../kit.js";
 import { go, put, settings } from "./frame.js";
 import { codeBrowser } from "./files.js";
 import { titleCase } from "./models.js";
 
-export { bundleTile, installFromFile, installSheet, sourceSheet };
+export { bundleTile, installFromFileOrLink, installSheet, sourceSheet };
 
 /** A file may be at most this big (Hewn says so too). */
 const MAX_BYTES = 5 * 1024 * 1024;
 
-/** The tile of a tool that isn't installed yet: its hue, saturation and glyph from the file (or its Hub card). */
+/** The tile of a tool that isn't installed yet: its hue, saturation and glyph from the file (or its card in Hewn's tools). */
 function bundleTile(p, size = 48) {
   const cap = { id: p.id, name: p.name, hue: p.icon?.hue ?? undefined, saturation: p.icon?.saturation ?? undefined };
   if (!p.icon?.glyph?.length) return appIcon(cap, { size });
   return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hueOf(cap), "--s": satOf(cap) }, "aria-hidden": "true" }, pixelGlyph(p.icon.glyph.map(([x, y]) => ({ x, y }))));
 }
 
-/** R1: choose a file (or drop it), then the sheet. */
-async function installFromFile() {
-  const file = await modal(
+/**
+ * R1: choose a file (or drop it), or paste a link to one (Hewn fetches it: https only, up to
+ * 5 MB), then the sheet. A link that can't be fetched says why under the field.
+ */
+async function installFromFileOrLink() {
+  const picked = await modal(
     (close) => {
       const input = h("input", { type: "file", accept: ".zip,application/zip", hidden: true, "aria-label": "A tool's file" });
       input.addEventListener("change", () => input.files[0] && close(input.files[0]));
       const zone = h("button", { type: "button", class: "drop-zone", onclick: () => input.click() }, h("span", { class: "strong" }, "Drop a tool's file here"), h("span", { class: "small muted" }, "or choose one · a .hewn.zip someone shared, up to 5 MB"));
+      const link = h("input", { type: "url", class: "mono grow", placeholder: "https://…/share/…", "aria-label": "A link to a tool's file", spellcheck: false, autocomplete: "off" });
+      const fetchIt = h("button", { type: "submit" }, "Fetch");
+      const status = h("div", { class: "small error" });
+      const tryLink = async (url) => {
+        fetchIt.disabled = true;
+        fetchIt.textContent = "Fetching…";
+        status.textContent = "";
+        try {
+          close({ preview: await api("/bundles", { method: "POST", body: { url } }) });
+        } catch (e) {
+          // A link Hewn can't fetch: fix it here. A file it fetched that can't be installed: the refusal sheet.
+          if (e.data?.details?.refusal !== "link") return close({ error: e });
+          status.textContent = e.message;
+          fetchIt.disabled = false;
+          fetchIt.textContent = "Fetch";
+        }
+      };
+      const form = h("form", { class: "row tight" }, link, fetchIt);
+      form.addEventListener("submit", (e) => (e.preventDefault(), link.value.trim() ? tryLink(link.value.trim()) : link.focus()));
       zone.addEventListener("dragover", (e) => (e.preventDefault(), zone.classList.add("over")));
       zone.addEventListener("dragleave", () => zone.classList.remove("over"));
-      zone.addEventListener("drop", (e) => (e.preventDefault(), zone.classList.remove("over"), e.dataTransfer?.files?.[0] && close(e.dataTransfer.files[0])));
-      return [sheetHead(null, "Install from a file", "Hewn reads it before anything is installed."), zone, input, sheetActions(h("button", { onclick: () => close(null) }, "Cancel"))];
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("over");
+        const file = e.dataTransfer?.files?.[0];
+        const dropped = e.dataTransfer?.getData("text/uri-list")?.split("\n").find((l) => l && !l.startsWith("#"));
+        if (file) close(file);
+        else if (dropped) ((link.value = dropped.trim()), tryLink(link.value));
+      });
+      return [sheetHead(null, "Install from a file or link", "Hewn reads it before anything is installed."), zone, input, h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, "Or a link someone shared"), form, status), sheetActions(h("button", { onclick: () => close(null) }, "Cancel"))];
     },
     { width: 520 },
   );
-  if (!file) return;
+  if (!picked) return;
+  if (picked.error) return refusal(picked.error);
+  // Where the file came from; a link that redirected elsewhere says where the link was too.
+  const p = picked.preview;
+  if (p) return readThenInstall(p, { from: `From ${p.host ?? "a link"}${p.linkHost ? `, linked from ${p.linkHost}` : ""}` });
+  const file = picked;
   if (file.size > MAX_BYTES) return refusal({ message: `${file.name} is ${Math.round(file.size / 104857.6) / 10} MB; a tool's file may be at most 5 MB.` });
   const data = await new Promise((ok, no) => {
     const r = new FileReader();
@@ -54,7 +88,7 @@ async function installFromFile() {
 
 /**
  * Files and links get read by your builder before the sheet (R2); a tool that ships with Hewn's own
- * reading (from the Hub) goes straight to the sheet, where Check it yourself reads it again.
+ * reading (one of Hewn's tools) goes straight to the sheet, where Check it yourself reads it again.
  */
 async function readThenInstall(p, { from }) {
   if (p.summaryBy === "hewn") return installSheet(p, { from });
@@ -141,7 +175,7 @@ function readingSheet(p, { from }) {
 
 /** R7: why it can't be installed, and the one way forward. */
 function refusal(e) {
-  const newer = e.details?.refusal === "newer";
+  const newer = e.data?.details?.refusal === "newer";
   return modal(
     (close) => [
       sheetHead(null, newer ? "This tool needs a newer Hewn" : "This file can't be installed"),
@@ -168,7 +202,7 @@ function asksRows(a) {
 
 /**
  * Its code, before it's installed: the code browser, read-only. `code`: where its files are (the
- * staged file's, or a Hub tool's); `at`: a file and line to show; `origin`: "Official" for Hewn's own.
+ * staged file's, or one of Hewn's tools'); `at`: a file and line to show; `origin`: "Official" for Hewn's own.
  */
 async function sourceSheet(p, { code = `/bundles/${enc(p.token)}/code`, at, origin } = {}) {
   // The sheet opens with its first file in (a moment at most), not a skeleton that then grows.
@@ -215,7 +249,7 @@ function installSheet(p, { from }) {
         }
       });
       const flags = (p.summary?.findings ?? []).filter((f) => f.kind === "warn");
-      // Hewn's own reading ships with a tool from the Hub; Check it yourself has your builder read it too.
+      // Hewn's own reading ships with one of Hewn's tools; Check it yourself has your builder read it too.
       const check = p.summaryBy === "hewn" && h("button", { class: "link sm", onclick: () => ((checking = true), close()) }, "Check it yourself");
       return [
         installHead(p, from),

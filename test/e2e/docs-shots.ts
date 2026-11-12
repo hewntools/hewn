@@ -247,13 +247,13 @@ try {
   reviewed();
   console.log("   bike-care:", (await settle(bike.buildId)).status);
 
-  // 6. The Hub: Hewn's own tools, every card in the shot.
+  // 6. Hewn's own tools, under + New: every card in the shot.
   await page.setViewportSize({ width: 1280, height: 1000 });
-  await page.goto(`${web}/#/hub`);
+  await page.goto(`${web}/#/new/tools`);
   await page.locator(".hub-card").first().waitFor();
   await page.waitForTimeout(800);
-  const hubH = await page.evaluate(() => Math.ceil(Math.max(...[...document.querySelectorAll(".hub-card")].map((el) => el.getBoundingClientRect().bottom + window.scrollY)) + 40));
-  await shot("hub", { width: 1280, height: Math.max(hubH, 800) });
+  const toolsH = await page.evaluate(() => Math.ceil(Math.max(...[...document.querySelectorAll(".hub-card")].map((el) => el.getBoundingClientRect().bottom + window.scrollY)) + 40));
+  await shot("hewns-tools", { width: 1280, height: Math.max(toolsH, 800) });
 
   // 7. Share…: Running Log with two more runs in its sample data, written by hand (a new version, v3).
   const seedSample = readFileSync(join(SEED, "sample/calls.json"), "utf8").trimEnd();
@@ -267,6 +267,9 @@ try {
   const sb = await post("/capabilities/running-log/sample", { text: sample });
   const sampled = await settle(sb.buildId);
   if (sampled.status !== "promoted") throw new Error(`the sample data didn't go live: ${sampled.status} ${sampled.failure?.title ?? ""} ${sampled.failure?.detail ?? ""}`);
+  // A public address, so Share… offers a link, and one link made on it (a week).
+  await sv.admin("call", { method: "setPublicUrl", args: ["https://hewn.example.com"] });
+  await post("/capabilities/running-log/links", { version: 3, expires: "7d" });
   // The sheets are measured at the size they're shot at (a centred dialog moves when the window does).
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`${web}/#/c/running-log`);
@@ -281,8 +284,8 @@ try {
   await shot("share", { width: 1280, height: 1000, clip: await dialog() });
   await page.keyboard.press("Escape");
 
-  // 8. Installing from the Hub: Hewn's reading, what it will ask for, the name, sample data.
-  await page.goto(`${web}/#/hub/plant-log`);
+  // 8. Installing one of Hewn's tools: Hewn's reading, what it will ask for, the name, sample data.
+  await page.goto(`${web}/#/new/tools/plant-log`);
   await page.getByRole("button", { name: "Install" }).click();
   await page.locator("dialog[open]").getByText("It will ask for").waitFor();
   await page.waitForTimeout(400);

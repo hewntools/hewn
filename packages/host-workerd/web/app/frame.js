@@ -14,6 +14,7 @@ export {
   browserZone,
   glassBack,
   go,
+  HEWNS_TOOLS,
   hewnMachine,
   holdDraws,
   hues,
@@ -141,9 +142,11 @@ const brandGlyph = () => pixelGlyph(rowCells(GLYPH));
 const brandTile = (size = 28) => h("span", { class: `app-icon brand${size < 24 ? " mini" : ""}`, style: { "--size": `${size}px` } }, brandGlyph());
 const brand = () => h("a", { class: "brand-link", href: "#/" }, brandTile(), h("span", { class: "brand-name" }, BRAND));
 
+/** Where Hewn's own tools (Official) are: one step into + New. */
+const HEWNS_TOOLS = "#/new/tools";
+
 const NAV = [
   ["Home", "#/", "home"],
-  ["Hub", "#/hub", "hub"],
   ["Agents", "#/agents", "agents"],
   ["Accounts", "#/accounts", "accounts"],
   ["Settings", "#/settings", "settings"],
@@ -158,7 +161,7 @@ const glassBack = (label, href) => h("div", { class: "glass-bar" }, h("a", { hre
 
 /**
  * Main pages: brand left; the tabs and the Inbox right. On a phone the tabs fold into a ☰ menu
- * while the Inbox stays visible. `back` ([label, href]): a page one step in (a Hub tool, New) has
+ * while the Inbox stays visible. `back` ([label, href]): a page one step in (New, Hewn's tools) has
  * its back button where the brand is.
  */
 const topBar = (active, { back } = {}) => {
@@ -178,8 +181,8 @@ const topBar = (active, { back } = {}) => {
 /** Moment screens and Info: a back button, optional actions on the right. */
 const backBar = (label, href, right) => bar({ left: glassBack(label, href), right });
 
-/** A standard page: top bar, notices, a centred column of the given width. */
-const page = (active, width, ...content) => view(topBar(active), sandboxNotice(), h("main", { class: "column", style: { "--w": `${width}px` } }, content));
+/** A standard page: top bar (its tab active, or `{ back: [label, href] }` for a page a step in), notices, a centred column of the given width. */
+const page = (active, width, ...content) => view(typeof active === "string" ? topBar(active) : topBar("", active), sandboxNotice(), h("main", { class: "column", style: { "--w": `${width}px` } }, content));
 
 /** The ASCII H, only on moment screens. Returns [field, ...rest] wrapper so the rest sits above it. */
 function moment(asciiPos, ...content) {

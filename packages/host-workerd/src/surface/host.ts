@@ -147,6 +147,8 @@ export interface SurfaceHost {
    * the host signs the owner in (HEWN_HOST_SIGNIN_URL). Absent: self-hosted.
    */
   hosted?: Hosted;
+  /** How Hewn fetches a tool's file from a link (install from a link). Absent: fetch. */
+  fetch?: typeof fetch;
   /** The public address agents in the cloud use (hewn tunnel). Absent: no tunnel support here. */
   tunnel?: () => Promise<TunnelStatus>;
   /** Hewn's own tools (the Official shelf), as this release ships them. Absent: an empty shelf. */
