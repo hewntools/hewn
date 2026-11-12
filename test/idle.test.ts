@@ -164,10 +164,10 @@ describe("requests: the owner and agents count; refreshes, /health and refused r
   let port: number;
   let cookie = "";
   let intakeDone: () => void = () => {};
-  const http = (path: string, o: { method?: string; host?: string; headers?: Record<string, string>; body?: unknown; onData?: (chunk: string) => void } = {}) =>
+  const http = (path: string, o: { method?: string; host?: string; headers?: Record<string, string>; body?: unknown; onData?: (chunk: string) => void; signal?: AbortSignal } = {}) =>
     new Promise<{ status: number; headers: Record<string, unknown>; body: string }>((res, rej) => {
       const r = request(
-        { host: "127.0.0.1", port, path, method: o.method ?? "GET", headers: { host: `${o.host ?? "hewn.localhost"}:${port}`, ...(cookie ? { cookie } : {}), ...(o.body !== undefined ? { "content-type": "application/json" } : {}), ...o.headers } },
+        { host: "127.0.0.1", port, path, method: o.method ?? "GET", signal: o.signal, headers: { host: `${o.host ?? "hewn.localhost"}:${port}`, ...(cookie ? { cookie } : {}), ...(o.body !== undefined ? { "content-type": "application/json" } : {}), ...o.headers } },
         (m) => {
           let body = "";
           m.on("data", (d) => ((body += d), o.onData?.(String(d))));
@@ -228,6 +228,52 @@ describe("requests: the owner and agents count; refreshes, /health and refused r
     // Where agents reach MCP, and the web client's host (signed in, here).
     for (const host of ["127.0.0.1", "hewn.localhost"]) assert.equal((await http(SKILL_URL, { host })).status, 200, host);
     assert.deepEqual(platform.idleActivity(), at, "lastRequestAt, and so since, unchanged");
+    await tick();
+    await api("/capabilities");
+    assert.ok(platform.idleActivity().lastRequestAt! > at.lastRequestAt!, "a web request still moves it");
+  });
+
+  test("what an open page fetches on its own leaves the clocks alone: a build's events, a tool's and a build's icon", async () => {
+    const glyph = '<svg viewBox="0 0 5 5"><rect x="0" y="0" width="5" height="1"/></svg>';
+    assert.equal((await api("/capabilities/running-log/icon", { method: "PUT", body: { glyph } })).status, 200);
+    const installed = platform.registry.recentBuilds(10).find((id) => platform.getBuild(USER, id).capabilityId === "running-log")!;
+    await api("/capabilities");
+    const at = platform.idleActivity();
+    await tick();
+    // A finished build's events replay its log, then "done"; each reconnect would again.
+    const replay = await api(`/builds/${installed}/events`);
+    assert.equal(replay.status, 200);
+    assert.match(replay.body, /event: done/);
+    assert.equal((await api("/capabilities/running-log/icon")).status, 200);
+    assert.deepEqual(platform.idleActivity(), at, "lastRequestAt and lastStreamAt, and so since, unchanged");
+    assert.equal(idleStatus(platform.idleActivity(), backedUp, { now: Date.now() }).since, idleStatus(at, backedUp, { now: Date.now() }).since);
+
+    // A build that's running: its icon (written first) and its live events.
+    let finish!: () => void;
+    const waiting = new Promise<void>((r) => (finish = r));
+    t.queue(async (ws) => {
+      const { cpSync, mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(resolve(ws, "ui"), { recursive: true });
+      writeFileSync(resolve(ws, "ui/icon.svg"), glyph);
+      await waiting;
+      cpSync(SEED, ws, { recursive: true });
+    });
+    const b = await platform.create(USER, { name: "Idle Log", purpose: "x", requirements: "x" });
+    const before = platform.idleActivity().lastRequestAt;
+    for (let i = 0; i < 50 && (await api(`/builds/${b.buildId}/icon`)).status !== 200; i++) await tick();
+    assert.equal((await api(`/builds/${b.buildId}/icon`)).status, 200);
+    const stop = new AbortController();
+    let wrote!: () => void;
+    const streamed = new Promise<void>((r) => (wrote = r));
+    const live = api(`/builds/${b.buildId}/events`, { signal: stop.signal, onData: () => wrote() }).catch(() => null);
+    await streamed;
+    stop.abort();
+    await live;
+    assert.equal(platform.idleActivity().lastRequestAt, before, "the build's icon and events aren't the owner");
+    finish();
+    await platform.settle(b.buildId);
+
+    // The owner's own request still counts.
     await tick();
     await api("/capabilities");
     assert.ok(platform.idleActivity().lastRequestAt! > at.lastRequestAt!, "a web request still moves it");

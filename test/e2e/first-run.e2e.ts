@@ -33,10 +33,12 @@ const pw = createRequire(process.env.PLAYWRIGHT_NODE_MODULES ?? import.meta.url)
 const root = mkdtempSync(join(tmpdir(), "hewn-e2e-"));
 const port = await freePort();
 
-// The builder: the Running Log seed, renamed to whatever was asked for; a change adds a line to it.
+// The builder: the Running Log seed, renamed to whatever was asked for; a change adds a line to it. It waits for `hold`.
+let hold = Promise.resolve();
 const builder: CapabilityBuilder = {
   name: "claude",
   build: async (job) => {
+    await hold;
     cpSync(SEED, job.workspace, { recursive: true });
     editJson(join(job.workspace, "capability.json"), (m) => {
       m.id = job.capabilityId;
@@ -570,6 +572,30 @@ export const operations = {
     if (r.headers()["x-hewn-refresh"] !== "1") throw new Error("a refresh without the x-hewn-refresh header");
     page.off("request", watch);
   });
+
+  if (!real)
+    await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick carries it to the end", async () => {
+      let release!: () => void;
+      hold = new Promise<void>((r) => (release = r));
+      try {
+        const id = await page.evaluate(async () => ((await (await fetch("/api/capabilities", { headers: { "x-hewn-ui": "1" } })).json()) as { id: string; name: string }[]).find((c) => c.name === "Reading List")!.id);
+        const b = await page.evaluate(async (id: string) => (await fetch(`/api/capabilities/${id}/modify`, { method: "POST", headers: { "x-hewn-ui": "1", "content-type": "application/json" }, body: JSON.stringify({ request: "Add a line" }) })).json(), id);
+        // As a proxy or a restart cuts it: one line, then the end, and a browser would retry in 200 ms.
+        let opened = 0;
+        await page.route("**/api/builds/*/events", (r: any) => (opened++, r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: 'retry: 200\nevent: line\ndata: "12:00:00 cut off"\n\n' })));
+        await page.goto(`${web}/#/b/${b.buildId}`);
+        await page.getByText("cut off").waitFor({ state: "attached" });
+        await page.waitForTimeout(1500);
+        if (opened !== 1) throw new Error(`the events stream was opened ${opened} times`);
+        release();
+        await page.getByText(/is ready|v2/).first().waitFor({ timeout: 30_000 });
+        if (opened !== 1) throw new Error(`the events stream was opened ${opened} times`);
+      } finally {
+        release();
+        hold = Promise.resolve();
+        await page.unroute("**/api/builds/*/events");
+      }
+    });
 
   await step("a failed build: Discard takes it off the Inbox; Activity keeps it, marked discarded", async () => {
     // A tool whose own tests fail: installed from a directory, it fails on its own (no builder to ask).

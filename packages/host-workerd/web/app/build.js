@@ -497,9 +497,13 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       if (!logPre.childNodes.length) for (const l of b.log) logLine(l);
       settle(JSON.parse(e.data));
     });
+    // The stream ended without "done" (Hewn restarted, a proxy cut it): no reconnecting, which would count as the owner
+    // each time and keep Hewn awake. The 4 s tick below carries the page.
+    let streaming = true;
     es.addEventListener("error", () => {
-      if (!finished || card.querySelector(".build-head")) return;
       es.close();
+      streaming = false;
+      if (!finished || card.querySelector(".build-head")) return;
       for (const l of b.log) logLine(l);
       settle(b);
     });
@@ -511,6 +515,12 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       ticking = true;
       const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`, { refresh: true }).catch(() => null), caps(true, { poll: true }).catch(() => null)]).finally(() => (ticking = false));
       if (fresh) for (const [k, x] of fresh) all.set(k, x);
+      // With the stream gone, the build's end comes from here.
+      if (!streaming && v && !LIVE_BUILD.has(v.status)) {
+        clearInterval(tick);
+        if (!logPre.childNodes.length) for (const l of v.log) logLine(l);
+        return settle(v);
+      }
       if (v?.progress) startedAt = Date.now() - v.progress.elapsedSeconds * 1000;
       if (v && b.status === "waiting" && v.status !== "waiting") b = v;
       if (v?.step && LIVE_BUILD.has(v.status)) ((step = v.step), live());

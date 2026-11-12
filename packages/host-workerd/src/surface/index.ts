@@ -34,15 +34,21 @@ export async function handle(platform: Platform, sessions: McpSessions, host: Su
 /** A page's own refresh (Home's widgets, a poll): the web client marks it, and the idle report ignores it. */
 export const REFRESH_HEADER = "x-hewn-refresh";
 
+/** A build's events, and a tool's or a build's icon: fetched by an open page on its own (see counted()). */
+const PAGES_OWN = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/icon)$/;
+
 /**
  * The idle report (core platform/activity.ts) counts the owner and their agents: a request once answered, unless it
  * was refused (anyone not signed in gets a 401 or a 404) or is one anyone may make (the files the sign-in page loads,
  * the Agent Skill, the OAuth endpoints and their metadata, robots.txt: what a scanner on a public address reaches); a
  * stream each time it writes; and a change made in the web client (any request that isn't a GET) as one a backup should
- * keep. A tool call counts itself. A share link's download counts: someone was given the link.
+ * keep. A tool call counts itself. A share link's download counts: someone was given the link. What an open page
+ * fetches on its own doesn't count: a build's events (a browser reconnects them, and each replays the log; the build
+ * counts itself) and a tool's icon (redrawn as the page ticks).
  */
 function counted(activity: Platform["activity"], req: Request, url: URL, res: Response): Response {
   if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || url.pathname === SKILL_URL || url.pathname === "/robots.txt" || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
+  if (req.method === "GET" && PAGES_OWN.test(url.pathname)) return res;
   activity.request();
   if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") activity.changed();
   if (!res.body || !/^(text\/event-stream|application\/x-ndjson)/.test(res.headers.get("content-type") ?? "")) return res;
