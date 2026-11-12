@@ -193,7 +193,9 @@ export class Validation extends Domain {
       // Run every case (not just up to the first failure) so the owner and the builder see the whole picture.
       const failed: string[] = [];
       onTests(0, cases.length);
+      const breathe = breather();
       for (const [i, c] of cases.entries()) {
+        await breathe();
         try {
           const op = caseOperation(manifest, c);
           const before = await this.runtime.countState(testState, code);
@@ -225,7 +227,9 @@ export class Validation extends Domain {
         await this.runtime.dropState(sampleState);
         await this.runtime.migrate(sampleState, migrations, code);
         let replayed = true;
+        const breathe = breather();
         for (const [i, c] of sample.entries()) {
+          await breathe();
           const before = await this.runtime.countState(sampleState, code);
           let inserted: string[];
           try {
@@ -328,8 +332,10 @@ export class Validation extends Domain {
       const widgetsChanged = !!manifest.widgets?.length && (build.kind === "widgets" || JSON.stringify(manifest.widgets) !== JSON.stringify(base?.row.manifest.widgets));
       if (widgetsChanged && !shot && visualCheck && abiAtLeast(manifest, "2.3")) {
         const sampled = new Map<string, unknown>();
+        const breathe = breather();
         if (sample)
           for (const w of manifest.widgets!) {
+            await breathe();
             const [operation, version] = w.operation.split("@");
             const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
@@ -627,6 +633,21 @@ function undeclaredDelete(op: OperationManifest, call: { before: Record<string, 
 }
 
 /** The operation a test case or sample call runs: its version, or the highest. */
+/**
+ * In a loop of calls into a tool, a turn of the event loop every 100 ms or so. On the workerd host a call that settles
+ * without I/O never lets the event loop turn, so a long run of them leaves every request waiting, the supervisor's
+ * health check among them, and the supervisor restarts workerd after 5 s. By time, not per call: a turn per call adds
+ * seconds to hundreds of cases.
+ */
+function breather(everyMs = 100) {
+  let last = Date.now();
+  return async () => {
+    if (Date.now() - last < everyMs) return;
+    await new Promise((r) => setTimeout(r, 0));
+    last = Date.now();
+  };
+}
+
 const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
   m.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
 
