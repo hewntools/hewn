@@ -585,28 +585,36 @@ export const operations = {
         await p.goto(`${web}/#/`);
         const id = await p.evaluate(async () => ((await (await fetch("/api/capabilities", { headers: { "x-hewn-ui": "1" } })).json()) as { id: string; name: string }[]).find((c) => c.name === "Reading List")!.id);
         const b = await p.evaluate(async (id: string) => (await fetch(`/api/capabilities/${id}/modify`, { method: "POST", headers: { "x-hewn-ui": "1", "content-type": "application/json" }, body: JSON.stringify({ request: "Add a line" }) })).json(), id);
-        // As a proxy or a restart cuts it: one line, then the end, and a browser would retry in 200 ms.
-        let opened = 0;
-        await p.route("**/api/builds/*/events", (r: any) => (opened++, r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: 'retry: 200\nevent: line\ndata: "12:00:00 cut off"\n\n' })));
+        // As a proxy or a restart cuts it: one line, then the end, and a browser would retry in 200 ms. The second time,
+        // the stream's own wait runs out first: "done" with the build still running.
+        let n = 0;
+        // Read through a function: TypeScript doesn't see the route's handler change it.
+        const opened = () => n;
+        const cut = 'retry: 200\nevent: line\ndata: "12:00:00 cut off"\n\n';
+        await p.route("**/api/builds/*/events", (r: any) => (n++, r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: n === 2 ? `${cut}event: done\ndata: ${JSON.stringify({ ...b, status: "building" })}\n\n` : cut })));
         // The page's own clock, so a minute passes at once (the requests are real).
         await p.clock.install();
         await p.goto(`${web}/#/b/${b.buildId}`);
         await p.getByText("cut off").waitFor({ state: "attached" });
         await p.waitForTimeout(1500);
-        if (opened !== 1) throw new Error(`the events stream was opened ${opened} times`);
+        if (opened() !== 1) throw new Error(`the events stream was opened ${opened()} times`);
         const run = async (ms: number) => {
           for (let t = 0; t < ms; t += 4000) await p.clock.runFor(4000), await p.waitForTimeout(100);
         };
         await run(48_000);
-        if (opened !== 1) throw new Error(`opened again within the minute (${opened})`);
+        if (opened() !== 1) throw new Error(`opened again within the minute (${opened()})`);
         await run(16_000);
-        if (opened !== 2) throw new Error(`not opened again once after a minute (${opened})`);
+        if (opened() !== 2) throw new Error(`not opened again once after a minute (${opened()})`);
         // The second one replays the log in place of the first.
         if ((await p.locator("pre", { hasText: "cut off" }).first().innerText()).split("cut off").length !== 2) throw new Error("the replayed log doubled");
+        await run(48_000);
+        if (opened() !== 2) throw new Error(`opened again within the minute after a done that wasn't the end (${opened()})`);
+        await run(16_000);
+        if (opened() !== 3) throw new Error(`not opened again after a done that wasn't the end (${opened()})`);
         release();
         for (let i = 0; i < 15 && !(await p.getByText(/is ready|v2/).count()); i++) await run(4000);
         await p.getByText(/is ready|v2/).first().waitFor({ timeout: 5000 });
-        if (opened !== 2) throw new Error(`the events stream was opened ${opened} times`);
+        if (opened() !== 3) throw new Error(`the events stream was opened ${opened()} times`);
       } finally {
         release();
         hold = Promise.resolve();

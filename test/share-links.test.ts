@@ -293,20 +293,38 @@ describe("share links and install from a link, over HTTP", () => {
     assert.ok(!logs.some((l) => l.includes("c".repeat(32))), "nor in the rate limit's log line");
   });
 
-  test("the limit is per address and per link: busy addresses don't use it up for everyone, and one link fetched too often waits on its own", async () => {
-    const limited = await startPublicServer(server, 0, () => {}, new RateLimiter({ ...RULES, share: { perClient: 4, total: 1000, windowMs: 60_000 }, shareLink: { perClient: 3, total: 1000, windowMs: 60_000 } }));
+  test("the limit is per address: busy addresses don't use it up for everyone, and a link that doesn't work is a 404 from any address", async () => {
+    const limited = await startPublicServer(server, 0, () => {}, new RateLimiter({ ...RULES, share: { perClient: 4, total: 1000, windowMs: 60_000 } }));
     try {
       const link = (c: string) => `/share/${c.repeat(32)}`;
-      // One link from three addresses: the fourth address waits for that link, not for another.
-      for (const from of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from })).status, 404, from);
-      assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from: "198.51.100.4" })).status, 429);
-      assert.equal((await http(limited, link("e"), { host: "hewn.example.com", from: "198.51.100.4" })).status, 404);
       // One address trying many links waits on its own; another address doesn't.
       for (const c of ["f", "g", "h", "i"]) assert.equal((await http(limited, link(c), { host: "hewn.example.com", from: "198.51.100.5" })).status, 404, c);
       assert.equal((await http(limited, link("j"), { host: "hewn.example.com", from: "198.51.100.5" })).status, 429);
       assert.equal((await http(limited, link("j"), { host: "hewn.example.com", from: "198.51.100.6" })).status, 404);
+      // A link that doesn't work never counts against itself: many addresses, still 404.
+      for (const from of ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"]) for (let i = 0; i < 4; i++) assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from })).status, 404, from);
     } finally {
       await new Promise((r) => limited.close(r));
+    }
+  });
+
+  test("one link fetched too often waits on its own, from any address; revoked, it's a 404 at once, not a wait", async () => {
+    t.platform.setPublicUrl(USER, "https://hewn.example.com");
+    try {
+      const made = await api("/capabilities/running-log/links", { method: "POST", body: { expires: "1d" } });
+      const token = String(made.json.url).split("/share/")[1];
+      const other = String((await api("/capabilities/running-log/links", { method: "POST", body: { expires: "1d" } })).json.url).split("/share/")[1];
+      // RULES.shareLink: 30 in 10 minutes, from three addresses (each under its own limit).
+      for (let i = 0; i < RULES.shareLink.perClient; i++) assert.equal((await http(pub, `/share/${token}`, { host: "hewn.example.com", from: `198.51.100.${20 + (i % 3)}` })).status, 200, String(i));
+      const waits = await http(pub, `/share/${token}`, { host: "hewn.example.com", from: "198.51.100.23" });
+      assert.equal(waits.status, 429);
+      assert.ok(Number(waits.headers["retry-after"]) > 0);
+      assert.equal(waits.headers["x-robots-tag"], "noindex, nofollow");
+      assert.equal((await http(pub, `/share/${other}`, { host: "hewn.example.com", from: "198.51.100.23" })).status, 200, "another link doesn't wait");
+      assert.equal((await api(`/capabilities/running-log/links/${made.json.link.id}`, { method: "DELETE" })).status, 200);
+      assert.equal((await http(pub, `/share/${token}`, { host: "hewn.example.com", from: "198.51.100.23" })).status, 404, "a dead link says so, not 'retry later'");
+    } finally {
+      t.platform.setPublicUrl(USER, null);
     }
   });
 

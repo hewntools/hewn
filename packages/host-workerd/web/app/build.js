@@ -459,11 +459,28 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       onLeave(() => clearTimeout(t));
     };
 
+    let tick = 0;
+    // The stream. When it ends without the build's end (Hewn restarted, a proxy cut it, its 30 minutes ran out), the
+    // browser doesn't reconnect it: each reconnect would count as the owner and keep Hewn awake. The 4 s tick carries
+    // the page, and opens it again after a minute while the build runs.
+    let es = null;
+    let closedAt = 0;
+    // The build's end, drawn once: whichever of the stream, the tick or Cancel sees it first.
+    let ended = false;
+    const end = (v) => {
+      if (ended) return;
+      ended = true;
+      clearInterval(tick);
+      es?.close();
+      if (!logPre.childNodes.length) for (const l of v.log ?? b.log) logLine(l);
+      settle(v);
+    };
+
     // Cancel while the builder works.
     cancelBtn.addEventListener("click", async () => {
       if (!(await confirmDialog({ title: "Cancel this build?", body: "The builder stops and nothing changes. You can start it again later.", confirm: "Cancel build", cancel: "Keep building", danger: true }))) return;
       try {
-        settle(await api(`/builds/${enc(id)}/cancel`, { method: "POST" }));
+        end(await api(`/builds/${enc(id)}/cancel`, { method: "POST" }));
       } catch (e) {
         fail(e);
       }
@@ -471,12 +488,6 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     // The transcript replays (live or finished, kept for 30 days), then "done".
     const finished = !LIVE_BUILD.has(b.status) && b.status !== "open";
     if (!finished) live();
-    let tick = 0;
-    // The stream. When it ends without "done" (Hewn restarted, a proxy cut it), the browser doesn't reconnect it: each
-    // reconnect would count as the owner and keep Hewn awake. The 4 s tick carries the page, and opens it again after a
-    // minute while the build runs.
-    let es = null;
-    let closedAt = 0;
     const open = () => {
       const s = (es = new EventSource(`/api/builds/${enc(id)}/events`));
       // A stream opened again replays the log: the first line starts it afresh.
@@ -491,19 +502,20 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         step = JSON.parse(e.data);
         live();
       });
-      s.addEventListener("done", (e) => {
-        s.close();
-        clearInterval(tick);
-        if (!logPre.childNodes.length) for (const l of b.log) logLine(l);
-        settle(JSON.parse(e.data));
-      });
-      s.addEventListener("error", () => {
+      const dropped = () => {
         s.close();
         es = null;
         closedAt = Date.now();
-        if (!finished || card.querySelector(".build-head")) return;
-        for (const l of b.log) logLine(l);
-        settle(b);
+      };
+      s.addEventListener("done", (e) => {
+        const v = JSON.parse(e.data);
+        // The stream's wait ran out before the build did.
+        if (LIVE_BUILD.has(v.status)) return dropped();
+        end(v);
+      });
+      s.addEventListener("error", () => {
+        dropped();
+        if (finished && !card.querySelector(".build-head")) end(b);
       });
     };
     open();
@@ -526,12 +538,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       ticking = true;
       const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`, { refresh: true }).catch(() => null), caps(true, { poll: true }).catch(() => null)]).finally(() => (ticking = false));
       if (fresh) for (const [k, x] of fresh) all.set(k, x);
+      if (ended) return;
       // With the stream gone, the build's end comes from here.
-      if (!es && v && !LIVE_BUILD.has(v.status)) {
-        clearInterval(tick);
-        if (!logPre.childNodes.length) for (const l of v.log) logLine(l);
-        return settle(v);
-      }
+      if (!es && v && !LIVE_BUILD.has(v.status)) return end(v);
       if (!es && v && Date.now() - closedAt >= 60_000) open();
       if (v?.progress) startedAt = Date.now() - v.progress.elapsedSeconds * 1000;
       if (v && b.status === "waiting" && v.status !== "waiting") b = v;

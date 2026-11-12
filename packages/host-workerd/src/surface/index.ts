@@ -12,7 +12,7 @@ import type { SurfaceHost } from "./host.ts";
 import { body, json } from "./http.ts";
 import type { McpSessions } from "./mcp-sessions.ts";
 import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
-import { CLIENT_IP_HEADER, loggedPath, PUBLIC_HEADER, PUBLIC_PATHS, ROBOTS_TXT, SHARE_PREFIX, SHARE_ROBOTS } from "./public.ts";
+import { CLIENT_IP_HEADER, loggedPath, PUBLIC_HEADER, PUBLIC_PATHS, RateLimiter, ROBOTS_TXT, SHARE_PREFIX, SHARE_ROBOTS } from "./public.ts";
 import { localSite, publicSite, requestHost, type Site, uiPath } from "./site.ts";
 import { handleUi } from "./ui.ts";
 import { handleWeb, PUBLIC_FILES, skillResponse } from "./web.ts";
@@ -31,11 +31,11 @@ export async function handle(platform: Platform, sessions: McpSessions, host: Su
   return counted(activity, req, url, res);
 }
 
-/** A page's own refresh (Home's widgets, a poll): the web client marks it, and the idle report ignores it. */
+/** A page's own refresh (Home's widgets, a poll): the web client marks it, and the idle report ignores it. What a page can't mark (an EventSource, an <img>) is PAGE_OWN_FETCHES. */
 export const REFRESH_HEADER = "x-hewn-refresh";
 
 /** A build's events, and a tool's or a build's icon: fetched by an open page on its own (see counted()). */
-const PAGES_OWN = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/icon)$/;
+const PAGE_OWN_FETCHES = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/icon)$/;
 
 /**
  * The idle report (core platform/activity.ts) counts the owner and their agents: a request once answered, unless it
@@ -48,7 +48,7 @@ const PAGES_OWN = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/
  */
 function counted(activity: Platform["activity"], req: Request, url: URL, res: Response): Response {
   if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || url.pathname === SKILL_URL || url.pathname === "/robots.txt" || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
-  if (req.method === "GET" && PAGES_OWN.test(url.pathname)) return res;
+  if (req.method === "GET" && PAGE_OWN_FETCHES.test(url.pathname)) return res;
   activity.request();
   if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") activity.changed();
   if (!res.body || !/^(text\/event-stream|application\/x-ndjson)/.test(res.headers.get("content-type") ?? "")) return res;
@@ -74,7 +74,7 @@ async function answer(platform: Platform, sessions: McpSessions, host: SurfaceHo
       const site = publicUrl ? publicSite(publicUrl) : undefined;
       const web = !!site?.isWeb(requestHost(req));
       let res: Response;
-      if (url.pathname.startsWith(SHARE_PREFIX)) res = await shareLink(platform, host, req, url);
+      if (url.pathname.startsWith(SHARE_PREFIX)) res = await shareLink(platform, host, req, url, true);
       else if (url.pathname === "/robots.txt") res = new Response(ROBOTS_TXT, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } });
       else if (PUBLIC_PATHS.has(url.pathname) || url.pathname.startsWith(PACK_PATH)) res = await route(platform, sessions, host, req, url, true, site);
       else if (site && web) res = await browser(platform, host, site, req, url);
@@ -86,7 +86,7 @@ async function answer(platform: Platform, sessions: McpSessions, host: SurfaceHo
     // DNS rebinding: a web page whose own name resolves to 127.0.0.1 reaches this port with its own
     // Host (and, for MCP, its own Origin). Only loopback names answer locally.
     if (!isLoopbackName(hostName(req.headers.get("host")))) return json(421, { error: "misdirected_request", message: "this port answers only on 127.0.0.1, localhost and hewn.localhost" });
-    if (url.pathname.startsWith(SHARE_PREFIX)) return await shareLink(platform, host, req, url);
+    if (url.pathname.startsWith(SHARE_PREFIX)) return await shareLink(platform, host, req, url, false);
     const local = localSite(host.port);
     if (local.isWeb(req.headers.get("host"))) return await browser(platform, host, local, req, url);
     if (url.pathname === "/health") return json(200, { ok: true });
@@ -139,11 +139,19 @@ const urlHost = (url: string) => {
  * A share link: the bundle of the version it was made for, to anyone with the link, until it
  * expires or is revoked. Every answer, a refusal too, tells search engines to keep out.
  */
-async function shareLink(platform: Platform, host: SurfaceHost, req: Request, url: URL): Promise<Response> {
+/** Share links' per-link limit (public.ts RULES.shareLink), counted once a link is known to work. */
+const linkLimiter = new RateLimiter();
+
+async function shareLink(platform: Platform, host: SurfaceHost, req: Request, url: URL, isPublic: boolean): Promise<Response> {
   const headers = { ...SHARE_ROBOTS, "cache-control": "no-store", "referrer-policy": "no-referrer" };
   if (req.method !== "GET") return json(405, { error: "method_not_allowed" }, { ...headers, allow: "GET" });
+  const token = url.pathname.slice(SHARE_PREFIX.length);
+  // A revoked or expired link says so at once, however often it was fetched.
+  if (!platform.shareLinkWorks(token)) return json(404, { error: "not_found" }, headers);
+  const wait = isPublic ? linkLimiter.take("shareLink", url.pathname) : 0;
+  if (wait) return json(429, { error: "rate_limited", message: `Too many requests; retry in ${wait}s` }, { ...headers, "retry-after": String(wait) });
   try {
-    const { name, bundle } = await platform.sharedBundle(url.pathname.slice(SHARE_PREFIX.length));
+    const { name, bundle } = await platform.sharedBundle(token);
     return new Response(body(bundle), { status: 200, headers: { ...headers, "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "x-content-type-options": "nosniff" } });
   } catch (e) {
     if (e instanceof PlatformError && e.code === "not_found") return json(404, { error: "not_found" }, headers);
