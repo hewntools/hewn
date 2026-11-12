@@ -40,7 +40,7 @@ Everything a tool brings runs before the owner grants it anything. Each step is 
   - The tool's record and the sheet show the host the file came from, plus "linked from …" when the pasted link's host differs.
   - `/share/` limits requests per client and per link.
 - **A submission.**
-  - An agent with `create` sends a new tool, and one with `modify` sends a change. Both go through the same gate as an install.
+  - An agent with `create` sends a new tool, and one with `modify` sends a change. An install from a file, a link or Hewn's tools is a submission too, the owner's (`Builds.submit`, builder `bundle`): one gate, the same file rules (`candidateFiles`, also when a file is opened) and the same validation. Only the platform writes `source`.
   - An agent in `wait` approval mode has every build held for the owner.
 
 ## What holds
