@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The public path: what a reverse proxy or a tunnel (cloudflared, Tailscale Funnel) reaches. MCP,
-// the OAuth endpoints, share links (/share/<token>) and robots.txt answer on any host; the web
+// the OAuth endpoints, the Agent Skill, a pack's download link (/_platform/pack/~<token>), share
+// links (/share/<token>) and robots.txt answer on any host; the web
 // client and capability UIs only on the public URL's hosts (the surface decides, see index.ts).
 // Admin never answers here. Requests are rate limited per client address (and in total).
 import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";

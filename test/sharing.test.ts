@@ -252,12 +252,9 @@ describe("sharing: a tool as a file", () => {
     assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.capabilityId === "picky" && e.action === "sample" && /0 of 1 calls; add failed: .*not for people/.test(e.detail)));
   });
 
-  test("an install is a submission: one gate for a file, a link and Hewn's tools; checks that fail run once; a file submit would refuse isn't staged", async () => {
-    // The entry installBundle hands Builds.submit: a new tool (no capabilityId, no base), builder "bundle", its source.
-    const builds = (t.platform as unknown as { d: { builds: { submit: (a: unknown, e: Record<string, unknown>) => Promise<{ buildId: string }> } } }).d.builds;
-    const real = builds.submit.bind(builds);
-    const entries: Record<string, unknown>[] = [];
-    builds.submit = (a, e) => (entries.push(e), real(a, e));
+  test("an install is a submission: one gate for a file, a link and Hewn's tools; checks that fail run once; a file submit would refuse is refused when it's opened", async () => {
+    // The one gate: install takes only a folder (`copy:`) or files given as they are (`keep`).
+    await assert.rejects(t.platform.install(USER, { name: "Side Door", purpose: "x", builder: "bundle", seed: { "capability.json": bytes("{}") } }), /install takes builder "keep" or "copy:<dir>"/);
     const op = { name: "add", description: "Adds one", version: 1, sideEffect: "write", inputSchema: { type: "object" }, outputSchema: { type: "object" } };
     const files = {
       "capability.json": bytes(JSON.stringify({ id: "adder", name: "Adder", purpose: "Adds", abi: "2.0", operations: [op] })),
@@ -267,18 +264,20 @@ describe("sharing: a tool as a file", () => {
     const sidecar: Sidecar = { format: 1, hewn: "test", abi: "2.0", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "adder", version: 3, hash: "f".repeat(64) } };
     const preview = await t.platform.stageBundle(USER, packBundle(files, sidecar));
     const failed = await t.platform.settle((await t.platform.installBundle(USER, preview.token, { name: "My Adder", sample: true })).buildId);
-    assert.deepEqual(entries.map(({ files: _, ...e }) => e), [{ id: "my-adder", name: "My Adder", builder: "bundle", request: "Installed from a file: Adder v3", source: { id: "adder", name: "Adder", version: 3, hash: "f".repeat(64), from: "file" }, sample: false }]);
-    assert.equal(failed.builder, "bundle");
+    // Submitted as a new tool: no base version, builder "bundle", its source and the request kept with the build.
+    const row = t.platform.registry.getBuild(failed.buildId)!;
+    assert.deepEqual([row.kind, row.builder, row.baseVersion ?? null], ["create", "bundle", null]);
+    assert.deepEqual(row.request, { name: "My Adder", purpose: "Adds", requirements: "Installed from a file: Adder v3", source: { id: "adder", name: "Adder", version: 3, hash: "f".repeat(64), from: "file" } });
     assert.equal(failed.status, "failed");
     assert.equal(failed.log.filter((l) => /validating candidate/.test(l)).length, 1, "the same files would fail the same way: validated once");
     // One of Hewn's tools goes the same way.
     const hub = await t.platform.hubStage(USER, readShelf(resolve(import.meta.dirname, "../seeds")).tools, "kid-quotes");
     const kid = await t.platform.settle((await t.platform.installBundle(USER, hub.token, { name: "Kid Quotes" })).buildId);
     assert.equal(kid.status, "promoted", kid.log.join("\n"));
-    assert.equal((entries.at(-1)!.source as { from: string }).from, "hub");
-    // What submit refuses (a builder's config, build output) is refused when the file is staged, with the rule.
-    for (const extra of ["CLAUDE.md", ".DS_Store", "node_modules/x/index.js"]) {
-      await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, [extra]: bytes("x") }, sidecar)), (e: any) => e.details?.refusal === "unreadable" && e.message.includes(extra) && /Hewn won't take these files/.test(e.message), extra);
+    assert.deepEqual([kid.builder, t.platform.activeManifest("kid-quotes").source?.from], ["bundle", "hub"]);
+    // What submit refuses (a builder's config, Hewn's workspace files, build output) is refused when the file is opened, in the owner's words.
+    for (const extra of ["CLAUDE.md", ".DS_Store", "BUILDER.md", "node_modules/x/index.js"]) {
+      await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, [extra]: bytes("x") }, sidecar)), (e: any) => e.details?.refusal === "unreadable" && e.message === `Hewn won't install Adder: it carries ${extra}, which a tool never keeps (a builder's settings, files Hewn writes for builders, or build output). Whoever shared it can share it again without it.`, extra);
     }
   });
 
@@ -419,7 +418,7 @@ describe("sharing: a tool as a file", () => {
   });
 
   test("an install from a file is never retried with a builder: by hand it's refused, and a restart leaves it failed", async () => {
-    const failed = await t.platform.settle((await t.platform.install(USER, { name: "Broken", purpose: "x", builder: "bundle", id: "broken", seed: { "capability.json": bytes("{}") } })).buildId);
+    const failed = await t.platform.settle((await t.platform.submit(USER, { files: { "capability.json": bytes("{}") }, id: "broken", name: "Broken", builder: "bundle", request: "Installed from a file" })).buildId);
     assert.equal(failed.status, "failed");
     await assert.rejects(t.platform.retryBuild(USER, failed.buildId), /install the file again/);
     // One cut off by a restart: no builder runs it from an empty tool.
@@ -623,7 +622,7 @@ describe("code from outside stays outside", () => {
     await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, ".npmrc": bytes("git=/tmp/run-me\n") }, sidecar)), /\.npmrc: tools can't carry npm settings \(\.npmrc\); remove it/);
     // Installed with no builder from given files, the same rule holds in validation.
     const manifest = { ...JSON.parse(text(files["capability.json"])), id: "dep-tool", name: "Dep Tool" };
-    const b = await t.platform.settle((await t.platform.install(USER, { name: "Dep Tool", purpose: "x", builder: "bundle", id: "dep-tool", seed: { ...withDep, "capability.json": bytes(JSON.stringify(manifest)) } })).buildId);
+    const b = await t.platform.settle((await t.platform.submit(USER, { files: { ...withDep, "capability.json": bytes(JSON.stringify(manifest)) }, id: "dep-tool", name: "Dep Tool", builder: "bundle", request: "Installed from a file" })).buildId);
     assert.equal(b.status, "failed");
     assert.ok(b.log.some((l) => /npm won't install this tool's dependencies/.test(l) && /secrets is "file:\/etc"/.test(l)), b.log.join("\n"));
   });

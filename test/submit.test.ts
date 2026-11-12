@@ -331,7 +331,7 @@ describe("submit: the same gate as any build", () => {
     };
     once(await t.platform.settle((await t.platform.submitFiles(t.claude, { files: broken("sent-counter"), request: "A counter" })).buildId), "submitted");
     const seed = Object.fromEntries(broken("file-counter").map((f) => [f.path, bytes(f.content)]));
-    once(await t.platform.settle((await t.platform.install(USER, { name: "File Counter", purpose: "x", builder: "bundle", id: "file-counter", seed })).buildId), "bundle");
+    once(await t.platform.settle((await t.platform.submit(USER, { files: seed, id: "file-counter", name: "File Counter", builder: "bundle", request: "Installed from a file" })).buildId), "bundle");
     const dir = mkdtempSync(join(tmpdir(), "hewn-copy-"));
     for (const f of broken("folder-counter")) {
       mkdirSync(dirname(join(dir, f.path)), { recursive: true });

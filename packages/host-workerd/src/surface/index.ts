@@ -4,7 +4,7 @@
 // connect with, and share links (/share/<token>). Runs on Node and on workerd. Requests marked
 // public came through the public listener (a reverse proxy or a tunnel, see public.ts): on the
 // public URL's host they reach the web client and capability UIs too (site.ts); on any other host
-// only MCP, OAuth, share links and robots.txt.
+// only MCP, OAuth, the Agent Skill, a pack's download link, share links and robots.txt.
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";

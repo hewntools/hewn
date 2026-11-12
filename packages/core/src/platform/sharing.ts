@@ -617,12 +617,21 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
   if (typeof tool?.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(tool.id) || !Number.isInteger(tool.version) || tool.version < 1 || typeof tool.hash !== "string" || !/^[0-9a-f]{64}$/.test(tool.hash)) refuse("Its hewn-bundle.json doesn't say which tool and version it is.");
   const deps = dependencyProblems(unpacked.files);
   if (deps.length) refuse(`Hewn won't install ${manifest.name}: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
-  // What the install will submit, held to submit's rules now: a file the install would refuse isn't staged.
+  // What the install will submit, held to submit's rules now: a file the install would refuse isn't
+  // staged. Its paths, size and file count were read above; what's left is what a tool never keeps.
   try {
     candidateFiles(unpacked.files);
   } catch (e) {
-    if (e instanceof PlatformError) refuse(e.message, e.details as Record<string, unknown>);
-    throw e;
+    if (!(e instanceof PlatformError)) throw e;
+    const { refused = [], problems = [] } = (e.details ?? {}) as { refused?: { path: string }[]; problems?: string[] };
+    const paths = refused.map((r) => r.path);
+    const named = paths.length > 4 ? `${paths.slice(0, 4).join(", ")} and ${paths.length - 4} more` : paths.join(", ");
+    refuse(
+      paths.length
+        ? `Hewn won't install ${manifest.name}: it carries ${named}, which a tool never keeps (a builder's settings, files Hewn writes for builders, or build output). Whoever shared it can share it again without ${paths.length === 1 ? "it" : "them"}.`
+        : `Hewn won't install ${manifest.name}: ${problems[0] ?? e.message}.`,
+      { refused, problems },
+    );
   }
   return { ...unpacked, manifest };
 }
