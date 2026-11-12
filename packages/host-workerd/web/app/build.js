@@ -471,56 +471,68 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     // The transcript replays (live or finished, kept for 30 days), then "done".
     const finished = !LIVE_BUILD.has(b.status) && b.status !== "open";
     if (!finished) live();
-    const es = new EventSource(`/api/builds/${enc(id)}/events`);
-    onLeave(() => es.close());
+    let tick = 0;
+    // The stream. When it ends without "done" (Hewn restarted, a proxy cut it), the browser doesn't reconnect it: each
+    // reconnect would count as the owner and keep Hewn awake. The 4 s tick carries the page, and opens it again after a
+    // minute while the build runs.
+    let es = null;
+    let closedAt = 0;
+    const open = () => {
+      const s = (es = new EventSource(`/api/builds/${enc(id)}/events`));
+      // A stream opened again replays the log: the first line starts it afresh.
+      let replay = logPre.childNodes.length > 0;
+      s.addEventListener("line", (e) => {
+        if (replay) ((replay = false), logPre.replaceChildren());
+        logLine(JSON.parse(e.data));
+        if (follow) logPre.scrollTop = logPre.scrollHeight;
+      });
+      s.addEventListener("step", (e) => {
+        if (finished) return;
+        step = JSON.parse(e.data);
+        live();
+      });
+      s.addEventListener("done", (e) => {
+        s.close();
+        clearInterval(tick);
+        if (!logPre.childNodes.length) for (const l of b.log) logLine(l);
+        settle(JSON.parse(e.data));
+      });
+      s.addEventListener("error", () => {
+        s.close();
+        es = null;
+        closedAt = Date.now();
+        if (!finished || card.querySelector(".build-head")) return;
+        for (const l of b.log) logLine(l);
+        settle(b);
+      });
+    };
+    open();
+    onLeave(() => es?.close());
     // A hidden tab makes no requests: the stream closes (else the browser reconnects it, hidden or not), and the page
     // draws itself again once the tab is shown.
     const hidden = () => {
       if (!document.hidden) return;
-      es.close();
+      es?.close();
       document.removeEventListener("visibilitychange", hidden);
       shown().then(() => document.body.contains(card) && route());
     };
     document.addEventListener("visibilitychange", hidden);
     onLeave(() => document.removeEventListener("visibilitychange", hidden));
-    es.addEventListener("line", (e) => {
-      logLine(JSON.parse(e.data));
-      if (follow) logPre.scrollTop = logPre.scrollHeight;
-    });
-    es.addEventListener("step", (e) => {
-      if (finished) return;
-      step = JSON.parse(e.data);
-      live();
-    });
-    es.addEventListener("done", (e) => {
-      es.close();
-      if (!logPre.childNodes.length) for (const l of b.log) logLine(l);
-      settle(JSON.parse(e.data));
-    });
-    // The stream ended without "done" (Hewn restarted, a proxy cut it): no reconnecting, which would count as the owner
-    // each time and keep Hewn awake. The 4 s tick below carries the page.
-    let streaming = true;
-    es.addEventListener("error", () => {
-      es.close();
-      streaming = false;
-      if (!finished || card.querySelector(".build-head")) return;
-      for (const l of b.log) logLine(l);
-      settle(b);
-    });
     if (finished) return;
     // Pick up the icon as soon as the builder has written it (it does that first), and the attempt clock.
     let ticking = false;
-    const tick = setInterval(async () => {
+    tick = setInterval(async () => {
       if (ticking) return;
       ticking = true;
       const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`, { refresh: true }).catch(() => null), caps(true, { poll: true }).catch(() => null)]).finally(() => (ticking = false));
       if (fresh) for (const [k, x] of fresh) all.set(k, x);
       // With the stream gone, the build's end comes from here.
-      if (!streaming && v && !LIVE_BUILD.has(v.status)) {
+      if (!es && v && !LIVE_BUILD.has(v.status)) {
         clearInterval(tick);
         if (!logPre.childNodes.length) for (const l of v.log) logLine(l);
         return settle(v);
       }
+      if (!es && v && Date.now() - closedAt >= 60_000) open();
       if (v?.progress) startedAt = Date.now() - v.progress.elapsedSeconds * 1000;
       if (v && b.status === "waiting" && v.status !== "waiting") b = v;
       if (v?.step && LIVE_BUILD.has(v.status)) ((step = v.step), live());

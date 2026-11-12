@@ -574,26 +574,43 @@ export const operations = {
   });
 
   if (!real)
-    await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick carries it to the end", async () => {
+    await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick opens it again after a minute and carries it to the end", async () => {
       let release!: () => void;
       hold = new Promise<void>((r) => (release = r));
+      // A page of its own, signed in, for its fake clock.
+      const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+      await ctx.addCookies(await page.context().cookies());
+      const p = await ctx.newPage();
       try {
-        const id = await page.evaluate(async () => ((await (await fetch("/api/capabilities", { headers: { "x-hewn-ui": "1" } })).json()) as { id: string; name: string }[]).find((c) => c.name === "Reading List")!.id);
-        const b = await page.evaluate(async (id: string) => (await fetch(`/api/capabilities/${id}/modify`, { method: "POST", headers: { "x-hewn-ui": "1", "content-type": "application/json" }, body: JSON.stringify({ request: "Add a line" }) })).json(), id);
+        await p.goto(`${web}/#/`);
+        const id = await p.evaluate(async () => ((await (await fetch("/api/capabilities", { headers: { "x-hewn-ui": "1" } })).json()) as { id: string; name: string }[]).find((c) => c.name === "Reading List")!.id);
+        const b = await p.evaluate(async (id: string) => (await fetch(`/api/capabilities/${id}/modify`, { method: "POST", headers: { "x-hewn-ui": "1", "content-type": "application/json" }, body: JSON.stringify({ request: "Add a line" }) })).json(), id);
         // As a proxy or a restart cuts it: one line, then the end, and a browser would retry in 200 ms.
         let opened = 0;
-        await page.route("**/api/builds/*/events", (r: any) => (opened++, r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: 'retry: 200\nevent: line\ndata: "12:00:00 cut off"\n\n' })));
-        await page.goto(`${web}/#/b/${b.buildId}`);
-        await page.getByText("cut off").waitFor({ state: "attached" });
-        await page.waitForTimeout(1500);
+        await p.route("**/api/builds/*/events", (r: any) => (opened++, r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: 'retry: 200\nevent: line\ndata: "12:00:00 cut off"\n\n' })));
+        // The page's own clock, so a minute passes at once (the requests are real).
+        await p.clock.install();
+        await p.goto(`${web}/#/b/${b.buildId}`);
+        await p.getByText("cut off").waitFor({ state: "attached" });
+        await p.waitForTimeout(1500);
         if (opened !== 1) throw new Error(`the events stream was opened ${opened} times`);
+        const run = async (ms: number) => {
+          for (let t = 0; t < ms; t += 4000) await p.clock.runFor(4000), await p.waitForTimeout(100);
+        };
+        await run(48_000);
+        if (opened !== 1) throw new Error(`opened again within the minute (${opened})`);
+        await run(16_000);
+        if (opened !== 2) throw new Error(`not opened again once after a minute (${opened})`);
+        // The second one replays the log in place of the first.
+        if ((await p.locator("pre", { hasText: "cut off" }).first().innerText()).split("cut off").length !== 2) throw new Error("the replayed log doubled");
         release();
-        await page.getByText(/is ready|v2/).first().waitFor({ timeout: 30_000 });
-        if (opened !== 1) throw new Error(`the events stream was opened ${opened} times`);
+        for (let i = 0; i < 15 && !(await p.getByText(/is ready|v2/).count()); i++) await run(4000);
+        await p.getByText(/is ready|v2/).first().waitFor({ timeout: 5000 });
+        if (opened !== 2) throw new Error(`the events stream was opened ${opened} times`);
       } finally {
         release();
         hold = Promise.resolve();
-        await page.unroute("**/api/builds/*/events");
+        await ctx.close();
       }
     });
 
