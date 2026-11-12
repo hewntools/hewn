@@ -76,6 +76,13 @@ describe("instructions: the owner's standing rules for building", () => {
     t.platform.setInstructions(USER, "running-log", ["One screen only"]);
     const m = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add notes" }), look);
     assert.match(seen["owner-instructions/this-tool.md"]!, /^# The owner's instructions for this tool\n[^]*\n- One screen only\n$/);
+    // A client's pack for the same change carries the same files.
+    const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
+    for (const f of ["owner-instructions/every-tool.md", "owner-instructions/this-tool.md"]) assert.equal(pack.files.find((x) => x.path === f)?.content, seen[f], f);
+    // A build no builder runs (a submission) reads nothing: it records none.
+    const submitted = await t.platform.submitFiles(t.claude, { files: pack.files.filter((f) => !f.path.startsWith("owner-instructions/")).map((f) => ({ path: f.path, content: f.content, ...(f.encoding ? { encoding: f.encoding } : {}) })), capabilityId: "running-log", request: "the same", baseVersion: 2 });
+    assert.equal(t.platform.buildContext(USER, submitted.buildId).ownerInstructions, undefined);
+    await t.platform.settle(submitted.buildId);
     assert.match(seen["owner-instructions/every-tool.md"]!, /- Swedish copy in every screen/);
     assert.match(seen["BUILDER.md"]!, /in `owner-instructions\/every-tool\.md` and `owner-instructions\/this-tool\.md`: read them/);
     assert.deepEqual(t.platform.buildContext(USER, m.buildId).ownerInstructions, { everyTool: ["Swedish copy in every screen"], thisTool: ["One screen only"] });

@@ -86,10 +86,10 @@ describe("the pack: what a client builds from", () => {
     assert.match(change.files[1].content, /- One screen only\n$/);
     const zip = readZip((await download(change))!);
     assert.ok("owner-instructions/every-tool.md" in zip && "owner-instructions/this-tool.md" in zip);
-    // A tool's rules only for a client that may see the tool: another tool's change pack doesn't carry them.
+    // A tool's own rules travel only in its own change's pack (one a client may see: another's is not_found).
     const other = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "ui-counter" });
-    assert.match(allPaths(other).join(), /every-tool\.md/);
-    assert.match(other.files.find((f) => f.path === "owner-instructions/this-tool.md")?.content ?? "", /^$/, "ui-counter has none");
+    assert.ok(allPaths(other).includes("owner-instructions/every-tool.md"));
+    assert.ok(!allPaths(other).includes("owner-instructions/this-tool.md"), "ui-counter has no rules of its own, and running-log's stay with it");
     const files = entriesOf(SEED).concat({ path: "owner-instructions/every-tool.md", content: "x" });
     await assert.rejects(t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: "x", baseVersion: 1 }), code("invalid_request", /owner-instructions\/every-tool\.md: Hewn writes these for builders/));
   });

@@ -475,15 +475,22 @@ export class Builds extends Domain {
     return { ...b, widgetsBuildId: w.buildId };
   }
 
-  /** What a new build records: the brief it runs on, the owner's instructions as they are now, and the conversation (if the web client sent one). */
-  private contextFor(capabilityId: string, kind: BuildKind, conversation?: BuildTurn[]): BuildContext {
-    const ownerInstructions = this.d.instructions.instructionsForBuild(capabilityId, kind);
+  /**
+   * What a new build records: the brief it runs on, the owner's instructions as they are now (for
+   * every tool, and for a build of an existing tool, `tool`, its own), and the conversation (if the web client sent one).
+   */
+  private contextFor(tool: string | undefined, conversation?: BuildTurn[]): BuildContext {
+    const ownerInstructions = this.d.instructions.instructionsForBuild(tool);
     return { brief: this.briefId, ...(ownerInstructions ? { ownerInstructions } : {}), ...(conversation ? { conversation } : {}) };
   }
 
-  /** Record what a new build (just inserted) ran with, and keep the attachments its conversation carried. */
-  private recordContext(buildId: string, capabilityId: string, conversation?: BuildTurn[]) {
-    this.registry.setBuildContext(buildId, this.contextFor(capabilityId, this.mustBuild(buildId).kind, conversation));
+  /**
+   * Record what a new build runs with (`tool`: the existing tool it changes; none for a new one), and
+   * keep the attachments its conversation carried. No owner's instructions where no builder runs to read them.
+   */
+  private recordContext(buildId: string, tool: string | undefined, conversation?: BuildTurn[]) {
+    const { ownerInstructions, ...context } = this.contextFor(tool, conversation);
+    this.registry.setBuildContext(buildId, noBuilderRuns(this.mustBuild(buildId).builder ?? "") ? context : { ...context, ...(ownerInstructions ? { ownerInstructions } : {}) });
     if (conversation) this.registry.claimAttachments(attachmentRefs(conversation), buildId);
   }
 
@@ -745,7 +752,7 @@ export class Builds extends Domain {
       else this.registry.takeOverCapability(reservation);
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
-      this.recordContext(buildId, id, conversation);
+      this.recordContext(buildId, undefined, conversation);
     });
     if (dependsOn) this.waitFor(buildId, id, dependsOn, `build ${buildId} [create ${id} by ${agent.id}]`);
     else await this.startCreate(buildId, seed);
@@ -891,8 +898,8 @@ export class Builds extends Domain {
     const base = cap?.activeVersion ? versionFiles((await this.loadVersion(cap.id, cap.activeVersion, { keep: false })).files) : {};
     const connection = cap?.activeVersion ? isConnection(this.activeManifest(cap.id)) : false;
     const exclude = capabilityId ?? "";
-    const rules = this.d.instructions.instructionsForBuild(exclude, cap && visible(cap.id) ? "modify" : "create");
-    return { ...base, ...ownerInstructionFiles(rules), ...this.contractFiles(exclude, visible), ...(connection ? {} : await this.looksFile(exclude, cap ? "modify" : "create", visible)), ...(await this.designSystemFile()) };
+    // A change's pack is only ever for a tool the client may see (`visibleActive`): its own rules come with it.
+    return { ...base, ...ownerInstructionFiles(this.d.instructions.instructionsForBuild(cap?.id)), ...this.contractFiles(exclude, visible), ...(connection ? {} : await this.looksFile(exclude, cap ? "modify" : "create", visible)), ...(await this.designSystemFile()) };
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). `marks`: a retry's, from `retryBuild`. */

@@ -2,30 +2,33 @@
 // Instructions: the owner's standing rules for building, read by the intake and the builder.
 import { type Agent, requireOwner } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { bytes } from "../files.ts";
+import { bytes, OWNER_INSTRUCTIONS_DIR } from "../files.ts";
 import type { Files } from "../ports.ts";
-import type { BuildKind, OwnerInstructions } from "../registry.ts";
+import type { OwnerInstructions } from "../registry.ts";
 import { Domain } from "./context.ts";
 
 /**
- * Where a builder finds the owner's instructions, in its workspace and in a client's pack: the rules
- * for every tool, and this tool's. Never part of a version (`WORKSPACE_ONLY_DIRS`).
+ * Where a builder finds the owner's instructions, in its workspace and in a client's pack (both of
+ * them in `OWNER_INSTRUCTIONS_DIR`, which is never part of a version): the rules for every tool, and this tool's.
  */
-export const EVERY_TOOL_FILE = "owner-instructions/every-tool.md";
-export const THIS_TOOL_FILE = "owner-instructions/this-tool.md";
+const EVERY_TOOL_FILE = `${OWNER_INSTRUCTIONS_DIR}/every-tool.md`;
+const THIS_TOOL_FILE = `${OWNER_INSTRUCTIONS_DIR}/this-tool.md`;
+
+/** Which of the two files there are: those with rules. */
+const filesOf = (i: OwnerInstructions | undefined) => [...(i?.everyTool.length ? [EVERY_TOOL_FILE] : []), ...(i?.thisTool.length ? [THIS_TOOL_FILE] : [])];
 
 /** The owner's instructions as files: one for every tool and one for this tool, those that have rules. */
 export function ownerInstructionFiles(i: OwnerInstructions | undefined): Files {
   const file = (which: string, lines: string[]) =>
     bytes(`# The owner's instructions for ${which}\n\nThe owner's standing rules for how their tools are built. Follow them wherever they apply; the contract in the brief still holds.\n\n${lines.map((l) => `- ${l}`).join("\n")}\n`);
-  return { ...(i?.everyTool.length ? { [EVERY_TOOL_FILE]: file("every tool", i.everyTool) } : {}), ...(i?.thisTool.length ? { [THIS_TOOL_FILE]: file("this tool", i.thisTool) } : {}) };
+  return Object.fromEntries(filesOf(i).map((f) => [f, f === EVERY_TOOL_FILE ? file("every tool", i!.everyTool) : file("this tool", i!.thisTool)]));
 }
 
 /** BUILDER.md's (and AGENTS.md's) pointer at the owner's instructions; empty when there are none. */
 export function ownerInstructionsNote(i: OwnerInstructions | undefined): string {
-  const files = Object.keys(ownerInstructionFiles(i)).map((f) => `\`${f}\``);
+  const files = filesOf(i).map((f) => `\`${f}\``);
   if (!files.length) return "";
-  return `## Owner's instructions\n\nThe owner's standing rules for how their tools are built are in ${files.join(" and ")}: read ${files.length > 1 ? "them" : "it"} before you write anything, and follow ${files.length > 1 ? "them" : "it"} wherever they apply. The contract in \`BRIEF.md\` still holds.`;
+  return `## Owner's instructions\n\nThe owner's standing rules for how their tools are built are in ${files.join(" and ")}: read ${files.length > 1 ? "them" : "it"} before you write anything, and follow the rules wherever they apply. The contract in \`BRIEF.md\` still holds.`;
 }
 
 /** The owner's instructions for building: at most this many lines per scope, each this long. */
@@ -134,12 +137,12 @@ export class Instructions extends Domain {
   }
 
   /**
-   * The owner's instructions a build of `capabilityId` runs with, as they are now: the rules for every
-   * tool, and this tool's for a build of an existing one (`kind` not create). Undefined when there are none.
+   * The owner's instructions a build runs with, as they are now: the rules for every tool, and for a
+   * build of an existing tool (`tool`) its own. Undefined when there are none.
    */
-  instructionsForBuild(capabilityId: string, kind: BuildKind): OwnerInstructions | undefined {
+  instructionsForBuild(tool: string | undefined): OwnerInstructions | undefined {
     const everyTool = this.instructionLines();
-    const thisTool = kind === "create" ? [] : this.instructionLines(capabilityId);
+    const thisTool = tool ? this.instructionLines(tool) : [];
     return everyTool.length || thisTool.length ? { everyTool, thisTool } : undefined;
   }
 }
