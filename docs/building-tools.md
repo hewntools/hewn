@@ -92,7 +92,7 @@ If a pass fails, the build fails like any other: nothing goes live, the tool sta
 
 Standing rules for how your tools are built, which the builder reads on every build: for every tool ("Swedish copy in every screen", "never a delete button without Undo") or for one tool ("keep it to a single screen"). Tell the intake a rule while you talk a request through and it remembers it: the chat shows **Saved as a rule:** (or **Saved as a rule for** the tool) with the rule as it was written down, and **Undo** if that's not what you meant. Withdraw a rule the same way.
 
-They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool, where **Remove** takes one out and the line under them adds one. Each build records the instructions it ran with, next to its conversation and spec.
+They're yours to read and edit, one rule per line: Settings › AI › **Instructions for building** for every tool, and a tool's Info › **Instructions** for that tool, where **Remove** takes one out and the line under them adds one. Each build records the instructions it ran with (from 0.4.11), next to its conversation and spec. The builder finds them in files of their own in its folder (`owner-instructions/every-tool.md` and, for a change, `owner-instructions/this-tool.md`), and so does an agent that writes a tool itself: they come in its pack.
 
 ## When a build fails
 

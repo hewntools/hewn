@@ -276,7 +276,7 @@ describe("sharing: a tool as a file", () => {
     assert.equal(kid.status, "promoted", kid.log.join("\n"));
     assert.deepEqual([kid.builder, t.platform.activeManifest("kid-quotes").source?.from], ["bundle", "hub"]);
     // What submit refuses (a builder's config, Hewn's workspace files, build output) is refused when the file is opened, in the owner's words.
-    for (const extra of ["CLAUDE.md", ".DS_Store", "BUILDER.md", "node_modules/x/index.js"]) {
+    for (const extra of ["CLAUDE.md", ".DS_Store", "BUILDER.md", "owner-instructions/every-tool.md", "node_modules/x/index.js"]) {
       await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, [extra]: bytes("x") }, sidecar)), (e: any) => e.details?.refusal === "unreadable" && e.message === `Hewn won't install Adder: it carries ${extra}, which a tool never keeps (a builder's settings, files Hewn writes for builders, or build output). Whoever shared it can share it again without it.`, extra);
     }
   });

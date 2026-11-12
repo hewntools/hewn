@@ -115,12 +115,18 @@ export interface BuildFeedback {
   at: string;
 }
 
+/** The owner's instructions for building, as a build runs with them: one rule per line. */
+export interface OwnerInstructions {
+  everyTool: string[];
+  thisTool: string[];
+}
+
 /** What led to a build, kept with it for the capability's life (`build_context`). */
 export interface BuildContext {
   /** The web client's conversation; an agent's build has none (its request is on the build). */
   conversation?: BuildTurn[];
-  /** The owner's instructions the build ran with. */
-  instructions?: string;
+  /** The owner's instructions the build ran with: its rules for every tool, and this tool's (a build of an existing tool only). */
+  ownerInstructions?: OwnerInstructions;
   /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
   brief?: string;
 }
@@ -332,8 +338,9 @@ CREATE TABLE IF NOT EXISTS build_charges (
   unit           TEXT NOT NULL
 );
 -- What led to a build, kept for the capability's life: the owner's conversation with the intake
--- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (the
--- spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
+-- (the web client's turns), the owner's instructions it ran with (owner_instructions, the lines as
+-- JSON; a build from before 0.4.11 has BUILDER.md's section in instructions instead, not read), and
+-- which brief it ran on (the spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
 CREATE TABLE IF NOT EXISTS build_context (
   build_id       TEXT PRIMARY KEY,
   conversation   TEXT,
@@ -491,6 +498,7 @@ const ADDED_COLUMNS: [string, string, string][] = [
   ["capabilities", "saturation", "INTEGER"],
   ["capabilities", "source", "TEXT"],
   ["builds", "discarded_at", "TEXT"],
+  ["build_context", "owner_instructions", "TEXT"],
 ];
 
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
@@ -755,14 +763,14 @@ export class Registry {
   setBuildContext(buildId: string, c: BuildContext) {
     const next = { ...this.buildContext(buildId), ...c };
     this.db
-      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, instructions, brief) VALUES (?, ?, ?, ?)")
-      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.instructions ?? null, next.brief ?? null);
+      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, owner_instructions, brief) VALUES (?, ?, ?, ?)")
+      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.ownerInstructions ? JSON.stringify(next.ownerInstructions) : null, next.brief ?? null);
   }
 
   buildContext(buildId: string): BuildContext | undefined {
-    const r = this.db.prepare("SELECT conversation, instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
+    const r = this.db.prepare("SELECT conversation, owner_instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
     if (!r) return undefined;
-    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.instructions ? { instructions: r.instructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
+    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.owner_instructions ? { ownerInstructions: JSON.parse(r.owner_instructions) } : {}), ...(r.brief ? { brief: r.brief } : {}) };
   }
 
   insertAttachment(a: AttachmentRef & { session: string }) {

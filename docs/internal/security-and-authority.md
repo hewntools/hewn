@@ -73,6 +73,8 @@ A Builder may receive source as part of a scoped build job.
 
 An Agent with `modify` scope receives a tool's source through the pack (`capabilities_pack`), for a tool its grant shows it: writing a change itself, it is that change's Builder. An Agent that can only discover and invoke never does.
 
+The pack also carries what Hewn's own Builder is told of the owner's standing instructions for building: their rules for every tool to an Agent with `create` or `modify`, and a tool's own rules with a change's pack, for a tool its grant shows it. Never the owner's conversations with the intake (their words), nor another build's request.
+
 Source access should eventually be independently authorizable.
 
 ## State access

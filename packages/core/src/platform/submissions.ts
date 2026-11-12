@@ -6,7 +6,7 @@
 import { type Agent, canSee, requireScope } from "../auth.ts";
 import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, writeZip } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
-import { bytes, CONTRACTS_DIR, fromBase64, isArtefact, isBuilderConfig, isWorkspaceOnly, toBase64 } from "../files.ts";
+import { bytes, CONTRACTS_DIR, fromBase64, isArtefact, isBuilderConfig, isWorkspaceOnly, OWNER_INSTRUCTIONS_DIR, toBase64 } from "../files.ts";
 import { randomToken, sha256 } from "../sha256.ts";
 import type { CheckResult, Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
@@ -76,7 +76,7 @@ export interface ClientCheck {
 /** Each refused path with the rule it breaks, so a client learns the rule. */
 const RULES = {
   config: "Hewn never keeps a builder's own configuration in a tool (dotfiles and dot-folders, CLAUDE.md, AGENTS.md, opencode.json)",
-  workspace: "Hewn writes these for builders and never keeps them in a tool (BUILDER.md, BRIEF.md, CONTRACTS.md, OTHER_TOOLS.md, PLATFORM_UI.css, OWNERS_WORDS.md, attachments/, screenshots/)",
+  workspace: "Hewn writes these for builders and never keeps them in a tool (BUILDER.md, BRIEF.md, CONTRACTS.md, OTHER_TOOLS.md, PLATFORM_UI.css, OWNERS_WORDS.md, attachments/, screenshots/, owner-instructions/)",
   artefact: "build output is never part of a tool (node_modules, .venv, __pycache__, .DS_Store, .pytest_cache)",
 } as const;
 
@@ -163,7 +163,8 @@ export class Submissions extends Domain {
 
   /**
    * What Hewn's builder finds in its workspace before it writes, for a client that writes the tool
-   * itself: the other tools' contracts (`CONTRACTS.md`, `.hewn-contracts/<id>.md`), their looks
+   * itself: the owner's instructions for building (`owner-instructions/`: every tool's, and for a
+   * change the tool's own), the other tools' contracts (`CONTRACTS.md`, `.hewn-contracts/<id>.md`), their looks
    * (`OTHER_TOOLS.md`), the design system (`PLATFORM_UI.css`), and for a change the tool's files and
    * its schedules. Never the brief's request or the owner's words: the client has its own. Only the
    * tools the client may see.
@@ -195,7 +196,7 @@ export class Submissions extends Domain {
       baseVersion: cap.activeVersion!,
       ...head,
       ...(schedules.length ? { schedules } : {}),
-      next: `The tool's files are v${cap.activeVersion}'s. Change them in your workspace, keep every operation version in schedules (each runs exactly that one), then capabilities_check with capabilityId while you work and capabilities_submit with capabilityId and baseVersion ${cap.activeVersion} when the check passes. Send the tool's files only, not the contracts, looks or design system.${rest}`,
+      next: `The tool's files are v${cap.activeVersion}'s. Change them in your workspace, keep every operation version in schedules (each runs exactly that one), then capabilities_check with capabilityId while you work and capabilities_submit with capabilityId and baseVersion ${cap.activeVersion} when the check passes. Send the tool's files only, not the owner's instructions, contracts, looks or design system.${rest}`,
     };
   }
 
@@ -316,9 +317,9 @@ export class Submissions extends Domain {
   }
 }
 
-/** A pack's files as a client reads them first: the other tools' contracts and looks, the tool's own files (smallest first), then the design system. */
+/** A pack's files as a client reads them first: the owner's instructions, the other tools' contracts and looks, the tool's own files (smallest first), then the design system. */
 function packOrder(files: Files): string[] {
-  const rank = (p: string) => (p === "CONTRACTS.md" ? 0 : p === "OTHER_TOOLS.md" ? 1 : p === "PLATFORM_UI.css" ? 3 : 2);
+  const rank = (p: string) => (p.startsWith(`${OWNER_INSTRUCTIONS_DIR}/`) ? -1 : p === "CONTRACTS.md" ? 0 : p === "OTHER_TOOLS.md" ? 1 : p === "PLATFORM_UI.css" ? 3 : 2);
   return Object.keys(files).sort((a, b) => rank(a) - rank(b) || files[a].length - files[b].length || a.localeCompare(b));
 }
 
