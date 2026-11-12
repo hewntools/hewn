@@ -40,7 +40,7 @@ test("Hewn answers its health check all through a validation of hundreds of case
     const probe = (async () => {
       while (installing) {
         const at = Date.now();
-        await fetch(`${h.sv.url}/health`).catch(() => {});
+        await fetch(`${h.sv.url}/health`, { signal: AbortSignal.timeout(10_000) }).catch(() => {});
         longest = Math.max(longest, Date.now() - at);
         await new Promise((r) => setTimeout(r, 50));
       }
@@ -49,7 +49,7 @@ test("Hewn answers its health check all through a validation of hundreds of case
       // Without a turn of the event loop between cases, workerd is restarted mid-install and the request is cut.
       const b = await h.sv.admin("install", { name: "Running Log", purpose: "x", dir, wait: true }).catch((e: Error) => ({ status: `cut off: ${e.message}`, log: [] as string[] }));
       assert.equal(b.status, "promoted", b.log.join("\n"));
-      assert.ok(b.log.some((l: string) => l.includes("412 test cases passed")), b.log.join("\n"));
+      assert.ok(b.log.some((l: string) => l.includes(`${cheap.length + slow.length} test cases passed`)), b.log.join("\n"));
     } finally {
       installing = false;
       await probe;

@@ -178,3 +178,18 @@ export class Domain {
     return build;
   }
 }
+
+/**
+ * In a loop of calls into a tool (validation, a sample replay, due schedules), a turn of the event loop every 100 ms
+ * or so. On the workerd host a call that settles without I/O never lets the event loop turn, so a long run of them
+ * leaves every request waiting, the supervisor's health check among them, and the supervisor restarts workerd after
+ * its stall time (5 s by default). By time, not per call: a turn per call adds seconds to hundreds of cases.
+ */
+export function breather() {
+  let last = Date.now();
+  return async () => {
+    if (Date.now() - last < 100) return;
+    await new Promise((r) => setTimeout(r, 0));
+    last = Date.now();
+  };
+}

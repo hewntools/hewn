@@ -7,7 +7,7 @@ import { compileSchema, connectOperation, opKey, schemaErrors } from "../manifes
 import type { BuildRow } from "../registry.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, toCron, parseCron } from "../schedules.ts";
 import { resolveOperation, inputMismatch } from "./invocation.ts";
-import { Domain, type Shared } from "./context.ts";
+import { breather, Domain, type Shared } from "./context.ts";
 import type { PlatformOptions } from "../platform.ts";
 
 export class Schedules extends Domain {
@@ -120,7 +120,9 @@ export class Schedules extends Domain {
    */
   async runDueSchedules(now = Date.now()): Promise<{ id: string; ok: boolean }[]> {
     const ran: { id: string; ok: boolean }[] = [];
+    const breathe = breather();
     for (const listed of this.schedules.due(now)) {
+      await breathe();
       // Another pass (the alarm, a resume) may have claimed it while this one awaited an earlier run.
       const s = this.schedules.get(listed.id);
       if (!s || s.status !== "active" || s.nextRunAt === null || s.nextRunAt > now) continue;
