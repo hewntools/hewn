@@ -14,8 +14,10 @@ import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
-import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
+import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
+import { fetchLink } from "./fetch-link.ts";
+import { SHARE_PREFIX } from "./public.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
 
@@ -349,14 +351,25 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const path = url.searchParams.get("path");
         return path ? platform.versionFile(owner, id, version, path) : platform.versionCode(owner, id, version);
       }
-      // Share…: what a version would ship (?version=N), or the file itself (share/download).
+      // Share…: what a version would ship (?version=N), its links and where they'd point, or the file itself (share/download).
       case "GET share": {
         const v = url.searchParams.get("version");
         const version = v ? Number(v) : undefined;
-        if (arg !== "download") return platform.shareCheck(owner, id, version);
+        if (arg !== "download") return { ...(await platform.shareCheck(owner, id, version)), links: platform.shareLinks(owner, id), address: publicAddress(platform, await tunnelNow(host)) };
         const { name, bundle } = await platform.shareBundle(owner, id, version);
         return new Response(body(bundle), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
       }
+      // Share… › Link: one version, for anyone with the link, until it expires or is revoked. Needs a public address.
+      case "POST links": {
+        const address = publicAddress(platform, await tunnelNow(host));
+        if (!address) throw new PlatformError("conflict", "Links need a public address. Set up remote access first (Settings › Remote access).");
+        const b = await readJson(req);
+        const { token, link } = await platform.createShareLink(owner, id, { version: b.version === undefined ? undefined : Number(b.version), expires: b.expires === undefined ? undefined : String(b.expires) });
+        return { url: `${address}${SHARE_PREFIX}${token}`, link };
+      }
+      case "DELETE links":
+        platform.revokeShareLink(owner, id, String(arg ?? ""));
+        return { ok: true };
       // Info › Data › Start over: empty the data, keep the tool (a backup is kept).
       case "POST start-over": {
         const b = await readJson(req);
@@ -418,7 +431,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "accounts") return platform.accounts(owner);
 
-  // The Hub (0.4.9: Hewn's own tools, Official, shipped with the release; offline): cards, a tool's page, its images and code, and staging one to install.
+  // Hewn's own tools (Official, shipped with the release; offline; under + New since 0.4.11, the Hub tab before): cards, a tool's page, its images and code, and staging one to install.
   if (resource === "hub") {
     const shelf = host.shelf ? await host.shelf.tools() : { tools: [], firstRun: [] };
     if (!id && method === "GET") return { tools: platform.hubCards(owner, shelf.tools), firstRun: shelf.firstRun };
@@ -437,9 +450,15 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (id && sub === "stage" && method === "POST") return platform.hubStage(owner, shelf.tools, id);
   }
 
-  // Install from a file: upload (staged, read before anything is installed), its code, install, or drop it.
+  // Install from a file or a link: upload or fetch (staged, read before anything is installed), its code, install, or drop it.
   if (resource === "bundles") {
-    if (!id && method === "POST") return platform.stageBundle(owner, fromBase64(String((await readJson(req)).data ?? "")), { from: "file" });
+    if (!id && method === "POST") {
+      const b = await readJson(req);
+      if (b.url === undefined) return platform.stageBundle(owner, fromBase64(String(b.data ?? "")), { from: "file" });
+      platform.agents(owner); // owner only, before anything is fetched
+      const fetched = await fetchLink(String(b.url), host.fetch);
+      return platform.stageBundle(owner, fetched.bytes, fetched.origin);
+    }
     if (id && !sub && method === "GET") return platform.stagedBundle(owner, id);
     if (id && sub === "code" && method === "GET") {
       const path = url.searchParams.get("path");
@@ -1071,7 +1090,7 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildId: b.buildId,
       buildKind: b.kind,
       builder: b.builder,
-      // An install from a file: "from a file", "from Hub" (Activity says "Installed from a file · v1").
+      // An install: "from a file", "from <host>", "from Hewn's tools" (Activity says "Installed from a file · v1").
       ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
       // A client's submission: "submitted by Claude Code".
       ...(b.submittedBy ? { submittedBy: b.submittedBy } : {}),
@@ -1106,6 +1125,15 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
   return { items: page, next: filtered.length > page.length ? page.at(-1)!.at : null };
 }
 
+/** The tunnel's status, or null (no tunnel on this host, or it can't say). */
+const tunnelNow = (host: SurfaceHost): Promise<TunnelStatus | null> => (host.tunnel ? host.tunnel().catch(() => null) : Promise.resolve(null));
+
+/**
+ * Where this Hewn is reachable from the internet: its public URL, else the tunnel's address once
+ * it's up; null when neither. What MCP's public address and share links are built on.
+ */
+const publicAddress = (platform: Platform, tunnel: TunnelStatus | null): string | null => platform.publicUrl() ?? (tunnel?.state === "up" && tunnel.url ? tunnel.url : null);
+
 /**
  * Connect an agent (owner only). `manual`: the addresses an MCP client connects to (it signs
  * in with OAuth, approved here). `agents/<id>`: registers Hewn with a local harness and starts its
@@ -1116,8 +1144,8 @@ async function setupRoute(platform: Platform, host: SurfaceHost, owner: Agent, r
   const mcpUrl = `http://127.0.0.1:${host.port}/mcp`;
   const method = req.method;
   if (id === "manual") {
-    const tunnel = host.tunnel ? await host.tunnel().catch(() => null) : null;
-    const reachable = platform.publicUrl() ?? (tunnel?.state === "up" && tunnel.url ? tunnel.url : null);
+    const tunnel = await tunnelNow(host);
+    const reachable = publicAddress(platform, tunnel);
     return { url: mcpUrl, publicUrl: reachable ? `${reachable}/mcp` : null, tunnel, pointer: AGENT_POINTER };
   }
   if (!host.setup) throw new PlatformError("not_found", host.hosted ? "there are no local agents to connect here: connect claude.ai, ChatGPT or another agent through your address" : "connecting agents from the web is not available here; run: hewn setup");

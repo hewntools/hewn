@@ -315,7 +315,7 @@ fieldset.job legend .sub { color: var(--text-2); }
 .clip-1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .danger-text, .list > li .sub.danger-text { color: var(--danger); }
 .warn-text { color: var(--warn); }
-/* Q1–Q3 the Hub (design pass 3): one grid of cards, a tool's page, the link under New, the hosted first run. */
+/* Q1–Q3 Hewn's tools under + New (design pass 3's Hub): one grid of cards, a tool's page, the options under New, the hosted first run. */
 .hub-head { gap: 16px; align-items: center; }
 .hub-head > input { flex: 1; min-width: 0; }
 .chip-divider { width: 1px; height: 20px; background: var(--border); }

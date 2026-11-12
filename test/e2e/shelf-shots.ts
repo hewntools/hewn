@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Hub's card images: each tool on the shelf (seeds/shelf.json) installed from the Hub with its
+// The card images of Hewn's own tools: each tool on the shelf (seeds/shelf.json) installed with its
 // sample data on a test host, then its screen (its own UI, or its widget, or the Run view) and a
 // widget shot into seeds/<id>/.hub/. Run per release, before it's cut:
-// PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/hub-shots.ts [id…]
+// PLAYWRIGHT_NODE_MODULES=<playwright-core dir> node test/e2e/shelf-shots.ts [id…]
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { createRequire } from "node:module";

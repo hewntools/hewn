@@ -797,18 +797,20 @@ export class Builds extends Domain {
   }
 
   /**
-   * Install a capability from a directory the host knows how to copy (`hewn install <dir>`):
-   * a create build whose builder copies the files in, then the normal validation. Owner only.
+   * Install a capability from a directory the host knows how to copy (`hewn install <dir>`,
+   * builder `copy:<dir>`) or from files given as they are (`keep`): a create build, then the normal
+   * validation. Owner only. A tool's file, a link and Hewn's tools go through `submit` instead.
    */
-  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean; summary?: BundleSummary }): Promise<BuildView> {
+  async install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string }): Promise<BuildView> {
     requireOwner(owner);
+    if (req.builder !== "keep" && !req.builder.startsWith("copy:")) throw new PlatformError("invalid_request", `install takes builder "keep" or "copy:<dir>"; a tool's file is installed with installBundle (submit)`);
     const id = req.id ?? slugify(req.name);
     const existing = this.registry.getCapability(id);
     if (existing?.archivedAt) throw archivedConflict(existing);
     if (existing?.activeVersion) throw new PlatformError("conflict", `capability '${id}' already exists`);
     // Takes over an id a create never promoted (as createBuild does), unless one is being built.
     if (existing) this.oneCreateAtATime(owner, id);
-    const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})`, ...(req.source ? { source: req.source } : {}), ...(req.sample ? { sample: true } : {}), ...(req.summary ? { summary: req.summary } : {}) };
+    const request: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements ?? `install (${req.builder})` };
     return this.openCreateBuild(owner, id, request, !existing, req.builder, req.seed);
   }
 

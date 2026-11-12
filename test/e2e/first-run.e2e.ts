@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Real-browser E2E on a fresh workerd host (not part of npm test): the first run, an agent's
-// approval (from the Inbox), choosing who builds, a starter build, the Hub, schedules, Info's own
+// approval (from the Inbox), choosing who builds, a starter build, Hewn's tools under + New, schedules, Info's own
 // actions (Run, a rule, Deny then Authorize, Restore… cancelled), a version's Files, a destructive
-// call confirmed from the banner, Share… on a tool installed from a file, and the authority trail on
+// call confirmed from the banner, Share… on a tool installed from a file (a file, a link served on the
+// public listener, Revoke), and the authority trail on
 // Activity. The builder is scripted (copies the Running Log seed; a change adds a line);
 // builder/intake checks are stubbed as installed and signed in, so it runs anywhere.
 //
@@ -45,10 +46,11 @@ const builder: CapabilityBuilder = {
   },
 };
 const real = process.env.E2E_REAL_BUILDER === "1";
+const publicPort = await freePort();
 const sv = await startSupervisor({
   home: openHome(root),
   port,
-  publicPort: await freePort(),
+  publicPort,
   builders: real ? BUILDERS : { claude: builder },
   log: real ? (l) => /build|attempt|promot|FAIL/i.test(l) && console.log(`  [hewn] ${l.slice(0, 160)}`) : () => {},
   keySource: "file",
@@ -178,17 +180,23 @@ try {
     await page.screenshot({ path: "/tmp/e2e-fr-home.png" });
   });
 
-  await step("the Hub: the Official tools, a tool's page, its Source code, Install opens the install sheet (cancelled); ⌘K has the Hub last", async () => {
-    await page.locator("nav.main-nav").getByRole("link", { name: "Hub" }).click();
-    await page.waitForURL(/#\/hub$/);
+  await step("Hewn's tools under + New: the Official tools, a tool's page, its Source code, Install opens the install sheet (cancelled); no Hub tab; ⌘K has Hewn's tools last", async () => {
+    const tabs = await page.locator("nav.main-nav a").allTextContents();
+    if (tabs.includes("Hub")) throw new Error(`tabs: ${tabs.join(", ")}`);
+    await page.goto(`${web}/#/hub`);
+    await page.getByText("That page doesn't exist.").waitFor();
+    await page.goto(`${web}/#/new`);
+    await page.locator(".start-options").getByText("One of Hewn's tools").click();
+    await page.waitForURL(/#\/new\/tools$/);
+    await page.getByRole("heading", { name: "Hewn's tools" }).waitFor();
     await page.locator(".hub-card", { hasText: "Plant Log" }).waitFor();
     const cards = await page.locator(".hub-card").count();
-    if (cards < 7) throw new Error(`${cards} tools on the Hub`);
-    // The starter is a Reading List: the Hub's counts as yours (same id), so it offers Open and Install a copy.
+    if (cards < 7) throw new Error(`${cards} of Hewn's tools`);
+    // The starter is a Reading List: Hewn's counts as yours (same id), so it offers Open and Install a copy.
     await page.locator(".hub-card", { hasText: "Reading List" }).getByText("Installed").waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-hub.png" });
     await page.locator(".hub-card", { hasText: "Plant Log" }).click();
-    await page.waitForURL(/#\/hub\/plant-log$/);
+    await page.waitForURL(/#\/new\/tools\/plant-log$/);
     await page.getByRole("heading", { name: "Plant Log" }).waitFor();
     await page.locator(".hub-what").getByText(/^Keeps plants/).waitFor();
     await page.locator(".hub-what").getByRole("button", { name: "Source code ›" }).click();
@@ -199,19 +207,19 @@ try {
     await code.waitFor({ state: "detached" });
     await page.locator(".info-head").getByRole("button", { name: "Install", exact: true }).click();
     const sheet = page.locator("dialog[open]", { hasText: "Install Plant Log" });
-    await sheet.getByText(/From Hub · Official/).waitFor();
+    await sheet.getByText(/From Hewn's tools · Official/).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-hub-install.png" });
     await sheet.getByRole("button", { name: "Cancel" }).click();
     await sheet.waitFor({ state: "detached" });
-    await page.goto(`${web}/#/hub/reading-list`);
+    await page.goto(`${web}/#/new/tools/reading-list`);
     await page.locator(".info-head").getByRole("button", { name: "Install a copy" }).waitFor();
     await page.locator(".info-head").getByRole("button", { name: "Open", exact: true }).waitFor();
-    // ⌘K: "log" names Hub tools (Plant Log, Running Log) and finds Activity by its words; yours first, the Hub last.
+    // ⌘K: "log" names Hewn's tools (Plant Log, Running Log) and finds Activity by its words; yours first, Hewn's tools last.
     await page.getByRole("button", { name: "Search and commands" }).click();
     await page.getByPlaceholder("Search tools, pages and actions").fill("log");
     await page.locator(".palette-item", { hasText: "Plant Log" }).waitFor();
     const groups = await page.locator(".palette-group").allTextContents();
-    if (groups.at(-1) !== "Hub" || groups.indexOf("Hub") !== groups.length - 1 || groups.length < 2) throw new Error(`groups: ${groups.join(", ")}`);
+    if (groups.at(-1) !== "Hewn's tools" || groups.indexOf("Hewn's tools") !== groups.length - 1 || groups.length < 2) throw new Error(`groups: ${groups.join(", ")}`);
     // The arrows wrap: Up on the first item goes to the last, Down on the last back to the first.
     const active = () => page.locator(".palette-item").evaluateAll((els: Element[]) => els.findIndex((e) => e.classList.contains("active")));
     const last = (await page.locator(".palette-item").count()) - 1;
@@ -231,6 +239,35 @@ try {
     await page.keyboard.press("ArrowDown");
     if ((await active()) !== 1) throw new Error(`after nothing shown, Down: ${await active()}`);
     await page.keyboard.press("Escape");
+  });
+
+  await step("one of Hewn's tools installs from + New with its sample data", async () => {
+    await page.goto(`${web}/#/new`);
+    await page.locator(".start-options").getByText("One of Hewn's tools").click();
+    await page.locator(".hub-card", { hasText: "Kid Quotes" }).click();
+    await page.locator(".info-head").getByRole("button", { name: "Install", exact: true }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "Install Kid Quotes" });
+    if (!(await sheet.getByRole("checkbox").isChecked())) throw new Error("Start with sample data isn't ticked");
+    await sheet.getByRole("button", { name: "Install", exact: true }).click();
+    await page.waitForURL(/#\/b\//);
+    const until = Date.now() + 120_000;
+    let st: any;
+    // Its sample data replays after it goes live: wait for the build to say so.
+    const replayed = (s: any) => s.builds.find((b: any) => b.capabilityId === "kid-quotes")?.log?.some((l: string) => /sample data(:| stopped)/.test(l));
+    while (Date.now() < until && !replayed((st = await sv.admin("status", {})))) await new Promise((r) => setTimeout(r, 500));
+    if (!st.capabilities.find((c: any) => c.id === "kid-quotes")?.version || !replayed(st)) throw new Error(`Kid Quotes didn't go live with its sample data: ${JSON.stringify(st.builds[0]?.log?.slice(-5))}`);
+    const quotes = await sv.admin("invoke", { capabilityId: "kid-quotes", operation: "list_quotes", input: {} });
+    if (!(JSON.stringify(quotes.result ?? {}).length > 200)) throw new Error(`no sample data: ${JSON.stringify(quotes)}`);
+    const src = (await sv.admin("call", { method: "get", args: ["kid-quotes"] })).result.source;
+    if (src?.from !== "hub" || src?.id !== "kid-quotes") throw new Error(`source: ${JSON.stringify(src)}`);    // A file or a link: a link Hewn won't fetch says why under the field, and the sheet stays.
+    await page.goto(`${web}/#/new`);
+    await page.locator(".start-options").getByText("A file or a link someone shared").click();
+    const r1 = page.locator("dialog[open]", { hasText: "Install from a file or link" });
+    await r1.getByLabel("A link to a tool's file").fill("http://example.com/plant-log.hewn.zip");
+    await r1.getByRole("button", { name: "Fetch" }).click();
+    await r1.getByText("The link isn't https. Hewn fetches only https links.").waitFor();
+    await r1.getByRole("button", { name: "Cancel" }).click();
+    await r1.waitFor({ state: "detached" });
   });
 
   await step("schedules: Info › Schedules › + Add schedule, add one daily, see the next run, pause it", async () => {
@@ -451,7 +488,54 @@ export const operations = {
     sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
     await sheet.getByText(/sample\/calls\.json/).waitFor();
     if ((await sheet.getByLabel("Version").inputValue()) !== "1") throw new Error("a version page's Share… isn't on that version");
+    // No public address yet: the Link row says so, and where to set one up.
+    await sheet.getByText("Links need a public address").waitFor();
+    await sheet.getByRole("button", { name: "Set up remote access ›" }).waitFor();
     await sheet.getByRole("button", { name: "Done" }).click();
+  });
+
+  await step("Share… › Link: a link to one version, Never in red, served on the public listener with the robots header, counted, then revoked", async () => {
+    await sv.admin("call", { method: "setPublicUrl", args: ["https://hewn.example.com"] });
+    await page.goto(`${web}/#/c/shared-log`);
+    // The router holds the version page (with its own Share…) until Info is ready: wait for Info.
+    await page.locator("main.version-layout").waitFor({ state: "detached" });
+    await page.locator(".pill", { hasText: "from a file · Running Log v1" }).waitFor();
+    await page.getByRole("button", { name: "Share…" }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "Share Shared Log" });
+    await sheet.getByText(/sample\/calls\.json · \d+ calls? · /).waitFor();
+    if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Share… isn't on the live version");
+    await sheet.locator("li", { hasText: "Anyone with it can install this version" }).getByRole("button", { name: "Create…" }).click();
+    const link = page.locator("dialog[open]", { hasText: "Link to Shared Log v2" });
+    await link.getByRole("button", { name: "7 days" }).and(link.locator("[aria-pressed=true]")).waitFor();
+    await link.getByRole("button", { name: "Never" }).click();
+    await link.getByText("Anyone with this link can install this tool until you revoke it.").waitFor();
+    await link.getByRole("button", { name: "Create link" }).click();
+    const url = await link.getByLabel("The link").inputValue();
+    const m = /^https:\/\/hewn\.example\.com\/share\/([A-Za-z0-9_-]{32,})$/.exec(url);
+    if (!m) throw new Error(`the link: ${url}`);
+    await page.screenshot({ path: "/tmp/e2e-fr-link.png" });
+    await link.getByRole("button", { name: "Done" }).click();
+    // The public listener answers it on any host (a tunnel's too), with the bundle and the robots header.
+    const pub = `http://127.0.0.1:${publicPort}`;
+    const res = await fetch(`${pub}/share/${m[1]}`, { headers: { host: "hewn.example.com" } });
+    if (res.status !== 200 || res.headers.get("content-type") !== "application/zip" || res.headers.get("x-robots-tag") !== "noindex, nofollow") throw new Error(`share link: ${res.status} ${[...res.headers].join(" ")}`);
+    if (!/attachment; filename="shared-log\.hewn\.zip"/.test(res.headers.get("content-disposition") ?? "")) throw new Error(`disposition: ${res.headers.get("content-disposition")}`);
+    if ((await res.arrayBuffer()).byteLength < 100) throw new Error("an empty bundle");
+    if ((await (await fetch(`${pub}/robots.txt`)).text()) !== "User-agent: *\nDisallow: /share/\n") throw new Error("robots.txt");
+    // Share… lists it: its version, until revoked, one download; Revoke, and it 404s.
+    await sheet.getByRole("button", { name: "Done" }).click();
+    await page.getByRole("button", { name: "Share…" }).click();
+    const again = page.locator("dialog[open]", { hasText: "Share Shared Log" });
+    const row = again.locator("li", { hasText: "until you revoke it · 1 download" });
+    await row.waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-links.png" });
+    await row.getByRole("button", { name: "Revoke" }).click();
+    await page.locator("dialog[open]", { hasText: "Revoke this link?" }).getByRole("button", { name: "Revoke" }).click();
+    await row.waitFor({ state: "detached" });
+    const gone = await fetch(`${pub}/share/${m[1]}`);
+    if (gone.status !== 404 || gone.headers.get("x-robots-tag") !== "noindex, nofollow") throw new Error(`after Revoke: ${gone.status}`);
+    await again.getByRole("button", { name: "Done" }).click();
+    await sv.admin("call", { method: "setPublicUrl", args: [null] });
   });
 
   await step("Activity shows who changed authority, and when, and an install from a file", async () => {

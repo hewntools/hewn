@@ -5,10 +5,10 @@ import { AgentStore, type AgentDetails, type ApprovalMode, type PendingRequest }
 import type { Agent, Scope } from "./auth.ts";
 import type { Cells } from "./glyph.ts";
 import type { Deadline } from "./deadline.ts";
-import type { CapabilityManifest, ModelRequirement, ToolSource, WidgetManifest } from "./manifest.ts";
+import type { CapabilityManifest, ModelRequirement, WidgetManifest } from "./manifest.ts";
 import type { HostModels, ModelSettings } from "./models.ts";
 import type { Blobs, CapabilityRuntime, Files, SecretStore, Sql, Workbench } from "./ports.ts";
-import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry } from "./registry.ts";
+import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry, type ShareLink } from "./registry.ts";
 import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { type Schedule, ScheduleStore } from "./schedules.ts";
 import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
@@ -23,7 +23,7 @@ import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
 import type { BundleSummary, ShelfTool } from "./bundle.ts";
-import { type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
+import { type BundleOrigin, type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
 import { CHECKS_PER_HOUR, type ClientCheck, type Pack, PACK_LINK_MS, PACK_PAGE_BYTES, Submissions } from "./platform/submissions.ts";
 import type { CodeFile, CodeText } from "./code.ts";
@@ -249,7 +249,11 @@ export class Platform {
 
   shareCheck(owner: Agent, capabilityId: string, version?: number): Promise<ShareCheck> { return this.d.sharing.shareCheck(owner, capabilityId, version); }
   shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.shareBundle(owner, capabilityId, version); }
-  stageBundle(owner: Agent, zip: Uint8Array, origin?: { from: "file" | "link" | "hub"; host?: string }): Promise<BundlePreview> { return this.d.sharing.stageBundle(owner, zip, origin); }
+  createShareLink(owner: Agent, capabilityId: string, req: { version?: number; expires?: string }): Promise<{ token: string; link: ShareLink }> { return this.d.sharing.createShareLink(owner, capabilityId, req); }
+  shareLinks(owner: Agent, capabilityId: string): ShareLink[] { return this.d.sharing.shareLinks(owner, capabilityId); }
+  revokeShareLink(owner: Agent, capabilityId: string, id: string) { return this.d.sharing.revokeShareLink(owner, capabilityId, id); }
+  sharedBundle(token: string): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.sharedBundle(token); }
+  stageBundle(owner: Agent, zip: Uint8Array, origin?: BundleOrigin): Promise<BundlePreview> { return this.d.sharing.stageBundle(owner, zip, origin); }
   stagedBundle(owner: Agent, token: string): Promise<BundlePreview> { return this.d.sharing.stagedBundle(owner, token); }
   bundleCode(owner: Agent, token: string) { return this.d.sharing.bundleCode(owner, token); }
   bundleFile(owner: Agent, token: string, path: string) { return this.d.sharing.bundleFile(owner, token, path); }
@@ -380,7 +384,7 @@ export class Platform {
   activeBuilds(): { buildId: string; capabilityId: string; kind: BuildKind; name: string; purpose: string; connection: boolean; state: BuildStepState }[] { return this.d.builds.activeBuilds(); }
   create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> { return this.d.builds.create(agent, req); }
   agentModelChoices(builder?: string): string[] { return this.d.builds.agentModelChoices(builder); }
-  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string; source?: ToolSource; sample?: boolean; summary?: BundleSummary }): Promise<BuildView> { return this.d.builds.install(owner, req); }
+  install(owner: Agent, req: { name: string; purpose: string; builder: string; id?: string; seed?: Files; requirements?: string }): Promise<BuildView> { return this.d.builds.install(owner, req); }
   modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.modify(agent, req); }
   addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.addWidgets(agent, req); }
   polish(owner: Agent, req: { capabilityId: string; note?: string; realData?: boolean; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView> { return this.d.builds.polish(owner, req); }

@@ -42,6 +42,13 @@ export async function bridge(req: IncomingMessage, res: ServerResponse, handler:
   res.end();
 }
 
+/**
+ * A kept-alive connection outlives the client's: Node's own agent drops one idle for 5 seconds, and
+ * a server that also closes at 5 seconds can close it just as a test sends on it (ECONNRESET, after
+ * a test waits on a build without a request).
+ */
+const idleLonger = (server: Server) => void (server.keepAliveTimeout = 30_000);
+
 /** Hewn HTTP surface: web client, capability UIs, MCP at /mcp and OAuth. */
 export function startServer(platform: Platform, port: number, host: (actualPort: number) => SurfaceHost, bind = "127.0.0.1"): Promise<Server & { surface?: SurfaceHost }> {
   let surface: SurfaceHost | undefined;
@@ -54,6 +61,7 @@ export function startServer(platform: Platform, port: number, host: (actualPort:
       if (!res.headersSent) res.writeHead(500).end();
     });
   });
+  idleLonger(server);
   // Open MCP sessions hold notification streams: end them, or close() would wait forever.
   const close = server.close.bind(server);
   server.close = ((cb?: (err?: Error) => void) => {
@@ -92,6 +100,7 @@ export function startPublicServer(main: Server, port: number, log: (line: string
       if (!res.headersSent) res.writeHead(502).end();
     });
   });
+  idleLonger(server);
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve(server)));
 }
 

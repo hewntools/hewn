@@ -2,8 +2,8 @@
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
 import { ago, api, appIcon, builderLabel, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
 import { briefParts } from "./brief.js";
-import { brandTile, go, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
-import { installFromFile } from "./install.js";
+import { brandTile, go, HEWNS_TOOLS, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
+import { installFromFileOrLink } from "./install.js";
 import { jobModelOf, saveBuildModel } from "./home.js";
 import { cadenceText } from "./schedules.js";
 import { memoryNotice } from "./tool-actions.js";
@@ -228,25 +228,25 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : polishMode ? `Polish ${cap?.name ?? "it"}` : "What should change?")
     : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
-  // Q1 New: or start from a tool someone made: one in Hub, or a file someone shared (gone once you're talking).
+  // Q1 New: or install one: one of Hewn's tools, or a file or link someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
-  const hubLink =
+  const installOptions =
     mode === "create" &&
     !connection &&
     h(
       "div",
       { class: "start-from" },
-      h("div", { class: "eyebrow" }, "Or start from"),
+      h("div", { class: "eyebrow" }, "Or install"),
       h(
         "div",
         { class: "start-options" },
-        option(brandTile(32), "A tool in Hub", "Hewn's own, ready to install", { href: "#/hub" }),
-        option(h("span", { class: "start-file", "aria-hidden": "true" }, ".zip"), "A file someone shared", "A .hewn.zip, up to 5 MB", { type: "button", onclick: () => installFromFile().catch(fail) }),
+        option(brandTile(32), "One of Hewn's tools", "Official, ready to install", { href: HEWNS_TOOLS }),
+        option(h("span", { class: "start-file", "aria-hidden": "true" }, ".zip"), "A file or a link someone shared", "A .hewn.zip or its https link, up to 5 MB", { type: "button", onclick: () => installFromFileOrLink().catch(fail) }),
       ),
     );
   // Continue the last conversation? sits above the box, not in it.
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, hubLink));
-  const say = (who, text, attachments) => (hubLink && (hubLink.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, installOptions));
+  const say = (who, text, attachments) => (installOptions && (installOptions.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
   syncSend();
@@ -446,7 +446,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     input.placeholder = placeholder;
     draftNow.hidden = true;
     heading.hidden = false;
-    if (hubLink) hubLink.hidden = false;
+    if (installOptions) installOptions.hidden = false;
     startOver.hidden = true;
     syncSend();
     grow();
