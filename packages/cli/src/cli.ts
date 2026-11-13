@@ -10,6 +10,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { backupLocation, backupNow, findBackup, listBackups, restoreBackup } from "./backup.ts";
 import { BUILDERS, cliIntake, isCliAgent } from "./builders/cli-agents.ts";
 import { startMetrics } from "./supervisor/metrics.ts";
+import { idleLine } from "./supervisor/idle.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
 import { initConfig, readConfig, writeConfig } from "./config.ts";
 import { formatChecks, runDoctor } from "./doctor.ts";
@@ -18,13 +19,14 @@ import { openUrl as openInBrowser } from "./open-url.ts";
 import { realSetupHooks } from "./setup/hooks.ts";
 import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remote.ts";
 import * as service from "./service.ts";
-import { defaultHome, harnesses, realExec } from "./setup/harnesses.ts";
+import { defaultHome, harnesses, realExec, refreshSkill } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
 import { hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
 import { checkFormat, writeFormat } from "./supervisor/format.ts";
 import { renderUnicodeCompact } from "uqr";
 import { dnsRecords, localSite, publicSite } from "@hewntools/host-workerd/surface/site.ts";
 import { webOrigin } from "@hewntools/host-workerd/surface/web.ts";
+import { SKILL_NAME } from "@hewntools/core/skill.ts";
 import { APP_DIR, BUNDLED, NPM_PREFIX } from "./app-dir.ts";
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -50,12 +52,12 @@ Use it (as the owner; talks to the running Hewn)
                       --print: print a sign-in link instead (on the public URL, with a QR code; --local for this machine's)
   url [<https://…> | --clear] [--listen <address> | --listen off]
                       the public URL: use Hewn from your phone or anywhere (prints the DNS records and proxy setup)
-  status              tools and recent builds
+  status [--json]     tools, the supervisor, and whether Hewn is idle (and its next alarm)
   feedback [--days N] [--json]
                       how recent builds worked out: your answers to "Got what you asked for?", attempts,
                       what they ran on, and the signs in the record (a fix, a change soon after, a restore, a delete)
-  install <dir | file.hewn.zip> [--name <name>] [--no-sample]
-                      install a tool from a source dir, or from a file someone shared (with its sample data)
+  install <dir | file.hewn.zip | https://…> [--name <name>] [--no-sample]
+                      install a tool from a source dir, or from a file or link someone shared (with its sample data)
   share <id> [--version N] [--out file.hewn.zip]
                       a tool as a file to give someone: what's in it (personal data, keys, your settings) first;
                       refused if it holds one of your own keys or has no sample data
@@ -78,11 +80,14 @@ Use it (as the owner; talks to the running Hewn)
   review [approve|reject <buildId>]
                       agents' changes waiting for you (to a connection, or adding operations)
   restore <id>        bring back a deleted tool, with its data
+  resume <id>         let a tool Hewn suspended run again (it kept Hewn from responding, 3 times in an hour)
   rollback <id> [version]
   export <id> [--out file.json]
   data reset <id> [--sample]
                       Start over: empty a tool's data and keep the tool (a backup is kept; asks you to
                       type the id); --sample replays its sample data after
+  data limit [<MB>] | data limit <id> <MB>|default
+                      how big each tool's data may grow (100 MB unless you change it), or one tool's own
   purge <id>          permanently delete a deleted tool (asks you to type the id)
   backup now|list|restore <date|file>|dir <path>
                       zipped snapshots (never secrets in plain text, never agent tokens)
@@ -91,7 +96,7 @@ Agents (MCP clients sign in with OAuth; you approve them)
   setup [--agents claude-code,codex,opencode] [--yes] [--dry-run]
                       connect local agents: registers Hewn with them, then they sign in
   agents              connected agents; agents pending | approve <code> [--scopes a,b] [--name n] [--only id,id]
-                      | deny <code> | scopes <agent> a,b | revoke <agent>
+                      | deny <code> | scopes <agent> a,b | tool <agent> <tool> on|off | revoke <agent>
   tunnel [status]     reach Hewn from cloud agents (claude.ai, ChatGPT): only MCP and sign-in are exposed
   tunnel start [--quick | --cloudflared <tunnel> --hostname <host> | --tailscale] | stop`;
 
@@ -168,7 +173,7 @@ async function main() {
       writeFileAtomic(supervisorFile(home), JSON.stringify({ url: sv.url, adminToken: sv.adminToken, control: sv.control, publicListener: sv.publicNetwork ?? sv.publicUrl, pid: process.pid }) + "\n", 0o600);
       // Off unless set: a host that scrapes Hewn turns it on.
       const metricsPort = Number(process.env.HEWN_METRICS_PORT ?? 0);
-      if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log });
+      if (metricsPort) startMetrics({ port: metricsPort, url: sv.url, adminToken: sv.adminToken, version: (await import("./upgrade.ts")).appVersion(), log, status: sv.status });
       log(`Hewn on ${webOrigin(port)} · MCP ${sv.url}/mcp · tunnels point at ${sv.publicUrl}${sv.publicNetwork ? ` · public listener also on ${sv.publicNetwork}` : ""} · home ${home.root}${flag("no-sandbox") ? " · workerd sandbox OFF" : ""}`);
       log(`Sign in: hewn open`);
       const stop = async () => {
@@ -210,16 +215,21 @@ async function main() {
       // Move the checkout to the newest release (or --to <tag>), install it, check it builds.
       // Then: data is migrated by the new code at start (with a backup first).
       const { isCheckout, upgradeCheckout, upgradeNpm } = await import("./upgrade.ts");
+      // The Skill as the code now on disk ships it (readSkill reads the file), for every agent set up with Hewn.
+      const skill = () => {
+        for (const dir of refreshSkill(defaultHome(), harnesses())) console.log(`✔ the Skill ${SKILL_NAME} written to ${dir}`);
+      };
       if (BUNDLED && !flag("restart-only")) {
         const r = upgradeNpm({ to: option("to"), log: (l) => console.log(`  ${l}`) });
         if (r.command) return console.log(`Hewn ${r.to} is out. npm needs more rights here; run:\n  ${r.command}\nthen: hewn upgrade --restart-only`);
-        if (!r.changed) return console.log(`✔ already on ${r.to}`);
+        if (!r.changed) return (console.log(`✔ already on ${r.to}`), skill());
         console.log(`✔ ${r.from} → ${r.to}`);
       } else if (isCheckout() && !flag("restart-only")) {
         const r = await upgradeCheckout({ to: option("to"), log: (l) => console.log(`  ${l}`) });
-        if (!r.changed) return console.log(`✔ already on ${r.to}`);
+        if (!r.changed) return (console.log(`✔ already on ${r.to}`), skill());
         console.log(`✔ ${r.from} → ${r.to}`);
       }
+      skill();
       const b = backupNow(home, backupLocation(home, readConfig(home).backupDir).dir);
       console.log(`✔ backed up: ${b.file}`);
       if (service.status().installed) {
@@ -334,12 +344,15 @@ async function main() {
 
     case "status":
       await owner(async (c) => {
-        console.log(`Hewn at ${c.url}`);
         const caps = await c.call("list");
+        const st = c.control ? await c.control("/control/status") : undefined;
+        // --json: the same, for a script or a host's loop (`idle` is the idle report GET /status gives on the metrics port).
+        if (flag("json")) return void console.log(JSON.stringify({ url: c.url, tools: caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })), ...(st ? (({ idle, ...supervisor }) => ({ supervisor, idle }))(st) : {}) }, null, 2));
+        console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
-        if (c.control) {
-          const st = await c.control("/control/status");
+        if (st) {
           console.log(`up ${st.upSeconds}s · workerd restarts ${st.restarts} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
+          if (st.idle) console.log(idleLine(st.idle));
         }
       });
       return;
@@ -356,15 +369,21 @@ async function main() {
       return;
 
     case "install": {
-      const dir = resolve(positional()[0] ?? "");
+      const given = positional()[0] ?? "";
+      const dir = resolve(given);
       const info = supervisorInfo(home);
       if (!info) throw new Error("Hewn isn't running: start it with hewn serve (or hewn service install)");
-      // A shared tool's file (a zip): installed under its name (or --name), with its sample data unless --no-sample.
-      const zip = statSync(dir, { throwIfNoEntry: false })?.isFile();
-      const manifest = zip ? null : JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
-      const body = zip ? { bundle: readFileSync(dir).toString("base64"), ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
+      // A shared tool's file (a zip) or link (Hewn fetches it: https only, 5 MB): installed under its name (or --name), with its sample data unless --no-sample.
+      const link = /^[a-z][a-z0-9+.-]*:\/\//i.test(given);
+      const zip = !link && statSync(dir, { throwIfNoEntry: false })?.isFile();
+      const manifest = zip || link ? null : JSON.parse(readFileSync(resolve(dir, "capability.json"), "utf8"));
+      const shared = { ...(option("name") ? { name: option("name") } : {}), sample: !args.includes("--no-sample"), wait: true };
+      const body = link ? { url: given, ...shared } : zip ? { bundle: readFileSync(dir).toString("base64"), ...shared } : { name: manifest.name, purpose: manifest.purpose, dir, wait: true };
       const res = await fetch(`${info.url}/_admin/install`, { method: "POST", headers: { "x-hewn-admin": info.adminToken, "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = (await res.json()) as any;
+      // A deleted tool has that id: how to bring it back, or to install this one beside it.
+      const archived = result.details?.archived;
+      if (!res.ok && archived) throw new Error(`${archived.name} (${archived.id}) was deleted and is kept with its data: hewn restore ${archived.id} brings it back, hewn purge ${archived.id} deletes it for good, or install this one under another name (${zip ? "--name <name>" : "another id in its capability.json"})`);
       if (!res.ok) throw new Error(result.message ?? result.error);
       console.log(result.status === "promoted" ? `✔ ${result.capabilityId} v${result.resultVersion}` : `✖ ${result.failure?.title ?? result.status}\n${result.log.join("\n")}`);
       process.exitCode = result.status === "promoted" ? 0 : 1;
@@ -398,7 +417,7 @@ async function main() {
         if (action === "approve" || action === "reject") {
           if (!id) throw new Error(`usage: hewn review ${action} <buildId>`);
           const b = await c.call(action === "approve" ? "approveBuild" : "rejectBuild", id);
-          console.log(b.status === "promoted" ? `✔ ${b.capabilityId}: v${b.resultVersion} is live` : b.status === "cancelled" ? `✔ turned down: ${b.capabilityId} is unchanged` : `✖ ${b.log.at(-1)}`);
+          console.log(b.status === "promoted" ? `✔ ${b.capabilityId}: v${b.resultVersion} is live` : b.status === "cancelled" ? `✔ turned down: ${b.kind === "create" ? `${b.capabilityId} never went live` : `${b.capabilityId} is unchanged`}` : `✖ ${b.log.at(-1)}`);
           return;
         }
         if (action) throw new Error("usage: hewn review [approve|reject <buildId>]");
@@ -407,7 +426,8 @@ async function main() {
         const verb: Record<string, string> = { read: "READ", write: "CHANGE", destructive: "DELETE" };
         for (const b of list) {
           const r = b.review;
-          console.log(`${b.buildId}  ${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"} ${b.capabilityId}`);
+          const what = b.kind === "create" ? (b.submittedBy ? `${b.submittedBy} wrote and submitted a new tool,` : `${b.requestedBy} asked for a new tool,`) : b.submittedBy ? `${b.submittedBy} wrote and submitted a change to` : `${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"}`;
+          console.log(`${b.buildId}  ${what} ${b.capabilityId}`);
           if (r.connection) console.log("    it's a connection: this code holds your sign-in for that service");
           for (const o of r.newOperations) {
             console.log(`    + ${o.key}: agents can then ${verb[o.sideEffect] ?? o.sideEffect}: ${o.description}`);
@@ -418,7 +438,7 @@ async function main() {
             const also = [c.ui && "the screen", c.migrations.length && `data (${c.migrations.join(", ")})`, c.newGrants.length && `new access (${c.newGrants.join(", ")})`, c.changedOperations.length && `updates ${c.changedOperations.join(", ")}`, c.removedOperations.length && `removes ${c.removedOperations.join(", ")}`].filter(Boolean);
             console.log(`    ${also.length ? `also changes: ${also.join("; ")}` : "nothing else changes"}`);
           }
-          console.log(`    asked: "${String(b.request.request ?? "").slice(0, 160)}"`);
+          console.log(`    ${b.submittedBy ? "says" : "asked"}: "${String(b.request.request ?? "").slice(0, 160)}"`);
         }
         console.log("\nAllow: hewn review approve <buildId>   Don't allow: hewn review reject <buildId>");
       });
@@ -428,6 +448,13 @@ async function main() {
       await owner(async (c) => {
         await c.call("restore", positional()[0] ?? "");
         console.log(`✔ ${positional()[0]} restored`);
+      });
+      return;
+
+    case "resume":
+      await owner(async (c) => {
+        await c.call("resume", positional()[0] ?? "");
+        console.log(`✔ ${positional()[0]} resumed: its calls, schedules and widgets run again`);
       });
       return;
 
@@ -476,8 +503,12 @@ async function main() {
     }
 
     case "data": {
-      const [sub, id] = positional();
-      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample]");
+      const [sub, id, mb] = positional();
+      if (sub === "limit") {
+        await owner((c) => dataLimit(c, id, mb));
+        return;
+      }
+      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample] | hewn data limit [<MB>] | hewn data limit <id> <MB>|default");
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const typed = (await rl.question(`Start ${id} over: its data is emptied (a backup is kept), the tool stays.\nType ${id} to confirm: `)).trim();
       rl.close();
@@ -701,9 +732,9 @@ async function agentsCommand(c: PlatformClient) {
   };
   switch (sub ?? "list") {
     case "list": {
-      const agents = (await c.call("agents")) as { id: string; name: string; scopes: string[]; capabilities: "*" | string[]; via: string; lastUsedAt: string | null }[];
+      const agents = (await c.call("agents")) as { id: string; name: string; scopes: string[]; capabilities: "*" | string[]; except: string[]; via: string; lastUsedAt: string | null }[];
       if (!agents.length) console.log("No agents yet. Connect one: hewn setup (local), or add Hewn's address in the agent (hewn tunnel for cloud agents).");
-      for (const a of agents) console.log(`${a.id.padEnd(16)} ${a.scopes.join(",") || "(no access)"}${a.capabilities === "*" ? "" : ` · only ${a.capabilities.join(", ")}`} · ${a.via} · ${a.lastUsedAt ? `last used ${a.lastUsedAt.slice(0, 16).replace("T", " ")}` : "not used yet"}`);
+      for (const a of agents) console.log(`${a.id.padEnd(16)} ${a.scopes.join(",") || "(no access)"}${a.capabilities === "*" ? (a.except.length ? ` · every tool except ${a.except.join(", ")}` : "") : ` · only ${a.capabilities.join(", ")}`} · ${a.via} · ${a.lastUsedAt ? `last used ${a.lastUsedAt.slice(0, 16).replace("T", " ")}` : "not used yet"}`);
       const pending = (await c.call("pendingAgents")) as unknown[];
       if (pending.length) console.log(`\n${pending.length} waiting for approval: hewn agents pending`);
       return;
@@ -735,14 +766,35 @@ async function agentsCommand(c: PlatformClient) {
       await c.call("updateAgent", target, { scopes: extra.split(",").filter(Boolean) });
       return console.log(`✔ ${target}: ${extra}`);
     }
+    case "tool": {
+      // Over its default: an agent that sees every tool switched off for this one, or one limited to some given it.
+      const onOff = positional()[3];
+      if (!target || !extra || (onOff !== "on" && onOff !== "off")) throw new Error("usage: hewn agents tool <agent> <tool> on|off");
+      await c.call("setCapabilityAgent", extra, target, onOff === "on");
+      return console.log(onOff === "on" ? `✔ ${target} can use ${extra}` : `✔ ${target} can no longer use ${extra}: it doesn't see it`);
+    }
     case "revoke": {
       if (!target) throw new Error("usage: hewn agents revoke <agent>");
       await c.call("updateAgent", target, "revoke");
       return console.log(`✔ ${target} revoked: its next call fails. Connect it again to restore access.`);
     }
     default:
-      throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | revoke <agent>]");
+      throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | tool <agent> <tool> on|off | revoke <agent>]");
   }
+}
+
+/** `hewn data limit`: how big each tool's data may grow; with <MB>, everyone's; with <id> <MB>|default, one tool's own. */
+async function dataLimit(c: PlatformClient, first?: string, second?: string) {
+  let s = await c.settings();
+  if (first !== undefined && second === undefined) s = await c.settings({ toolDataLimitMB: Number(first) });
+  else if (first !== undefined) {
+    const own: Record<string, number> = { ...s.toolDataLimitsMB };
+    if (second === "default") delete own[first];
+    else own[first] = Number(second);
+    s = await c.settings({ toolDataLimitsMB: own });
+  }
+  console.log(`Each tool's data: up to ${s.toolDataLimitMB} MB`);
+  for (const [id, n] of Object.entries((s.toolDataLimitsMB ?? {}) as Record<string, number>)) console.log(`  ${id}: up to ${n} MB`);
 }
 
 /** hewn url: the public URL (where the owner reaches Hewn from anywhere), its DNS records and proxy. */
@@ -917,7 +969,7 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
       const value = secret ? (st.missingSecrets.includes(secret) ? " (value missing)" : " (value set)") : "";
       console.log(`  ${i.approved ? "✔" : "·"} ${i.label}${value}${i.approved ? "" : st.declinedGrants?.includes(i.grant) ? "  [you said no]" : "  [not authorized]"}`);
     }
-    for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? "(not set)"}  ${x.description}`);
+    for (const x of (await c.call("authorization", id)).config ?? []) console.log(`  ${x.value === null ? "·" : "✔"} config ${x.name}: ${x.value ?? (x.suggested !== undefined ? `(not set; suggested: ${x.suggested})` : "(not set)")}  ${x.description}`);
     for (const d of st.missingDependencies) console.log(`  ✖ depends on ${d}, which no longer exists`);
     if (st.retiredModel) console.log(`  ✖ ${st.retiredModel.model} is no longer available: hewn models set ${id} ${st.retiredModel.successor ?? "<provider/model>"}`);
     else if (st.missingModel) console.log(`  ✖ model: ${st.missingModel}${/provider is set up/.test(st.missingModel) ? " (hewn models key <provider>)" : ""}`);
@@ -954,7 +1006,11 @@ async function authority(c: PlatformClient, command: string, rl: ReturnType<type
     return;
   }
   const setConfig = async (id: string, name: string, value?: string) => {
-    const v = value ?? (await rl.question(`${name} for ${id}: `)).trim();
+    // A setting not set yet offers its suggested value in the prompt: Enter takes it, as Save does in Hewn. Nothing
+    // is stored before. One already set offers nothing (Enter doesn't swap the owner's value for the suggestion).
+    const entry = value === undefined ? ((await c.call("authorization", id)).config ?? []).find((x: { name: string }) => x.name === name) : undefined;
+    const suggested = entry?.value === null ? entry.suggested : undefined;
+    const v = value ?? ((await rl.question(`${name} for ${id}${suggested !== undefined ? ` [${suggested}]` : ""}: `)).trim() || suggested);
     if (!v) throw new Error("empty value, nothing stored");
     await c.call("setConfig", id, name, v);
     console.log(`✔ ${name} set`);

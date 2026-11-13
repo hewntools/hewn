@@ -16,6 +16,9 @@ test("summarize: the prompt carries the files with their line numbers, what the 
   assert.match(p, /hosts: "api\.plantnet\.org"; a model \("light", with images\)/);
   assert.match(p, /Left out or shortened .*ui\/index\.html \(cut at line 812\), ui\/logo\.png \(not text\)/);
   assert.doesNotMatch(p, /Conversation so far/, "no conversation: a reading, not a chat");
+  assert.doesNotMatch(p, /npm dependencies/, "no package.json: nothing to say about packages");
+  const withDeps = intakePrompt({ mode: "summarize", messages: [], bundle: { ...bundle, files: [...bundle.files, { path: "package.json", text: '   1| {"dependencies":{"x":"1.0.0"}}' }] } });
+  assert.match(withDeps, /Its npm dependencies \(package\.json\) aren't here[^\n]*say in a finding that their code wasn't read/);
   assert.equal(schemaFor({ mode: "summarize" }), SUMMARY_SCHEMA);
   assert.equal(schemaFor({ mode: "create" }), SCHEMA);
 });

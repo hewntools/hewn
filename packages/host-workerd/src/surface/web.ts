@@ -7,19 +7,23 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { readSummary } from "@hewntools/core/bundle.ts";
-import { explainFailure } from "@hewntools/core/failure.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { failureOf } from "@hewntools/core/platform/builds.ts";
+import { sha256 } from "@hewntools/core/sha256.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
-import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost } from "./host.ts";
+import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
 import { body, cookieValue, errorBody, esc, json, readJson, sse, STATUS, typeOf } from "./http.ts";
+import { fetchLink } from "./fetch-link.ts";
+import { SHARE_PREFIX } from "./public.ts";
 import { dnsRecords, localSite, type Site } from "./site.ts";
 import { platformAsset, sameOrigin, signedIn } from "./ui.ts";
 
 /** Served without a session: branding and install metadata only (browsers fetch manifests without cookies). */
-const PUBLIC_FILES = new Set(["app.css", "passkey.js", "hewn-mark.svg", "hewn-glyph.svg", "manifest.webmanifest", "icons/hewn-180.png", "icons/hewn-192.png", "icons/hewn-512.png"]);
+export const PUBLIC_FILES = new Set(["app.css", "passkey.js", "hewn-mark.svg", "hewn-glyph.svg", "manifest.webmanifest", "icons/hewn-180.png", "icons/hewn-192.png", "icons/hewn-512.png"]);
 const SESSION_MAX_AGE = 30 * 86400;
 // On the public URL the cookie is __Host- (Secure, this exact host, Path=/). Capability UIs under
 // /tools/ run on opaque origins: they can neither read it nor send it (their requests are cross-site).
@@ -150,11 +154,16 @@ function recentCalls(platform: Platform, owner: Agent, limit: number, perCapabil
   return calls.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
 
+/** The Agent Skill "build a Hewn tool" (SKILL_URL), public like the design system: any agent may load it, here or where it reaches MCP. */
+export const skillResponse = (platform: Platform) =>
+  new Response(platform.skill(), { status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "x-content-type-options": "nosniff", "cache-control": "no-cache", "access-control-allow-origin": "*" } });
+
 export async function handleWeb(platform: Platform, host: SurfaceHost, site: Site, req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const asset = await platformAsset(host, path);
   if (asset) return asset;
+  if (path === SKILL_URL && req.method === "GET") return skillResponse(platform);
   const command = site.kind === "public" ? "hewn open --print" : "hewn open";
   /** Signed out: the command to run, or (hosted) the host's sign-in, after `hostedLead`. */
   const signIn = (status: number, title: string, line: string, cmd: string, hostedLead = "") =>
@@ -241,7 +250,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "capabilities" && !id) {
     if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
-    return capabilityList(platform, owner);
+    return withEtag(req, await capabilityList(platform, owner));
   }
 
   if (resource === "capabilities" && id) {
@@ -331,6 +340,10 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST restore":
         platform.restore(owner, id);
         return { ok: true };
+      // A tool Hewn suspended (it kept Hewn from responding) runs again.
+      case "POST resume":
+        platform.resume(owner, id);
+        return { ok: true };
       case "POST rollback":
         return platform.rollback(owner, id, (await readJson(req)).version);
       case "POST purge":
@@ -343,14 +356,25 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const path = url.searchParams.get("path");
         return path ? platform.versionFile(owner, id, version, path) : platform.versionCode(owner, id, version);
       }
-      // Share…: what a version would ship (?version=N), or the file itself (share/download).
+      // Share…: what a version would ship (?version=N), its links and where they'd point, or the file itself (share/download).
       case "GET share": {
         const v = url.searchParams.get("version");
         const version = v ? Number(v) : undefined;
-        if (arg !== "download") return platform.shareCheck(owner, id, version);
+        if (arg !== "download") return { ...(await platform.shareCheck(owner, id, version)), links: platform.shareLinks(owner, id), address: publicAddress(platform, await tunnelNow(host)) };
         const { name, bundle } = await platform.shareBundle(owner, id, version);
         return new Response(body(bundle), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
       }
+      // Share… › Link: one version, for anyone with the link, until it expires or is revoked. Needs a public address.
+      case "POST links": {
+        const address = publicAddress(platform, await tunnelNow(host));
+        if (!address) throw new PlatformError("conflict", "Links need a public address. Set up remote access first (Settings › Remote access).");
+        const b = await readJson(req);
+        const { token, link } = await platform.createShareLink(owner, id, { version: b.version === undefined ? undefined : Number(b.version), expires: b.expires === undefined ? undefined : String(b.expires) });
+        return { url: `${address}${SHARE_PREFIX}${token}`, link };
+      }
+      case "DELETE links":
+        platform.revokeShareLink(owner, id, String(arg ?? ""));
+        return { ok: true };
       // Info › Data › Start over: empty the data, keep the tool (a backup is kept).
       case "POST start-over": {
         const b = await readJson(req);
@@ -397,6 +421,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.createSchedule(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input, cadence: String(body.cadence ?? "") });
       }
+      // Info › Agents: which agents can use it; switching one overrides its default (every tool, or only some).
+      case "GET agents":
+        return platform.capabilityAgents(owner, id);
+      case "PUT agents":
+        return platform.setCapabilityAgent(owner, id, arg ?? "", (await readJson(req)).canUse);
       case "POST grants":
         if (arg === "approve") {
           // A body names one grant; no body approves everything the version requests.
@@ -412,7 +441,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   if (resource === "accounts") return platform.accounts(owner);
 
-  // The Hub (0.4.9: Hewn's own tools, Official, shipped with the release; offline): cards, a tool's page, its images and code, and staging one to install.
+  // Hewn's own tools (Official, shipped with the release; offline; under + New since 0.4.11, the Hub tab before): cards, a tool's page, its images and code, and staging one to install.
   if (resource === "hub") {
     const shelf = host.shelf ? await host.shelf.tools() : { tools: [], firstRun: [] };
     if (!id && method === "GET") return { tools: platform.hubCards(owner, shelf.tools), firstRun: shelf.firstRun };
@@ -431,9 +460,15 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (id && sub === "stage" && method === "POST") return platform.hubStage(owner, shelf.tools, id);
   }
 
-  // Install from a file: upload (staged, read before anything is installed), its code, install, or drop it.
+  // Install from a file or a link: upload or fetch (staged, read before anything is installed), its code, install, or drop it.
   if (resource === "bundles") {
-    if (!id && method === "POST") return platform.stageBundle(owner, fromBase64(String((await readJson(req)).data ?? "")), { from: "file" });
+    if (!id && method === "POST") {
+      const b = await readJson(req);
+      if (b.url === undefined) return platform.stageBundle(owner, fromBase64(String(b.data ?? "")), { from: "file" });
+      platform.agents(owner); // owner only, before anything is fetched
+      const fetched = await fetchLink(String(b.url), host.fetch);
+      return platform.stageBundle(owner, fetched.bytes, fetched.origin);
+    }
     if (id && !sub && method === "GET") return platform.stagedBundle(owner, id);
     if (id && sub === "code" && method === "GET") {
       const path = url.searchParams.get("path");
@@ -492,8 +527,15 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
+    if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
+    // A held build's review card: its files against the version it was built on (or one file, ?path=), and its four renders.
+    if (sub === "code" && method === "GET") {
+      const path = url.searchParams.get("path");
+      return path ? platform.reviewFile(owner, id, path) : platform.reviewCode(owner, id);
+    }
+    if (sub === "shots" && arg && method === "GET") return new Response(body(await platform.reviewShot(owner, id, arg)), { status: 200, headers: { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" } });
     if (sub === "screenshot") {
       platform.getBuild(owner, id);
       // ?scheme=dark: the dark-mode render, if the build has one (older builds have only light).
@@ -536,7 +578,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "settings") {
     platform.agents(owner); // owner only
     if (method === "PUT") {
-      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"]));
+      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
       return { ...next, ...(host.hosted ? { hosted: true } : {}) };
     }
@@ -653,7 +695,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     }
     if (method === "PUT") {
       const b = await readJson(req);
-      return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}) });
+      return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}), ...(b.approvalMode !== undefined ? { approvalMode: b.approvalMode } : {}) });
     }
     if (method === "DELETE") return platform.updateAgent(owner, id, "revoke");
   }
@@ -759,9 +801,9 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
       if (!summary) throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
       // The owner moved on (Install anyway, Cancel, closed the sheet): a reading that ends now isn't theirs to keep.
       if (signal.aborted) throw new PlatformError("operation_failed", "stopped");
-      await platform.keepSummary(owner, token, summary);
+      const kept = await platform.keepSummary(owner, token, summary);
       log(`${summary.findings.filter((f) => f.kind === "warn").length} warning(s)`);
-      return { summary, seconds: Math.round((Date.now() - started) / 1000), by };
+      return { summary: kept, unread: bundle.cut, seconds: Math.round((Date.now() - started) / 1000), by };
     } catch (e) {
       log(`ERROR ${(e as Error).message}`);
       throw NO_READER.test((e as Error).message) && !signal.aborted ? new PlatformError("not_found", NO_BUILDER) : e;
@@ -826,20 +868,23 @@ async function capabilityList(platform: Platform, owner: Agent) {
     const b = active.find((x) => x.capabilityId === capId);
     return b ? { buildId: b.buildId, progress: b.state.progress, step: b.state.step, tests: b.state.tests ?? null } : null;
   };
+  // A build held for the owner, per tool (the newest): opening the tool shows it, whatever was built since.
+  const held = new Map(platform.registry.buildsInReview().map((b) => [b.capabilityId, b.id]));
   const order = (id: string) => platform.registry.getCapability(id)?.homeOrder ?? Number.MAX_SAFE_INTEGER;
   const caps: Record<string, any>[] = [];
   // Unplaced tiles follow in creation order, so a new capability lands last (next to "New").
   const created = (id: string) => platform.registry.getCapability(id)?.createdAt ?? "";
   for (const c of platform.list(owner).sort((a, b) => order(a.id) - order(b.id) || created(a.id).localeCompare(created(b.id)))) {
     const m = platform.get(owner, c.id);
-    const icon = await platform.icon(c.id).catch(() => undefined);
+    // Its kind only: the icon itself is fetched by the page, and Home asks for this list again and again.
+    const iconKind = await platform.iconKind(c.id).catch(() => null);
     const row = platform.registry.getCapability(c.id);
     const last = latest.get(c.id);
     caps.push({
       ...c,
-      hasIcon: !!icon,
+      hasIcon: !!iconKind,
       // "image": an owner upload (shown as is); "glyph": a 5×5 glyph, the owner's or the builder's ui/icon.svg (tinted by the tile).
-      iconKind: !icon ? null : icon.glyph ? "glyph" : "image",
+      iconKind,
       hue: platform.hueOf(c.id),
       saturation: platform.saturationOf(c.id),
       ui: !!m.ui?.available,
@@ -847,48 +892,71 @@ async function capabilityList(platform: Platform, owner: Agent) {
       requests: platform.registry.accessRequests(c.id).length,
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
-      lastBuild: last ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
+      // A failed build the owner discarded isn't shown on the tool (Home's badge, Info's notice): it's put aside.
+      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && failureOf(last.id, () => platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
+      held: held.get(c.id) ?? null,
     });
   }
+  // Tools that aren't one yet: being built, or an agent's new tool held for the owner (its tile opens the review card).
+  const unbuilt = (o: { id: string; name: string; purpose: string; buildId: string; status: string; glyph?: { hue: number | null; saturation: number | null }; connection: boolean }) => ({
+    id: o.id,
+    name: o.name,
+    purpose: o.purpose,
+    tags: [],
+    operations: [],
+    ready: false,
+    hasIcon: !!o.glyph,
+    iconKind: o.glyph ? "glyph" : null,
+    iconUrl: o.glyph ? `/api/builds/${o.buildId}/icon` : null,
+    hue: o.glyph?.hue ?? null,
+    saturation: o.glyph?.saturation ?? null,
+    ui: false,
+    version: null,
+    requests: 0,
+    lastBuild: { buildId: o.buildId, status: o.status },
+    building: building(o.id),
+    held: o.status === "review" ? o.buildId : null,
+    // A new connection belongs under Accounts, not on Home.
+    ...(o.connection ? { kind: "connection" } : {}),
+  });
   const pending: Record<string, any>[] = [];
   for (const b of active.filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
     // The builder writes the icon first, so a new capability has its own tile while it builds.
-    const glyph = await platform.buildGlyph(b.buildId);
-    pending.push({
-      id: b.capabilityId,
-      name: b.name,
-      purpose: b.purpose,
-      tags: [],
-      operations: [],
-      ready: false,
-      hasIcon: !!glyph,
-      iconKind: glyph ? "glyph" : null,
-      iconUrl: glyph ? `/api/builds/${b.buildId}/icon` : null,
-      hue: glyph?.hue ?? null,
-      saturation: glyph?.saturation ?? null,
-      ui: false,
-      version: null,
-      requests: 0,
-      lastBuild: { buildId: b.buildId, status: "building" },
-      building: building(b.capabilityId),
-      // A new connection belongs under Accounts while it builds, not on Home.
-      ...(b.connection ? { kind: "connection" } : {}),
-    });
+    pending.push(unbuilt({ id: b.capabilityId, name: b.name, purpose: b.purpose, buildId: b.buildId, status: "building", glyph: await platform.buildGlyph(b.buildId), connection: b.connection }));
+  }
+  for (const b of platform.registry.buildsInReview().filter((b) => b.kind === "create" && !caps.some((c) => c.id === b.capabilityId))) {
+    const req = b.request as { name?: string; purpose?: string; kind?: string };
+    const name = platform.registry.getCapability(b.capabilityId)?.name ?? req.name ?? b.capabilityId;
+    pending.push(unbuilt({ id: b.capabilityId, name, purpose: req.purpose ?? "", buildId: b.id, status: "review", connection: !!b.review?.connection || req.kind === "connection" }));
   }
   return [...caps, ...pending];
+}
+
+/**
+ * A list a page polls (Home's tools), with an ETag of what it says: the browser asks again with If-None-Match, and an
+ * unchanged list is a 304 it answers from its own cache.
+ */
+function withEtag(req: Request, value: unknown): Response {
+  const text = JSON.stringify(value);
+  const etag = `"${sha256(text).slice(0, 32)}"`;
+  const headers = { "content-security-policy": WEB_CSP, "cache-control": "private, no-cache", etag };
+  // Weak comparison (RFC 9110): a proxy that compresses the answer may hand the browser W/"…".
+  if (req.headers.get("if-none-match")?.split(",").some((t) => t.trim().replace(/^W\//, "") === etag)) return new Response(null, { status: 304, headers });
+  return new Response(text, { status: 200, headers: { "content-type": "application/json", ...headers } });
 }
 
 const LIVE = new Set(["waiting", "open", "building", "validating"]);
 
 /**
- * Failed builds nobody has dealt with: not retried, and nothing of that capability promoted since
- * (a later change replaced it).
+ * Failed builds nobody has dealt with: not retried or discarded, and nothing of that capability
+ * promoted since (a later change replaced it).
  */
-export function unresolvedFailures<T extends { buildId: string; capabilityId: string; kind: string; status: string; createdAt: string; request: Record<string, unknown> }>(builds: T[]): T[] {
+export function unresolvedFailures<T extends { buildId: string; capabilityId: string; kind: string; status: string; createdAt: string; request: Record<string, unknown>; discardedAt?: string }>(builds: T[]): T[] {
   return builds.filter(
     (b) =>
       b.status === "failed" &&
+      !b.discardedAt &&
       !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) &&
       !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt),
   );
@@ -902,7 +970,7 @@ export const failureReason = (f?: { title: string; detail: string }) => (!f ? ""
 
 export interface InboxItem {
   /** "builder-model": the model the owner picked for building has a successor. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model";
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model" | "suspended";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -936,7 +1004,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const p of platform.pendingAgents(owner))
     needs.push({ kind: "agent", id: p.id, title: p.clientName, detail: p.reconnects ? `wants to connect again as ${p.reconnects}` : "wants to connect", severity: "warn", action: "Review", at: p.createdAt });
   for (const b of builds.filter((x) => x.status === "review"))
-    needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} changed it: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
+    needs.push({ kind: "review", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: nameOf(b.capabilityId), detail: `${who(b.requestedBy)} ${b.kind === "create" ? "made it" : "changed it"}: it waits for you`, severity: "warn", action: "Review", at: b.updatedAt });
   for (const b of unresolvedFailures(builds))
     needs.push({ kind: "build", id: b.buildId, buildId: b.buildId, capabilityId: b.capabilityId, title: platform.registry.getCapability(b.capabilityId) ? nameOf(b.capabilityId) : String(b.request?.name ?? b.capabilityId), ...(b.failure?.paused ? { detail: `Paused · ${b.failure.detail}`, severity: "warn" as const, action: "Continue…" } : { detail: `Build failed${b.failure ? ` · ${failureReason(b.failure)}` : ""}`, severity: "danger" as const, action: "Show" }), at: b.updatedAt });
   for (const x of platform.listSchedules(owner).filter((s) => s.status === "proposed"))
@@ -950,6 +1018,12 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const c of caps) {
     const m = platform.activeManifest(c.id);
     if (m.requires?.model) modelUsers = true;
+    // Suspended by Hewn: nothing runs it until the owner resumes it, a fix on its way or not.
+    const suspended = platform.suspension(c.id);
+    if (suspended) {
+      needs.push({ kind: "suspended", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: `Suspended: ${suspended.reason}`, severity: "danger", action: "Resume…", at: suspended.at });
+      continue;
+    }
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
     // Held back only by what the owner said no to (Deny): nothing to ask.
@@ -1046,12 +1120,15 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       buildId: b.buildId,
       buildKind: b.kind,
       builder: b.builder,
-      // An install from a file: "from a file", "from Hub" (Activity says "Installed from a file · v1").
+      // An install: "from a file", "from <host>", "from Hewn's tools" (Activity says "Installed from a file · v1").
       ...(b.builder === "bundle" && b.request?.source ? { installed: sourceWords(b.request.source as ToolSource) } : {}),
+      // A client's submission: "submitted by Claude Code".
+      ...(b.submittedBy ? { submittedBy: b.submittedBy } : {}),
       ...(b.model ? { buildModel: b.model } : {}),
       ...(b.charge ? { charge: b.charge } : {}),
       version: row.resultVersion,
       ...(b.failure ? { failure: b.failure, reason: failureReason(b.failure) } : {}),
+      ...(b.discardedAt ? { discarded: true } : {}),
     });
   }
   for (const c of recentCalls(platform, owner, 5000, 2000)) {
@@ -1078,6 +1155,15 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
   return { items: page, next: filtered.length > page.length ? page.at(-1)!.at : null };
 }
 
+/** The tunnel's status, or null (no tunnel on this host, or it can't say). */
+const tunnelNow = (host: SurfaceHost): Promise<TunnelStatus | null> => (host.tunnel ? host.tunnel().catch(() => null) : Promise.resolve(null));
+
+/**
+ * Where this Hewn is reachable from the internet: its public URL, else the tunnel's address once
+ * it's up; null when neither. What MCP's public address and share links are built on.
+ */
+const publicAddress = (platform: Platform, tunnel: TunnelStatus | null): string | null => platform.publicUrl() ?? (tunnel?.state === "up" && tunnel.url ? tunnel.url : null);
+
 /**
  * Connect an agent (owner only). `manual`: the addresses an MCP client connects to (it signs
  * in with OAuth, approved here). `agents/<id>`: registers Hewn with a local harness and starts its
@@ -1088,8 +1174,8 @@ async function setupRoute(platform: Platform, host: SurfaceHost, owner: Agent, r
   const mcpUrl = `http://127.0.0.1:${host.port}/mcp`;
   const method = req.method;
   if (id === "manual") {
-    const tunnel = host.tunnel ? await host.tunnel().catch(() => null) : null;
-    const reachable = platform.publicUrl() ?? (tunnel?.state === "up" && tunnel.url ? tunnel.url : null);
+    const tunnel = await tunnelNow(host);
+    const reachable = publicAddress(platform, tunnel);
     return { url: mcpUrl, publicUrl: reachable ? `${reachable}/mcp` : null, tunnel, pointer: AGENT_POINTER };
   }
   if (!host.setup) throw new PlatformError("not_found", host.hosted ? "there are no local agents to connect here: connect claude.ai, ChatGPT or another agent through your address" : "connecting agents from the web is not available here; run: hewn setup");

@@ -21,16 +21,38 @@ function checkBuild(res) {
   if (changed) toast(`${BRAND} was updated`, { dot: "warn", ms: Infinity, action: ["Reload", () => location.reload()] });
 }
 
-export async function api(path, { method = "GET", body } = {}) {
+/** Resolves when the tab is shown (at once if it is). */
+export const shown = () =>
+  !document.hidden
+    ? Promise.resolve()
+    : new Promise((resolve) => {
+        const on = () => !document.hidden && (document.removeEventListener("visibilitychange", on), resolve());
+        document.addEventListener("visibilitychange", on);
+      });
+
+/**
+ * `refresh`: the page's own refresh (a poll, Home's widgets), not something the owner did. It waits while the tab is
+ * hidden, so a forgotten tab makes no requests (and catches up when shown), and Hewn's idle clock ignores it, so an
+ * open page doesn't keep Hewn awake.
+ */
+export async function api(path, { method = "GET", body, refresh = false } = {}) {
+  if (refresh) await shown();
   const res = await fetch(`/api${path}`, {
     method,
-    headers: { "x-hewn-ui": "1", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
+    headers: { "x-hewn-ui": "1", ...(refresh ? { "x-hewn-refresh": "1" } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   checkBuild(res);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.message || data.error || res.statusText), { data, status: res.status });
+  if (!res.ok) throw Object.assign(new Error(ownersWords(data) || data.message || data.error || res.statusText), { data, status: res.status });
   return data;
+}
+
+/** An error as the owner reads it here, where Hewn's own words are an agent's (or a command's). */
+function ownersWords(data) {
+  const archived = data?.details?.archived;
+  if (archived) return `${archived.name} was deleted and is kept with its data. Bring it back or delete it for good in Settings › Data › Deleted tools, or give the new one another name.`;
+  return "";
 }
 
 /** Server-sent events over a POST (EventSource is GET-only). Calls onEvent(name, data) per event; `signal` stops it. */
@@ -195,7 +217,7 @@ function inline(text) {
 
 // ---------- agents and actors ----------
 
-const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
+const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client", hewn: "Hewn" };
 /** Agents' own names (from the Agents API), for activity and cards. */
 export const rememberAgents = (list) => list.forEach((a) => a.name && (AGENT_LABELS[a.id] = a.name));
 /** Human name for an actor id: agents by label; the owner (web, CLI, an opened app) is "You". */
@@ -212,9 +234,9 @@ export const builderLabel = (b) => (b === "agent" ? "your agent" : BUILDERS[b] ?
 // ---------- capabilities and their icons ----------
 
 let capCache = null;
-/** id → capability summary (Home data), shared by cap-refs across screens. */
-export async function caps(refresh = false) {
-  if (!capCache || refresh) capCache = api("/capabilities").then((list) => new Map(list.map((c) => [c.id, c])));
+/** id → capability summary (Home data), shared by cap-refs across screens. `poll`: a page's own refresh (see api). */
+export async function caps(refresh = false, { poll = false } = {}) {
+  if (!capCache || refresh) capCache = api("/capabilities", { refresh: poll }).then((list) => new Map(list.map((c) => [c.id, c])));
   try {
     return await capCache;
   } catch (e) {

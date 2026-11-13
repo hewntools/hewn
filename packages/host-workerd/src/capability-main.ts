@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Main module of every capability's Dynamic Worker (bundled to text by the supervisor and loaded
-// next to the capability's own bundle, "capability.js"). It turns the capability's `operations`
-// into a Durable Object class that the CapabilityHost runs as a facet: the capability's private
-// SQLite lives in that facet's storage. Capability ABI v2 (see src/core/abi.ts).
+// next to the capability's own bundle, "capability.js", and "hewn-guard.js", which limits the size
+// of its storage). It turns the capability's `operations` into a Durable Object class that the
+// CapabilityHost runs as a facet: the capability's private SQLite lives in that facet's storage.
+// Capability ABI v2 (see src/core/abi.ts).
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AsyncLocalStorage } from "node:async_hooks";
+// Before the capability's own bundle, so it's evaluated first (capability-guard.ts).
+// @ts-expect-error provided at load time: the size limit
+import { lockStorage } from "./hewn-guard.js";
 // @ts-expect-error provided at load time: the capability's own bundle
 import * as capability from "./capability.js";
-import { type AbiDb, applyMigrations, capLines, countTables, dumpTables, exportedOperations, loadTables, runOperation } from "@hewntools/core/abi.ts";
+import { type AbiDb, applyMigrations, capError, capLines, countTables, dumpTables, exportedOperations, loadTables, runOperation } from "@hewntools/core/abi.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 
 const mod = capability as { operations?: Record<string, any> };
@@ -47,6 +51,12 @@ function abiDb(sql: SqlStorage, storage: DurableObjectState["storage"]): AbiDb {
 }
 
 export class Capability extends DurableObject {
+  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
+    // The size limit is set before anything else can reach this state's storage.
+    (lockStorage as (ctx: DurableObjectState) => void)(ctx);
+    super(ctx, env);
+  }
+
   private db(): AbiDb {
     return abiDb(this.ctx.storage.sql, this.ctx.storage);
   }
@@ -74,12 +84,12 @@ export class Capability extends DurableObject {
   async invoke(key: string, input: unknown, secrets: Record<string, string>, caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: unknown) => Promise<any>) | null = null, readOnly = false) {
     const lines: string[] = [];
     try {
-      const { output, secretUpdates } = await logs.run(lines, () =>
+      const { output, secretUpdates, inserted } = await logs.run(lines, () =>
         runOperation(mod, key, input, { db: this.db(), secrets, config, caller, call: (id, op, i) => call(id, op, i), ...(model ? { model: (req) => model(req) } : {}), readOnly }),
       );
-      return { ok: true as const, output, secretUpdates, logs: capLines(lines) };
+      return { ok: true as const, output, secretUpdates, logs: capLines(lines), inserted };
     } catch (e) {
-      return { ok: false as const, error: (e as Error)?.message ?? String(e), logs: capLines(lines) };
+      return { ok: false as const, error: capError((e as Error)?.message ?? String(e)), logs: capLines(lines) };
     }
   }
 }

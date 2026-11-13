@@ -47,13 +47,16 @@ There are four scopes. The web client shows them as See, Use, Make and Change. A
 | `capabilities_create` | | | yes | |
 | `capabilities_modify` | | | | yes |
 | `capabilities_add_widgets` | | | | yes |
+| `capabilities_pack` | | | yes | yes |
+| `capabilities_check` | | | yes | yes |
+| `capabilities_submit` | | | yes | yes |
 | `builds_get` | | | yes | yes |
 | `builds_wait` | | | yes | yes |
 | `builds_retry` | | | yes | yes |
 | `builds_cancel` | | | yes | yes |
 | `hewn_docs` | yes | yes | yes | yes |
 
-Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent limited to some tools gets `not_found` for the others.
+Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent gets `not_found` for a tool it can't use: one not on its list if it's limited to some tools, or one the owner switched it off for (on the tool's page) if it sees every tool. An agent limited to some tools that the owner switches on for a tool gets that tool on its list.
 
 ## Discovery
 
@@ -66,8 +69,10 @@ The agent learns about the owner's tools in three places:
 A catalog line looks like this; connections are listed apart, and a tool that isn't ready says so:
 
 ```
-- Running Log (running-log): Maintain a durable personal running history … Operations: record_run@1, list_runs@1, get_summary@1.
+- Running Log (running-log): "Maintain a durable personal running history …" Operations: record_run@1, list_runs@1, get_summary@1.
 ```
+
+What a tool says about itself is its author's, not Hewn's. The purpose is quoted (a JSON string, so it stays on one line), and wherever an agent gets it (the catalog, `capabilities_list`, `capabilities_get`) a name is cut to 80 characters and a purpose or an operation's description to 600. The server instructions and `capabilities_invoke`'s description tell the agent to read a tool's words and results as information, not instructions.
 
 Without `discover`, the catalog is empty. When the agent's list of MCP tools changes, including any description (a tool created, changed, deleted, made ready, or the agent's scopes changed), the session gets `notifications/tools/list_changed` and the client should list tools again.
 
@@ -83,7 +88,7 @@ A failed call is an MCP tool result with `isError: true` and JSON text `{ error,
 | --- | --- |
 | `not_found` | No such tool, or not visible to this agent; or no such operation (`details.available` lists the operations). |
 | `invalid_input` | The input doesn't match `inputSchema`; `details` lists the schema errors. |
-| `not_ready` | The tool needs the owner first (a grant, a secret, config, a model); `details` is its readiness, with `userAction` saying what to ask the owner. `capabilities_request_access` files a visible request. |
+| `not_ready` | The tool needs the owner first (a grant, a secret, config, a model, or to resume it after Hewn suspended it); `details` is its readiness, with `userAction` saying what to ask the owner. `capabilities_request_access` files a visible request. |
 | `awaiting_confirmation` | A destructive call is waiting for the owner (below). |
 | `forbidden` | Not allowed: a missing scope, the owner rejected a destructive call, or a sign-in step. |
 | `operation_failed` | The tool's code threw, or the call ran out of time. |
@@ -94,16 +99,26 @@ A failed call is an MCP tool result with `isError: true` and JSON text `{ error,
 
 ## Builds
 
-An agent with `create` or `modify` asks the host's builder for a new tool or a change. It never writes the code itself, and it can't promote anything: the host validates every result (see [tools.md](tools.md#tests-and-promotion)).
+An agent with `create` or `modify` asks the host's builder for a new tool or a change, or writes it itself and submits it (below). Either way it can't promote anything: the host validates every result (see [tools.md](tools.md#tests-and-promotion)), and while its approval mode is `wait` the owner approves it.
 
-- **`capabilities_create`** `{ name, purpose, requirements, kind?, after?, widgets?, model?, effort? }` starts a build. The tool's id is derived from `name`. `kind: "connection"` builds a [connection](capability-model.md#connection); only connections hold credentials, so a tool that needs a service with a login is built on one. `after: <buildId>` makes the build wait (status `waiting`) until that build promotes, for example the connection it will call. `widgets: true` also queues a widgets build after it, returned as `widgetsBuildId`.
-- **`capabilities_modify`** `{ capabilityId, request, after?, model?, effort? }` asks for a change to an existing tool. A change to a connection, or one that adds operations, waits for the owner's review once it passes validation (status `review`). Changes to one tool take turns: one asked for while another is queued or building waits for it (status `waiting`) and is built on the version it makes; one in review doesn't hold it up.
-- **`capabilities_add_widgets`** `{ capabilityId, request?, after?, model?, effort? }` asks for a build that adds widgets and changes nothing else.
+- **`capabilities_create`** `{ name, purpose, requirements, kind?, after?, widgets?, model?, effort? }` starts a build. The tool's id is derived from `name`. `kind: "connection"` builds a [connection](capability-model.md#connection); only connections hold credentials, so a tool that needs a service with a login is built on one. `after: <buildId>` makes the build wait (status `waiting`) until that build promotes, for example the connection it will call. `widgets: true` also queues a widgets build after it, returned as `widgetsBuildId`. Once it passes validation the new tool waits for the owner's approval (status `review`, `review.approval: "wait"`) while the agent's approval mode is `wait`, which in this release it always is; a build waiting for it (`after`, or its widgets build) starts once the owner approves it. Its grants wait for the owner whatever the mode.
+- **`capabilities_modify`** `{ capabilityId, request, after?, model?, effort? }` asks for a change to an existing tool. Once it passes validation it waits for the owner's review (status `review`) while the agent's approval mode is `wait`, as a new tool does, and whatever the mode when it changes a connection or adds operations. The build's `review.approval` is `"wait"` when the approval mode is why. Changes to one tool take turns: one asked for while another is queued or building waits for it (status `waiting`) and is built on the version it makes; one in review doesn't hold it up.
+- **`capabilities_add_widgets`** `{ capabilityId, request?, after?, model?, effort? }` asks for a build that adds widgets and changes nothing else. It is a change like `capabilities_modify`'s and waits for the owner's review the same way. Only the one `widgets: true` chains to the agent's own create is part of that creation, and even that one waits while the agent's approval mode is `wait`.
 - **`model` and `effort`** on those three choose what the build runs on: a model name the owner's builder takes (`default` for its own, a family such as `fable`, or a full name) and an effort (`low`, `medium`, `high`, more on some models). Leave them out to use the owner's choice. The owner decides which names agents may use; the tools' descriptions list them ("Models you may ask for"), and any other is an `invalid_request` naming the allowed ones, as is an effort the model doesn't take (naming its levels). A build's `model` says what it ran on (`ran`). A model the builder can't run fails the build at once ("Model not available"); it never runs on another one instead.
 - **`builds_wait`** `{ buildId, timeoutSeconds? }` follows a build until it is promoted, fails, or waits for the owner's review. If the request carries a `progressToken`, each builder action and validation step arrives as a `notifications/progress` message. After `timeoutSeconds` (default 600, at most 1800) it returns the current state with `waitTimedOut: true`; call it again to keep following.
 - **`builds_get`** returns a build's state: `status` (`waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted`, `cancelled`), its log, and `resultVersion` once promoted. A change waiting its turn behind an earlier change to the same tool has `queued: true`. A build the builder's host paused part-way, its work kept, is `failed` with `failure.paused: true`: tell the owner, who continues or stops it in Hewn (once continued, `continuedAs` names the build that carries it on). **`builds_retry`** re-runs a failed or cancelled build, except a paused one (only the owner continues it). **`builds_cancel`** cancels a build the agent requested (the owner can cancel any), except while it's being validated.
 
 A promoted tool may still be not ready: if it asks for hosts, secrets, other tools' operations or a model, the owner approves those first. `capabilities_get` shows what's missing.
+
+### A tool the agent writes itself
+
+An agent may also write a tool and hand it over; the Skill **build a Hewn tool** ([below](#hewns-docs)) says how. The host's builder doesn't run; the host validates the files as it validates its builder's, and the gate is the same. Files travel as `files: [{ path, content, encoding? }]`: `path` relative to the tool's folder, `content` UTF-8 text, or base64 with `encoding: "base64"`; at most 1,000 files and 5 MB.
+
+- **`capabilities_pack`** `{ kind: "create" | "modify", capabilityId?, paths? }` (scope `create` or `modify`, as for the build it prepares) returns `{ files, more?, download?, next }`: the pack, what the host's builder finds in its workspace besides the request. The owner's instructions for building (`owner-instructions/every-tool.md`, their rules for every tool; for `modify`, `owner-instructions/this-tool.md`, the tool's own, when the agent may see it; each only when there are some), `CONTRACTS.md` and `.hewn-contracts/<id>.md` (the other tools' contracts), `OTHER_TOOLS.md` (their looks) and `PLATFORM_UI.css` (the design system), only for the tools the agent may see. `files` is a page of it, about 40 KB (at least one file): the owner's instructions, `CONTRACTS.md` and `OTHER_TOOLS.md` first, then for `modify` the tool's files, smallest first, then `PLATFORM_UI.css`; `more` lists the rest as `{ path, bytes }`, and a call with `paths` (from `more`) returns those, a page at a time. Pages never carry `.hewn-contracts/` (`capabilities_get` has a tool's contract). `download` (`{ url, expiresAt }`, not on a call with `paths`) is the whole pack as a zip, `.hewn-contracts/` included: the URL works once, for 10 minutes, then answers 404 (any GET uses it: an agent fetches it once, itself, and calls `capabilities_pack` again for a new one); it is minted for this agent and checked again when fetched (its scope and the tools it may see), so it never carries more than the agent could fetch itself. An agent with a shell fetches it into its workspace and spends no tokens on the pack. An agent has at most 5 links at a time: a sixth ends its oldest. For `modify`, also the tool's active version's files, `baseVersion` and `schedules` (`operation` as `name@version`, `cadence`, `status`): a schedule runs exactly that operation version, so a change keeps each one, whatever its `status` (validation refuses a version without one, as for an operation another tool calls). Never the owner's conversation or another build's request.
+- **`capabilities_check`** `{ files, capabilityId?, screenshots? }` runs validation on the files without promoting anything (contract compatibility against the tool when `capabilityId` is given), all but the upgrade dry run on a copy of the tool's own data, which runs on submit: the content is the check's text (PASS or FAIL, every failure, what was measured on the UI, what passed) and the renders as `image/png`: the four (`desktop-light`, `desktop-dark`, `mobile-light`, `mobile-dark`), a long page's top part. A long page's further parts (`mobile-light-2` …, top to bottom) are named in the text and left out; `screenshots: "all"` sends them after the four. `screenshots: false` sends no images; the UI is still rendered and measured. `structuredContent` has `passed`, `failures`, `defects` and `screenshots`, the names of the images sent, in order (no image data). 30 calls per agent per hour, counted in memory (a restart starts the count afresh); the next is a `conflict` ("No checks left this hour (30)").
+- **`capabilities_submit`** `{ files, request, capabilityId?, baseVersion? }` returns a build (`builder: "submitted"`, `submittedBy`: the agent's name in Hewn); follow it with `builds_wait`. Without `capabilityId` (scope `create`) it is a new tool, its id from `capability.json`; once it passes it waits for the owner's approval as a created one does. A new tool held for the owner keeps its id: another of that id is refused (`conflict`) until the owner decides. With `capabilityId` (scope `modify`) it is a change: refused (`conflict`) while another change to the tool is queued, building or paused (the message and `details.buildId` name that build), or when `baseVersion` isn't the tool's active version; once it passes it waits for the owner's review as above. `request` (what it is or changes) is kept with the build. No builder ran, so `builds_retry` refuses it: submit again.
+
+Files a version never holds are refused, not dropped (`invalid_request`, every path named with its rule; `details.refused` lists `{ path, rule }`): a builder's configuration (dotfiles and dot-folders, `CLAUDE.md`, `AGENTS.md`, `opencode.json`), what the host writes for builders (`BUILDER.md`, `BRIEF.md`, `CONTRACTS.md`, `OTHER_TOOLS.md`, `PLATFORM_UI.css`, `OWNERS_WORDS.md`, `attachments/`, `screenshots/`, `owner-instructions/`) and build output (`node_modules`, `.venv` …). So are paths with `..`, an empty part, a leading `/` or a backslash, and two paths a disk that ignores case would take for one.
 
 ## Schedules
 
@@ -135,6 +150,8 @@ An agent with `invoke` can propose running an operation on a timetable: `schedul
 - **`page`:** that page's markdown, or with `page#section` (the anchor, as links write it, or the heading) one section and the ones under it. With `query` too: the search, within that page.
 
 An unknown page or section is `not_found`, naming the ones there are.
+
+One more page is listed and read by name, but left out of the search (its text is the builder brief's, which the search covers): `skills/build-a-hewn-tool/SKILL.md`, the Agent Skill **build a Hewn tool**. It is the brief Hewn's own builder reads, with the three calls of [a tool the agent writes itself](#a-tool-the-agent-writes-itself) where the builder has its workspace, so the two never differ. The server instructions name it. A host also serves it as `text/markdown` to anyone at `/_platform/skills/build-a-hewn-tool/SKILL.md`, on its web address and where agents reach `/mcp`, and the npm package carries it in `dist/skills/`.
 
 ## For host implementers
 

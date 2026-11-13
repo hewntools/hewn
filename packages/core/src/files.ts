@@ -9,10 +9,14 @@ export const bytes = (s: string) => utf8(s);
 
 /** Files that are build/runtime artefacts, never part of a version's identity. */
 export const ARTEFACTS = new Set([".venv", "__pycache__", "node_modules", ".DS_Store", ".pytest_cache"]);
+/** The workspace folder with each other capability's contract in full: a dot-folder, which no version can hold. */
+export const CONTRACTS_DIR = ".hewn-contracts";
 /** Workspace-only files (the build's request and brief, the design system, the other tools' looks and contracts, the owner's words) that never become part of a version. */
 export const WORKSPACE_ONLY = new Set(["BUILDER.md", "BRIEF.md", "PLATFORM_UI.css", "OTHER_TOOLS.md", "CONTRACTS.md", "OWNERS_WORDS.md"]);
 /** Workspace-only directories: what the owner attached for the builder to look at, and its UI's screenshots. */
-export const WORKSPACE_ONLY_DIRS = ["attachments", "screenshots"];
+/** Where Hewn writes the owner's instructions for a builder (`ownerInstructionFiles`), and puts them in a client's pack. */
+export const OWNER_INSTRUCTIONS_DIR = "owner-instructions";
+export const WORKSPACE_ONLY_DIRS = ["attachments", "screenshots", OWNER_INSTRUCTIONS_DIR];
 export const isWorkspaceOnly = (path: string) => WORKSPACE_ONLY.has(path) || WORKSPACE_ONLY_DIRS.some((d) => path === d || path.startsWith(`${d}/`));
 
 export const isArtefact = (path: string) => path.split("/").some((part) => ARTEFACTS.has(part));

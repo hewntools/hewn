@@ -29,6 +29,7 @@ export const ABI_FEATURES: AbiFeature[] = [
   { name: '"saturation"', since: "2.4", used: (m) => m.saturation !== undefined },
   { name: '"source"', since: "2.5", used: (m) => m.source !== undefined },
   { name: '"hub" and "minVersion" in requires.capabilities', since: "2.5", used: (m) => (m.requires?.capabilities ?? []).some((c) => c.hub !== undefined || c.minVersion !== undefined) },
+  { name: '"suggested" in config', since: "2.6", used: (m) => (m.config ?? []).some((c) => c.suggested !== undefined) },
 ];
 
 /** ctx members added after 2.0, each exposed only to code whose manifest declares at least `since`. */
@@ -88,11 +89,13 @@ export function stampSource(m: CapabilityManifest, source: ToolSource | null): C
 
 /**
  * Where an installed tool came from, in words, the same everywhere (a build's log, Activity, Info):
- * "from Hub", "from example.com" (a link), "from a file". `long` adds what it was: "from a file ·
- * Plant Log v7" (a Hub tool's is "Official").
+ * "from Hewn's tools", "from example.com" (a link), "from a file". `long` (Info's pill) adds what
+ * it was: "from a file · Plant Log v7", "from a link · example.com", "from Hewn's tools · Official".
+ * (`from: "hub"` is the ABI's value for Hewn's own tools; the word isn't shown.)
  */
 export function sourceWords(s: ToolSource, long = false): string {
-  const where = s.from === "hub" ? "from Hub" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+  if (long && s.from === "link") return `from a link · ${s.host ?? "unknown"}`;
+  const where = s.from === "hub" ? "from Hewn's tools" : s.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
   return long ? `${where} · ${s.from === "hub" ? "Official" : `${s.name ?? s.id} v${s.version}`}` : where;
 }
 
@@ -143,9 +146,16 @@ export function schemaErrors(check: SchemaCheck): string[] {
 const validateManifestShape = compileSchema(MANIFEST_SCHEMA);
 
 export function validateManifest(m: unknown, expectedId: string): string[] {
-  if (!validateManifestShape(m)) return schemaErrors(validateManifestShape).map((e) => `manifest ${e}`);
+  // A config entry has no default (Hewn never fills a setting in): say what it has instead.
+  if (!validateManifestShape(m)) return schemaErrors(validateManifestShape).map((e) => `manifest ${/^\/config\/\d+ unexpected property "default"$/.test(e) ? `${e}: use "suggested" (prefilled in the setup form; the owner confirms it)` : e}`);
   const manifest = m as CapabilityManifest;
   const errors: string[] = [];
+  // Secrets are never suggested: the owner pastes each one.
+  // (From 2.6: an older manifest's secrets could carry extra properties, and still may.)
+  if (abiAtLeast(manifest, "2.6")) for (const s of manifest.requires?.secrets ?? []) if ("suggested" in s) errors.push(`requires.secrets ${s.name}: a secret can't carry "suggested" (only a config entry can)`);
+  // Nor a setting a host comes from (`config:NAME`): the owner types the host.
+  const hostSettings = new Set((manifest.requires?.hosts ?? []).filter((h) => h.startsWith("config:")).map((h) => h.slice(7)));
+  for (const c of manifest.config ?? []) if (c.suggested !== undefined && hostSettings.has(c.name)) errors.push(`config ${c.name}: a setting a host comes from can't carry "suggested": the owner types the host`);
   if (manifest.id !== expectedId) errors.push(`manifest id '${manifest.id}' must be '${expectedId}'`);
   errors.push(...abiErrors(manifest));
   errors.push(...kindErrors(manifest));
@@ -237,6 +247,7 @@ function kindErrors(m: CapabilityManifest): string[] {
   const config = new Set((m.config ?? []).map((c) => c.name));
   if (config.size !== (m.config ?? []).length) errors.push("config names must be unique");
   for (const h of m.requires?.hosts ?? []) if (h.startsWith("config:") && !config.has(h.slice(7))) errors.push(`requires.hosts '${h}': no config named ${h.slice(7)}`);
+  for (const h of m.requires?.hosts ?? []) if (/^\*\.[^.]+$/.test(h)) errors.push(`requires.hosts '${h}': a wildcard covers one site's subdomains (*.example.com), not every site ending in ${h.slice(1)}`);
   const secrets = m.requires?.secrets ?? [];
   if (!isConnection(m)) {
     if (secrets.length) errors.push(`only connections hold credentials: ${secrets.map((s) => s.name).join(", ")} must live in a connection (a capability with "kind": "connection") that wraps the service; call its operations instead`);

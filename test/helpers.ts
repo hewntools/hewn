@@ -77,6 +77,15 @@ export function setup(opts: NodePlatformOptions & { attempts?: number } = {}) {
   };
 }
 
+/**
+ * Wait for a build to finish; an agent's change held for the owner (its approval mode: wait) is
+ * approved as the owner, for tests about something else (holding itself: review.test.ts, submit.test.ts).
+ */
+export async function settled(platform: Platform, buildId: string): Promise<BuildView> {
+  const done = await platform.settle(buildId);
+  return done.status === "review" ? platform.approveBuild(USER, buildId) : done;
+}
+
 /** Install a capability from a directory (copy builder), as `hewn install` does. */
 export async function installFrom(platform: Platform, dir: string, name?: string) {
   const manifest = JSON.parse(readFileSync(join(dir, "capability.json"), "utf8"));

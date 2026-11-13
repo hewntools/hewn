@@ -15,7 +15,7 @@ import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
-import { Domain } from "./context.ts";
+import { breather, Domain } from "./context.ts";
 
 /** A candidate that passed validation, held in memory: nothing about the tool has changed yet. */
 export interface Candidate {
@@ -41,6 +41,17 @@ export interface Candidate {
   failures?: string[];
 }
 
+/** The four renders of a candidate's screen a held build's review card shows (and a check returns): 1280 and 390 px, light and dark. */
+export const REVIEW_SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
+/** Where a held build keeps one of them. */
+export const reviewShotKey = (buildId: string, name: string) => `screenshots/${buildId}/${name}.png`;
+
+/**
+ * What an agent's build says when its migrations don't apply to the tool's data. The error itself may
+ * quote that data, so it goes to the build's transcript, which only the owner reads.
+ */
+export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
+
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
 /** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
@@ -58,9 +69,11 @@ export class Validation extends Domain {
    * screenshot is kept), so it can be promoted later (`promote`), or not at all. `onTests` follows
    * the tests; `measure` has the visual check measure what a builder should fix, too. Throws with
    * what failed. `check` is a builder's check of its work in progress: it goes on after a failure
-   * (the candidate lists them all), and leaves the build page's screenshot alone.
+   * (the candidate lists them all), and leaves the build page's screenshot alone. `liveData: false`
+   * leaves out the one step that runs the candidate on the tool's own data (the upgrade dry run): a
+   * client's check, whose migrations run there only once submitted.
    */
-  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean } = {}): Promise<Candidate> {
+  async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean; liveData?: boolean } = {}): Promise<Candidate> {
     const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
@@ -112,7 +125,8 @@ export class Validation extends Domain {
     const code: CodeRef = { hash: contentHash(files, bundled.js), js: bundled.js };
     let exportedKeys: string[];
     try {
-      exportedKeys = await this.runtime.describe(code);
+      // Loading runs its top-level code: written down like a call, for a candidate that never lets go.
+      exportedKeys = await this.d.stalls.running({ capabilityId: id, state: `test:${build.id}`, what: "load", caller: "validation" }, () => this.runtime.describe(code));
     } catch (e) {
       return fail(`implementation failed to load: ${(e as Error).message}`);
     }
@@ -164,6 +178,8 @@ export class Validation extends Domain {
     let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean; real?: boolean } = {};
     let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
+      // One for all its loops of calls, so the time between them counts too.
+      const breathe = breather();
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
       let cases: TestCase[];
@@ -181,9 +197,13 @@ export class Validation extends Domain {
       const failed: string[] = [];
       onTests(0, cases.length);
       for (const [i, c] of cases.entries()) {
+        await breathe();
         try {
-          const result = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
-          const op = manifest.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
+          const op = caseOperation(manifest, c);
+          const before = await this.runtime.countState(testState, code);
+          const { result, inserted } = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
+          // A case that passed (one that expects an error is about the error, not what the call left behind).
+          if (op && !c.expectError) undeclaredDelete(op, { before, after: await this.runtime.countState(testState, code), inserted }, `test '${c.name}'`);
           if (op && !c.expectError && !views.has(opKey(op.name, op.version))) views.set(opKey(op.name, op.version), result);
         } catch (e) {
           failed.push((e as Error).message);
@@ -210,10 +230,21 @@ export class Validation extends Domain {
         await this.runtime.migrate(sampleState, migrations, code);
         let replayed = true;
         for (const [i, c] of sample.entries()) {
+          await breathe();
+          const before = await this.runtime.countState(sampleState, code);
+          let inserted: string[];
           try {
-            await this.replayCall(manifest, sampleTarget, c);
+            ({ inserted } = await this.replayCall(manifest, sampleTarget, c));
           } catch (e) {
             softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
+            replayed = false;
+            break;
+          }
+          const op = caseOperation(manifest, c);
+          try {
+            if (op) undeclaredDelete(op, { before, after: await this.runtime.countState(sampleState, code), inserted });
+          } catch (e) {
+            softFail(`${SAMPLE_FILE}: call ${i + 1} (${c.operation}): ${(e as Error).message}`);
             replayed = false;
             break;
           }
@@ -304,6 +335,7 @@ export class Validation extends Domain {
         const sampled = new Map<string, unknown>();
         if (sample)
           for (const w of manifest.widgets!) {
+            await breathe();
             const [operation, version] = w.operation.split("@");
             const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
@@ -322,14 +354,15 @@ export class Validation extends Domain {
       }
 
       // 6. dry-run migrations against a copy of real state
-      if (await this.runtime.hasState({ capabilityId: id })) {
+      if (opts.liveData !== false && (await this.runtime.hasState({ capabilityId: id }))) {
         await this.runtime.copyState({ capabilityId: id }, dryRun);
         try {
           const applied = await this.runtime.migrate(dryRun, migrations, code);
           step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
         } catch (e) {
-          if (!opts.check) throw e;
-          softFail(`the upgrade dry run failed: ${(e as Error).message}`);
+          const message = await this.ownersDetail(build, `the upgrade dry run failed: ${(e as Error).message}`, DRY_RUN_FAILED, { note: !opts.check });
+          if (!opts.check) throw new Error(message);
+          softFail(message);
         }
       }
     } finally {
@@ -354,9 +387,11 @@ export class Validation extends Domain {
   /**
    * A builder's check of its work in progress (its `check` tool): every step validation runs, going
    * on after a failure, with the UI rendered filled with the sample data and what to fix measured on
-   * it. Nothing about the tool or the build page changes.
+   * it. Nothing about the tool or the build page changes. `liveData: false`: not the upgrade dry run
+   * on the tool's own data (a client's check). `shots`: where the text says the renders are (`files`,
+   * a builder's `screenshots/`; `attached`, all of them as images; `none`, left out).
    */
-  async check(build: BuildRow): Promise<CheckResult> {
+  async check(build: BuildRow, opts: { liveData?: boolean; shots?: ShotsShown } = {}): Promise<CheckResult> {
     const passed: string[] = [];
     let candidate: Candidate | undefined;
     let failures: string[];
@@ -365,7 +400,7 @@ export class Validation extends Domain {
     const copy: BuildRow = { ...build, id: `${build.id}-check` };
     try {
       await this.workbench.snapshot(build.id, copy.id);
-      candidate = await this.validate(copy, (l) => passed.push(l), { check: true, measure: true });
+      candidate = await this.validate(copy, (l) => passed.push(l), { check: true, measure: true, ...(opts.liveData === false ? { liveData: false } : {}) });
       failures = candidate.failures ?? [];
     } catch (e) {
       // A step nothing after it can run without (the manifest, the bundle).
@@ -383,7 +418,7 @@ export class Validation extends Domain {
     const parts = shots.filter((s) => isPart(s.name) && (room -= s.png.length) >= 0);
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
-    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled }), failures, defects, images, ...(parts.length ? { parts } : {}) };
+    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled, shown: opts.shots ?? "files" }), failures, defects, images, ...(parts.length ? { parts } : {}) };
   }
 
   /**
@@ -409,6 +444,18 @@ export class Validation extends Domain {
     return { run, settled: async () => void (await queue) };
   }
 
+  /**
+   * A message about the candidate's code run on the tool's own data: the error may quote that data.
+   * The owner's build says it as it is; an agent's (whose log the agent reads, and builds_wait
+   * streams) says `generic`, and the error goes to the build's transcript, which only the owner reads
+   * (`note`: a check's copy has none to keep).
+   */
+  private async ownersDetail(build: BuildRow, detail: string, generic: string, { note = true } = {}): Promise<string> {
+    if (byOwner(build)) return detail;
+    if (note) await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${detail}`).catch(() => {});
+    return generic;
+  }
+
   /** The build page's screenshot of a build, light and dark. */
   private async keepScreenshots(build: BuildRow, v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) {
     if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
@@ -416,8 +463,9 @@ export class Validation extends Domain {
   }
 
   /**
-   * 7. freeze a validated candidate; an agent's change that adds operations or changes a connection
-   * waits for the owner, anything else is promoted (8).
+   * 7. freeze a validated candidate; an agent's new tool or change waits for the owner while its
+   * approval mode says so (in 0.4.11, always), as does a change that adds operations or changes a
+   * connection; anything else is promoted (8). A held one keeps its four renders for the review card.
    */
   async promote(build: BuildRow, candidate: Candidate, step: (message: string) => void): Promise<{ version: number } | { review: BuildReview }> {
     const id = build.capabilityId;
@@ -427,13 +475,18 @@ export class Validation extends Domain {
     await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
     this.loaded.set(code.hash, { files, bundle: code.js });
-    // A follow-up chained to the creation of the same capability (create with widgets) is part of that creation.
+    // A follow-up chained to the creation of the same capability (create with widgets) is part of that
+    // creation, when whoever asked for the creation asked for it (another agent's is its own change);
+    // an agent's waits for the owner all the same while its approval mode says so.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
-    const partOfCreate = dep?.kind === "create" && dep.capabilityId === id;
-    const review = partOfCreate || !base ? undefined : reviewFor(build, base, { manifest, files }, code.hash, views);
+    const partOfCreate = dep?.kind === "create" && dep.capabilityId === id && dep.requestedBy === build.requestedBy;
+    const held = !byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait";
+    const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? newToolReview(manifest, code.hash, views) : undefined;
     if (review) {
+      const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
+      for (const s of shots) await this.blobs.put(reviewShotKey(build.id, s.name), s.png);
       await this.workbench.remove(build.id);
-      return { review };
+      return { review: shots.length ? { ...review, shots: shots.map((s) => s.name) } : review };
     }
     return { version: await this.promoteVersion(build, manifest, files, code, step) };
   }
@@ -451,7 +504,12 @@ export class Validation extends Domain {
       for (const old of backups.slice(3)) await this.runtime.dropState({ capabilityId: id, scratch: old });
       step(`state backed up`);
     }
-    const applied = await this.runtime.migrate(live, migrations, code);
+    let applied: string[];
+    try {
+      applied = await this.runtime.migrate(live, migrations, code);
+    } catch (e) {
+      throw new Error(await this.ownersDetail(build, `migrations failed on the tool's data: ${(e as Error).message}`, "a migration failed on the tool's data as it went live (the owner's build log has the error)"));
+    }
     if (applied.length) step(`migrations applied: ${applied.join(", ")}`);
 
     const before = this.registry.getCapability(id)?.activeVersion ?? null;
@@ -462,6 +520,7 @@ export class Validation extends Domain {
       // Installed from a file: where it came from becomes the record every later version is stamped from.
       if (installed && !this.registry.getCapability(id)?.source) this.registry.setSource(id, installed);
     });
+    this.platform.activity.changed();
     // Grants this version no longer asks for go: asking again later means asking the owner again.
     const wanted = new Set(wantedGrants(manifest));
     for (const g of this.registry.grants(id)) {
@@ -533,7 +592,7 @@ export class Validation extends Domain {
               return { text, ...(json !== undefined ? { json } : {}), usage: { inputTokens: 0, outputTokens: 0 }, cost: 0, model: "test/fake" };
             }
           : undefined;
-      const { result } = await this.d.invocation.execute(
+      const { result, inserted } = await this.d.invocation.execute(
         manifest,
         { ...target, caller: { kind: "test", id: "validation" }, ...(widget ? { readOnly: true } : {}) },
         { capabilityId: manifest.id, operation: c.operation, operationVersion: c.version, input: c.input },
@@ -546,9 +605,9 @@ export class Validation extends Domain {
       if (c.expect !== undefined && !matches(c.expect, result)) {
         throw new Error(`${label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(result)}`);
       }
-      return result;
+      return { result, inserted };
     } catch (e) {
-      if (e instanceof PlatformError && c.expectError) return undefined;
+      if (e instanceof PlatformError && c.expectError) return { result: undefined, inserted: [] };
       if (e instanceof PlatformError) {
         throw new Error(`${label}: ${e.code}: ${e.message}${e.details ? " " + JSON.stringify(e.details) : ""}`);
       }
@@ -556,6 +615,27 @@ export class Validation extends Domain {
     }
   }
 }
+
+/**
+ * Hewn's own check of a call's side effect, whatever the tool's tests expect: an operation that leaves a table with
+ * fewer rows (or drops it) and adds none to it deletes, and only one declared `destructive` may (it asks the owner
+ * before an agent runs it, and can't be scheduled). Rows are counted per table before and after the call; `inserted`
+ * is the tables a statement inserted into during it (the db wrapper's). A table that lost rows but got new ones is a
+ * replace (a tag set swapped for a smaller one, delete-then-insert, INSERT OR REPLACE), a normal write. Not caught: an
+ * overwrite that keeps the count, or a delete that also inserts into the same table.
+ */
+function undeclaredDelete(op: OperationManifest, call: { before: Record<string, number>; after: Record<string, number>; inserted: string[] }, label?: string) {
+  if (op.sideEffect === "destructive") return;
+  const { before, after } = call;
+  const added = new Set(call.inserted);
+  // Fewer rows, or gone (dropped, even empty).
+  const fewer = Object.keys(before).filter((t) => (!(t in after) || after[t] < before[t]) && !added.has(t.toLowerCase()));
+  if (fewer.length) throw new Error(`${label ? `${label}: ` : ""}${op.name} leaves ${fewer.join(", ")} with fewer rows and adds none: declare it destructive`);
+}
+
+/** The operation a test case or sample call runs: its version, or the highest. */
+const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
+  m.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
 
 function readCases(files: Files): TestCase[] {
   const raw = files["tests/cases.json"];
@@ -578,20 +658,31 @@ export function matches(expected: unknown, actual: unknown): boolean {
   return expected === actual;
 }
 
+/** A build the owner started (the web client or the CLI): never held, and its log says things as they are. */
+const byOwner = (build: BuildRow) => build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
+
+/** An agent's new tool held for the owner: everything in it is new. */
+const newToolReview = (manifest: CapabilityManifest, contentHash: string, views: Map<string, unknown>): BuildReview => ({ contentHash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" });
+
+/** Operations as a review card shows them: what each takes, and what it returned in its first passing test. */
+function reviewOps(ops: OperationManifest[], views: Map<string, unknown>): BuildReview["newOperations"] {
+  const key = (o: OperationManifest) => opKey(o.name, o.version);
+  return ops.map((o) => ({ key: key(o), description: o.description, sideEffect: o.sideEffect, inputs: Object.keys((o.inputSchema as { properties?: object }).properties ?? {}), ...(views.has(key(o)) ? { example: shortJson(views.get(key(o))) } : {}) }));
+}
+
 /**
- * Whether a candidate waits for the owner: an agent's change (not the owner's, and not a new
- * capability, which has no data yet) to a connection, or one that adds operations. An agent with
- * `modify` otherwise decides what the code does with the capability's data and credentials.
+ * Whether a change waits for the owner: an agent's (not the owner's) while its approval mode says to
+ * wait (`held`), and whatever its mode, one to a connection or one that adds operations. An agent with
+ * `modify` otherwise decides what the code does with the capability's data and credentials. (An agent's
+ * new tool waits while its mode says to: `promote`.)
  */
-function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>): BuildReview | undefined {
-  if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return undefined;
+function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>, held: boolean): BuildReview | undefined {
+  if (byOwner(build)) return undefined;
   const key = (o: OperationManifest) => opKey(o.name, o.version);
   const had = new Map(base.manifest.operations.map((o) => [key(o), o]));
-  const newOperations = candidate.manifest.operations
-    .filter((o) => !had.has(key(o)))
-    .map((o) => ({ key: key(o), description: o.description, sideEffect: o.sideEffect, inputs: Object.keys((o.inputSchema as { properties?: object }).properties ?? {}), ...(views.has(key(o)) ? { example: shortJson(views.get(key(o))) } : {}) }));
+  const newOperations = reviewOps(candidate.manifest.operations.filter((o) => !had.has(key(o))), views);
   const connection = isConnection(candidate.manifest);
-  if (!connection && !newOperations.length) return undefined;
+  if (!connection && !newOperations.length && !held) return undefined;
   const ui = (f: Files) => Object.keys(f).filter((p) => p.startsWith("ui/")).sort();
   const sameBytes = (a?: Uint8Array, b?: Uint8Array) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
   const uiChanged = JSON.stringify(ui(base.files)) !== JSON.stringify(ui(candidate.files)) || ui(candidate.files).some((p) => !sameBytes(base.files[p], candidate.files[p]));
@@ -610,6 +701,7 @@ function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files:
       changedOperations: candidate.manifest.operations.filter((o) => had.has(key(o)) && strip(had.get(key(o))!) !== strip(o)).map(key),
       removedOperations: [...had.keys()].filter((k) => !now.has(k)),
     },
+    ...(held ? { approval: "wait" as const } : {}),
   };
 }
 
@@ -638,21 +730,41 @@ const listed = (msg: string, problems: string[]) => (problems.length ? `${msg}:\
 const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
 /**
+ * Where a check's renders go: a builder's `screenshots/` (the four shown too); for a client, the four
+ * as images (`four`, a long page's further parts named but left out) or all of them (`all`); or nowhere.
+ */
+export type ShotsShown = "files" | "four" | "all" | "none";
+
+/** What the text says of the renders: `images`, the top of each; `parts`, the rest of a long page. */
+function shotsText(images: string[], parts: string[], shown: ShotsShown): string {
+  if (shown === "none") return "rendered and measured, the screenshots left out (screenshots: false).";
+  const where = shown === "files" ? `attached, and in ${images.map((n) => `screenshots/${n}.png`).join(", ")}.` : `attached (${images.join(", ")}).`;
+  const rest = !parts.length
+    ? ""
+    : shown === "files"
+      ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.`
+      : shown === "all"
+        ? ` A long page shows its top part; the rest follows it (${parts.join(", ")}, top to bottom).`
+        : ` A long page shows its top part; the rest (${parts.join(", ")}, top to bottom) is left out: check again with screenshots: "all" to see it.`;
+  return `${where}${rest} Open every one and fix what looks broken, cramped, cut off or unreadable.`;
+}
+
+/**
  * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
  * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
- * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page, in files only.
+ * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page; `shown`:
+ * where the renders are.
  */
-function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean }): string {
-  const { failures, defects, images, parts, passed, ui, sampled } = c;
+function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean; shown: ShotsShown }): string {
+  const { failures, defects, images, parts, passed, ui, sampled, shown } = c;
   const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
-  const files = images.map((n) => `screenshots/${n}.png`);
   const skipped = passed.find((l) => /visual check skipped/.test(l));
   return [
-    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || images.length ? " Look at what follows before you stop." : ""}`,
+    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || (images.length && shown !== "none") ? " Look at what follows before you stop." : ""}`,
     failures.length ? `What failed:\n${list(failures)}` : "",
     defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
     images.length
-      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: attached, and in ${files.join(", ")}.${parts.length ? ` A long page shows its top part; the rest is in ${parts.map((n) => `screenshots/${n}.png`).join(", ")} (top to bottom): open those to see it.` : ""} Open every one and fix what looks broken, cramped, cut off or unreadable.`
+      ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: ${shotsText(images, parts, shown)}`
       : ui === false
         ? ""
         : `No screenshots: the UI wasn't rendered${skipped ? ` (${skipped})` : ui === undefined ? " (fix the failures first)" : ""}.`,

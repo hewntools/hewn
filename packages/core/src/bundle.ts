@@ -24,7 +24,7 @@ export interface BundleSummary {
   findings?: { kind: "warn" | "ok"; title: string; detail?: string; file?: string; line?: number }[];
 }
 
-/** A tool on the Official shelf (seeds/<id>/.hub/listing.json): what the Hub shows about it. */
+/** A tool on the Official shelf (seeds/<id>/.hub/listing.json): what Hewn's tools show about it. */
 export interface HubListing {
   /** One line for its card. */
   line: string;
@@ -66,7 +66,7 @@ const SUMMARY_MAX = { message: 600, keeps: 300, reaches: 500, title: 160, detail
 /**
  * A reading, checked and cut to size: its message (none: null), what it keeps and where data goes,
  * and its well-formed findings, warnings first, at most six. For the intake's reply, and for the one
- * a tool from the Hub ships with (a file's own is never read: it could say anything).
+ * one of Hewn's tools ships with (a file's own is never read: it could say anything).
  */
 export function readSummary(v: unknown): Required<BundleSummary> | null {
   const j = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
@@ -314,7 +314,7 @@ export function readZip(zip: Uint8Array): Files {
     next = start + size;
     if (path.endsWith("/")) continue;
     if (method !== 0) throw new BundleError(`${path} is compressed. Hewn reads bundles that Hewn made: share the tool again from Hewn and use that file.`);
-    if (path.startsWith("/") || path.split("/").some((s) => s === ".." || s === "") || path.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(path)) throw new BundleError(`${JSON.stringify(path)} isn't a path Hewn accepts.`);
+    if (path.startsWith("/") || path.split("/").some((s) => s === ".." || s === "." || s === "") || path.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(path)) throw new BundleError(`${JSON.stringify(path)} isn't a path Hewn accepts.`);
     // On a disk that ignores case (or Unicode normalisation), SRC/index.ts would overwrite src/index.ts.
     const key = path.normalize("NFC").toLowerCase();
     const twin = seen.get(key);

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A tool as a file (sharing, step 1). Share…: what a version would ship (its files, the scan,
-// sample data), and the bundle. Install from a file: staged first so the owner can read it, then
-// a create build with no builder ("bundle") through the normal validation. Sample data: replayed
-// after an install or Start over, and written by the owner as a new version. Owner only.
+// A tool as a file or a link. Share…: what a version would ship (its files, the scan, sample
+// data), the bundle, and links to it (/share/<token>, one version each, until they expire or are
+// revoked). Install from a file, a link or Hewn's tools: staged first so the owner can read it,
+// then submitted (`Builds.submit`, builder "bundle"): the one gate a client's tool goes through
+// too, so the same file rules and the same validation. Sample data: replayed after an
+// install or Start over, and written by the owner as a new version. Owner only, but for what a
+// link serves (the token is the authority there).
 import { type Agent, requireOwner } from "../auth.ts";
 import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, type Finding, type HubListing, type OwnValue, packBundle, readSample, readSummary, SAMPLE_FILE, type SampleCall, sampleOrNull, scanFiles, type ShelfTool, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
@@ -10,15 +13,23 @@ import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, contentHash, text } from "../files.ts";
 import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, newestByName, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import type { Files } from "../ports.ts";
-import type { BuildRow } from "../registry.ts";
-import { randomToken } from "../sha256.ts";
-import { type BuildView, RESERVED_IDS, slugify } from "./builds.ts";
-import { Domain } from "./context.ts";
+import type { BuildRow, ShareLink } from "../registry.ts";
+import { randomToken, sha256 } from "../sha256.ts";
+import { archivedConflict, type BuildView, RESERVED_IDS, slugify } from "./builds.ts";
+import { breather, Domain } from "./context.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
+import { candidateFiles } from "./submissions.ts";
 
 /** A staged bundle (uploaded, not installed) is dropped after a day. */
 const STAGED_MS = 24 * 3600_000;
+
+/** How long a share link works, in days, as picked in Share… (null: until revoked). */
+const LINK_DAYS = { "1d": 1, "7d": 7, "30d": 30, never: null } as const;
+type LinkExpiry = keyof typeof LINK_DAYS;
+const isLinkExpiry = (e: string): e is LinkExpiry => Object.hasOwn(LINK_DAYS, e);
+/** A share link's token: Hewn makes 24 random bytes as base64url (32 characters); a token of another shape is no link. */
+const SHARE_TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 
 export interface ShareCheck {
   id: string;
@@ -34,7 +45,7 @@ export interface ShareCheck {
   blocked: { kind: "secret"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
 }
 
-/** A card on the Hub (Q2): enough to choose, and whether you have it. */
+/** A card in Hewn's tools (Q2): enough to choose, and whether you have it. */
 export interface HubCard {
   id: string;
   name: string;
@@ -51,13 +62,13 @@ export interface HubCard {
   release: string;
 }
 
-/** A tool's Hub page (Q3): the card, its reading, its operations and versions. */
+/** One of Hewn's tools, its page (Q3): the card, its reading, its operations and versions. */
 export interface HubDetail extends HubCard {
   purpose: string;
   summary: BundleSummary;
   operations: { name: string; description: string; sideEffect: string }[];
   versions: HubListing["versions"];
-  /** Your tool that it is (installed from Hub, under any name, or one of the same id): Open opens it. */
+  /** Your tool that it is (installed from Hewn's tools, under any name, or one of the same id): Open opens it. */
   installedAs: string | null;
 }
 
@@ -72,10 +83,15 @@ export interface BundlePreview {
   /** The version it was exported from. */
   version: number;
   from: ToolSource["from"];
+  /** A link's: the host the file came from (where the link's redirects ended). */
   host: string | null;
+  /** A link that redirected to another host: the host the link itself was on. */
+  linkHost: string | null;
   summary: BundleSummary | null;
-  /** Whose reading `summary` is: Hewn's, shipped with a tool from the Hub, or the owner's own builder's. */
+  /** Whose reading `summary` is: Hewn's, shipped with one of Hewn's tools, or the owner's own builder's. */
   summaryBy: "hewn" | "yours" | null;
+  /** With the owner's own reading: what it left out or cut short (`SummaryInput.cut`); otherwise null. */
+  unread: string[] | null;
   /** What it will ask for once installed (grants still happen then). */
   asks: { hosts: string[]; model: { tier?: string; model?: string; images: boolean } | null; tools: { id: string; operations: string[] }[]; secrets: string[]; config: string[] };
   /** Sample calls it ships with. */
@@ -88,10 +104,15 @@ export interface BundlePreview {
   icon: { hue: number | null; saturation: number | null; glyph: Cells | null };
 }
 
-interface Staged {
-  at: number;
+/** Where a tool's file came from: a file, one of Hewn's tools, or a link (`host` the file's, and `linkHost` the link's own when it redirected elsewhere). */
+export interface BundleOrigin {
   from: ToolSource["from"];
   host?: string;
+  linkHost?: string;
+}
+
+interface Staged extends BundleOrigin {
+  at: number;
   /** The owner's own reading of it (the intake's summary), once asked for. */
   summary?: BundleSummary;
 }
@@ -106,6 +127,35 @@ export interface SummaryInput {
 /** What the intake reads, at most, counted as it's sent (numbered): 40 KB of a file, 200 KB in all. */
 const SUMMARY_FILE_BYTES = 40_000;
 const SUMMARY_TOTAL_BYTES = 200_000;
+
+/**
+ * A tool's files as the intake reads them: each line numbered, migrations and code first, at most
+ * 40 KB of each and 200 KB in all as sent; `cut` names what was left out (a file that isn't text, or
+ * no room left) or cut short (and where).
+ */
+function readable(all: Files): Omit<SummaryInput, "manifest"> {
+  const rank = (p: string) => ["capability.json", "migrations/", "src/", "sample/", "tests/", "ui/"].findIndex((d) => p.startsWith(d)) + 1 || 9;
+  const paths = Object.keys(all).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const files: SummaryInput["files"] = [];
+  const cut: string[] = [];
+  let total = 0;
+  for (const path of paths) {
+    const b = all[path];
+    if (b.includes(0)) {
+      cut.push(`${path} (not text)`);
+      continue;
+    }
+    const n = numbered(text(b), Math.min(SUMMARY_FILE_BYTES, SUMMARY_TOTAL_BYTES - total));
+    if (!n.lines) {
+      cut.push(path);
+      continue;
+    }
+    files.push({ path, text: n.text });
+    if (n.short) cut.push(`${path} (cut at line ${n.lines})`);
+    total += n.bytes;
+  }
+  return { files, cut };
+}
 
 export class Sharing extends Domain {
   // ---------- Share… ----------
@@ -137,18 +187,78 @@ export class Sharing extends Domain {
 
   /** The bundle (`<id>.hewn.zip`): refused while the check blocks it. */
   async shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> {
-    const check = await this.shareCheck(owner, capabilityId, version);
-    if (check.blocked?.kind === "secret") {
-      const keys = check.findings.filter((f) => f.kind === "secret");
-      throw new PlatformError("conflict", `${keys.map((f) => `${f.file}:${f.line} is ${f.label}`).join("; ")}. Remove ${keys.length > 1 ? "them" : "it"}, then share again.`, { blocked: check.blocked });
-    }
-    if (check.blocked?.kind === "no-sample") throw new PlatformError("conflict", `${capabilityId} has no sample data (${SAMPLE_FILE}), and a tool needs it to be shared. Ask the builder to add some, or write it yourself.`, { blocked: check.blocked });
-    const files = await this.shareFiles(capabilityId, check.version);
-    const row = this.registry.getVersion(capabilityId, check.version)!;
-    const manifest = JSON.parse(text(files["capability.json"])) as CapabilityManifest;
-    const sidecar: Sidecar = { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(manifest), exportedAt: new Date().toISOString(), tool: { id: capabilityId, version: check.version, hash: row.contentHash } };
+    const check = refuseBlocked(await this.shareCheck(owner, capabilityId, version));
     this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a file`, owner.id);
+    return this.packShare(capabilityId, check.version);
+  }
+
+  /** A version as a bundle, with the sidecar saying which tool and version it is. */
+  private async packShare(capabilityId: string, version: number): Promise<{ name: string; bundle: Uint8Array }> {
+    const files = await this.shareFiles(capabilityId, version);
+    const row = this.registry.getVersion(capabilityId, version)!;
+    const manifest = JSON.parse(text(files["capability.json"])) as CapabilityManifest;
+    const sidecar: Sidecar = { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(manifest), exportedAt: new Date().toISOString(), tool: { id: capabilityId, version, hash: row.contentHash } };
     return { name: `${capabilityId}.hewn.zip`, bundle: packBundle(files, sidecar) };
+  }
+
+  // ---------- Share… › Link ----------
+
+  /**
+   * A link to one version: `/share/<token>` serves its bundle until it expires or is revoked. The
+   * same check as the file first (a blocked version gets no link). The token is returned here, once;
+   * Hewn keeps only its hash.
+   */
+  async createShareLink(owner: Agent, capabilityId: string, req: { version?: number; expires?: string }): Promise<{ token: string; link: ShareLink }> {
+    const expires = req.expires ?? "7d";
+    if (!isLinkExpiry(expires)) throw new PlatformError("invalid_request", `expires must be ${Object.keys(LINK_DAYS).join(", ")}`);
+    const check = refuseBlocked(await this.shareCheck(owner, capabilityId, req.version));
+    const days = LINK_DAYS[expires];
+    const token = randomToken(24);
+    const id = randomToken(9);
+    this.registry.insertShareLink({ id, tokenHash: sha256(token), capabilityId, version: check.version, expiresAt: days === null ? null : new Date(Date.now() + days * 86400_000).toISOString() });
+    this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a link (${days === null ? "until revoked" : `${days} ${days === 1 ? "day" : "days"}`})`, owner.id);
+    return { token, link: this.registry.shareLinks(capabilityId).find((l) => l.id === id)! };
+  }
+
+  /** A tool's links that still work, newest first: version, expiry and the download count. */
+  shareLinks(owner: Agent, capabilityId: string): ShareLink[] {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    return this.registry.shareLinks(capabilityId);
+  }
+
+  /** Revoke: the link 404s from now on. */
+  revokeShareLink(owner: Agent, capabilityId: string, id: string) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    const link = this.registry.shareLinks(capabilityId).find((l) => l.id === id);
+    if (!link) throw new PlatformError("not_found", "That link has stopped already (revoked or expired).");
+    this.registry.revokeShareLinks(capabilityId, id);
+    this.registry.addLifecycleEvent(capabilityId, "share", `link to v${link.version} revoked`, owner.id);
+  }
+
+  /**
+   * What `/share/<token>` serves: the bundle of the version the link was made for. No owner: the
+   * token is the authority, so anything that isn't a working link is the same not_found. Each file
+   * served is counted, never who fetched it.
+   */
+  /** Whether a link still works: not revoked or expired, and its tool and version still there. */
+  shareLinkWorks(token: string): boolean {
+    return !!this.workingLink(token);
+  }
+
+  async sharedBundle(token: string): Promise<{ name: string; bundle: Uint8Array }> {
+    const link = this.workingLink(token);
+    if (!link) throw new PlatformError("not_found", "no such link");
+    const shared = await this.packShare(link.capabilityId, link.version);
+    this.registry.countShareDownload(link.id);
+    return shared;
+  }
+
+  private workingLink(token: string) {
+    const link = SHARE_TOKEN.test(token) ? this.registry.workingShareLink(sha256(token)) : undefined;
+    const cap = link && this.registry.getCapability(link.capabilityId);
+    return link && cap?.activeVersion && !cap.archivedAt && this.registry.getVersion(link.capabilityId, link.version) ? link : undefined;
   }
 
   /** A version's files as they travel: its own `source` goes (an install writes its own). */
@@ -186,12 +296,12 @@ export class Sharing extends Domain {
   // ---------- Install from a file ----------
 
   /** Stage an uploaded bundle: checked (format, size, ABI), kept until installed or a day old. */
-  async stageBundle(owner: Agent, zip: Uint8Array, origin: { from: ToolSource["from"]; host?: string } = { from: "file" }): Promise<BundlePreview> {
+  async stageBundle(owner: Agent, zip: Uint8Array, origin: BundleOrigin = { from: "file" }): Promise<BundlePreview> {
     requireOwner(owner);
     const { files, sidecar, manifest } = refuseUnreadable(zip);
     await this.dropOldStaged();
     const token = randomToken(24);
-    const entry: Staged = { at: Date.now(), from: origin.from, ...(origin.host ? { host: origin.host } : {}) };
+    const entry: Staged = { at: Date.now(), from: origin.from, ...(origin.host ? { host: origin.host } : {}), ...(origin.linkHost ? { linkHost: origin.linkHost } : {}) };
     // The preview first: nothing is kept of a file that can't be shown.
     const preview = this.preview(token, files, sidecar, manifest, entry);
     await this.blobs.put(`bundles/${token}.zip`, zip);
@@ -220,44 +330,28 @@ export class Sharing extends Domain {
     return codeText(path, (await this.loadStaged(token)).files, null);
   }
 
-  /**
-   * What the intake reads to summarize a staged tool: its manifest and its text files, each line
-   * numbered, migrations and code first, at most 40 KB of each and 200 KB in all as sent; `cut`
-   * names what was left out (a file that isn't text, or no room left) or cut short (and where).
-   */
+  /** What the intake reads to summarize a staged tool: its manifest and its files as `readable` gives them. */
   async summaryInput(owner: Agent, token: string): Promise<SummaryInput> {
     requireOwner(owner);
     const s = await this.loadStaged(token);
-    const rank = (p: string) => ["capability.json", "migrations/", "src/", "sample/", "tests/", "ui/"].findIndex((d) => p.startsWith(d)) + 1 || 9;
-    const paths = Object.keys(s.files).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-    const files: SummaryInput["files"] = [];
-    const cut: string[] = [];
-    let total = 0;
-    for (const path of paths) {
-      const b = s.files[path];
-      if (b.includes(0)) {
-        cut.push(`${path} (not text)`);
-        continue;
-      }
-      const n = numbered(text(b), Math.min(SUMMARY_FILE_BYTES, SUMMARY_TOTAL_BYTES - total));
-      if (!n.lines) {
-        cut.push(path);
-        continue;
-      }
-      files.push({ path, text: n.text });
-      if (n.short) cut.push(`${path} (cut at line ${n.lines})`);
-      total += n.bytes;
-    }
-    return { manifest: s.manifest, files, cut };
+    return { manifest: s.manifest, ...readable(s.files) };
   }
 
-  /** Keep the owner's reading of a staged tool: the sheet shows it, and the install keeps it with its build. */
-  async keepSummary(owner: Agent, token: string, summary: BundleSummary) {
+  /**
+   * Keep the owner's reading of a staged tool: the sheet shows it, and the install keeps it with its
+   * build. A finding's place is kept only when it's in the tool (a file it has, a line that file has):
+   * Show never opens somewhere the reading made up. Returns the reading as kept.
+   */
+  async keepSummary(owner: Agent, token: string, summary: BundleSummary): Promise<BundleSummary> {
     requireOwner(owner);
-    await this.loadStaged(token);
+    const s = await this.loadStaged(token);
+    const lines = (path: string) => (s.files[path] ? text(s.files[path]).split("\n").length : 0);
+    const findings = summary.findings?.map(({ file, line, ...f }) => (file && lines(file) >= (line ?? 1) ? { ...f, file, ...(line ? { line } : {}) } : f));
+    const kept = { ...summary, ...(findings ? { findings } : {}) };
     const staged = this.registry.getKv<Record<string, Staged>>("bundles:staged") ?? {};
-    if (staged[token]) staged[token].summary = summary;
+    if (staged[token]) staged[token].summary = kept;
     this.registry.setKv("bundles:staged", staged);
+    return kept;
   }
 
   /** Forget a staged bundle (the sheet was cancelled). */
@@ -270,9 +364,9 @@ export class Sharing extends Domain {
   }
 
   /**
-   * Install a staged bundle under `name` (its id comes from the name): a create build whose files
-   * are the bundle's, with `source` set to where it came from, through the normal validation.
-   * `sample`: replay its sample data once it's live.
+   * Install a staged bundle under `name` (its id comes from the name): its files submitted as a new
+   * tool (builder "bundle", no base version), with `source` set to where it came from. `sample`:
+   * replay its sample data once it's live.
    */
   async installBundle(owner: Agent, token: string, req: { name: string; sample?: boolean }): Promise<BuildView> {
     requireOwner(owner);
@@ -282,13 +376,15 @@ export class Sharing extends Domain {
     const id = slugify(name);
     if (!id) throw new PlatformError("invalid_request", "the name needs a letter or a digit");
     if (RESERVED_IDS.has(id)) throw new PlatformError("invalid_request", `'${id}' is reserved; choose another name`);
-    if (this.registry.getCapability(id)) throw new PlatformError("conflict", `You already have a tool called ${name}. Pick another name.`);
+    const taken = this.registry.getCapability(id);
+    // A deleted one keeps its name while it's kept: say so, and where to bring it back.
+    if (taken?.archivedAt) throw archivedConflict(taken);
+    if (taken) throw new PlatformError("conflict", `You already have a tool called ${name}. Pick another name.`);
     const source: ToolSource = { id: s.sidecar.tool.id, name: s.manifest.name, version: s.sidecar.tool.version, hash: s.sidecar.tool.hash, from: s.staged.from, ...(s.staged.host ? { host: s.staged.host } : {}) };
-    const manifest = stampSource({ ...s.manifest, id, name }, source);
-    const seed: Files = { ...s.files, "capability.json": bytes(JSON.stringify(manifest, null, 2) + "\n") };
     const sample = !!req.sample && !!s.files[SAMPLE_FILE];
     const summary = s.staged.summary ?? hewnReading(s.sidecar, s.staged);
-    const build = await this.platform.install(owner, { name, purpose: manifest.purpose, builder: "bundle", id, seed, requirements: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample, ...(summary ? { summary } : {}) });
+    // Submit writes the id, the name and `source` into its capability.json.
+    const build = await this.d.builds.submit(owner, { files: s.files, id, name, builder: "bundle", request: `Installed ${sourceWords(source)}: ${s.manifest.name} v${source.version}`, source, sample, ...(summary ? { summary } : {}) });
     await this.dropStaged(owner, token);
     return build;
   }
@@ -307,10 +403,12 @@ export class Sharing extends Domain {
       version: sidecar.tool?.version ?? 1,
       from: staged.from,
       host: staged.host ?? null,
+      linkHost: staged.linkHost ?? null,
       summary: staged.summary ?? hewn,
       summaryBy: staged.summary ? "yours" : hewn ? "hewn" : null,
+      unread: staged.summary ? readable(files).cut : null,
       asks: {
-        hosts: (m.requires?.hosts ?? []).filter((x) => !x.startsWith("config:")),
+        hosts: m.requires?.hosts ?? [],
         model: model ? { ...(model.tier ? { tier: model.tier } : {}), ...(model.model ? { model: model.model } : {}), images: !!model.input?.includes("image") } : null,
         tools: (m.requires?.capabilities ?? []).map((c) => ({ id: c.id, operations: c.operations })),
         secrets: (m.requires?.secrets ?? []).map((x) => x.name),
@@ -353,7 +451,8 @@ export class Sharing extends Domain {
     if (changed) this.registry.setKv("bundles:staged", staged);
   }
 
-  // ---------- the Hub: Hewn's own tools (Official), shipped in the release ----------
+  // ---------- Hewn's own tools (Official), shipped in the release, under + New ----------
+  // (The methods keep the `hub` names of the Hub tab they served until 0.4.11.)
 
   /** The Official shelf as cards, in the shelf's order: installed when you have one from it (or one of the same id). */
   hubCards(owner: Agent, shelf: ShelfTool[]): HubCard[] {
@@ -361,7 +460,7 @@ export class Sharing extends Domain {
     return shelf.map((t) => this.card(t));
   }
 
-  /** A tool's Hub page: its card, Hewn's reading, its operations (the newest of each), its versions, and which of yours it is. */
+  /** One of Hewn's tools, its page: its card, Hewn's reading, its operations (the newest of each), its versions, and which of yours it is. */
   hubDetail(owner: Agent, shelf: ShelfTool[], id: string): HubDetail {
     requireOwner(owner);
     const t = shelfTool(shelf, id);
@@ -389,7 +488,7 @@ export class Sharing extends Domain {
     return { id: t.id, name };
   }
 
-  /** An Official tool, staged to install (from Hub, with Hewn's reading): the same sheet as a file's. */
+  /** An Official tool, staged to install (with Hewn's reading): the same sheet as a file's. */
   async hubStage(owner: Agent, shelf: ShelfTool[], id: string): Promise<BundlePreview> {
     requireOwner(owner);
     return this.stageBundle(owner, this.hubBundle(shelfTool(shelf, id)), { from: "hub" });
@@ -401,7 +500,7 @@ export class Sharing extends Domain {
     return packBundle(t.files, { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(m), exportedAt: new Date().toISOString(), tool: { id: t.id, version: t.listing.version, hash: contentHash(t.files, "") }, summary: t.listing.summary });
   }
 
-  /** Your tool that is this one: installed from Hub (under any name) first, else one of the same id. */
+  /** Your tool that is this one: installed from Hewn's tools (under any name) first, else one of the same id. */
   private installedAs(t: ShelfTool): string | null {
     const active = this.registry.listActiveCapabilities();
     return (active.find((c) => c.source?.from === "hub" && c.source.id === t.id) ?? active.find((c) => c.id === t.id))?.id ?? null;
@@ -445,7 +544,9 @@ export class Sharing extends Domain {
     const calls = readSample(v.files);
     if (!calls) throw new PlatformError("not_found", `${capabilityId} has no sample data`);
     const target = { capabilityId, code: v.code, state: { capabilityId }, secrets: {}, config: {}, caller: { kind: "user", id: actor } };
+    const breathe = breather();
     for (const [i, c] of calls.entries()) {
+      await breathe();
       try {
         await this.d.validation.replayCall(v.row.manifest, target, c);
       } catch (e) {
@@ -473,7 +574,7 @@ export class Sharing extends Domain {
 }
 
 /**
- * Hewn's own reading, shipped with a tool from the Hub (where it's Hewn's to write; staged as such by
+ * Hewn's own reading, shipped with one of Hewn's tools (where it's Hewn's to write; staged as such by
  * Hewn itself), when it's well-formed. A file's or a link's hewn-bundle.json could say anything, so
  * theirs is never shown as Hewn's: the owner's builder reads those.
  */
@@ -506,6 +607,16 @@ function numbered(raw: string, room: number): { text: string; bytes: number; lin
   return { text: out.join("\n"), bytes: used, lines: out.length, short: false };
 }
 
+/** A share check that lets the version go, or the reason it can't (the same for a file and a link). */
+function refuseBlocked(check: ShareCheck): ShareCheck {
+  if (check.blocked?.kind === "secret") {
+    const keys = check.findings.filter((f) => f.kind === "secret");
+    throw new PlatformError("conflict", `${keys.map((f) => `${f.file}:${f.line} is ${f.label}`).join("; ")}. Remove ${keys.length > 1 ? "them" : "it"}, then share again.`, { blocked: check.blocked });
+  }
+  if (check.blocked?.kind === "no-sample") throw new PlatformError("conflict", `${check.id} has no sample data (${SAMPLE_FILE}), and a tool needs it to be shared. Ask the builder to add some, or write it yourself.`, { blocked: check.blocked });
+  return check;
+}
+
 /** A bundle's files, sidecar and manifest, or the reason it can't be installed here. */
 function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; manifest: CapabilityManifest } {
   const refuse = (message: string, details: Record<string, unknown> = {}): never => {
@@ -534,6 +645,22 @@ function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; ma
   if (typeof tool?.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(tool.id) || !Number.isInteger(tool.version) || tool.version < 1 || typeof tool.hash !== "string" || !/^[0-9a-f]{64}$/.test(tool.hash)) refuse("Its hewn-bundle.json doesn't say which tool and version it is.");
   const deps = dependencyProblems(unpacked.files);
   if (deps.length) refuse(`Hewn won't install ${manifest.name}: ${deps.join("; ")}.`, { refusal: "dependencies", problems: deps });
+  // What the install will submit, held to submit's rules now: a file the install would refuse isn't
+  // staged. Its paths, size and file count were read above; what's left is what a tool never keeps.
+  try {
+    candidateFiles(unpacked.files);
+  } catch (e) {
+    if (!(e instanceof PlatformError)) throw e;
+    const { refused = [], problems = [] } = (e.details ?? {}) as { refused?: { path: string }[]; problems?: string[] };
+    const paths = refused.map((r) => r.path);
+    const named = paths.length > 4 ? `${paths.slice(0, 4).join(", ")} and ${paths.length - 4} more` : paths.join(", ");
+    refuse(
+      paths.length
+        ? `Hewn won't install ${manifest.name}: it carries ${named}, which a tool never keeps (a builder's settings, files Hewn writes for builders, or build output). Whoever shared it can share it again without ${paths.length === 1 ? "it" : "them"}.`
+        : `Hewn won't install ${manifest.name}: ${problems[0] ?? e.message}.`,
+      { refused, problems },
+    );
+  }
   return { ...unpacked, manifest };
 }
 
@@ -542,7 +669,7 @@ const manifestOf = (files: Files) => JSON.parse(text(files["capability.json"])) 
 /** A tool on the shelf, or not_found. */
 function shelfTool(shelf: ShelfTool[], id: string): ShelfTool {
   const t = shelf.find((x) => x.id === id);
-  if (!t) throw new PlatformError("not_found", `${id} isn't on the Hub`);
+  if (!t) throw new PlatformError("not_found", `${id} isn't one of Hewn's tools`);
   return t;
 }
 

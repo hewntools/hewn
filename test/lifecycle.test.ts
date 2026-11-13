@@ -4,7 +4,7 @@ import { type Agent, USER } from "@hewntools/core/auth.ts";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { editJson, editText, installSeed, SEED, setup } from "./helpers.ts";
+import { editJson, editText, installSeed, SEED, settled, setup } from "./helpers.ts";
 
 const write = (path: string, content: string) => (mkdirSync(dirname(path), { recursive: true }), writeFileSync(path, content));
 const backups = (t: ReturnType<typeof setup>, id: string) => (existsSync(join(t.home.capabilities, id, "backups")) ? readdirSync(join(t.home.capabilities, id, "backups")) : []);
@@ -184,9 +184,10 @@ describe("modification lifecycle", () => {
     const seen: string[] = [];
     const mark = (n: string) => (ws: string) => (seen.push(readFileSync(join(ws, "src", "index.ts"), "utf8")), editText(join(ws, "src", "index.ts"), (s) => `${s}\n// ${n}`));
     t.queue(async (ws) => (await gate, mark("first")(ws)), mark("second"), mark("third"));
-    const first = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a" });
-    const second = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "b" });
-    const third = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "c" });
+    // The owner's changes: an agent's would wait for the owner, and one held for review holds nothing up.
+    const first = await t.platform.modify(USER, { capabilityId: "running-log", request: "a" });
+    const second = await t.platform.modify(USER, { capabilityId: "running-log", request: "b" });
+    const third = await t.platform.modify(USER, { capabilityId: "running-log", request: "c" });
     assert.equal(second.status, "waiting");
     assert.equal(second.dependsOn, first.buildId);
     assert.equal(second.queued, true);
@@ -210,7 +211,7 @@ describe("modification lifecycle", () => {
     assert.equal(second.status, "waiting");
     release();
     assert.equal((await t.platform.settle(first.buildId)).status, "failed");
-    const done = await t.platform.settle(second.buildId);
+    const done = await settled(t.platform, second.buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.equal(done.resultVersion, 2);
   });

@@ -2,6 +2,7 @@
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
 import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, modal, setWallpaper, sheetActions, sheetHead, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
+import { agentTile, catalogOf } from "./agents.js";
 import { retryable } from "./build.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
 import { grantsSheet, grantText, kindPill, signInDialog, TIERS } from "./grants.js";
@@ -95,16 +96,41 @@ function startOverDialog(c, hasSample) {
 /** One section of Info: a card with its title (and an action on the right), then the thing itself. */
 const section = (title, body, { action, order } = {}) => h("section", { class: "card info-section", style: { order } }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, title), action), body);
 
+/**
+ * Agents: each connected agent, switched on or off for this tool. That overrides its default (every
+ * tool, or only some) for this one tool; switching it back undoes that. Each saves at once, with Undo.
+ */
+function agentsSection(c, agents, order) {
+  const row = (a) => {
+    const sw = h("input", { type: "checkbox", class: "switch", checked: a.canUse, "aria-label": `${a.name} can use ${c.name}` });
+    const sub = h("span", { class: "sub" });
+    const words = () => (sub.textContent = a.default === "some" ? "Only some tools" : a.canUse ? "Every tool" : "Every tool but this one");
+    const set = async (canUse, undo) => {
+      await api(`/capabilities/${enc(c.id)}/agents/${enc(a.id)}`, { method: "PUT", body: { canUse } });
+      a.canUse = sw.checked = canUse;
+      words();
+      toast(canUse ? `${a.name} can use ${c.name}` : `${a.name} can no longer use ${c.name}`, undo ? { undo: () => set(!canUse, false).catch(fail) } : {});
+    };
+    sw.addEventListener("change", () => set(sw.checked, true).catch((e) => ((sw.checked = !sw.checked), fail(e))));
+    words();
+    return h("li", {}, agentTile(catalogOf(a)?.id ?? a.id, a.name, 28), h("div", { class: "grow" }, h("span", {}, a.name), sub), sw);
+  };
+  return section("Agents", h("ul", { class: "list" }, agents.length ? agents.map(row) : h("li", {}, h("span", { class: "grow muted" }, "No agents connected yet."))), {
+    order,
+    action: h("a", { class: "btn link sm", href: "#/agents" }, "All agents ›"),
+  });
+}
+
 
 async function infoPage(id) {
   const here = stillHere();
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("50%", "30%", "90%", "70%")));
-  const [cap, all] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true)]);
+  const [cap, all, agents] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true), api(`/capabilities/${enc(id)}/agents`).catch(() => [])]);
   if (!here()) return;
   const c = all.get(id) ?? { id, name: cap.name, ui: !!cap.ui?.available, ready: cap.status.ready, kind: cap.kind };
   setWallpaper(await hues([tintOf(c)]));
   if (!here()) return;
-  if (cap.kind === "connection") return connectionPage(c, cap, all);
+  if (cap.kind === "connection") return connectionPage(c, cap, all, agents);
   const req = cap.requires?.model;
   const [scheds, home, m, instr, data] = await Promise.all([
     api("/schedules").catch(() => []),
@@ -156,6 +182,12 @@ async function infoPage(id) {
 
   // W2: whatever needs the owner, above the composer, each with its one action. It stays in its section too.
   const notices = [];
+  // Suspended by Hewn: first, as nothing runs it until the owner resumes it.
+  if (cap.status.suspended) {
+    const resume = () => api(`/capabilities/${enc(id)}/resume`, { method: "POST" }).then(() => (invalidateCaps(), toast(`${cap.name} resumed`), route()), fail);
+    const fix = () => openChange(c, { m: "It kept Hewn from responding while it ran (an endless loop?), so Hewn suspended it. Find what never lets go and fix it." });
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `Suspended: ${cap.status.suspended.reason}. Its calls, schedules and widgets are refused until you resume it.`), h("button", { class: "sm", onclick: fix }, "Ask builder to fix"), h("button", { class: "sm primary", onclick: resume }, "Resume")));
+  }
   const shownPending = pending.filter((i) => !denied(i));
   if (shownPending.length === 1 && oneTap(shownPending[0]) && !missingConfig.length) {
     const i = shownPending[0];
@@ -173,7 +205,7 @@ async function infoPage(id) {
   if (c.lastBuild?.paused && !c.building)
     notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, "The last change is paused, its work kept. The live version is unchanged."), h("a", { class: "btn sm primary", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Continue…")));
   else if (c.lastBuild?.status === "failed" && !c.building)
-    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), retryable(c.lastBuild) && h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry")));
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "The last change didn't build. The live version is unchanged."), h("a", { class: "btn sm", href: `#/b/${enc(c.lastBuild.buildId)}` }, "Details"), retryable(c.lastBuild) && h("button", { class: "sm primary", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/retry`, { method: "POST" }).then((b) => go(`#/b/${enc(b.buildId ?? c.lastBuild.buildId)}`), fail) }, "Retry"), h("button", { class: "sm", onclick: () => api(`/builds/${enc(c.lastBuild.buildId)}/discard`, { method: "POST" }).then(() => (toast("Discarded: it stays in Activity"), route()), fail) }, "Discard")));
   if (cap.status.retiredModel) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `${cap.status.retiredModel.model} is no longer available.`), h("button", { class: "sm primary", onclick: () => toolModelSheet(c, { replace: true }).then((ok) => ok || route()) }, "Replace…")));
   else if (cap.status.missingModel && !pending.length) notices.push(h("div", { class: "notice warn info-notice" }, h("span", { class: "grow" }, cap.status.missingModel), h("button", { class: "sm primary", onclick: giveWhatItNeeds }, "Set a model")));
   if (cap.status.missingDependencies?.length > 0) notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, "Depends on operations that no longer exist."), h("a", { class: "btn sm", href: changeHref(c) }, "Change it")));
@@ -408,7 +440,7 @@ async function infoPage(id) {
   });
 
   // Every section, empty or not, each with its way to add one.
-  const columns = h("div", { class: "info-sections" }, h("div", { class: "info-col" }, operations, allowed, dataSection), h("div", { class: "info-col" }, widgetSection, schedules, instructions, versions));
+  const columns = h("div", { class: "info-sections" }, h("div", { class: "info-col" }, operations, allowed, agentsSection(c, agents, 2), dataSection), h("div", { class: "info-col" }, widgetSection, schedules, instructions, versions));
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
@@ -438,10 +470,11 @@ async function infoPage(id) {
 }
 
 /**
- * I2 A connection's page: its health; Operations on the left (each opens the Run view, health shows
- * its last result); Used by and Settings (sign-in, its config as one form, one Save) on the right.
+ * I2 A connection's page: its health; Operations and the agents that can use it on the left (each
+ * operation opens the Run view, health shows its last result); Used by and Settings (sign-in, its
+ * config as one form, one Save) on the right.
  */
-async function connectionPage(c, cap, all) {
+async function connectionPage(c, cap, all, agents) {
   const id = c.id;
   const name = h("span", {}, cap.name);
   const ops = runnableOps(cap);
@@ -492,6 +525,7 @@ async function connectionPage(c, cap, all) {
             ),
             { order: 1 },
           ),
+          agentsSection(c, agents, 4),
         ),
         h(
           "div",

@@ -123,8 +123,8 @@ export function inProcessRuntime(home: { root: string; capabilities: string }): 
             readOnly: target.readOnly,
           }),
         );
-        const { output, secretUpdates } = await Promise.race([run, timer.expired]);
-        return { output, secretUpdates, logs: capLines(lines) };
+        const { output, secretUpdates, inserted } = await Promise.race([run, timer.expired]);
+        return { output, secretUpdates, logs: capLines(lines), inserted };
       } catch (e) {
         if (e instanceof PlatformError && (e.details as { timeout?: boolean } | undefined)?.timeout) {
           e.details = { logs: capLines(lines) };

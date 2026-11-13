@@ -62,11 +62,22 @@ const SCOPES = [
   ["create", "Make new ones", "make tools"],
   ["modify", "Change existing ones", "change tools"],
 ];
+/** What happens to an agent's new tools and changes once they pass the checks (its approval mode); only "wait" can be chosen until 0.4.12. */
+const APPROVAL = [
+  ["wait", "Wait for your approval", null],
+  ["live", "Go live after the checks", "From 0.4.12, once Hewn's own tests guard your data"],
+];
 /** Scopes in words: "see, use, make". */
 const scopeWords = (scopes) => {
   const s = new Set(scopes);
   const parts = [s.has("discover") && "see", s.has("invoke") && "use", s.has("create") && "make", s.has("modify") && "change"].filter(Boolean);
   return parts.length ? parts.join(", ") : "no access";
+};
+/** Its tools in words: "every tool except Aurora Watch, Gift Ideas", "only Running Log", or "" for every tool. Deleted tools aren't named. */
+const toolWords = (a, all) => {
+  const names = (a.capabilities === "*" ? a.except ?? [] : a.capabilities).map((id) => all.get(id)).filter((c) => c?.version).map((c) => c.name).join(", ");
+  if (a.capabilities === "*") return names && `every tool except ${names}`;
+  return names ? `only ${names}` : "no tools";
 };
 
 /**
@@ -96,10 +107,25 @@ const TILES = { "claude-code": [30, "claude"], claude: [30, "claude"], "claude-d
 /** A tile with a brand's logo as a mask (it takes the tile's glyph colour), or the monogram. */
 const logoTile = (hue, logo, letters, size, saturation = 100) =>
   h("span", { class: "app-icon", style: { "--size": `${size}px`, "--hue": hue, "--s": saturation / 100 }, "aria-hidden": "true" }, logo ? h("span", { class: "icon-mask logo", style: { "mask-image": `url(/logos/${logo}.svg)`, "-webkit-mask-image": `url(/logos/${logo}.svg)` } }) : letters);
-/** An agent's tile, by id (claude-code-2 → claude-code) or by its name. */
+/** A name as an agent id: "Claude Code (hewn)" → claude-code (a client's name may carry a note in parentheses). */
+const agentKey = (name) =>
+  String(name ?? "")
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+/**
+ * The catalog entry an id or a client's name belongs to: claude-code, claude-code-2, "Claude Code (hewn)", "Codex".
+ * A name made an id is matched against the ids; a label only as it is ("VS Code (Copilot)", not "VS Code (Cline)").
+ */
+const catalogEntry = (id, label) => {
+  const keys = [String(id), agentKey(id), agentKey(label)];
+  return AGENT_CATALOG.find((c) => keys.some((k) => k === c.id || k.startsWith(`${c.id}-`) || c.match?.test(k)) || c.label === label || c.label === id);
+};
+/** An agent's tile, by id (claude-code-2 → claude-code) or by its name ("Claude Code (hewn)"). */
 const agentTile = (id, label = id, size = 44) => {
   if (id === "remote") return brandTile(size);
-  const entry = AGENT_CATALOG.find((c) => id === c.id || String(id).startsWith(`${c.id}-`) || c.label === label || c.label === id);
+  const entry = catalogEntry(id, label);
   const [hue, logo, saturation] = TILES[entry?.id ?? id] ?? [260, null];
   return logoTile(hue, logo, String(label).replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase() || "AG", size, saturation);
 };
@@ -280,7 +306,7 @@ async function agentsPage() {
         "div",
         { class: "grow stack-xs" },
         h("span", { class: "row tight strong" }, h("span", { class: `dot ${recent(a) ? "ok" : ""}` }), a.name),
-        h("span", { class: "sub" }, `${from(a)} · ${scopeWords(a.scopes)}${a.capabilities !== "*" ? " · some tools" : ""} · ${a.lastUsedAt ? ago(a.lastUsedAt) : "not used yet"}`),
+        h("span", { class: "sub" }, [from(a), scopeWords(a.scopes), toolWords(a, all), a.lastUsedAt ? ago(a.lastUsedAt) : "not used yet"].filter(Boolean).join(" · ")),
         roleChips(a),
       ),
     );
@@ -304,7 +330,7 @@ function agentSheet(a, all) {
       const switches = h("div", { class: "settings-list" });
       const save = async (body, message, undo) => {
         const next = await api(`/agents/${enc(a.id)}`, { method: "PUT", body });
-        Object.assign(a, body.scopes ? { scopes: body.scopes } : {}, body.capabilities ? { capabilities: body.capabilities } : {}, next?.scopes ? { scopes: next.scopes } : {});
+        Object.assign(a, body.scopes ? { scopes: body.scopes } : {}, body.capabilities ? { capabilities: body.capabilities } : {}, body.approvalMode ? { approvalMode: body.approvalMode } : {}, next?.scopes ? { scopes: next.scopes } : {});
         render();
         toast(message, { undo });
       };
@@ -323,7 +349,12 @@ function agentSheet(a, all) {
           (() => {
             const some = a.capabilities !== "*";
             const sw = h("input", { type: "checkbox", class: "switch", checked: some, "aria-label": "Only some tools" });
-            sw.addEventListener("change", () => save({ capabilities: sw.checked ? [] : "*" }, sw.checked ? `${a.name} sees no tools until you pick some` : `${a.name} sees all your tools`).catch(fail));
+            sw.addEventListener("change", () => {
+              // Either way it starts afresh: no tool stays switched off (the server forgets them too).
+              const except = a.except;
+              a.except = [];
+              save({ capabilities: sw.checked ? [] : "*" }, sw.checked ? `${a.name} sees no tools until you pick some` : `${a.name} sees all your tools`).catch((e) => ((a.except = except), fail(e)));
+            });
             return [
               h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, "Only some tools")), sw),
               some &&
@@ -344,8 +375,18 @@ function agentSheet(a, all) {
                       });
                     }),
                 ),
+              !some && toolWords(a, all) && h("div", { class: "small faint" }, `Sees ${toolWords(a, all)}. Change that on each tool's page.`),
             ];
           })(),
+          // Its approval mode: what happens to its new tools and its changes to yours once they pass the checks.
+          (max.has("create") || max.has("modify")) && [
+            h("div", { class: "eyebrow", style: { "margin-top": "var(--s4)" } }, "Its new tools and changes"),
+            APPROVAL.map(([mode, text, sub]) => {
+              const r = h("input", { type: "radio", name: `approval-${a.id}`, value: mode, checked: (a.approvalMode ?? "wait") === mode, disabled: mode !== "wait", "aria-label": text });
+              r.addEventListener("change", () => r.checked && save({ approvalMode: mode }, `${a.name}'s new tools and changes: ${text.toLowerCase()}`).catch(fail));
+              return h("label", { class: `setting compact${mode !== "wait" ? " faint" : ""}` }, h("div", { class: "grow stack-xs" }, h("span", {}, text), sub && h("span", { class: "small faint" }, sub)), r);
+            }),
+          ],
         );
       };
       render();
@@ -383,6 +424,10 @@ async function agentRequestSheet(p, { inline } = {}) {
   const onlySome = h("input", { type: "checkbox", class: "switch", checked: !!currentCaps, "aria-label": "Only some tools" });
   const capList = h("div", { class: "cap-pick row tight wrap", hidden: !currentCaps }, [...all.values()].filter((c) => c.version).map((c) => h("label", { class: "chip plain" }, h("input", { type: "checkbox", value: c.id, checked: !!currentCaps?.includes(c.id) }), appIcon(c, { size: 20 }), c.name)));
   onlySome.addEventListener("change", () => (capList.hidden = !onlySome.checked));
+  // On a reconnect: the tools it was switched off for stay off, unless you pick some.
+  const off = p.current?.capabilities === "*" && toolWords(p.current, all);
+  const keeps = off && h("div", { class: "small faint" }, `As now: ${off}.`);
+  if (keeps) onlySome.addEventListener("change", () => (keeps.hidden = onlySome.checked));
   const decide = async (approve) => {
     const body = approve ? { approve: true, name: name.value.trim() || p.suggestedName, scopes: [...picked], capabilities: onlySome.checked ? [...capList.querySelectorAll("input:checked")].map((x) => x.value) : "*" } : { approve: false };
     const r = await api(`/agents/pending/${enc(p.id)}`, { method: "POST", body });
@@ -402,6 +447,7 @@ async function agentRequestSheet(p, { inline } = {}) {
     "div",
     { class: "stack-sm" },
     h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, "Only some tools")), onlySome),
+    keeps,
     capList,
     h("label", { class: "field" }, h("span", { class: "label" }, p.reconnects ? `Name · replaces “${p.reconnects}” if kept` : "Name"), name),
     h("div", { class: "small faint row tight" }, "Check the code matches the one in its browser window:", h("code", { class: "user-code" }, p.userCode)),

@@ -82,6 +82,8 @@ export interface InvocationResult {
   secretUpdates: Record<string, string>;
   /** The capability's own console lines ("| " / "! " prefixed), capped. */
   logs: string[];
+  /** The tables a statement inserted into during the call, lowercased (validation's delete check). */
+  inserted?: string[];
 }
 
 export interface CapabilityRuntime {
@@ -167,7 +169,7 @@ export interface CheckResult {
   defects: string[];
   /** The UI filled with its sample data: desktop-light, desktop-dark, mobile-light, mobile-dark (none when it didn't render), a long page's top part. */
   images: VisualShot[];
-  /** The rest of a long page ("mobile-light-2" …): written to `screenshots/` beside the images, not shown with them. */
+  /** The rest of a long page ("mobile-light-2" …): a builder's are written to `screenshots/` beside the images, not shown with them; a client's are shown after them. */
   parts?: VisualShot[];
 }
 

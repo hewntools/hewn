@@ -22,10 +22,12 @@ import type { Models } from "./models.ts";
 import type { Invocation } from "./invocation.ts";
 import type { Schedules } from "./schedules.ts";
 import type { Sharing } from "./sharing.ts";
+import type { Submissions } from "./submissions.ts";
 import type { Builds } from "./builds.ts";
 import type { Validation } from "./validation.ts";
 import type { Widgets } from "./widgets.ts";
 import type { Housekeeping } from "./housekeeping.ts";
+import type { Stalls } from "./stalls.ts";
 import type { Platform } from "../platform.ts";
 
 /** Minimal event emitter (no node:events in the core). */
@@ -69,6 +71,8 @@ export interface Domains {
   schedules: Schedules;
   sharing: Sharing;
   sessions: Sessions;
+  submissions: Submissions;
+  stalls: Stalls;
   validation: Validation;
   widgets: Widgets;
 }
@@ -175,4 +179,19 @@ export class Domain {
     if (!build) throw new PlatformError("not_found", `no build '${buildId}'`);
     return build;
   }
+}
+
+/**
+ * In a loop of calls into a tool (validation, a sample replay, due schedules), a turn of the event loop every 100 ms
+ * or so. On the workerd host a call that settles without I/O never lets the event loop turn, so a long run of them
+ * leaves every request waiting, the supervisor's health check among them, and the supervisor restarts workerd after
+ * its stall time (5 s by default). By time, not per call: a turn per call adds seconds to hundreds of cases.
+ */
+export function breather() {
+  let last = Date.now();
+  return async () => {
+    if (Date.now() - last < 100) return;
+    await new Promise((r) => setTimeout(r, 0));
+    last = Date.now();
+  };
 }

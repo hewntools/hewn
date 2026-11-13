@@ -6,6 +6,7 @@ import http from "node:http";
 import { CALLER_KINDS } from "@hewntools/core/platform/housekeeping.ts";
 import type { BuildStatus } from "@hewntools/core/registry.ts";
 import type { ScheduleStatus } from "@hewntools/core/schedules.ts";
+import { afterParam, BUSY_REASONS, type IdleStatus } from "./idle.ts";
 
 type Snapshot = {
   tools: { active: number; archived: number; unversioned: number };
@@ -45,8 +46,8 @@ function allowed<T>(counts: Record<string, T>, value: (v: string) => string, add
 }
 const plus = (a: number, b: number) => a + b;
 
-/** Prometheus exposition text for a snapshot. */
-export function prometheusText(s: Snapshot, appVersion: string): string {
+/** Prometheus exposition text for a snapshot (and the idle report, when there is one). */
+export function prometheusText(s: Snapshot, appVersion: string, idle?: IdleStatus): string {
   const out: string[] = [];
   const metric = (name: string, help: string, type: "gauge" | "counter", rows: [Record<string, string>, number][]) => {
     out.push(`# HELP ${name} ${help}`, `# TYPE ${name} ${type}`);
@@ -71,22 +72,41 @@ export function prometheusText(s: Snapshot, appVersion: string): string {
   metric("hewn_agents", "Connected agents", "gauge", [[{ window: "all" }, s.agents.connected], [{ window: "7d" }, s.agents.active7d]]);
   metric("hewn_schedules", "Schedules by status", "gauge", allowed(s.schedules, scheduleStatus, plus).map(([status, n]) => [{ status }, n]));
   metric("hewn_schedules_failing", "Schedules with failures since their last success", "gauge", [[{}, s.schedulesFailing]]);
+  if (idle) {
+    metric("hewn_idle", "1 when Hewn is idle (GET /status says why not)", "gauge", [[{}, idle.idle ? 1 : 0]]);
+    metric("hewn_busy", "1 for each reason Hewn isn't idle", "gauge", BUSY_REASONS.map((reason) => [{ reason }, idle.busy.includes(reason) ? 1 : 0]));
+    metric("hewn_next_alarm_seconds", "When the next schedule runs (epoch seconds, 0 if none)", "gauge", [[{}, idle.nextAlarmAt ? Math.floor(Date.parse(idle.nextAlarmAt) / 1000) : 0]]);
+    metric("hewn_backup_changed_since", "1 when something changed since the newest backup", "gauge", [[{}, idle.backup.changedSince ? 1 : 0]]);
+  }
   return out.join("\n") + "\n";
 }
 
-/** Serve GET /metrics on all interfaces at `port`, asking the platform through the admin channel. */
-export function startMetrics(o: { port: number; url: string; adminToken: string; version: string; log: (m: string) => void }) {
+/**
+ * Serve GET /metrics on all interfaces at `port`, asking the platform through the admin channel, and GET /status: the
+ * idle report (`?after=<seconds>`: the host's own quiet time). Neither counts as activity.
+ */
+export function startMetrics(o: { port: number; url: string; adminToken: string; version: string; log: (m: string) => void; status: (afterSeconds?: number) => Promise<IdleStatus> }) {
   const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://x");
+    if (req.method === "GET" && url.pathname === "/status") {
+      try {
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(await o.status(afterParam(url.searchParams.get("after")))));
+      } catch (e) {
+        res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: `status unavailable: ${(e as Error).message}` }));
+      }
+      return;
+    }
     if (req.method !== "GET" || req.url !== "/metrics") { res.writeHead(404).end(); return; }
     try {
       const r = await fetch(`${o.url}/_admin/call`, { method: "POST", headers: { "x-hewn-admin": o.adminToken, "content-type": "application/json" }, body: JSON.stringify({ method: "metrics" }) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { result } = (await r.json()) as { result: Snapshot };
-      res.writeHead(200, { "content-type": "text/plain; version=0.0.4" }).end(prometheusText(result, o.version));
+      const idle = await o.status().catch(() => undefined);
+      res.writeHead(200, { "content-type": "text/plain; version=0.0.4" }).end(prometheusText(result, o.version, idle));
     } catch (e) {
       res.writeHead(503, { "content-type": "text/plain" }).end(`metrics unavailable: ${(e as Error).message}\n`);
     }
   });
-  server.listen(o.port, "::", () => o.log(`metrics on :${o.port}/metrics`));
+  server.listen(o.port, "::", () => o.log(`metrics on :${o.port}/metrics, the idle report on :${o.port}/status`));
   return server;
 }

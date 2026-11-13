@@ -7,7 +7,7 @@ import { PROVIDERS, titleCase, usd } from "./models.js";
 import { changeHref } from "./tool-actions.js";
 import { quickModelChange } from "./tool-model.js";
 
-export { grantsSheet, grantText, kindPill, perCall, signInDialog, tierModel, TIERS };
+export { grantsSheet, grantText, kindPill, perCall, reachText, signInDialog, tierModel, TIERS };
 
 // ---------- D1 / D2 / O4: the grants sheet (a Request; approved, the same rows with Revoke) ----------
 
@@ -17,10 +17,12 @@ function grantText(i, all) {
     const verb = i.sideEffect === "read" ? "Read" : i.sideEffect === "destructive" ? "Change" : i.sideEffect === "missing" ? "Use" : "Write to";
     return h("span", { class: "row tight wrap" }, `${verb} `, capRef(all.get(i.target), i.target));
   }
-  if (i.kind === "host") return h("span", {}, `Reach ${i.grant.slice(5)}`);
+  if (i.kind === "host") return h("span", {}, `Reach ${reachText(i.grant.slice(5), i.host)}`);
   if (i.kind === "model") return h("span", {}, "Use a model");
   return h("span", { class: "mono" }, i.grant.slice(7));
 }
+/** A declared host as the owner reads it: "api.example.com", "any site ending in .example.com", "the host in FEED (example.com)". */
+const reachText = (x, host) => (x.startsWith("config:") ? `the host in ${x.slice(7)} (${host ?? "not set yet"})` : x.startsWith("*.") ? `any site ending in ${x.slice(1)}` : x);
 const kindPill = (i) =>
   i.kind === "capability"
     ? kindTag(i.sideEffect === "read" ? "read" : i.sideEffect === "missing" ? "missing" : "write", i.sideEffect === "read" ? "" : i.sideEffect === "missing" ? "danger" : "accent")
@@ -161,7 +163,8 @@ async function grantsSheet(capId) {
         }
       });
       const configRow = (x) => {
-        const input = h("input", { type: "text", autocomplete: "off", placeholder: x.description, oninput: check });
+        // A suggested value is in the field, not a placeholder: Save takes it as it is (nothing is stored until then).
+        const input = h("input", { type: "text", autocomplete: "off", value: x.suggested ?? "", placeholder: x.description, oninput: check });
         config.set(x.name, input);
         return { pill: kindTag("setting"), main: h("span", { class: "mono" }, x.name), sub: x.description, extra: input };
       };
@@ -195,13 +198,15 @@ async function grantsSheet(capId) {
           control: sw,
         };
       };
+      // The rows first: their fields (a suggested value already in one) decide whether Authorize starts enabled.
+      const rows = requestRows([...missingConfig.map(configRow), ...pending.map(row)]);
       check();
       return [
         sheetHead(appIcon(c, { size: 48 }), `${c.name} wants to`, requestedBy && `Requested by ${actorLabel(requestedBy, all)}`),
         requests[0]?.note && h("div", { class: "small quote" }, `“${requests[0].note}”`),
         cap.status.missingDependencies?.length > 0 && h("div", { class: "notice danger" }, h("span", {}, "Depends on operations that no longer exist. ", h("a", { href: changeHref(c) }, "Change it"))),
         cap.status.unsupportedAbi && h("div", { class: "notice danger" }, h("span", {}, `This version ${cap.status.unsupportedAbi}. Upgrade Hewn, or roll it back.`)),
-        requestRows([...missingConfig.map(configRow), ...pending.map(row)]),
+        rows,
         keyBlock,
         h(
           "div",

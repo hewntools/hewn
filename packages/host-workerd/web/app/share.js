@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// S1/S2 Share…: one sheet that grows. What's in it on top (the scan's findings by file and line,
-// masked, each with Show; the sample data), the ways to share below as rows (a file now; a link
-// in 0.4.10, Publish to Hub in 0.5). Write it yourself: a tool's sample data, edited by hand.
-import { api, appIcon, enc, fail, h, modal, setWallpaper, sheetActions, skeleton, svg, tintOf, caps } from "../kit.js";
+// S1–S4 Share…: one sheet that grows. What's in it on top (the scan's findings by file and line,
+// masked, each with Show; the sample data), the ways to share below as rows (a file, a link), then
+// the links that still work, each with Revoke. S3 a link: one version, an expiry, the link shown
+// once. Write it yourself: a tool's sample data, edited by hand.
+import { api, appIcon, confirmDialog, enc, fail, h, modal, setWallpaper, sheetActions, skeleton, svg, tintOf, toast, caps } from "../kit.js";
 import { backBar, go, hues, put, stillHere, view } from "./frame.js";
 import { plural } from "./intake.js";
 import { download, openChange } from "./tool-actions.js";
+import { segmented } from "./widgets.js";
 
 export { samplePage, shareButton, shareIcon, shareSheet };
 
@@ -51,6 +53,16 @@ async function shareSheet(c, { version } = {}) {
           });
         return h("li", {}, h("span", { class: `dot ${key ? "danger" : "warn"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, `${f.file}:${f.line}`), sub), show);
       };
+      // After a link is made or revoked: the list again, on the version picked.
+      const reload = async () => {
+        check = await api(`/capabilities/${enc(c.id)}/share?version=${check.version}`);
+        draw();
+      };
+      const revoke = async (l) => {
+        if (!(await confirmDialog({ title: "Revoke this link?", body: `Nobody can install ${c.name} v${l.version} from it any more. Anyone who already did keeps their copy.`, confirm: "Revoke", danger: true }))) return;
+        await api(`/capabilities/${enc(c.id)}/links/${enc(l.id)}`, { method: "DELETE" });
+        await reload();
+      };
       const draw = () => {
         put(pick, check.versions.map((v) => h("option", { value: v, selected: v === check.version }, `v${v}`)));
         const keys = check.findings.filter((f) => f.kind === "secret");
@@ -94,14 +106,90 @@ async function shareSheet(c, { version } = {}) {
               "ul",
               { class: "list" },
               h("li", {}, h("div", { class: "grow" }, h("span", {}, "Download"), h("span", { class: "sub mono" }, name)), h("button", { class: "sm primary", disabled: blocked, onclick: () => download(`/api/capabilities/${enc(c.id)}/share/download?version=${check.version}`) }, "Download")),
+              check.address
+                ? h("li", {}, h("div", { class: "grow" }, h("span", {}, "Link"), h("span", { class: "sub" }, "Anyone with it can install this version")), h("button", { class: "sm", disabled: blocked, onclick: () => linkSheet(c, check.version).then(reload).catch(fail) }, "Create…"))
+                : h("li", {}, h("div", { class: "grow" }, h("span", {}, "Link"), h("span", { class: "sub" }, "Links need a public address")), h("button", { class: "link sm", onclick: () => (close(), go("#/settings/remote")) }, "Set up remote access ›")),
             ),
           ),
+          check.links.length > 0 &&
+            h(
+              "div",
+              {},
+              h("div", { class: "eyebrow share-eyebrow" }, `Links · ${check.links.length}`),
+              h("ul", { class: "list" }, check.links.map((l) => h("li", {}, h("div", { class: "grow" }, h("span", {}, `v${l.version}`), h("span", { class: "sub" }, `${timeLeft(l.expiresAt)} · ${plural(l.downloads, "download")}`)), h("button", { class: "sm ghost danger", onclick: () => revoke(l).catch(fail) }, "Revoke")))),
+            ),
         );
       };
       draw();
       return [h("div", { class: "row sheet-head" }, appIcon(c, { size: 44 }), h("div", { class: "grow sheet-title" }, `Share ${c.name}`), pick), body, sheetActions(h("button", { onclick: () => close() }, "Done"))];
     },
     { width: 560 },
+  );
+}
+
+/** How long a link still works: "6 days left", "5 hours left", or "until you revoke it". */
+function timeLeft(expiresAt) {
+  if (!expiresAt) return "until you revoke it";
+  // Rounded: a 7-day link made a moment ago has 7 days left, not 6.
+  const hours = (new Date(expiresAt).getTime() - Date.now()) / 3600_000;
+  const days = Math.round(hours / 24);
+  return days >= 2 ? `${days} days left` : hours >= 1 ? `${plural(Math.round(hours), "hour")} left` : "less than an hour left";
+}
+
+/** What each choice in Expires sends, and says. */
+const EXPIRES = [
+  ["1d", "1 day"],
+  ["7d", "7 days"],
+  ["30d", "30 days"],
+  ["never", "Never"],
+];
+
+/**
+ * S3 a link to one version: pick how long it works (7 days unless you pick another), Create link,
+ * then the link with Copy. Shown once: Hewn keeps only a fingerprint of it.
+ */
+function linkSheet(c, version) {
+  return modal(
+    (close) => {
+      let expires = "7d";
+      const line = h("div", { class: "small" });
+      const sayLine = () => {
+        line.className = expires === "never" ? "small error" : "small muted";
+        line.textContent = expires === "never" ? "Anyone with this link can install this tool until you revoke it." : `Anyone with this link can install this version for ${EXPIRES.find(([k]) => k === expires)[1]}, until you revoke it.`;
+      };
+      const pick = segmented(EXPIRES, expires, (k) => ((expires = k), sayLine()), { label: "Expires" });
+      pick.classList.add("self-start");
+      sayLine();
+      const status = h("div", { class: "small error" });
+      const create = h("button", { class: "primary" }, "Create link");
+      const actions = sheetActions(h("button", { onclick: () => close() }, "Cancel"), create);
+      const result = h("div", { class: "stack-sm" });
+      create.addEventListener("click", async () => {
+        create.disabled = true;
+        status.textContent = "";
+        try {
+          const made = await api(`/capabilities/${enc(c.id)}/links`, { method: "POST", body: { version, expires } });
+          pick.querySelectorAll("button").forEach((b) => (b.disabled = true));
+          const field = h("input", { type: "text", class: "mono grow", value: made.url, readOnly: true, "aria-label": "The link" });
+          field.addEventListener("focus", () => field.select());
+          const copy = h("button", { onclick: () => navigator.clipboard.writeText(made.url).then(() => toast("Link copied"), fail) }, "Copy");
+          put(result, h("div", { class: "row tight" }, field, copy), h("div", { class: "small faint" }, "Copy it now: Hewn keeps only a fingerprint of the link, so it can't show it again. Share… lists it, with Revoke."));
+          put(actions, h("button", { class: "primary", onclick: () => close() }, "Done"));
+        } catch (e) {
+          status.textContent = e.message;
+          create.disabled = false;
+        }
+      });
+      return [
+        h("div", { class: "sheet-title" }, `Link to ${c.name} v${version}`),
+        h("div", { class: "small muted" }, "A newer version needs a new link, so it's checked again."),
+        h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, "Expires"), pick, line),
+        result,
+        status,
+        actions,
+      ];
+    },
+    { width: 480 },
   );
 }
 

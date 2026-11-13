@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Settings: General · AI · Remote access · Data · About.
 import { ago, api, appIcon, BRAND, capRef, CLI, commandBlock, confirmDialog, enc, fail, formSheet, h, invalidateCaps, modal, setWallpaper, sheetActions, skeleton, toast } from "../kit.js";
-import { installFromFile } from "./install.js";
+import { installFromFileOrLink } from "./install.js";
 import { addPasskey, knownPasskeys, passkeyError, passkeysSupported } from "../passkey.js";
 import { deviceName } from "./add-passkey.js";
 import { addSheet, agentModelsSheet, agentTileOf, buildJobs, jobPicker, modelSheet, providerTile } from "./agents.js";
@@ -347,6 +347,10 @@ async function dataSection() {
   if (!options.some(([v]) => v === s.logRetentionDays)) options.push([s.logRetentionDays, `${s.logRetentionDays} days`]);
   const keep = h("select", { class: "setting-select", "aria-label": "Keep call logs" }, options.map(([v, l]) => h("option", { value: v, selected: v === s.logRetentionDays }, l)));
   keep.addEventListener("change", () => saveSettings({ logRetentionDays: Number(keep.value) }, `Call logs: ${options.find(([v]) => v === Number(keep.value))[1].toLowerCase()}`));
+  const sizes = [[50, "50 MB"], [100, "100 MB"], [250, "250 MB"], [500, "500 MB"], [1024, "1 GB"], [5120, "5 GB"]];
+  if (!sizes.some(([v]) => v === s.toolDataLimitMB)) sizes.push([s.toolDataLimitMB, `${s.toolDataLimitMB} MB`]);
+  const limit = h("select", { class: "setting-select", "aria-label": "Each tool's data" }, sizes.map(([v, l]) => h("option", { value: v, selected: v === s.toolDataLimitMB }, l)));
+  limit.addEventListener("change", () => saveSettings({ toolDataLimitMB: Number(limit.value) }, `Each tool's data: up to ${sizes.find(([v]) => v === Number(limit.value))[1]}`));
   const last = backups?.backups?.[0];
   if (!here()) return;
   settingsFrame(
@@ -358,7 +362,8 @@ async function dataSection() {
       backups && setting("Backups", last ? `Last ${ago(last.at)} · ${Math.round(last.bytes / 1024)} KB · nightly, 7 daily and 4 weekly kept` : "Nightly; 7 daily and 4 weekly kept. Never includes secrets.", backupBtn),
       !s.hosted && backups && h("div", { class: "setting" }, h("div", { class: "grow" }, h("span", {}, "Folder"), h("span", { class: "sub mono" }, backups.dir)), h("button", { class: "sm", onclick: folderSheet }, "Change")),
       setting("Keep call logs", "Builds, grants and access changes are always kept", keep),
-      setting("Install from a file", "A tool someone shared with you (.hewn.zip): you read it before it's installed", h("button", { class: "sm", onclick: () => installFromFile().catch(fail) }, "Install…")),
+      setting("Each tool's data", "Up to this much each. A tool at its limit can't save more; reading still works", limit),
+      setting("Install from a file or link", "A tool someone shared with you (a .hewn.zip, or its link): you read it before it's installed", h("button", { class: "sm", onclick: () => installFromFileOrLink().catch(fail) }, "Install…")),
     ),
     deleted.length > 0 &&
       h(

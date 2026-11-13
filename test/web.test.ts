@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, cpSync, readdirSync, readFileSync } from "node:fs";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
@@ -13,7 +13,7 @@ import type { Platform } from "@hewntools/core/platform.ts";
 import { WEB_CODE } from "@hewntools/host-workerd/surface/web.ts";
 import { packBundle } from "@hewntools/core/bundle.ts";
 import { readTree } from "@hewntools/cli/workbench.ts";
-import { installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
+import { editJson, installFrom, installSeed, platformWith, SEED, serve, setup, TOKENS } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 /** The web client's JavaScript: app.js, the kit, and its modules in app/. */
@@ -77,9 +77,12 @@ describe("web client (owner surface)", () => {
       name: "fake",
       build: async (job) => {
         if (job.capabilityId === "stops-early") throw new Error("hit the usage limit");
+        if (job.kind === "modify" && readFileSync(resolve(job.workspace, "BUILDER.md"), "utf8").includes("Fail this change")) throw new Error("the change didn't work out");
         appendFileSync(job.logPath, "00:00:00 → Write src/index.ts\n");
         job.onActivity?.("→ Write src/index.ts");
         cpSync(SEED, job.workspace, { recursive: true });
+        // An agent's new tool (held for the owner): the seed under its own id.
+        if (job.capabilityId === "agent-log") editJson(join(job.workspace, "capability.json"), (m) => Object.assign(m, { id: "agent-log", name: "Agent Log" }));
       },
     };
     platform = platformWith(t.home, () => builder);
@@ -116,6 +119,7 @@ describe("web client (owner surface)", () => {
             agentId: "fake-agent",
             label: "Fake Agent",
             pointerRequired: true,
+            skills: "agents",
             pointerNote: "",
             detect: () => true,
             registered: () => setupRan.length > 0,
@@ -245,7 +249,10 @@ describe("web client (owner surface)", () => {
         assert.doesNotMatch(js, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/, file);
         // Dialogs, inline edits and toasts instead of browser built-ins.
         assert.doesNotMatch(js, /(?<![\w.])(alert|confirm|prompt)\(/, file);
+        // The Hub tab folded into + New (0.4.11): no page answers to it, and the word isn't shown.
+        assert.doesNotMatch(js.replace(/^\s*\*.*$/gm, ""), /["'`][^"'`\n]*\bHub\b|#\/hub\b/, file);
       }
+      assert.doesNotMatch(readFileSync(resolve(WEB, "app/router.js"), "utf8"), /p === "hub"/);
     });
 
     test("the id 'hewn' is reserved for the web client origin", async () => {
@@ -305,6 +312,45 @@ describe("web client (owner surface)", () => {
       assert.ok(!(await api("/agents")).json.some((a: any) => a.id === "outsider"));
     });
 
+    test("an agent's approval mode: wait, shown on its row; go live can't be chosen yet", async () => {
+      assert.equal((await api("/agents")).json.find((a: any) => a.id === "claude-code").approvalMode, "wait");
+      const live = await api("/agents/claude-code", { method: "PUT", body: { approvalMode: "live" } });
+      assert.equal(live.status, 400);
+      assert.match(live.json.message, /0\.4\.12/);
+      assert.equal((await api("/agents/claude-code", { method: "PUT", body: { approvalMode: "wait" } })).status, 200);
+    });
+
+    test("a held build's review card: its files against the version it's built on; its renders when it has a screen", async () => {
+      const claude = platform.agentStore.authenticate(TOKENS.claude)!;
+      const held = await platform.settle((await platform.modify(claude, { capabilityId: "running-log", request: "anything" })).buildId);
+      assert.equal(held.status, "review", held.log.join("\n"));
+      const code = (await api(`/builds/${held.buildId}/code`)).json;
+      assert.equal(code.base, platform.registry.getCapability("running-log")!.activeVersion, "the live version it's built on");
+      assert.ok(code.files.some((f: any) => f.path === "src/index.ts"));
+      assert.equal((await api(`/builds/${held.buildId}/code?path=src/index.ts`)).json.path, "src/index.ts");
+      assert.equal((await api(`/builds/${held.buildId}/shots/desktop-light`)).status, 404, "Running Log has no screen");
+      assert.equal((await api(`/builds/${held.buildId}/code`, { cookie: "", headers: { authorization: `Bearer ${TOKENS.claude}` } })).status, 401, "the owner's only");
+      // Opening the tool shows it, whatever was built since (a later build that failed, say).
+      platform.registry.insertBuild({ id: "b-later", capabilityId: "running-log", kind: "modify", request: { request: "x" }, requestedBy: "web", baseVersion: 1, builder: "fake" });
+      platform.registry.updateBuild("b-later", { status: "failed" });
+      const tool = (await api("/capabilities")).json.find((c: any) => c.id === "running-log");
+      assert.deepEqual([tool.lastBuild.buildId, tool.held], ["b-later", held.buildId]);
+      await api(`/builds/${held.buildId}/reject`, { method: "POST" });
+      assert.equal((await api(`/builds/${held.buildId}/code`)).status, 404, "once decided, no card");
+    });
+
+    test("an agent's new tool waits for the owner: on Home, its tile to the review; in the Inbox as made; approved, it's a tool", async () => {
+      const claude = platform.agentStore.authenticate(TOKENS.claude)!;
+      const held = await platform.settle((await platform.create(claude, { name: "Agent Log", purpose: "p", requirements: "r" })).buildId);
+      assert.equal(held.status, "review", held.log.join("\n"));
+      const tile = (await api("/capabilities")).json.find((c: any) => c.id === "agent-log");
+      assert.deepEqual([tile.version, tile.ready, tile.building, tile.lastBuild, tile.held], [null, false, null, { buildId: held.buildId, status: "review" }, held.buildId]);
+      assert.match((await api("/inbox")).json.needs.find((n: any) => n.buildId === held.buildId).detail, / made it: it waits for you$/);
+      assert.equal((await api(`/builds/${held.buildId}/code`)).json.base, null, "a new tool: nothing to compare with");
+      assert.equal((await api(`/builds/${held.buildId}/approve`, { method: "POST" })).status, 200);
+      assert.equal((await api("/capabilities")).json.find((c: any) => c.id === "agent-log").version, 1);
+    });
+
     test("open a capability UI: returns a single-use link under /tools/<id>/", async () => {
       const { json } = await api("/capabilities/ui-counter/open", { method: "POST" });
       assert.match(json.url, new RegExp(`^http://hewn\\.localhost:${port}/tools/ui-counter/auth\\?ticket=`));
@@ -335,7 +381,7 @@ describe("web client (owner surface)", () => {
       assert.equal(del.status, 200, JSON.stringify(del.json));
       assert.ok(!(await api("/capabilities")).json.some((c: any) => c.id === "secret-echo"));
       assert.ok(!platform.list(t.codex).some((c) => c.id === "secret-echo"));
-      await assert.rejects(platform.create(USER, { name: "Secret Echo", purpose: "x", requirements: "x" }), /archived/);
+      await assert.rejects(platform.create(USER, { name: "Secret Echo", purpose: "x", requirements: "x" }), (e: any) => /was deleted by the owner and is kept with its data/.test(e.message) && e.details?.archived?.id === "secret-echo");
       platform.restore(USER, "secret-echo");
       assert.ok((await api("/capabilities")).json.some((c: any) => c.id === "secret-echo"));
     });
@@ -389,10 +435,10 @@ describe("web client (owner surface)", () => {
       assert.deepEqual(m.json.saved.remember, [{ scope: "tool", text: "One screen only" }]);
       assert.deepEqual(intakeCalls.at(-1)!.instructions, { global: ["Swedish copy in every screen"], tool: [] });
       assert.deepEqual((await api("/capabilities/running-log/instructions")).json, { lines: ["One screen only"] });
-      // A build records them in BUILDER.md's "Owner's instructions".
+      // A build records them (its builder reads them in owner-instructions/).
       const b = await api("/capabilities/running-log/modify", { method: "POST", body: { request: "add a note field" } });
       await platform.settle(b.json.buildId);
-      assert.match((await api(`/builds/${b.json.buildId}/context`)).json.instructions, /## Owner's instructions[^]*For every tool:\n- Swedish copy in every screen[^]*For this tool:\n- One screen only/);
+      assert.deepEqual((await api(`/builds/${b.json.buildId}/context`)).json.ownerInstructions, { everyTool: ["Swedish copy in every screen"], thisTool: ["One screen only"] });
       // Dropping one, and editing by hand (a text, one per line; blanks and bullets cleaned up).
       const f = await api("/intake", { method: "POST", body: { mode: "create", messages: [{ role: "user", content: "drop the Swedish rule" }] } });
       assert.deepEqual(f.json.saved, { remember: [], forget: [{ scope: "global", text: "Swedish copy in every screen" }] });
@@ -436,6 +482,8 @@ describe("web client (owner surface)", () => {
       assert.equal(asked.bundle!.files[0].path, "capability.json", "the manifest first");
       assert.match(asked.bundle!.files.find((f) => f.path === "src/index.ts")!.text, /^ {3}1\| /, "lines numbered");
       assert.equal((await api(`/bundles/${staged.json.token}`)).json.summaryBy, "yours");
+      assert.deepEqual(read.json.unread, asked.bundle!.cut, "what it didn't read, for the sheet");
+      assert.deepEqual((await api(`/bundles/${staged.json.token}`)).json.unread, asked.bundle!.cut);
       const started = await api(`/bundles/${staged.json.token}/install`, { method: "POST", body: { name: "Read Log", sample: true } });
       const done = await platform.settle(started.json.buildId);
       assert.equal(done.status, "promoted", done.log.join("\n"));
@@ -505,7 +553,7 @@ describe("web client (owner surface)", () => {
       }
     });
 
-    test("the Hub: Hewn's own tools from the release, a tool's page, its image and code; installed from Hub with its sample data", async () => {
+    test("Hewn's own tools from the release: a tool's page, its image and code; installed from them with its sample data", async () => {
       const hub = await api("/hub");
       assert.equal(hub.status, 200, JSON.stringify(hub.json));
       const ids = hub.json.tools.map((t: any) => t.id);
@@ -528,7 +576,7 @@ describe("web client (owner surface)", () => {
       assert.equal((await http("/api/hub/plant-log/image/nope", { headers: { "x-hewn-ui": "1" } })).status, 404);
       // Only the images the tool has: a path in the name reaches nothing.
       for (const name of ["..%2F..", "..%2Fcapability.json", "..%2F..%2Fshelf.json"]) assert.equal((await http(`/api/hub/plant-log/image/${name}`, { headers: { "x-hewn-ui": "1" } })).status, 404, name);
-      // No Download: an Official tool leaves the Hub only through the install sheet.
+      // No Download: an Official tool is installed only through the install sheet.
       assert.equal((await api("/hub/plant-log/download")).status, 404);
       const code = await api("/hub/plant-log/code");
       assert.ok(code.json.files.some((f: any) => f.path === "sample/calls.json"));
@@ -540,7 +588,7 @@ describe("web client (owner surface)", () => {
       const names = ideas.json.operations.map((o: any) => o.name);
       assert.deepEqual(names, [...new Set(names)]);
       assert.ok(names.includes("add_idea") && names.includes("list_tags"), names.join());
-      // Installed from Hub under another name: still the Hub's Idea Tracker (Installed, and Open opens yours).
+      // Installed under another name: still Hewn's Idea Tracker (Installed, and Open opens yours).
       const preview = await api("/hub/idea-tracker/stage", { method: "POST" });
       assert.equal(preview.json.summaryBy, "hewn");
       assert.equal(preview.json.from, "hub");
@@ -637,6 +685,39 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/activity")).json.items.find((i: any) => i.buildId === last).reason, title);
     });
 
+    test("Discard: a failed build leaves the Inbox and stays in Activity, marked; only a failed one, only the owner", async () => {
+      const b = await api("/capabilities", { method: "POST", body: { name: "Stops Early", purpose: "p", requirements: "r" } });
+      const id = b.json.buildId;
+      await platform.settle(id);
+      assert.ok((await api("/inbox")).json.needs.some((n: any) => n.buildId === id), "failed: in the Inbox");
+      await assert.rejects(platform.discardBuild(t.claude, id), /owner/, "an agent can't");
+      const r = await api(`/builds/${id}/discard`, { method: "POST" });
+      assert.equal(r.status, 200, JSON.stringify(r.json));
+      assert.ok(r.json.discardedAt);
+      assert.equal(r.json.status, "failed", "still what it was");
+      assert.ok(!(await api("/inbox")).json.needs.some((n: any) => n.buildId === id), "gone from the Inbox");
+      const row = (await api("/activity")).json.items.find((i: any) => i.buildId === id);
+      assert.equal(row.outcome, "failed");
+      assert.equal(row.discarded, true, "kept in Activity, marked");
+      assert.equal(platform.registry.getCapability("stops-early")?.activeVersion ?? null, null, "nothing installed");
+      // Twice is fine; something that isn't a failed build isn't discarded.
+      assert.equal((await api(`/builds/${id}/discard`, { method: "POST" })).status, 200);
+      // A failed change, discarded: the tool keeps its version, and neither Home nor Info shows the failure any more.
+      const cid = (await platform.modify(USER, { capabilityId: "secret-echo", request: "Fail this change" })).buildId;
+      assert.equal((await platform.settle(cid)).status, "failed");
+      const before = (await api("/capabilities")).json.find((c: any) => c.id === "secret-echo");
+      assert.equal(before.lastBuild?.buildId, cid);
+      assert.equal(before.lastBuild.status, "failed");
+      assert.equal((await api(`/builds/${cid}/discard`, { method: "POST" })).status, 200);
+      const after = (await api("/capabilities")).json.find((c: any) => c.id === "secret-echo");
+      assert.equal(after.lastBuild, null, "the tool no longer shows the failure");
+      assert.equal(after.version, before.version, "the active version is untouched");
+      const promoted = (await api("/builds?n=50&brief=1")).json.find((x: any) => x.status === "promoted");
+      const no = await api(`/builds/${promoted.buildId}/discard`, { method: "POST" });
+      assert.equal(no.status, 409);
+      assert.match(no.json.message, /only a failed build can be discarded/);
+    });
+
     test("home data: hue, icon kind, last build, in-flight builds", async () => {
       const list = (await api("/capabilities")).json;
       const rl = list.find((c: any) => c.id === "running-log");
@@ -667,7 +748,7 @@ describe("web client (owner surface)", () => {
 
     test("settings: read and write platform.json, validated; no discovery option", async () => {
       const s = (await api("/settings")).json;
-      assert.deepEqual(Object.keys(s).sort(), ["buildPasses", "builder", "intake", "logRetentionDays", "maxBuildAttempts", "sandbox"]);
+      assert.deepEqual(Object.keys(s).sort(), ["buildPasses", "builder", "intake", "logRetentionDays", "maxBuildAttempts", "sandbox", "toolDataLimitMB"]);
       assert.deepEqual(s.buildPasses, ["critique", "craft"]);
       assert.equal((await api("/settings", { method: "PUT", body: { buildPasses: ["polish"] } })).status, 400);
       assert.deepEqual((await api("/settings", { method: "PUT", body: { buildPasses: ["craft"] } })).json.buildPasses, ["craft"]);
@@ -676,6 +757,12 @@ describe("web client (owner surface)", () => {
       assert.equal((await api("/settings", { method: "PUT", body: { logRetentionDays: -1 } })).status, 400);
       assert.equal((await api("/settings", { method: "PUT", body: { logRetentionDays: 0 } })).json.logRetentionDays, 0);
       await api("/settings", { method: "PUT", body: { logRetentionDays: 14 } });
+      assert.equal(s.toolDataLimitMB, 100);
+      assert.equal((await api("/settings", { method: "PUT", body: { toolDataLimitMB: 0 } })).status, 400);
+      assert.equal((await api("/settings", { method: "PUT", body: { toolDataLimitsMB: { "Not an id": 5 } } })).status, 400);
+      const limits = (await api("/settings", { method: "PUT", body: { toolDataLimitMB: 250, toolDataLimitsMB: { "running-log": 20 } } })).json;
+      assert.deepEqual([limits.toolDataLimitMB, limits.toolDataLimitsMB], [250, { "running-log": 20 }]);
+      await api("/settings", { method: "PUT", body: { toolDataLimitMB: 100, toolDataLimitsMB: {} } });
       assert.equal((await api("/settings", { method: "PUT", body: { maxBuildAttempts: 9 } })).status, 400);
       const next = (await api("/settings", { method: "PUT", body: { maxBuildAttempts: 2, discovery: "tools" } })).json;
       assert.equal(next.maxBuildAttempts, 2);
@@ -730,6 +817,31 @@ describe("web client (owner surface)", () => {
       assert.ok(items.some((i: any) => i.kind === "authority" && i.outcome === "secret_set" && i.subject === "API_TOKEN" && i.capabilityId === "secret-echo"));
       assert.deepEqual((await api("/confirmations")).json, []);
       assert.equal((await api("/confirmations/nope", { method: "POST", body: { approve: true } })).status, 404);
+    });
+
+    test("a tool's agents: which can use it, each switched on the tool's page over its default", async () => {
+      const narrow = platform.agentStore.approveDirect("Narrow", ["discover", "invoke"], ["running-log"]);
+      const set = (agent: string, canUse: unknown) => api(`/capabilities/ui-counter/agents/${agent}`, { method: "PUT", body: { canUse } });
+      const row = async (agent: string) => (await api("/capabilities/ui-counter/agents")).json.find((a: any) => a.id === agent);
+      assert.deepEqual(await row("claude-code"), { id: "claude-code", name: "claude-code", canUse: true, default: "all" });
+      assert.deepEqual(await row(narrow), { id: "narrow", name: "Narrow", canUse: false, default: "some" });
+      assert.deepEqual((await set("claude-code", false)).json, { id: "claude-code", name: "claude-code", canUse: false, default: "all" });
+      assert.equal((await set(narrow, true)).json.canUse, true);
+      const agents = (await api("/agents")).json;
+      assert.deepEqual(agents.find((a: any) => a.id === "claude-code").except, ["ui-counter"]);
+      assert.deepEqual(agents.find((a: any) => a.id === narrow).capabilities, ["running-log", "ui-counter"]);
+      assert.ok(!platform.list(platform.agentStore.get("claude-code")!).some((c) => c.id === "ui-counter"));
+      const items = (await api("/activity?limit=300")).json.items;
+      assert.ok(items.some((i: any) => i.kind === "authority" && i.outcome === "agent_tool" && i.subject === "claude-code" && i.capabilityId === "ui-counter" && i.detail === "off"));
+      assert.equal((await set("claude-code", "no")).status, 400);
+      assert.equal((await set("nobody", false)).status, 404);
+      assert.equal((await api("/capabilities/nope/agents")).status, 404);
+      // Switching back undoes either.
+      await set("claude-code", true);
+      await set(narrow, false);
+      assert.deepEqual([(await row("claude-code")).canUse, (await row(narrow)).canUse], [true, false]);
+      assert.deepEqual((await api("/agents")).json.find((a: any) => a.id === narrow).capabilities, ["running-log"]);
+      platform.updateAgent(USER, narrow, "revoke");
     });
 
     test("another MCP client: just the address (it signs in with OAuth)", async () => {

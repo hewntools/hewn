@@ -76,6 +76,8 @@ async function openNeed(n) {
       if (n.action === "Replace…" && c) await toolModelSheet(c, { replace: true });
       else await grantsSheet(n.capabilityId);
     } else if (n.kind === "builder-model") go("#/settings/ai");
+    // Suspended: the tool's page says why, with Resume.
+    else if (n.kind === "suspended") go(`#/c/${enc(n.capabilityId)}`);
     else if (n.kind === "spend") {
       const c = n.capabilityId && (await caps()).get(n.capabilityId);
       if (c) await toolModelSheet(c);
@@ -145,7 +147,7 @@ let inboxTimer = null;
 async function pollInbox(withRecent = false) {
   clearTimeout(inboxTimer);
   if (!document.hidden) {
-    const next = await api(`/inbox${inboxPanel.isConnected || withRecent ? "?recent=1" : ""}`).catch(() => null);
+    const next = await api(`/inbox${inboxPanel.isConnected || withRecent ? "?recent=1" : ""}`, { refresh: true }).catch(() => null);
     if (next) {
       inboxData = { ...next, recent: next.recent ?? inboxData.recent };
       const n = next.needs.length;

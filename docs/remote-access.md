@@ -77,11 +77,30 @@ Then point the proxy at `192.168.1.50:7718`. Only the public listener goes on th
 
 If the public listener can be reached without going through your proxy (a host with its own public address), set `HEWN_PROXY_SECRET` in `hewn serve`'s environment and have the proxy send it on every request as the `x-hewn-proxy-secret` header. Requests without it, or with another value, get 403; the header is removed before anything else sees it, and `X-Forwarded-Host` / `X-Forwarded-For` only count on requests that had it. A tunnel (`hewn tunnel`) doesn't send the header, so don't combine the two. The local port is not affected. Unset (the default): no check.
 
+Behind such a trusted reverse proxy, Hewn's limits per visitor (sign-in, agents registering, …) can count each visitor rather than the proxy: have the proxy set the visitor's address as `x-hewn-proxy-client-ip`, replacing any copy a client sent, and set `HEWN_PROXY_CLIENT_IP=1` in `hewn serve`'s environment. Set it only then: a proxy that passes client headers through as they are would let a visitor choose their own address. In Caddy, `header_up x-hewn-proxy-client-ip {remote_host}` inside `reverse_proxy`; in nginx, `proxy_set_header x-hewn-proxy-client-ip $remote_addr;`. Hewn reads the header only with `HEWN_PROXY_CLIENT_IP=1` on requests carrying the right secret, and removes it from every request; otherwise it uses the last `X-Forwarded-For` hop, as before. An IPv6 visitor counts by its /64 either way.
+
 ### Running Hewn for someone else (`HEWN_HOSTED`)
 
 If you run Hewn for its owner and they have no terminal on the machine (a hosting service), set `HEWN_HOSTED=1` in `hewn serve`'s environment, together with `HEWN_BUILD_URL` (your builder: there are no agents on the machine to build with). `HEWN_HOST_SIGNIN_URL`, an https link where you sign the owner in and send them back with a sign-in link, is optional. Hewn sends your builder's service each build as `POST /v1/builds` ([the request](internal/remote-builder.md)); a retry says which build it retries (`retryOf`, the first of the chain), so you can count the chain as one build.
 
 Then the web client and its pages never send the owner to a command: signed out, they get a **Sign in** button to `HEWN_HOST_SIGNIN_URL` (or passkey sign-in, once they've added one); an agent's sign-in page links to Hewn to approve it; the first run has no "who builds" step; and Settings hides what you manage (the address, the sandbox, the backup folder, upgrades, and which agent builds). Connecting agents is through the public address only. Tools that think (`ctx.model`) run on your models, through your builder's service (`/v1/generate`), so the owner needs no API key; Settings › AI › Models shows what each tier runs on and what you charged this month. Unset (the default): nothing changes.
+
+#### Suspending Hewn when idle
+
+If you run Hewn on a machine you can suspend and wake (a VM that sleeps when unused), Hewn tells you when it's safe to: `GET /status` on the [metrics port](#metrics-hewn_metrics_port) answers with JSON, and `hewn status --json` gives the same under `idle`. Hewn never suspends itself and sends nothing; you read it, and you decide.
+
+```json
+{ "idle": false, "since": null, "busy": ["build"], "nextAlarmAt": "2026-11-10T05:00:00.000Z",
+  "backup": { "lastAt": "2026-11-09T03:12:44.000Z", "changedSince": true },
+  "lastRequestAt": "2026-11-09T14:02:10.000Z", "lastCallAt": "2026-11-09T14:02:11.000Z" }
+```
+
+- **`idle`** is true when every reason is clear. **`busy`** names each one that isn't: `starting` (Hewn started or woke less than 10 minutes ago, whatever quiet time you ask for, so a Hewn you just woke isn't put back to sleep at once), `request` (you or an agent used Hewn in the last 10 minutes), `call` (a tool call, a schedule's run too), `build` (one queued or running; one paused for the owner isn't), `intake` (a reply on its way), `stream` (an open stream that wrote in the last 10 minutes), `backup` (something changed since the newest backup and none was made today) and `alarm-soon` (a schedule due within 2 minutes).
+- **`since`** is when the last activity ended (a request, a call, a stream's last write, a build or reply finishing, the start or a wake), so you can apply your own idle time; or ask with `?after=<seconds>` instead of the 10 minutes. It's null while a reason that isn't a clock holds (`build`, `intake`, `backup`, `alarm-soon`).
+- **`nextAlarmAt`** is when the next schedule runs, or null: wake Hewn before it. The daily backup isn't an alarm: **`backup`** says when the newest backup was made (any backup: the nightly one or `hewn backup now`) and whether anything changed since, and you choose whether to wake Hewn for one.
+- Your own traffic doesn't count: reading `/status` or `/metrics`, the `hewn` commands' own calls to Hewn (`hewn backup now`, `hewn status`), and Hewn's health checks. A page's own refreshes don't either (an open Home refreshing its widgets, or looking for changes once a minute while nothing builds; an open build page following its build and redrawing the tool's icon), and a hidden browser tab makes no requests at all. A request Hewn refuses, or one anyone may make (the files the sign-in page loads, the [Agent Skill](agents.md#tools-an-agent-writes-itself), the OAuth endpoints, `robots.txt`), doesn't count: a scanner on your public address doesn't keep Hewn awake. A [share link](sharing.md#links)'s download does: someone was given the link.
+- A request to a suspended Hewn wakes it if your platform starts the machine on traffic. After a wake, Hewn catches up by itself: when its clock jumps ahead it runs every schedule that came due while it slept (once, however many times it was missed), and makes the day's backup if it's due; once more 15 seconds later, while the clock settles.
+- `hewn status` shows the same in a line: `Idle since 14:02 · next alarm 06:00`.
 
 ### Metrics (`HEWN_METRICS_PORT`)
 
@@ -91,6 +110,9 @@ Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text a
 - `hewn_calls`: tool calls in the last 24 hours and 7 days, by the kind of caller that called them directly (`caller`): `user` (you), `agent` (any connected agent), `ui` (a tool's own page), `widget`, `schedule`, or `capability` (another tool); and how they went (`outcome`: `ok` or `error`).
 - `hewn_tools_used`: how many different tools were called in the last 24 hours, by the same kinds of caller. A tool called many times counts once; never which tools.
 - Model spend, tokens and calls this month; connected agents (and those active in the last 7 days); schedules by status, and those failing.
+- The idle report ([below](#suspending-hewn-when-idle)): `hewn_idle` (1 when idle), `hewn_busy` (1 for each reason it isn't, by `reason`), `hewn_next_alarm_seconds` (when the next schedule runs, in epoch seconds; 0 if none) and `hewn_backup_changed_since` (1 when something changed since the newest backup).
+
+`/status` on the same port is the one place with times rather than counts: when Hewn was last used (`lastRequestAt`, `lastCallAt`) and when its next schedule runs. Still no names, but keep the port private.
 
 Calls come from the call logs, so they reach back only as far as those are kept ([Call logs](data.md#call-logs)). A build or schedule status Hewn doesn't know shows as `other`. For calls per tool or per agent, look in [Activity](using-hewn.md#activity), which filters by both.
 
@@ -119,6 +141,12 @@ It prints a one-time link on the public URL and a QR code. Scan it with your pho
 Passkeys sync through iCloud Keychain or Google Password Manager, so a passkey added on your phone often works on your other devices too. Settings › **Remote access** lists your passkeys (remove one there) and the browsers that are signed in.
 
 New device, or lost the passkey? `hewn open --print` again.
+
+## What the public address exposes
+
+On the public URL itself: the web client, tool apps, passkey sign-in, MCP and the OAuth sign-in agents use. On any other name that reaches the public listener (a tunnel's, say), only MCP, OAuth, the [Agent Skill](agents.md#tools-an-agent-writes-itself), a pack's download link, share links and `robots.txt`. Admin never answers there. Everything is rate limited per address, and logged.
+
+Two things there serve something of yours without a sign-in. A pack's download link (`/_platform/pack/~<code>`) is made for an agent inside its own signed-in call, to fetch what it needs to [write a tool itself](agents.md#tools-an-agent-writes-itself); it works once, for 10 minutes. **Share links** (`/share/<code>`, [Sharing tools](sharing.md#links)) each serve one version of one tool as a file, to whoever has the link, until it expires or you revoke it. Nothing else answers under `/share/`: a code that isn't a working link gets the same 404 as one that never existed. The code is 192 random bits and never written to Hewn's log (it shows as `/share/…`), and links are rate limited per address and per link. Every answer under `/share/` carries `X-Robots-Tag: noindex, nofollow`, and `robots.txt` disallows `/share/`, so search engines keep out.
 
 ## How it's protected
 

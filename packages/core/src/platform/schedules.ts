@@ -7,7 +7,7 @@ import { compileSchema, connectOperation, opKey, schemaErrors } from "../manifes
 import type { BuildRow } from "../registry.ts";
 import { checkCadence, MAX_FAILURES, nextRun, type Schedule, toCron, parseCron } from "../schedules.ts";
 import { resolveOperation, inputMismatch } from "./invocation.ts";
-import { Domain, type Shared } from "./context.ts";
+import { breather, Domain, type Shared } from "./context.ts";
 import type { PlatformOptions } from "../platform.ts";
 
 export class Schedules extends Domain {
@@ -120,10 +120,22 @@ export class Schedules extends Domain {
    */
   async runDueSchedules(now = Date.now()): Promise<{ id: string; ok: boolean }[]> {
     const ran: { id: string; ok: boolean }[] = [];
-    for (const s of this.schedules.due(now)) {
+    const breathe = breather();
+    for (const listed of this.schedules.due(now)) {
+      await breathe();
+      // Another pass (the alarm, a resume) may have claimed it while this one awaited an earlier run.
+      const s = this.schedules.get(listed.id);
+      if (!s || s.status !== "active" || s.nextRunAt === null || s.nextRunAt > now) continue;
       const cron = parseCron(toCron(s.cadence));
       // Claim the slot first, so a slow run can't be started twice.
       this.schedules.update(s.id, { nextRunAt: nextRun(cron, s.timezone, Math.max(now, Date.now())) });
+      // A suspended tool's schedule is refused (it says why) without counting as a failure: it runs on once the tool is resumed.
+      const suspended = this.platform.suspension(s.capabilityId);
+      if (suspended) {
+        this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: `not_ready: ${s.capabilityId} is suspended: ${suspended.reason}. It runs again once the owner resumes it` });
+        ran.push({ id: s.id, ok: false });
+        continue;
+      }
       const outcome = await this.runOnce(s);
       const ok = outcome === "ok";
       const failures = ok ? 0 : s.failures + 1;

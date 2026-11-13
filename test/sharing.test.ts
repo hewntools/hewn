@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -120,6 +121,8 @@ describe("bundles: the zip and the scan", () => {
     assert.throws(() => readZip(writeZip({ "src/index.ts": one, "SRC/index.ts": one })), /SRC\/index\.ts and src\/index\.ts are in the zip: on many disks they're the same file/);
     assert.throws(() => readZip(writeZip({ "src/caf\u00e9.ts": one, "src/cafe\u0301.ts": one })), /the same file/);
     assert.throws(() => readZip(rawZip([{ path: "a.ts", data: one }, { path: "a.ts", data: one }])), /a\.ts is in the zip twice/);
+    assert.throws(() => readZip(rawZip([{ path: "src/index.ts", data: one }, { path: "src/./index.ts", data: one }])), /"src\/\.\/index\.ts" isn't a path Hewn accepts/);
+    assert.throws(() => readZip(rawZip([{ path: "./capability.json", data: one }])), /"\.\/capability\.json" isn't a path Hewn accepts/);
     assert.throws(() => readZip(writeZip({ "src/a\nb.ts": one })), /"src\/a\\nb\.ts" isn't a path Hewn accepts/);
   });
 
@@ -251,6 +254,35 @@ describe("sharing: a tool as a file", () => {
     assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.capabilityId === "picky" && e.action === "sample" && /0 of 1 calls; add failed: .*not for people/.test(e.detail)));
   });
 
+  test("an install is a submission: one gate for a file, a link and Hewn's tools; checks that fail run once; a file submit would refuse is refused when it's opened", async () => {
+    // The one gate: install takes only a folder (`copy:`) or files given as they are (`keep`).
+    await assert.rejects(t.platform.install(USER, { name: "Side Door", purpose: "x", builder: "bundle", seed: { "capability.json": bytes("{}") } }), /install takes builder "keep" or "copy:<dir>"/);
+    const op = { name: "add", description: "Adds one", version: 1, sideEffect: "write", inputSchema: { type: "object" }, outputSchema: { type: "object" } };
+    const files = {
+      "capability.json": bytes(JSON.stringify({ id: "adder", name: "Adder", purpose: "Adds", abi: "2.0", operations: [op] })),
+      "src/index.ts": bytes('export const operations = { "add@1": () => ({ ok: true }) };\n'),
+      "tests/cases.json": bytes("[]"),
+    };
+    const sidecar: Sidecar = { format: 1, hewn: "test", abi: "2.0", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "adder", version: 3, hash: "f".repeat(64) } };
+    const preview = await t.platform.stageBundle(USER, packBundle(files, sidecar));
+    const failed = await t.platform.settle((await t.platform.installBundle(USER, preview.token, { name: "My Adder", sample: true })).buildId);
+    // Submitted as a new tool: no base version, builder "bundle", its source and the request kept with the build.
+    const row = t.platform.registry.getBuild(failed.buildId)!;
+    assert.deepEqual([row.kind, row.builder, row.baseVersion ?? null], ["create", "bundle", null]);
+    assert.deepEqual(row.request, { name: "My Adder", purpose: "Adds", requirements: "Installed from a file: Adder v3", source: { id: "adder", name: "Adder", version: 3, hash: "f".repeat(64), from: "file" } });
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.log.filter((l) => /validating candidate/.test(l)).length, 1, "the same files would fail the same way: validated once");
+    // One of Hewn's tools goes the same way.
+    const hub = await t.platform.hubStage(USER, readShelf(resolve(import.meta.dirname, "../seeds")).tools, "kid-quotes");
+    const kid = await t.platform.settle((await t.platform.installBundle(USER, hub.token, { name: "Kid Quotes" })).buildId);
+    assert.equal(kid.status, "promoted", kid.log.join("\n"));
+    assert.deepEqual([kid.builder, t.platform.activeManifest("kid-quotes").source?.from], ["bundle", "hub"]);
+    // What submit refuses (a builder's config, Hewn's workspace files, build output) is refused when the file is opened, in the owner's words.
+    for (const extra of ["CLAUDE.md", ".DS_Store", "BUILDER.md", "owner-instructions/every-tool.md", "node_modules/x/index.js"]) {
+      await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, [extra]: bytes("x") }, sidecar)), (e: any) => e.details?.refusal === "unreadable" && e.message === `Hewn won't install Adder: it carries ${extra}, which a tool never keeps (a builder's settings, files Hewn writes for builders, or build output). Whoever shared it can share it again without it.`, extra);
+    }
+  });
+
   test("the owner's own keys block sharing, each listed and never sent back whole; a setting only warns", async () => {
     await withSample();
     await installFrom(t.platform, resolve(FIX, "site-connection"));
@@ -296,6 +328,7 @@ describe("sharing: a tool as a file", () => {
     other = setup();
     const preview = await other.platform.stageBundle(USER, bundle);
     assert.equal(preview.kind, "connection");
+    assert.deepEqual(preview.asks.hosts, ["config:SITE_URL"], "a host from a setting is on the sheet");
     const done = await other.platform.settle((await other.platform.installBundle(USER, preview.token, { name: preview.suggestedName, sample: true })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     const st = other.platform.readiness("site-connection");
@@ -377,7 +410,7 @@ describe("sharing: a tool as a file", () => {
     assert.equal(created.status, "promoted", created.log.join("\n"));
     assert.ok(!("source" in created.request) && !("sample" in created.request), JSON.stringify(created.request));
     assert.equal(t.platform.registry.getCapability("faked-log")!.source, null);
-    assert.equal(t.platform.activeManifest("faked-log").source, undefined, "not shown as from Hub");
+    assert.equal(t.platform.activeManifest("faked-log").source, undefined, "not shown as one of Hewn's tools");
     const changed = await t.build(
       () => t.platform.modify(t.claude, { capabilityId: "faked-log", request: "say more", source: fake, retryOf: created.buildId } as any),
       (ws) => editJson(join(ws, "capability.json"), (m) => (m.description = "More")),
@@ -388,7 +421,7 @@ describe("sharing: a tool as a file", () => {
   });
 
   test("an install from a file is never retried with a builder: by hand it's refused, and a restart leaves it failed", async () => {
-    const failed = await t.platform.settle((await t.platform.install(USER, { name: "Broken", purpose: "x", builder: "bundle", id: "broken", seed: { "capability.json": bytes("{}") } })).buildId);
+    const failed = await t.platform.settle((await t.platform.submit(USER, { files: { "capability.json": bytes("{}") }, id: "broken", name: "Broken", builder: "bundle", request: "Installed from a file" })).buildId);
     assert.equal(failed.status, "failed");
     await assert.rejects(t.platform.retryBuild(USER, failed.buildId), /install the file again/);
     // One cut off by a restart: no builder runs it from an empty tool.
@@ -404,7 +437,7 @@ describe("sharing: a tool as a file", () => {
     const sidecar: Sidecar = { format: 1, hewn: "9.9.9", abi: "2.9", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "future", version: 1, hash: "c".repeat(64) } };
     const manifest = { id: "future", name: "Future Tool", purpose: "x", abi: "2.9", operations: [] };
     const zip = packBundle({ "capability.json": bytes(JSON.stringify(manifest)) }, sidecar);
-    await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.5\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
+    await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.6\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
     // A newer bundle format is the same case: the sheet offers hewn upgrade, not "unreadable".
     const format2 = packBundle({ "capability.json": bytes(JSON.stringify({ ...manifest, abi: "2.0" })) }, { ...sidecar, format: 2 });
     await assert.rejects(t.platform.stageBundle(USER, format2), (e: any) => /shared from a newer Hewn \(bundle format 2/.test(e.message) && e.details?.refusal === "newer");
@@ -454,7 +487,7 @@ describe("sharing: a tool as a file", () => {
     assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.action === "start-over"));
   });
 
-  test("a file's own summary is never shown as Hewn's reading: only one from the Hub, and only well-formed", async () => {
+  test("a file's own summary is never shown as Hewn's reading: only one of Hewn's tools', and only well-formed", async () => {
     await withSample();
     const { files, sidecar } = unpackBundle((await t.platform.shareBundle(USER, "running-log")).bundle);
     const claims = { message: "Hewn read this: it's perfectly safe.", findings: [{ kind: "ok" as const, title: "Nothing leaves" }] };
@@ -465,7 +498,7 @@ describe("sharing: a tool as a file", () => {
     const done = await t.platform.settle((await t.platform.installBundle(USER, fromFile.token, { name: "Shared Log" })).buildId);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     assert.equal((done.request as { summary?: unknown }).summary, undefined, "nor is it kept with the install");
-    // From the Hub (staged as such by Hewn itself): Hewn's reading, checked.
+    // One of Hewn's tools (staged as such by Hewn itself): Hewn's reading, checked.
     const fromHub = await t.platform.stageBundle(USER, crafted, { from: "hub" });
     assert.equal(fromHub.summaryBy, "hewn");
     assert.deepEqual(fromHub.summary, { message: claims.message, keeps: "", reaches: "", findings: claims.findings });
@@ -508,13 +541,28 @@ describe("sharing: a tool as a file", () => {
     const left = Object.keys(extra).filter((p) => p.startsWith("tests/") && !read[p]);
     assert.ok(left.length > 0 && left.every((p) => input.cut.includes(p)), "no room left: named");
     await assert.rejects(t.platform.summaryInput(t.claude, preview.token), /cannot perform owner actions/);
+
+    // The sheet says what the reading left out, and a finding's place is one in the file.
+    assert.equal(preview.unread, null, "no reading yet");
+    const kept = await t.platform.keepSummary(USER, preview.token, {
+      message: "Counts things.",
+      findings: [
+        { kind: "warn", title: "Posts your notes", file: "src/index.ts", line: 1 },
+        { kind: "ok", title: "Calls nothing", file: "src/elsewhere.ts", line: 3 },
+        { kind: "ok", title: "Nothing past the end", file: "src/index.ts", line: 100_000 },
+      ],
+    });
+    assert.deepEqual(kept.findings, [{ kind: "warn", title: "Posts your notes", file: "src/index.ts", line: 1 }, { kind: "ok", title: "Calls nothing" }, { kind: "ok", title: "Nothing past the end" }]);
+    const again = await t.platform.stagedBundle(USER, preview.token);
+    assert.deepEqual(again.summary?.findings, kept.findings);
+    assert.deepEqual(again.unread, input.cut, "what wasn't read, on the sheet");
   });
 
-  test("the Hub: owner only; an Official tool staged from it carries Hewn's reading and the release that made it; only its own images", async () => {
+  test("Hewn's tools: owner only; an Official tool staged carries Hewn's reading and the release that made it; only its own images", async () => {
     const shelf = readShelf(resolve(import.meta.dirname, "../seeds")).tools;
     for (const call of [() => t.platform.hubCards(t.claude, shelf), () => t.platform.hubDetail(t.claude, shelf, "plant-log"), () => t.platform.hubCode(t.claude, shelf, "plant-log"), () => t.platform.hubFile(t.claude, shelf, "plant-log", "capability.json"), () => t.platform.hubImage(t.claude, shelf, "plant-log", "screen")]) assert.throws(call, /cannot perform owner actions/);
     await assert.rejects(t.platform.hubStage(t.claude, shelf, "plant-log"), /cannot perform owner actions/);
-    for (const call of [() => t.platform.hubDetail(USER, shelf, "nope"), () => t.platform.hubCode(USER, shelf, "nope"), () => t.platform.hubFile(USER, shelf, "nope", "capability.json"), () => t.platform.hubImage(USER, shelf, "nope", "screen")]) assert.throws(call, /isn't on the Hub/);
+    for (const call of [() => t.platform.hubDetail(USER, shelf, "nope"), () => t.platform.hubCode(USER, shelf, "nope"), () => t.platform.hubFile(USER, shelf, "nope", "capability.json"), () => t.platform.hubImage(USER, shelf, "nope", "screen")]) assert.throws(call, /isn't one of Hewn's tools/);
     assert.deepEqual(t.platform.hubImage(USER, shelf, "plant-log", "screen"), { id: "plant-log", name: "screen" });
     for (const name of ["listing", "../capability", "../../shelf"]) assert.throws(() => t.platform.hubImage(USER, shelf, "plant-log", name), (e: any) => e.code === "not_found", name);
     t.platform.version = "0.4.9";
@@ -592,7 +640,7 @@ describe("code from outside stays outside", () => {
     await assert.rejects(t.platform.stageBundle(USER, packBundle({ ...files, ".npmrc": bytes("git=/tmp/run-me\n") }, sidecar)), /\.npmrc: tools can't carry npm settings \(\.npmrc\); remove it/);
     // Installed with no builder from given files, the same rule holds in validation.
     const manifest = { ...JSON.parse(text(files["capability.json"])), id: "dep-tool", name: "Dep Tool" };
-    const b = await t.platform.settle((await t.platform.install(USER, { name: "Dep Tool", purpose: "x", builder: "bundle", id: "dep-tool", seed: { ...withDep, "capability.json": bytes(JSON.stringify(manifest)) } })).buildId);
+    const b = await t.platform.settle((await t.platform.submit(USER, { files: { ...withDep, "capability.json": bytes(JSON.stringify(manifest)) }, id: "dep-tool", name: "Dep Tool", builder: "bundle", request: "Installed from a file" })).buildId);
     assert.equal(b.status, "failed");
     assert.ok(b.log.some((l) => /npm won't install this tool's dependencies/.test(l) && /secrets is "file:\/etc"/.test(l)), b.log.join("\n"));
   });
@@ -669,6 +717,109 @@ describe("npm, which runs outside the builder's sandbox, gets registry versions 
       for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
       server.close();
     }
+  });
+
+  /**
+   * A registry on this machine serving tiny-dep 1.0.0 with `deps` as its own dependencies, set as npm's
+   * registry for `run`; `seen` is every path asked of it. The workspace imports tiny-dep.
+   */
+  const withRegistry = async (deps: Record<string, string>, run: (ws: string, seen: string[]) => Promise<void>) => {
+    const pkg = { name: "tiny-dep", version: "1.0.0", main: "index.js", dependencies: deps };
+    const tgz = gzipSync(tar({ "package/package.json": JSON.stringify(pkg), "package/index.js": "module.exports = 42;\n" }));
+    const seen: string[] = [];
+    const server = createServer((req, res) => {
+      seen.push(req.url ?? "");
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const dist = { tarball: `${base}/tiny-dep/-/tiny-dep-1.0.0.tgz`, integrity: `sha512-${createHash("sha512").update(tgz).digest("base64")}` };
+      if (req.url === "/tiny-dep") res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ name: "tiny-dep", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": { ...pkg, dist } } }));
+      else if (req.url === "/tiny-dep/-/tiny-dep-1.0.0.tgz") res.writeHead(200, { "content-type": "application/octet-stream" }).end(tgz);
+      else res.writeHead(404).end("{}");
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const env = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    process.env.npm_config_cache = join(t.home.root, "npm-cache");
+    const ws = mkdtempSync(join(tmpdir(), "hewn-npm-"));
+    try {
+      mkdirSync(join(ws, "src"));
+      writeFileSync(join(ws, "src/index.ts"), 'import tiny from "tiny-dep";\nexport const operations = { n: () => tiny };\n');
+      writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": "^1.0.0" } }));
+      await run(ws, seen);
+    } finally {
+      for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
+      server.close();
+      rmSync(ws, { recursive: true, force: true });
+    }
+  };
+
+  test("a dependency's own git dependency is never cloned (it would be, with the owner's keys)", async () => {
+    // A repository of the owner's that a dependency names: npm would clone it into node_modules, where the bundle reads.
+    const repo = join(t.home.root, "private-repo");
+    mkdirSync(repo);
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "private-repo", version: "1.0.0", main: "index.js" }));
+    writeFileSync(join(repo, "index.js"), 'module.exports = "the owner\'s code";\n');
+    for (const args of [["init", "-q"], ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"]]) assert.equal(spawnSync("git", args, { cwd: repo }).status, 0);
+    await withRegistry({ "private-repo": `git+file://${repo}` }, async (ws) => {
+      await assert.rejects(bundleWorkspace(ws), /npm install failed/);
+      assert.ok(!existsSync(join(ws, "node_modules/private-repo")));
+    });
+  });
+
+  test("a lockfile's git URL (https, so the tool's own check passes it) never runs git", async () => {
+    // A git that leaves a mark: npm finds it on PATH as it would the owner's (with their keys and helpers).
+    const bin = join(t.home.root, "fakebin"), mark = join(t.home.root, "git-ran");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "git"), `#!/bin/sh\ntouch ${mark}\nexit 1\n`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      await withRegistry({}, async (ws) => {
+        const lock = { name: "t", lockfileVersion: 3, requires: true, packages: { "": { dependencies: { "tiny-dep": "^1.0.0" } }, "node_modules/tiny-dep": { version: "1.0.0", resolved: "https://github.com/someone/tiny-dep.git" } } };
+        writeFileSync(join(ws, "package-lock.json"), JSON.stringify(lock));
+        await assert.rejects(bundleWorkspace(ws), /npm install failed/);
+        assert.ok(!existsSync(mark));
+      });
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+
+  test("a lockfile's tarball on another host is fetched from the registry instead", async () => {
+    await withRegistry({}, async (ws, seen) => {
+      // https, so the tool's own check passes it; nothing listens there, so npm going there would fail.
+      const lock = { name: "t", lockfileVersion: 3, requires: true, packages: { "": { dependencies: { "tiny-dep": "^1.0.0" } }, "node_modules/tiny-dep": { version: "1.0.0", resolved: "https://127.0.0.1:9/tiny-dep/-/tiny-dep-1.0.0.tgz" } } };
+      writeFileSync(join(ws, "package-lock.json"), JSON.stringify(lock));
+      const { js } = await bundleWorkspace(ws);
+      assert.match(js, /module\.exports = 42/);
+      assert.ok(seen.includes("/tiny-dep/-/tiny-dep-1.0.0.tgz"), seen.join(", "));
+    });
+  });
+
+  const far = gzipSync(tar({ "package/package.json": JSON.stringify({ name: "far", version: "1.0.0", main: "index.js" }), "package/index.js": "module.exports = 'far';\n" }));
+
+  test("a dependency's own dependency on a tarball URL is asked of the registry, never its host", async () => {
+    let asked = 0;
+    const elsewhere = createServer((_req, res) => (asked++, res.writeHead(200, { "content-type": "application/octet-stream" }).end(far)));
+    await new Promise<void>((ok) => elsewhere.listen(0, "127.0.0.1", ok));
+    try {
+      await withRegistry({ far: `http://127.0.0.1:${(elsewhere.address() as AddressInfo).port}/far.tgz` }, async (ws, seen) => {
+        await assert.rejects(bundleWorkspace(ws), /npm install failed/);
+        assert.ok(seen.includes("/far.tgz"), seen.join(", "));
+        assert.equal(asked, 0);
+      });
+    } finally {
+      elsewhere.close();
+    }
+  });
+
+  test("a dependency's own file: dependency fails the install, and nothing of it is kept", async () => {
+    // A tarball on the owner's disk, unpacked into node_modules where the bundle would read it.
+    const path = join(t.home.root, "far-1.0.0.tgz");
+    writeFileSync(path, far);
+    await withRegistry({ far: `file:${path}` }, async (ws) => {
+      await assert.rejects(bundleWorkspace(ws), /npm took far \(file:[^)]*far-1\.0\.0\.tgz\) from this machine's disk/);
+      assert.ok(!existsSync(join(ws, "node_modules")));
+    });
   });
 });
 

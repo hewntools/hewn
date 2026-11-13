@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { type CapabilityManifest, validateManifest } from "@hewntools/core/manifest.ts";
-import { hostOf, resolveHosts } from "@hewntools/core/platform.ts";
+import { hostOf, hostWords, resolveHosts } from "@hewntools/core/platform.ts";
 import { FIXTURES, installFrom, installSeed, setup } from "./helpers.ts";
 
 const op = (name: string, extra: Record<string, unknown> = {}) => ({ name, description: "d", version: 1, inputSchema: { type: "object" }, outputSchema: { type: "object" }, sideEffect: "read", ...extra });
@@ -63,11 +63,15 @@ describe("the connection kind", () => {
     const site = { config: [{ name: "SITE_URL", description: "u" }], requires: { ...secrets.requires, hosts: ["config:SITE_URL"] } };
     assert.deepEqual(validateManifest(connection(site), "x"), []);
     assert.match(validateManifest(connection({ requires: { ...secrets.requires, hosts: ["config:NOPE"] } }), "x").join("\n"), /no config named NOPE/);
+    assert.match(validateManifest(manifest({ requires: { hosts: ["*.com"] } }), "x").join("\n"), /'\*\.com': a wildcard covers one site's subdomains \(\*\.example\.com\), not every site ending in \.com/);
+    assert.deepEqual(validateManifest(manifest({ requires: { hosts: ["*.example.com"] } }), "x"), []);
     assert.match(validateManifest(manifest({ abi: "2.0", config: [{ name: "A", description: "a" }] }), "x").join("\n"), /"config" needs ABI 2\.1/);
     assert.equal(hostOf("https://blog.example.com/ghost/"), "blog.example.com");
     assert.equal(hostOf("Blog.example.com"), "blog.example.com");
     assert.equal(hostOf("not a host"), undefined);
     assert.equal(hostOf("localhost"), undefined);
+    assert.equal(hostWords("*.example.com"), "any site ending in .example.com", "how the grant card and CLI say a wildcard");
+    assert.equal(hostWords("api.example.com"), "api.example.com");
     assert.deepEqual(resolveHosts(connection(site), { SITE_URL: "https://blog.example.com" }), ["blog.example.com"]);
     assert.deepEqual(resolveHosts(connection(site), {}), []);
   });
@@ -149,7 +153,7 @@ describe("config", () => {
     t.platform.setConfig(USER, "site-connection", "SITE_URL", " https://example.com ");
     t.platform.setSecret(USER, "site-connection", "API_KEY", "k");
     const auth = t.platform.authorization("site-connection");
-    assert.ok(auth.items.some((i) => i.label === "connect to the host in SITE_URL (example.com)"));
+    assert.ok(auth.items.some((i) => i.label === "connect to the host in SITE_URL (example.com)" && i.host === "example.com"), "the card shows the host, not config:SITE_URL");
     assert.deepEqual(auth.config, [{ name: "SITE_URL", description: "The site's base URL, e.g. https://example.com", value: "https://example.com" }]);
     t.platform.approveGrants(USER, "site-connection");
     assert.equal(t.platform.readiness("site-connection").ready, true);

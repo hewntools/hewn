@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The code browser (U4, Q5): the one place code is shown, wherever it comes in (a version's
-// Files, a Hub page's Source code, the install sheet, updates). Files on the left; on the right
+// Files, Source code on one of Hewn's tools, the install sheet, updates). Files on the left; on the right
 // the file, as Changes (a git-style unified diff against the version before) or as Source.
 import { api, enc, h, skeleton } from "../kit.js";
 import { put } from "./frame.js";

@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import { type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems } from "@hewntools/host-workerd/surface/host.ts";
+import { type JobModel, modelPrefProblems, ownerPrefProblems, settingsProblems, TOOL_DATA_LIMIT_MB } from "@hewntools/host-workerd/surface/host.ts";
 import { defaultPasses, type Pass, passesIn } from "@hewntools/core/passes.ts";
 import type { Home } from "./home.ts";
 
@@ -36,14 +36,18 @@ export interface PlatformConfig {
   agentModels?: Record<string, string[]>;
   /** The passes a new tool's build runs once its candidate validates ("critique", "craft"); [] for none. */
   buildPasses: Pass[];
+  /** How big each tool's data may grow, in MB (see Settings in surface/host.ts). */
+  toolDataLimitMB: number;
+  /** One tool's own limit instead, in MB, by tool id. */
+  toolDataLimitsMB?: Record<string, number>;
 }
 
-export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses() };
+export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses(), toolDataLimitMB: TOOL_DATA_LIMIT_MB };
 
 /** The defaults here: a host that runs the builder and intake (HEWN_BUILD_URL) makes them the default. */
 const defaults = (): PlatformConfig => ({ ...DEFAULT_CONFIG, ...(process.env.HEWN_BUILD_URL ? { builder: "remote", intake: "remote" } : {}) });
 
-const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"] as const;
+const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"] as const;
 
 const path = (home: Home) => join(home.root, "platform.json");
 
@@ -66,7 +70,7 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 /** Re-read on every call so edits apply without restarting Hewn. */
 export function readConfig(home: Home): PlatformConfig {
   // Unknown keys (e.g. the retired "discovery") are ignored.
-  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels, buildPasses } = { ...defaults(), ...stored(home) } as Record<string, any>;
+  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels, buildPasses, toolDataLimitMB, toolDataLimitsMB } = { ...defaults(), ...stored(home) } as Record<string, any>;
   return {
     builder,
     maxBuildAttempts,
@@ -74,6 +78,8 @@ export function readConfig(home: Home): PlatformConfig {
     intake,
     logRetentionDays,
     buildPasses: Array.isArray(buildPasses) ? passesIn(buildPasses) : defaultPasses(),
+    toolDataLimitMB,
+    ...(toolDataLimitsMB !== undefined ? { toolDataLimitsMB } : {}),
     ...(typeof backupDir === "string" && backupDir ? { backupDir } : {}),
     ...(firstRunDone === true ? { firstRunDone } : {}),
     ...(typeof publicListen === "string" && IPV4.test(publicListen) ? { publicListen } : {}),

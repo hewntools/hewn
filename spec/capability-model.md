@@ -4,7 +4,7 @@ This document defines Hewn's domain concepts and the invariants between them. It
 
 A **Capability** is what the rest of the spec, and Hewn's interface, call a **tool**. This document keeps the formal name. For the practical side, see [Writing a tool](tools.md) and [Connecting an agent](agents.md).
 
-[ABI](README.md#versions) 2.5 is current. Anything added after 2.0 is marked with the minor version that introduced it ("since 2.1"); see [Capability ABI](#capability-abi).
+[ABI](README.md#versions) 2.6 is current. Anything added after 2.0 is marked with the minor version that introduced it ("since 2.1"); see [Capability ABI](#capability-abi).
 
 ## Capability
 
@@ -261,7 +261,7 @@ The authorization representation may later use a relationship-based engine, but 
 
 ## Capability Manifest
 
-The Capability Manifest (`capability.json`) is the public machine-readable description of a Capability. A host validates it before any version is installed or promoted. The types are [`src/manifest.ts`](src/manifest.ts) and the JSON Schema is [`schemas/capability.schema.json`](schemas/capability.schema.json); this section summarises them for ABI 2.5, and [Writing a tool](tools.md#the-manifest) explains each field.
+The Capability Manifest (`capability.json`) is the public machine-readable description of a Capability. A host validates it before any version is installed or promoted. The types are [`src/manifest.ts`](src/manifest.ts) and the JSON Schema is [`schemas/capability.schema.json`](schemas/capability.schema.json); this section summarises them for ABI 2.6, and [Writing a tool](tools.md#the-manifest) explains each field.
 
 ```ts
 interface CapabilityManifest {
@@ -286,7 +286,7 @@ interface CapabilityManifest {
   tags?: string[];
 
   /** Since 2.1. Non-secret settings the owner fills in; code reads ctx.config.NAME. */
-  config?: { name: string; description: string }[];   // name: ^[A-Z][A-Z0-9_]*$, unique
+  config?: { name: string; description: string; suggested?: string }[];   // name: ^[A-Z][A-Z0-9_]*$, unique; suggested since 2.6
 
   /** Authority the implementation needs. Usable only once the owner grants it. */
   requires?: {
@@ -326,7 +326,7 @@ interface OperationManifest {
 
 ### `requires`
 
-- **`hosts`**: hostnames reachable over HTTP or HTTPS. `*.example.com` matches its subdomains. `config:NAME` (since 2.1) means the host in that config value (the config must be declared).
+- **`hosts`**: hostnames reachable over HTTP or HTTPS. `*.example.com` matches its subdomains. `config:NAME` (since 2.1) means the host in that config value (the config must be declared, and can't carry `suggested`: the owner types the host).
 - **`secrets`**: credentials, `name` matching `^[A-Z][A-Z0-9_]*$`. Only a connection may declare them.
 - **`capabilities`**: other capabilities' operations this one calls through `ctx.call`, pinned as `name@N` (at least one per entry).
 - **`model`** (since 2.2): a model the platform runs for it through `ctx.model.generate`. Exactly one of `tier` (`light` | `standard` | `strong` | `max`, mapped to a model by the owner) or `model` (pinned `<provider>/<model-id>`, provider `anthropic` | `openai` | `openrouter`). `input` lists what prompts carry (`text`, `image`).
@@ -369,7 +369,7 @@ The widget's operation must be a `read` operation. It returns a view model for o
 
 ## Capability ABI
 
-The Capability ABI is what a capability's code and the platform agree on: the module the code exports, the `ctx` each handler receives, the environment it runs in, and the manifest format above. It is the same on every runtime and every host. The types are [`src/ctx.ts`](src/ctx.ts) (module and `ctx`), [`src/model.ts`](src/model.ts) (`ctx.model`) and [`src/abi.ts`](src/abi.ts) (the version and its history); this section summarises them for ABI 2.5. [Writing a tool](tools.md) has the same contract with examples, and [`builder-brief.md`](builder-brief.md) is the version handed to builders.
+The Capability ABI is what a capability's code and the platform agree on: the module the code exports, the `ctx` each handler receives, the environment it runs in, and the manifest format above. It is the same on every runtime and every host. The types are [`src/ctx.ts`](src/ctx.ts) (module and `ctx`), [`src/model.ts`](src/model.ts) (`ctx.model`) and [`src/abi.ts`](src/abi.ts) (the version and its history); this section summarises them for ABI 2.6. [Writing a tool](tools.md) has the same contract with examples, and [`builder-brief.md`](builder-brief.md) is the version handed to builders.
 
 ### Versions
 
@@ -383,6 +383,7 @@ A manifest's `abi` declares the lowest version the capability needs. Minor versi
 | 2.3 | `widgets` (and read-only runs) |
 | 2.4 | `saturation` |
 | 2.5 | `source`, `requires.capabilities[]` `hub` and `minVersion`, `sample/calls.json` |
+| 2.6 | `config[].suggested` |
 
 A manifest without `abi` is 2.0.
 
@@ -401,7 +402,7 @@ export const operations: Record<string, (input: unknown, ctx: Ctx) => unknown | 
 
 - Every operation in the manifest must be exported; a version that doesn't is rejected.
 - A handler may be `async`. Its return value is the output, passed as JSON (`undefined` becomes `null`).
-- A thrown error fails the call (`operation_failed`) with the error's message.
+- A thrown error fails the call (`operation_failed`) with the error's message, cut to 1,000 characters.
 
 ### `ctx`
 
@@ -427,7 +428,7 @@ interface Db {
 }
 ```
 
-- **`db`**: the capability's own private SQLite database, synchronous, and its only state. `transaction(fn)` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed.
+- **`db`**: the capability's own private SQLite database, synchronous, and its only state. `transaction(fn)` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed. Its size has a limit the owner sets (on Hewn, 100 MB unless they change it): a write that needs more room fails (`SQLITE_FULL`), and so does the operation. What it deletes makes room again.
 - **`secrets`**: the granted values of `requires.secrets`, per call (connections only).
 - **`updateSecret(name, value)`**: stores a new value for a declared secret, e.g. a refreshed token. Updates are kept only when the operation succeeds.
 - **`config`**: the owner's values for the manifest's `config`.
@@ -466,7 +467,7 @@ Images: at most 20 per request, 5 MB and 8000 px a side each. Text: at most 400 
 ### Calls
 
 - The input is validated against the operation's `inputSchema` before the handler runs, and the output against `outputSchema` after it returns.
-- A call chain (a call and every `ctx.call` it makes) has 30 seconds. Time spent waiting on `ctx.model` is added back, up to 120 seconds per chain. A widget's run has 15 seconds.
+- A call chain (a call and every `ctx.call` it makes) has 30 seconds. Time spent waiting on `ctx.model` is added back, up to 120 seconds per chain. A widget's run has 15 seconds. Past it the call's code is stopped, and so is anything a call leaves pending when it returns.
 - An agent's call to a `destructive` operation runs only once the owner confirms it.
 - **Read-only runs** (since 2.3): a widget's operation runs read-only. `ctx.db` refuses any statement that would write before it runs, secret updates are dropped, `ctx.call` reaches read operations only, and there is no `ctx.model`.
 

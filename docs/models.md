@@ -48,7 +48,7 @@ Settings › AI › Models shows which model each tier uses on your provider, an
 
 ## Spending
 
-Hewn counts what each call costs from the provider's prices, and stops at your **monthly budget** (default is $5). Calls over the budget are refused, and the tool gets an error it can show. Settings › AI › Models shows this month's spend and lets you change the budget. A tool can have its own cap too (Info › Allowed to › **Monthly cap**).
+Hewn counts what each call costs from the provider's prices, and stops at your **monthly budget** (default is $5). Calls over the budget are refused, and the tool gets an error it can show. A call the provider doesn't answer in time counts at the most it could have cost, since the provider may still bill it. Settings › AI › Models shows this month's spend and lets you change the budget. A tool can have its own cap too (Info › Allowed to › **Monthly cap**).
 
 ![Settings › AI › Models: $1.21 of the $5.00 monthly budget spent, Anthropic in use with its key working, and the model and price for each tier](images/models.png)
 

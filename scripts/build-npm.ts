@@ -15,7 +15,10 @@ import { DOC_PAGES } from "../packages/core/src/docs.ts";
 const ROOT = resolve(import.meta.dirname, "..");
 const OUT = join(ROOT, "build", "npm");
 const root = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
-/** What the published CLI installs: the two native runtimes it starts (bundling can't carry their binaries). */
+/**
+ * What the published CLI installs: the two native runtimes it starts (bundling can't carry their binaries), at the
+ * root's versions. workerd's is exact: capability-guard.ts needs its sql.setMaxPageCountForTest, so a newer one comes with a release.
+ */
 const RUNTIME_DEPS = ["workerd", "esbuild"];
 
 const write = (path: string, text: string) => (mkdirSync(resolve(path, ".."), { recursive: true }), writeFileSync(path, text));
@@ -49,6 +52,8 @@ async function cli() {
   copyFileSync(join(ROOT, "spec", "LICENSE"), join(out, "dist", "docs", "spec", "LICENSE"));
   // The Official shelf the Hub shows (each tool's source and its .hub/ listing and images), and its license.
   cpSync(join(ROOT, "seeds"), join(out, "dist", "seeds"), { recursive: true, filter: (src) => !/(^|\/)(node_modules|\.DS_Store)$/.test(src) });
+  // The Agent Skill "build a Hewn tool" (generated from the brief: npm run skill), for agents that load skills from files.
+  cpSync(join(ROOT, "skills"), join(out, "dist", "skills"), { recursive: true });
   for (const f of ["LICENSE", "LICENSING.md"]) copyFileSync(join(ROOT, f), join(out, f));
   for (const f of ["README.md", "CHANGELOG.md"]) write(join(out, f), absoluteLinks(readFileSync(join(ROOT, f), "utf8")));
 

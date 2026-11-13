@@ -4,6 +4,7 @@
 import { type Agent, requireOwner, requireScope } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { type Deadline, deadlineOf } from "../deadline.ts";
+import { capError, capLines } from "../abi.ts";
 import { abiAtLeast, type CapabilityManifest, compileSchema, connectOperation, type OperationManifest, opKey, schemaErrors } from "../manifest.ts";
 import type { ModelHandler } from "../models.ts";
 import type { CallHandler, ExecutionTarget } from "../ports.ts";
@@ -55,8 +56,8 @@ export class Invocation extends Domain {
     const isSignIn = !!signIn && req.operation === "connect";
     if (isSignIn && agent.kind !== "user") throw new PlatformError("forbidden", `connect is ${cap.id}'s sign-in step: only the owner runs it, under Accounts in Hewn`);
     // The sign-in step fills the secrets, so it runs without them (everything else must be in place).
-    const missingOnlySecrets = !status.ready && !status.unsupportedAbi && !status.pendingGrants.length && !status.missingConfig.length && !status.missingDependencies.length;
-    if (!status.ready && !(isSignIn && missingOnlySecrets)) throw new PlatformError("not_ready", `${cap.id} is not ready`, status);
+    const missingOnlySecrets = !status.ready && !status.suspended && !status.unsupportedAbi && !status.pendingGrants.length && !status.missingConfig.length && !status.missingDependencies.length;
+    if (!status.ready && !(isSignIn && missingOnlySecrets)) throw new PlatformError("not_ready", status.suspended ? `${cap.id} is suspended: ${status.suspended.reason}. It runs again once the owner resumes it` : `${cap.id} is not ready`, status);
     const version = await this.loadVersion(cap.id, cap.activeVersion!);
     const manifest = version.row.manifest;
     if (origin.kind === "agent" || readChain) {
@@ -109,8 +110,12 @@ export class Invocation extends Domain {
     const leaks = (s: string) => secretValues.some((v) => s.includes(v));
     const redact = (s: string) => secretValues.reduce((acc, v) => acc.split(v).join("[secret]"), s);
     let executed: Awaited<ReturnType<Invocation["execute"]>>;
+    // The idle report: a call keeps Hewn awake while it runs, and a write wants a backup. A widget's reads don't count:
+    // the page that asked for them does, unless it was the page's own refresh.
+    const sideEffect = readChain ? "read" : sideEffectOf(manifest, req);
+    const endCall = readChain ? undefined : this.platform.activity.call();
     try {
-      executed = await this.execute(manifest, target, req, onCall, onModel);
+      executed = await this.execute(manifest, target, req, onCall, onModel, trace.join(" → "));
     } catch (e) {
       if (held) throw held;
       const err = e as PlatformError;
@@ -129,8 +134,12 @@ export class Invocation extends Domain {
         err.details = Object.keys(rest).length ? rest : undefined; // capability logs are for the user, not agents
       }
       throw e;
+    } finally {
+      endCall?.();
+      if (sideEffect !== "read") this.platform.activity.changed();
     }
-    const { secretUpdates, logs: rawLogs, ...rest } = executed;
+    // `inserted` is validation's, not the caller's.
+    const { secretUpdates, logs: rawLogs, inserted: _inserted, ...rest } = executed;
     for (const [name, value] of Object.entries(secretUpdates)) {
       if (declared.includes(name) && typeof value === "string") {
         this.secrets.set(cap.id, name, value);
@@ -155,19 +164,31 @@ export class Invocation extends Domain {
     return out;
   }
 
-  /** Contract-enforcing call: resolve operation, validate input, run, validate output. */
-  async execute(manifest: CapabilityManifest, target: ExecutionTarget, req: InvokeRequest, onCall?: CallHandler, onModel?: ModelHandler) {
+  /**
+   * Contract-enforcing call: resolve operation, validate input, run, validate output. `via`: who called,
+   * as the call log says it (the call path); what was running when Hewn stopped responding says so.
+   */
+  async execute(manifest: CapabilityManifest, target: ExecutionTarget, req: InvokeRequest, onCall?: CallHandler, onModel?: ModelHandler, via = target.caller?.id ?? "") {
     const op = resolveOperation(manifest, req.operation, req.operationVersion);
     const key = opKey(op.name, op.version);
     const input = req.input ?? {};
     const checkIn = compileSchema(op.inputSchema);
     if (!checkIn(input)) throw inputMismatch(key, schemaErrors(checkIn));
-    const { output: result, secretUpdates, logs } = await this.runtime.invoke(target, key, input, onCall, onModel);
+    // The runtime caps the error and console lines next to the tool's code, which can change them:
+    // capped again here, before anything is kept or passed on.
+    const ran = await this.d.stalls.running({ capabilityId: target.capabilityId, state: target.state.scratch ?? "", what: key, caller: via }, () => this.runtime.invoke(target, key, input, onCall, onModel)).catch((e: unknown) => {
+      if (e instanceof Error) e.message = capError(e.message);
+      const details = e instanceof PlatformError ? (e.details as { logs?: unknown } | undefined) : undefined;
+      if (details && typeof details === "object" && "logs" in details) (e as PlatformError).details = { ...details, logs: capLines(details.logs) };
+      throw e;
+    });
+    const { output: result, secretUpdates, inserted = [] } = ran;
+    const logs = capLines(ran.logs);
     const checkOut = compileSchema(op.outputSchema);
     if (!checkOut(result)) {
       throw new PlatformError("invalid_output", `implementation returned output violating ${key} outputSchema`, schemaErrors(checkOut));
     }
-    return { capabilityId: manifest.id, operation: key, result, secretUpdates, logs };
+    return { capabilityId: manifest.id, operation: key, result, secretUpdates, logs, inserted };
   }
 
   /** Per-capability call log (user-facing). Records who/what/outcome, never inputs or outputs. */
@@ -210,6 +231,15 @@ export class Invocation extends Domain {
     return this.registry.capabilityLogLines(capabilityId, n);
   }
 }
+
+/** The operation's side effect, or "read" for one that doesn't resolve (execute reports that). */
+const sideEffectOf = (m: CapabilityManifest, req: InvokeRequest) => {
+  try {
+    return resolveOperation(m, req.operation, req.operationVersion).sideEffect;
+  } catch {
+    return "read";
+  }
+};
 
 export function resolveOperation(m: CapabilityManifest, name: string, version?: number): OperationManifest {
   const candidates = m.operations.filter((o) => o.name === name);

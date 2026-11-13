@@ -74,6 +74,8 @@ function explainLog(log: string[]): BuildFailure {
   const last = [...log].reverse().find((l) => /^(FAILED|PAUSED): /.test(l));
   if (last?.startsWith("PAUSED: ")) return { ...say("Paused", last.slice("PAUSED: ".length).trim() || "The builder paused it."), paused: true };
   if (/interrupted by platform restart/.test(msg)) return say("Interrupted by a restart", "The platform restarted while this was building.");
+  const hung = /^its code kept Hewn from responding \((.+)\)/.exec(msg);
+  if (hung) return say("Its code kept Hewn from responding", `${hung[1][0].toUpperCase()}${hung[1].slice(1)} never let go (an endless loop?), so Hewn was restarted. It wasn't tried again: it would do the same.`);
   const noModel = /^model unavailable: ([\s\S]*)$/.exec(msg);
   if (noModel) return say("Model not available", noModel[1].trim());
   const refused = /^refused: ([\s\S]*)$/.exec(msg);

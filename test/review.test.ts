@@ -76,12 +76,14 @@ describe("agents' changes wait for the owner's review", () => {
     await assert.rejects(t.platform.approveBuild(USER, b.buildId), code("conflict"));
   });
 
-  test("the owner's own changes, and agents' changes that add nothing, go live as before", async () => {
+  test("the owner's own changes go live as before; an agent's that adds nothing waits too (its approval mode: wait)", async () => {
     t.queue(addDump);
     const own = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "dump" })).buildId);
     assert.equal(own.status, "promoted", own.log.join("\n"));
     const agents = await modify(t.claude, reword);
-    assert.equal(agents.status, "promoted", agents.log.join("\n"));
+    assert.equal(agents.status, "review", agents.log.join("\n"));
+    assert.deepEqual([agents.review!.approval, agents.review!.newOperations], ["wait", []]);
+    assert.match(agents.log.join("\n"), /waiting for the owner's review before it goes live \(the agent's changes wait for the owner's approval\)/);
   });
 
   test("approving after the capability moved on fails the build; retrying builds on the new version", async () => {

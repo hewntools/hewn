@@ -3,7 +3,7 @@
 // registration), sends the owner's browser to /authorize, and waits; the owner sees a pending
 // request in the web client (or `hewn agents pending`) and approves it, possibly narrowing what it
 // asked for. Only token hashes are stored. Revoking an agent deletes its tokens: the next call fails.
-import { type Agent, type AgentInfo, type Scope, SCOPES, validScopes } from "./auth.ts";
+import { type Agent, type AgentInfo, canSee, type Scope, SCOPES, validScopes } from "./auth.ts";
 import { PlatformError } from "./errors.ts";
 import type { Sql } from "./ports.ts";
 import { randomToken, sha256 } from "./sha256.ts";
@@ -18,6 +18,17 @@ const CODE_TTL = 5 * 60 * 1000;
 /** Waiting requests per way in: requests through the tunnel can't fill the queue local agents use. */
 const MAX_PENDING = { local: 20, tunnel: 10 } as const;
 const MAX_CLIENTS = 200;
+
+/**
+ * What happens to an agent's new tools, and its changes to existing ones, once they pass validation:
+ * they wait for the owner's approval, or go live after the checks (what a tool asks for, a host or a
+ * key, waits for the owner either way). Only "wait" can be chosen until Hewn's own tests guard
+ * the owner's data (0.4.12).
+ */
+export type ApprovalMode = "wait" | "live";
+export const APPROVAL_MODES: ApprovalMode[] = ["wait", "live"];
+/** Why "live" can't be chosen yet, as the owner and an agent read it. */
+export const LIVE_NOT_YET = "going live after the checks comes in 0.4.12, once Hewn's own tests guard your data; until then an agent's new tools and changes wait for your approval";
 
 /** OAuth protocol errors (RFC 6749 §5.2 codes), answered as `{error, error_description}`. */
 export class OAuthError extends Error {
@@ -46,7 +57,7 @@ export interface PendingRequest {
   /** Pre-checked at approval: what it asked for, or on a reconnect only what the agent has now. */
   suggested: Scope[];
   /** On a reconnect: what the agent may do now (the owner may have narrowed it since it first connected). */
-  current: { scopes: Scope[]; capabilities: "*" | string[] } | null;
+  current: { scopes: Scope[]; capabilities: "*" | string[]; except: string[] } | null;
   userCode: string;
   via: "local" | "tunnel";
   /** The host it is connecting through (hewn.example.com, a tunnel's, 127.0.0.1:7717). */
@@ -72,6 +83,8 @@ export interface AgentDetails extends AgentInfo {
   address: string | null;
   createdAt: string;
   lastUsedAt: string | null;
+  /** Its new tools and changes: wait for the owner's approval, or go live after the checks. */
+  approvalMode: ApprovalMode;
 }
 
 export interface Tokens {
@@ -80,6 +93,14 @@ export interface Tokens {
   expires_in: number;
   refresh_token: string;
   scope: string;
+}
+
+/** An agent as a tool's page shows it: whether it can use the tool, and its default (every tool, or only some). */
+export interface ToolAgent {
+  id: string;
+  name: string;
+  canUse: boolean;
+  default: "all" | "some";
 }
 
 const now = () => Date.now();
@@ -159,9 +180,13 @@ export class AgentStore {
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, client_id TEXT, scopes TEXT NOT NULL, max_scopes TEXT NOT NULL,
         capabilities TEXT NOT NULL, via TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT, address TEXT);
+      CREATE TABLE IF NOT EXISTS agent_except (
+        agent_id TEXT NOT NULL, capability_id TEXT NOT NULL, PRIMARY KEY (agent_id, capability_id));
       CREATE TABLE IF NOT EXISTS oauth_tokens (
         hash TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, client_id TEXT, expires_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS oauth_tokens_agent ON oauth_tokens (agent_id);`);
+    // Added after the table first shipped (0.4.11): every agent, existing ones included, starts at "wait".
+    if (!sql.prepare("PRAGMA table_info(agents)").all().some((c) => c.name === "approval_mode")) sql.exec("ALTER TABLE agents ADD COLUMN approval_mode TEXT NOT NULL DEFAULT 'wait'");
   }
 
   // ---------- resource server ----------
@@ -185,7 +210,12 @@ export class AgentStore {
     const r = this.sql.prepare("SELECT * FROM agents WHERE id = ?").get(id);
     if (!r) return undefined;
     const caps = json<"*" | string[]>(r.capabilities);
-    return { id: r.id, kind: "agent", scopes: new Set(json<Scope[]>(r.scopes)), capabilities: caps === "*" ? "*" : new Set(caps) };
+    return { id: r.id, kind: "agent", scopes: new Set(json<Scope[]>(r.scopes)), capabilities: caps === "*" ? "*" : new Set(caps), except: new Set(this.except(r.id)) };
+  }
+
+  /** The tools an agent that sees every tool was switched off for (ids of deleted tools too). */
+  private except(agentId: string): string[] {
+    return this.sql.prepare("SELECT capability_id FROM agent_except WHERE agent_id = ? ORDER BY capability_id").all(agentId).map((r) => String(r.capability_id));
   }
 
   list(): AgentDetails[] {
@@ -198,23 +228,35 @@ export class AgentStore {
         scopes: json(r.scopes),
         maxScopes: json(r.max_scopes),
         capabilities: json(r.capabilities),
+        except: this.except(r.id),
         clientName: r.client_name ?? r.name,
         via: r.via,
         address: r.address ?? null,
         createdAt: r.created_at,
         lastUsedAt: r.last_used_at ?? null,
+        approvalMode: r.approval_mode === "live" ? "live" : "wait",
       }));
+  }
+
+  /** What happens to an agent's new tools and changes once they pass validation (`ApprovalMode`). One Hewn no longer knows (revoked): they wait. */
+  approvalMode(id: string): ApprovalMode {
+    return this.sql.prepare("SELECT approval_mode FROM agents WHERE id = ?").get(id)?.approval_mode === "live" ? "live" : "wait";
   }
 
   /**
    * Change an agent's scopes (within what it was approved for: never wider), its capability
-   * allowlist, or revoke it (its tokens die with it).
+   * allowlist, its approval mode (only "wait" for now), or revoke it (its tokens die with it).
    */
-  update(id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[] } | "revoke"): void {
+  update(id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke"): void {
     const r = this.sql.prepare("SELECT * FROM agents WHERE id = ?").get(id);
     if (!r) throw new PlatformError("not_found", `no agent '${id}'`);
+    if (change !== "revoke" && change.approvalMode !== undefined) {
+      if (!APPROVAL_MODES.includes(change.approvalMode)) throw new PlatformError("invalid_request", 'approvalMode must be "wait" or "live"');
+      if (change.approvalMode === "live") throw new PlatformError("invalid_request", `${r.name}: ${LIVE_NOT_YET}`);
+    }
     if (change === "revoke") {
       this.sql.prepare("DELETE FROM oauth_tokens WHERE agent_id = ?").run(id);
+      this.sql.prepare("DELETE FROM agent_except WHERE agent_id = ?").run(id);
       this.sql.prepare("DELETE FROM agents WHERE id = ?").run(id);
     } else {
       if (change.scopes) {
@@ -223,9 +265,35 @@ export class AgentStore {
         if (wider.length) throw new PlatformError("forbidden", `'${id}' was approved for ${[...max].join(", ") || "nothing"}; reconnect it to ask for ${wider.join(", ")}`);
         this.sql.prepare("UPDATE agents SET scopes = ? WHERE id = ?").run(JSON.stringify(change.scopes), id);
       }
+      // Every tool, or a list, set here starts afresh: no tool stays switched off.
+      if (change.capabilities) this.sql.prepare("DELETE FROM agent_except WHERE agent_id = ?").run(id);
       if (change.capabilities) this.sql.prepare("UPDATE agents SET capabilities = ? WHERE id = ?").run(JSON.stringify(change.capabilities), id);
+      if (change.approvalMode) this.sql.prepare("UPDATE agents SET approval_mode = ? WHERE id = ?").run(change.approvalMode, id);
     }
     this.onChange(id);
+  }
+
+  /**
+   * Whether an agent can use one tool, as the owner sets it on the tool's page: one that sees every
+   * tool is switched off for it (or back on); for one limited to some, the tool joins its list or leaves it.
+   */
+  setTool(id: string, capabilityId: string, canUse: boolean): void {
+    const r = this.sql.prepare("SELECT capabilities FROM agents WHERE id = ?").get(id);
+    if (!r) throw new PlatformError("not_found", `no agent '${id}'`);
+    const caps = json<"*" | string[]>(r.capabilities);
+    if (caps === "*") {
+      if (canUse) this.sql.prepare("DELETE FROM agent_except WHERE agent_id = ? AND capability_id = ?").run(id, capabilityId);
+      else this.sql.prepare("INSERT OR IGNORE INTO agent_except (agent_id, capability_id) VALUES (?, ?)").run(id, capabilityId);
+    } else {
+      const next = canUse ? [...new Set([...caps, capabilityId])] : caps.filter((c) => c !== capabilityId);
+      this.sql.prepare("UPDATE agents SET capabilities = ? WHERE id = ?").run(JSON.stringify(next), id);
+    }
+    this.onChange(id);
+  }
+
+  /** Every agent and whether it can use one tool. */
+  forTool(capabilityId: string): ToolAgent[] {
+    return this.list().map((a) => ({ id: a.id, name: a.name, canUse: canSee(this.get(a.id)!, capabilityId), default: a.capabilities === "*" ? "all" : "some" }));
   }
 
   // ---------- registration (RFC 7591) ----------
@@ -333,7 +401,7 @@ export class AgentStore {
   /** What an existing agent may do now, or null. */
   private currentGrant(agentId: string): PendingRequest["current"] {
     const a = this.sql.prepare("SELECT scopes, capabilities FROM agents WHERE id = ?").get(agentId);
-    return a ? { scopes: json<Scope[]>(a.scopes), capabilities: json<"*" | string[]>(a.capabilities) } : null;
+    return a ? { scopes: json<Scope[]>(a.scopes), capabilities: json<"*" | string[]>(a.capabilities), except: this.except(agentId) } : null;
   }
 
   /** See PendingRequest.reconnects. */
@@ -355,7 +423,8 @@ export class AgentStore {
   /**
    * The owner's decision. Approval may narrow the requested scopes, never widen them. Naming it
    * like an existing agent reconnects that agent (its old tokens stop working); scopes and tools
-   * left unsaid then stay as the owner last set them, so reconnecting never quietly widens it.
+   * left unsaid then stay as the owner last set them, so reconnecting never quietly widens it. The
+   * tools it was switched off for stay off too, unless the approval limits it to some tools.
    */
   decide(id: string, d: { approve: false } | { approve: true; name?: string; scopes?: Scope[]; capabilities?: "*" | string[] }): { agentId?: string } {
     this.expireRequests();
@@ -383,6 +452,7 @@ export class AgentStore {
            max_scopes = excluded.max_scopes, capabilities = excluded.capabilities, via = excluded.via, address = excluded.address`,
       )
       .run(agentId, name, r.client_id, JSON.stringify(scopes), JSON.stringify(requested), JSON.stringify(caps), r.via, hostOf(r.issuer), at);
+    if (caps !== "*") this.sql.prepare("DELETE FROM agent_except WHERE agent_id = ?").run(agentId);
     this.sql.prepare("UPDATE oauth_requests SET status = 'approved', agent_id = ?, decided_at = ? WHERE id = ?").run(agentId, at, id);
     // Other requests from the same client (an earlier attempt, another tab) are moot now.
     this.sql.prepare("DELETE FROM oauth_requests WHERE status = 'pending' AND client_id = ?").run(r.client_id);

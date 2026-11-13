@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { USER } from "@hewntools/core/auth.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { installSeed, setup, TOKENS } from "./helpers.ts";
@@ -137,5 +138,72 @@ describe("authorization", () => {
   test("scopes come from the agent's approval, not the caller", () => {
     const a = t.platform.agentStore.authenticate(TOKENS.codex)!;
     assert.deepEqual([...a.scopes].sort(), ["discover", "invoke"]);
+  });
+
+  describe("which agents can use a tool, set on the tool", () => {
+    // As each call finds them: the agent as it is now.
+    const as = (token: string) => t.platform.agentStore.authenticate(token)!;
+    const tools = () => Object.fromEntries(t.platform.agents(USER).map((a) => [a.id, [a.capabilities, a.except]]));
+
+    test("switched off, an agent that sees every tool can't see or use it; switched on, one limited to some can; back undoes either", async () => {
+      t.platform.setCapabilityAgent(USER, "running-log", "codex", false);
+      assert.deepEqual(t.platform.list(as(TOKENS.codex)), []);
+      assert.throws(() => t.platform.get(as(TOKENS.codex), "running-log"), rejectsWith("not_found"));
+      await assert.rejects(t.platform.invoke(as(TOKENS.codex), { capabilityId: "running-log", operation: "list_runs" }), rejectsWith("not_found"));
+      assert.throws(() => t.platform.requestAccess(as(TOKENS.codex), "running-log", "let me in"), rejectsWith("not_found"));
+      assert.deepEqual(t.platform.list(as(TOKENS.claude)).map((c) => c.id), ["running-log"], "only that agent");
+      t.platform.setCapabilityAgent(USER, "running-log", "outsider", true);
+      assert.deepEqual(t.platform.list(as(TOKENS.outsider)).map((c) => c.id), ["running-log"]);
+      assert.deepEqual(
+        t.platform.capabilityAgents(USER, "running-log").map((a) => [a.id, a.canUse, a.default]).sort(),
+        [["claude-code", true, "all"], ["codex", false, "all"], ["outsider", true, "some"]],
+      );
+      assert.deepEqual(tools(), { "claude-code": ["*", []], codex: ["*", ["running-log"]], outsider: [["something-else", "running-log"], []] });
+
+      t.platform.setCapabilityAgent(USER, "running-log", "codex", true);
+      t.platform.setCapabilityAgent(USER, "running-log", "outsider", false);
+      assert.equal((await t.platform.invoke(as(TOKENS.codex), { capabilityId: "running-log", operation: "list_runs" })).operation, "list_runs@1");
+      assert.deepEqual(t.platform.list(as(TOKENS.outsider)), []);
+      assert.deepEqual(tools(), { "claude-code": ["*", []], codex: ["*", []], outsider: [["something-else"], []] });
+    });
+
+    test("the owner's alone, for a tool that's there and an agent that's connected", () => {
+      assert.throws(() => t.platform.setCapabilityAgent(t.claude, "running-log", "codex", false), rejectsWith("forbidden"));
+      assert.throws(() => t.platform.capabilityAgents(t.claude, "running-log"), rejectsWith("forbidden"));
+      assert.throws(() => t.platform.setCapabilityAgent(USER, "nope", "codex", false), rejectsWith("not_found"));
+      assert.throws(() => t.platform.setCapabilityAgent(USER, "running-log", "nobody", false), rejectsWith("not_found"));
+      assert.throws(() => t.platform.setCapabilityAgent(USER, "running-log", "codex", "off" as unknown as boolean), rejectsWith("invalid_request"));
+    });
+
+    test("a deleted tool isn't named; restored, it stays off", () => {
+      t.platform.setCapabilityAgent(USER, "running-log", "codex", false);
+      t.platform.archive(USER, "running-log");
+      assert.deepEqual(tools().codex, ["*", []]);
+      assert.throws(() => t.platform.setCapabilityAgent(USER, "running-log", "codex", true), rejectsWith("not_found"));
+      t.platform.restore(USER, "running-log");
+      assert.deepEqual(tools().codex, ["*", ["running-log"]]);
+      assert.deepEqual(t.platform.list(as(TOKENS.codex)), []);
+    });
+
+    test("setting an agent's tools on the agent starts afresh", () => {
+      t.platform.setCapabilityAgent(USER, "running-log", "codex", false);
+      t.platform.updateAgent(USER, "codex", { capabilities: ["running-log"] });
+      t.platform.updateAgent(USER, "codex", { capabilities: "*" });
+      assert.deepEqual(tools().codex, ["*", []]);
+      assert.deepEqual(t.platform.list(as(TOKENS.codex)).map((c) => c.id), ["running-log"]);
+    });
+
+    test("switched off, an agent can't change the tool or chain a change to it; its own build it still sees", async () => {
+      t.queue(() => new Promise(() => {}));
+      const b = await t.platform.modify(t.claude, { capabilityId: "running-log", request: "x" });
+      t.platform.setCapabilityAgent(USER, "running-log", "claude-code", false);
+      const claude = as(TOKENS.claude);
+      await assert.rejects(t.platform.modify(claude, { capabilityId: "running-log", request: "y" }), rejectsWith("not_found"));
+      await assert.rejects(t.platform.addWidgets(claude, { capabilityId: "running-log", after: b.buildId }), rejectsWith("not_found"));
+      assert.throws(() => t.platform.changesComing(claude, "running-log"), rejectsWith("not_found"));
+      assert.equal(t.platform.getBuild(claude, b.buildId).status, "building");
+      t.platform.cancelBuild(claude, b.buildId);
+      await assert.rejects(t.platform.retryBuild(claude, b.buildId), rejectsWith("not_found"));
+    });
   });
 });

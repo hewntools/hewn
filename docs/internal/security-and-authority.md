@@ -71,6 +71,10 @@ An Agent that can invoke a Capability should not automatically receive its sourc
 
 A Builder may receive source as part of a scoped build job.
 
+An Agent with `modify` scope receives a tool's source through the pack (`capabilities_pack`), for a tool its grant shows it: writing a change itself, it is that change's Builder. An Agent that can only discover and invoke never does.
+
+The pack also carries what Hewn's own Builder is told of the owner's standing instructions for building: their rules for every tool to an Agent with `create` or `modify`, and a tool's own rules with a change's pack, for a tool its grant shows it. Never the owner's conversations with the intake (their words), nor another build's request.
+
 Source access should eventually be independently authorizable.
 
 ## State access
@@ -172,6 +176,8 @@ This does not imply authority to:
 - access unrelated Capabilities
 
 A Builder should receive only the information needed for its build job.
+
+An Agent that writes a tool itself (`capabilities_submit`) is held to the same: it promotes nothing (its files go through the same validation as any build, and while its approval mode is `wait` the owner approves the result), and it never receives the owner's data or secrets.
 
 One exception, the owner's to make per build: a Polish with **Show the builder my own data** ticked
 (`realData`, off by default, only offered when the tool has rows of its own, never by an agent: Polish is
@@ -346,13 +352,15 @@ An authorization engine answers relationship questions; it does not replace prod
 
 ## Code from outside (a shared tool)
 
-A tool installed from a file or from the Hub runs through the same validation and sandbox as a builder's: its manifest, its code bundled and loaded, its tests, its migrations, its UI rendered. Nothing in a bundle can grant itself anything: what its manifest asks for (hosts, a model, other tools' operations, secrets for a connection) is asked of the owner after install, one grant at a time, as for any new tool. Hewn never puts state, secrets, config values, the build's conversation or logs in a bundle, and nothing it adds says whose Hewn it came from; what the code itself holds is what the scan below is for.
+A tool installed from a file, a link or Hewn's own tools runs through the same validation and sandbox as a builder's: its manifest, its code bundled and loaded, its tests, its migrations, its UI rendered. Nothing in a bundle can grant itself anything: what its manifest asks for (hosts, a model, other tools' operations, secrets for a connection) is asked of the owner after install, one grant at a time, as for any new tool. Hewn never puts state, secrets, config values, the build's conversation or logs in a bundle, and nothing it adds says whose Hewn it came from; what the code itself holds is what the scan below is for.
 
 - **The reading is advisory.** The intake's summary (Hewn's for an Official tool, the owner's own builder's for a file, run with no tools and no web) says what the code does with the owner's data and where it differs from what it says. It isn't a gate: the owner can skip or stop it, the code is what runs, and the owner can read all of it before installing. A file's own summary in its sidecar is ignored.
 - **npm and imports stay inside the tool.** A bundle whose npm dependencies aren't registry versions or ranges, or that carries an `.npmrc`, is refused when it's staged; code that imports a file outside the tool fails at bundling, as in any build.
 - **`source` is the platform's.** Where a tool came from is the capability's record; validation writes it into every version's manifest, replacing whatever a builder wrote, so a later change can't claim another origin.
 - **Sample data runs with nothing granted.** Replayed after install (on the owner's request) and before every promotion, each call goes through the contract with no hosts, no other tools and no model.
 - **Sharing scans first.** Before a tool is shared, its files are scanned: an exact match of one of the owner's stored keys (any tool's secrets, the model providers' keys) blocks the share; one of the owner's settings, personal data and key shapes warn. The scan finds known values and common shapes; it can't prove a file clean.
+- **A share link is a bearer token for one version's file.** `/share/<token>` is one of two unauthenticated routes that serve something of the owner's (the other, a pack's download link, is minted inside an Agent's signed-in call and works once, for 10 minutes): the bundle of the version the link was made for (the same scan first, as for a file), until it expires or is revoked. The token is 24 random bytes (base64url, 32 characters); only its SHA-256 is stored and it never reaches a log; anything that isn't a working link is the same 404; links are rate limited on the public listener per address and per link (`share`, `shareLink`: a busy address can't use up everyone's, and a link fetched too often waits on its own; `share`'s total is only a backstop). `share` is counted in the front (`gatePublic`), `shareLink` in the surface once the link is known to work, so a revoked or expired link is a 404 at once, never a 429. It reveals nothing else (no other version, no data, no names beyond the tool's own manifest). Deleting the tool revokes its links for good.
+- **Install from a link fetches only public https.** The surface fetches the URL itself (`fetchLink`): https only, no credentials in the URL, at most 5 MB however the body is sent, redirects followed by hand (at most 5), each hop held to the same rules, literal loopback, private, link-local and CGNAT addresses and local names refused. On the workerd host, the HewnDO's own fetch can reach only public addresses (`network = (allow = ["public"])`), which also covers a public name that resolves to a private address. What it fetches is staged exactly as a file is; `source.host` is the host the file came from (the last hop), and the install sheet also names the link's own host when a redirect led elsewhere.
 
 ## Security invariants
 

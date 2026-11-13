@@ -97,7 +97,7 @@ async function home({ editing = false } = {}) {
   const timers = widgets.flatMap((w, i) => {
     if (w.entry.missing) return [];
     const stale = !w.entry.at || Date.now() - Date.parse(w.entry.at) > 60_000;
-    return [stale ? setTimeout(w.refresh, i * 150) : 0, setInterval(w.refresh, Math.max(w.entry.refreshMs ?? 1_800_000, 300_000))];
+    return [stale ? setTimeout(() => w.refresh({ auto: true }), i * 150) : 0, setInterval(() => w.refresh({ auto: true }), Math.max(w.entry.refreshMs ?? 1_800_000, 300_000))];
   });
   onLeave(() => timers.forEach((t) => (clearTimeout(t), clearInterval(t))));
 
@@ -158,20 +158,24 @@ async function home({ editing = false } = {}) {
   if (editing) enterEdit();
 
   // Building tiles fill in live; when a build starts or finishes the grid is rebuilt.
-  const signature = (cs) => cs.map((c) => `${c.id}:${!!c.building}:${c.ready}:${c.lastBuild?.status}:${c.requests}`).join("|");
+  const signature = (cs) => cs.map((c) => `${c.id}:${!!c.building}:${c.ready}:${c.lastBuild?.status}:${c.held}:${c.requests}`).join("|");
   let last = signature(list);
   const poll = async () => {
     if (!document.body.contains(grid)) return;
-    const next = onHome(await caps(true).catch(() => new Map()));
+    const next = onHome(await caps(true, { poll: true }).catch(() => new Map()));
     const busy = grid.querySelector("input.rename") || document.querySelector(".menu.context") || grid.classList.contains("editing");
     if (signature(next) !== last && !busy) return home();
     for (const c of next) if (c.building) tiles.get(c.id)?.update(c);
     last = busy ? last : signature(next);
-    timer = setTimeout(poll, list.some((c) => c.building) || next.some((c) => c.building) ? 2500 : 15000);
+    timer = setTimeout(poll, list.some((c) => c.building) || next.some((c) => c.building) ? BUILDING_POLL : IDLE_POLL);
   };
-  let timer = setTimeout(poll, list.some((c) => c.building) ? 2500 : 15000);
+  let timer = setTimeout(poll, list.some((c) => c.building) ? BUILDING_POLL : IDLE_POLL);
   onLeave(() => clearTimeout(timer));
 }
+
+/** How often Home looks for changes: while something builds (its tile fills in live), and otherwise (an agent's new tool, a build started elsewhere). */
+const BUILDING_POLL = 2500;
+const IDLE_POLL = 60_000;
 
 /** Home label for a building tile: real milestones only (there's no honest % while code is written). */
 const buildingLabel = (b) => (b.step === "tests" && b.tests ? `Testing ${b.tests.passed}/${b.tests.total}` : b.step === "auth" ? "Needs you" : b.step === "waiting" ? "Waiting" : b.step === "critique" ? "Reviewing…" : b.step === "craft" ? "Polishing…" : "Building…");
@@ -219,12 +223,14 @@ function enableReorder(grid, save) {
 function tile(c, { hidden = false, editHome, show } = {}) {
   const label = h("span", { class: "tile-label" });
   const iconSlot = h("span", { class: "tile-icon" });
-  const el = h("div", { class: "tile", role: "button", tabindex: 0, "data-id": c.building && !c.version ? undefined : c.id }, iconSlot, label);
+  // Not yet a tool (being built, or an agent's new tool waiting for you): it opens its build.
+  const unbuilt = () => !c.version && (c.building ?? (c.held && { buildId: c.held }));
+  const el = h("div", { class: "tile", role: "button", tabindex: 0, "data-id": unbuilt() ? undefined : c.id }, iconSlot, label);
   const render = (cap) => {
     Object.assign(c, cap);
     const paused = c.lastBuild?.paused;
     const failed = c.lastBuild?.status === "failed" && !paused;
-    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0;
+    const needsYou = (!c.ready && !c.saidNo) || c.requests > 0 || !!c.held;
     const more = c.building ? null : h("span", { class: "more", "aria-hidden": "true", onclick: (e) => (e.stopPropagation(), menuFrom(more, items())) }, "•••");
     // Lit cells follow real progress: none while code is written (the glyph pulses), then tests passed / total.
     const b = c.building;
@@ -235,7 +241,7 @@ function tile(c, { hidden = false, editHome, show } = {}) {
     el.setAttribute("aria-label", c.building ? `${c.name}, building` : `${c.name}${failed ? ", last build failed" : paused ? ", build paused" : needsYou ? ", needs you" : ""}`);
     el.title = c.purpose ?? "";
   };
-  const items = () => (c.building && !c.version ? [["Show build", () => go(`#/b/${c.building.buildId}`)]] : capabilityMenu(c, { rename: () => inlineRename(c, label), editHome, hidden, show }));
+  const items = () => (unbuilt() ? [["Show build", () => go(`#/b/${unbuilt().buildId}`)]] : capabilityMenu(c, { rename: () => inlineRename(c, label), editHome, hidden, show }));
   // While it builds, the tile opens the build.
   const open = () => (c.building ? go(`#/b/${enc(c.building.buildId)}`) : openCapability(c).catch(fail));
   el.addEventListener("click", open);

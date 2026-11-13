@@ -151,13 +151,13 @@ describe("docs: hewn_docs", () => {
     test("every agent has it, whatever its scopes; the instructions point at it; it reads the real docs", async () => {
       const store = t.platform.agentStore;
       const maker = await connect(store.issue(store.approveDirect("maker", ["create"])).access_token);
-      assert.deepEqual((await maker.listTools()).tools.map((x) => x.name).sort(), ["builds_cancel", "builds_get", "builds_retry", "builds_wait", "capabilities_create", "capabilities_request_access", "hewn_docs"]);
+      assert.deepEqual((await maker.listTools()).tools.map((x) => x.name).sort(), ["builds_cancel", "builds_get", "builds_retry", "builds_wait", "capabilities_check", "capabilities_create", "capabilities_pack", "capabilities_request_access", "capabilities_submit", "hewn_docs"]);
       assert.match(maker.getInstructions() ?? "", /read hewn_docs instead of guessing/);
       await maker.close();
 
       const agent = await connect(TOKENS.codex);
       const list = text(await agent.callTool({ name: "hewn_docs", arguments: {} }));
-      assert.match(list, new RegExp(`^Hewn's docs: ${DOC_PAGES.length} pages`));
+      assert.match(list, new RegExp(`^Hewn's docs: ${DOC_PAGES.length + 1} pages`), "the pages and the Skill");
       assert.match(list, /docs\/concepts\.md: Concepts\n  Tools · Agents · Hewn's two jobs/);
       const found = text(await agent.callTool({ name: "hewn_docs", arguments: { query: "how do grants work?" } }));
       assert.match(found, /--- docs\/concepts\.md#grants \(Concepts › Grants\) ---\n## Grants\n/);

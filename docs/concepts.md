@@ -41,7 +41,7 @@ When you (or an agent) ask for a new tool or a change, the builder writes it. He
 4. for a new tool with a screen, has the builder look at it again on screenshots filled with sample data: it reviews the design, then fixes the details (a tool you have already gets the same with [Polish](building-tools.md#polishing-a-tool))
 5. makes it live if all of that passes
 
-What you ask for goes live right after the checks. A change an **agent** asks for that adds operations, or touches a [connection](#connections), waits for you to approve it first (the Inbox, or `hewn review`). Either way, a tool can't reach anything new until you approve its [grants](#grants).
+What you ask for goes live right after the checks. A change an **agent** makes to a tool you have waits for you to approve it first (the Inbox, or `hewn review`), with the files it changes and its screen to look at. Either way, a tool can't reach anything new until you approve its [grants](#grants).
 
 If it fails, you see why, and you can ask the builder to fix it. See [Building tools](building-tools.md).
 
@@ -63,11 +63,11 @@ A **connection** is a tool that wraps one service you have an account with (Todo
 
 You can run an operation on a timetable, e.g. "daily 07:00", in your time zone. Agents can only **propose** a schedule; nothing runs until you enable it. Read and write operations only. A schedule pauses itself after three failures in a row.
 
-## Sharing and the Hub
+## Sharing and Hewn's own tools
 
-A tool can travel as a file (`<tool>.hewn.zip`). **Share…** makes one from any version of yours; **Install from a file** turns someone else's into a new tool of yours. The file holds the tool's code, tests, migrations, screens and **sample data** (made-up entries it can start with). Hewn never puts your data, keys or settings in it, and checks the code for them before you share: one of your own keys stops the share, and anything else that looks personal is a warning. Before you install one, your builder reads its code and says what it does with your data.
+A tool can travel as a file (`<tool>.hewn.zip`) or a link to one. **Share…** makes either from any version of yours (a link needs a [public address](remote-access.md), and lasts 1, 7 or 30 days, or until you revoke it); **Install from a file or link** turns someone else's into a new tool of yours. The file holds the tool's code, tests, migrations, screens and **sample data** (made-up entries it can start with). Hewn never puts your data, keys or settings in it, and checks the code for them before you share: one of your own keys stops the share, and anything else that looks personal is a warning. Before you install one, your builder reads its code and says what it does with your data.
 
-The **Hub** holds tools ready to install: today Hewn's own (**Official**), which ship with Hewn and come with Hewn's reading of their code. However it arrives, a tool goes through the same checks as a build, runs in the same sandbox, and asks for its [grants](#grants) once it's installed. It's yours from then on: nothing updates it from where it came from. See [Sharing tools](sharing.md).
+**Hewn's own tools** (**Official**), under **+ New**, are ready to install: they ship with Hewn and come with Hewn's reading of their code. However it arrives, a tool goes through the same checks as a build, runs in the same sandbox, and asks for its [grants](#grants) once it's installed. It's yours from then on: nothing updates it from where it came from. See [Sharing tools](sharing.md).
 
 ## The Inbox and Activity
 

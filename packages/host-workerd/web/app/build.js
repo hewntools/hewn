@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A build: its page, or the panel in the change drawer.
-import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, skeleton, stepRow, tintOf } from "../kit.js";
+import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
 import { AGENT_CATALOG, agentTile, catalogOf } from "./agents.js";
 import { shotUrl } from "./appearance.js";
 import { go, hues, moment, onLeave, put, sandboxNotice, topBar, view } from "./frame.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { modelWords } from "./home.js";
 import { pollInbox } from "./inbox.js";
+import { codeBrowser } from "./files.js";
+import { route } from "./router.js";
 import { conversationThread } from "./intake.js";
 import { titleCase } from "./models.js";
 import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from "./review.js";
@@ -25,27 +27,34 @@ const STEPS = [
 ];
 /** A new tool's passes after its tests (when it runs them): the step, and its pill in Activity. */
 const PASS_STEPS = { critique: ["Reviewing the design", "reviewing design"], craft: ["Fixing details", "fixing details"] };
-/** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hub", "from <host>" or "from a file". */
+/** Where an install came from, as its build request says, in the words Hewn uses everywhere (`sourceWords` in the core): "from Hewn's tools", "from <host>" or "from a file". */
 const installedFrom = (b) => {
   const s = b.request?.source;
-  return s?.from === "hub" ? "from Hub" : s?.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
+  return s?.from === "hub" ? "from Hewn's tools" : s?.from === "link" ? `from ${s.host ?? "a link"}` : "from a file";
 };
-/** A tool installed from a file or from Hub has no builder: its milestones are the file's (R4). */
+/** A tool installed from a file, a link or Hewn's tools has no builder: its milestones are the file's (R4). */
 const installSteps = (b) => [
-  ["spec", b.request?.source?.from === "hub" ? "From Hub" : "From the file"],
+  ["spec", b.request?.source?.from === "hub" ? "From Hewn's tools" : b.request?.source?.from === "link" ? "From the link" : "From the file"],
   ["code", "Unpacked"],
   ["tests", "Running tests"],
   ["auth", "Your authorization"],
 ];
-/** No builder runs: an install from a file, Hub or a directory, or a change that needs none. */
-const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || String(b.builder ?? "").startsWith("copy:");
-/** Retry runs the same builder again; an install from a file or your own edit had none (Hewn refuses), so you do it again instead. */
-const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep";
+/** A client wrote it and handed it over: its milestones are the submission's. */
+const submittedSteps = (b) => [
+  ["spec", `From ${b.submittedBy ?? actorLabel(b.requestedBy)}`],
+  ["code", "Received"],
+  ["tests", "Running tests"],
+  ["auth", "Your authorization"],
+];
+/** No builder runs: an install from a file, a link, Hewn's tools or a directory, a client's submission, or a change that needs none. */
+const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || b.builder === "submitted" || String(b.builder ?? "").startsWith("copy:");
+/** Retry runs the same builder again; an install from a file, a submission or your own edit had none (Hewn refuses), so it's done again instead. */
+const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep" && b.builder !== "submitted";
 /** A Polish's steps: its builder writes no code, only sample data when the tool has none (else that step is done at once). */
 const POLISH_STEPS = STEPS.map(([k, label]) => [k, k === "code" ? "Sample data" : label]);
 /** The steps, with the passes the build runs (`passes`, from its step) right after its tests. */
 const stepsOf = (b, passes) => {
-  const steps = b.builder === "bundle" ? installSteps(b) : b.request?.polish ? POLISH_STEPS : STEPS;
+  const steps = b.builder === "bundle" ? installSteps(b) : b.builder === "submitted" ? submittedSteps(b) : b.request?.polish ? POLISH_STEPS : STEPS;
   const after = steps.findIndex(([k]) => k === "tests") + 1;
   const extra = (passes ?? []).filter((p) => PASS_STEPS[p]).map((p) => [p, PASS_STEPS[p][0]]);
   return [...steps.slice(0, after), ...extra, ...steps.slice(after)];
@@ -57,11 +66,11 @@ const LIVE_BUILD = new Set(["waiting", "open", "building", "validating"]);
 const kindWord = (b) => (b.builder === "keep" || b.request?.manifestOnly ? "quick change" : b.request?.polish ? "polish" : BUILD_KIND[b.kind] ?? b.kind);
 
 /**
- * Failed builds nobody has dealt with yet: not retried, and nothing of that tool promoted since (a
- * later change replaced it). These are what "needs you" means for builds.
+ * Failed builds nobody has dealt with yet: not retried or discarded, and nothing of that tool promoted
+ * since (a later change replaced it). These are what "needs you" means for builds.
  */
 const unresolvedFailures = (builds) =>
-  builds.filter((b) => b.status === "failed" && !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) && !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt));
+  builds.filter((b) => b.status === "failed" && !b.discardedAt && !builds.some((x) => x.request?.retryOf === b.buildId || x.request?.autoRetryOf === b.buildId) && !builds.some((x) => x.capabilityId === b.capabilityId && (x.kind === b.kind || b.kind === "create") && x.status === "promoted" && x.createdAt > b.createdAt));
 
 /** V6 A build that waits its turn says for what, the same in the drawer, the Inbox and Activity. */
 const waitingPill = (b) => kindTag(b.queued ? "waiting for the change before it" : "waiting", "warn");
@@ -211,7 +220,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           waitingAgent ? `Waiting for ${actorLabel(b.requestedBy, all)} to build it · you can leave` : null,
           clockEl,
         ),
-        !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? `Installed ${installedFrom(b)}: no builder runs. Its own tests run as for any build.` : "No builder runs.") : buildMeta(b)),
+        !waitingAgent && (noBuilder(b) ? h("div", { class: "small faint" }, b.builder === "bundle" ? `Installed ${installedFrom(b)}: no builder runs. Its own tests run as for any build.` : b.builder === "submitted" ? `Submitted by ${b.submittedBy ?? actorLabel(b.requestedBy, all)}: no builder runs. Hewn checks it as any build.` : "No builder runs.") : buildMeta(b)),
         convoView,
         h("ol", { class: "steps" }, steps.map(([k, label], i) => {
           const row = stepRow(k === "spec" && specView ? specView : label, i < at ? "done" : i === at ? "live" : "todo", meta(k, i));
@@ -351,6 +360,21 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       };
       if (fix) fix.addEventListener("click", again("fix", fix));
       if (retry) retry.addEventListener("click", again("retry", retry));
+      // Discard: off the Inbox, kept in Activity. Nothing about the tool changes.
+      const discard = !b.discardedAt && h("button", {}, "Discard");
+      if (discard)
+        discard.addEventListener("click", async () => {
+          discard.disabled = true;
+          try {
+            b = await api(`/builds/${enc(id)}/discard`, { method: "POST" });
+            pollInbox();
+            toast("Discarded: it stays in Activity");
+            failed();
+          } catch (e) {
+            discard.disabled = false;
+            fail(e);
+          }
+        });
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
@@ -360,7 +384,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         convoView,
         specView,
-        retry ? h("div", { class: "row tight" }, fix, retry) : h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : "No builder ran: make the change again to try once more."),
+        retry ? h("div", { class: "row tight" }, fix, retry, discard) : [h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more."), discard && h("div", { class: "row tight" }, discard)],
+        b.discardedAt && h("div", { class: "small muted" }, "Discarded: it's out of the Inbox, and stays in Activity."),
         logBlock(true),
       );
       requestAnimationFrame(keepScroll);
@@ -399,17 +424,24 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       yes.addEventListener("click", decide(true, yes));
       no.addEventListener("click", decide(false, no));
       const changes = reviewChanges(b.review);
-      // Only a changed screen is worth a look (validation renders it on empty data).
-      const shot = b.screenshot && (!changes || b.review.changes.ui);
+      // The four renders (1280 and 390 px, light and dark), as the checks drew it; older reviews: one screenshot, when the screen changed.
+      const shots = b.review.shots ?? [];
+      const shot = !shots.length && b.screenshot && (!changes || b.review.changes.ui);
+      // The files against the version it's built on, opened on demand (the code browser).
+      const create = b.kind === "create";
+      const files = h("details", { class: "small review-files" }, h("summary", {}, create ? "Its files" : "The files it changes"));
+      files.addEventListener("toggle", () => files.open && !files.querySelector(".code-browser") && files.append(codeBrowser({ label: "the change", list: () => api(`/builds/${enc(id)}/code`), file: (p) => api(`/builds/${enc(id)}/code?path=${enc(p)}`) })), { once: false });
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), "It passed its checks. It goes live only if you allow it."),
-        b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, "New"),
+        b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, create ? "What agents can do with it" : "New"),
         ...b.review.newOperations.map((o) => reviewOp(o, { full: true })),
         changes && [h("div", { class: "eyebrow" }, changes.every(([ok]) => ok) ? "Nothing else changes" : "Also"), changeList(changes)],
+        shots.length > 0 && [h("div", { class: "eyebrow" }, create ? "Its screen" : "The screen after the change"), h("div", { class: "review-shots" }, shots.map((n) => h("a", { href: `/api/builds/${enc(id)}/shots/${enc(n)}`, target: "_blank", rel: "noopener" }, h("img", { class: "build-shot", src: `/api/builds/${enc(id)}/shots/${enc(n)}`, alt: `${create ? "Its screen" : "The screen after the change"}: ${n.replace("-", ", ")}`, loading: "lazy" }))))],
         shot && [h("div", { class: "eyebrow" }, "The screen after the change (rendered with no data)"), h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" })],
+        (b.review.changes || create) && files,
         reviewRequest(b, all),
-        h("div", { class: "row tight" }, yes, no),
+        h("div", { class: "row tight" }, yes, no, cap().version && h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
         logBlock(false),
       );
     };
@@ -423,15 +455,32 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       // Agent-built and still open: the agent submits when it's done.
       step = b.step ?? step;
       live();
-      const t = setTimeout(() => api(`/builds/${enc(id)}`).then(settle).catch(() => {}), 5000);
+      const t = setTimeout(() => api(`/builds/${enc(id)}`, { refresh: true }).then(settle).catch(() => {}), 5000);
       onLeave(() => clearTimeout(t));
+    };
+
+    let tick = 0;
+    // The stream. When it ends without the build's end (Hewn restarted, a proxy cut it, its 30 minutes ran out), the
+    // browser doesn't reconnect it: each reconnect would count as the owner and keep Hewn awake. The 4 s tick carries
+    // the page, and opens it again after a minute while the build runs.
+    let es = null;
+    let closedAt = 0;
+    // The build's end, drawn once: whichever of the stream, the tick or Cancel sees it first.
+    let ended = false;
+    const end = (v) => {
+      if (ended) return;
+      ended = true;
+      clearInterval(tick);
+      es?.close();
+      if (!logPre.childNodes.length) for (const l of v.log ?? b.log) logLine(l);
+      settle(v);
     };
 
     // Cancel while the builder works.
     cancelBtn.addEventListener("click", async () => {
       if (!(await confirmDialog({ title: "Cancel this build?", body: "The builder stops and nothing changes. You can start it again later.", confirm: "Cancel build", cancel: "Keep building", danger: true }))) return;
       try {
-        settle(await api(`/builds/${enc(id)}/cancel`, { method: "POST" }));
+        end(await api(`/builds/${enc(id)}/cancel`, { method: "POST" }));
       } catch (e) {
         fail(e);
       }
@@ -439,33 +488,60 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     // The transcript replays (live or finished, kept for 30 days), then "done".
     const finished = !LIVE_BUILD.has(b.status) && b.status !== "open";
     if (!finished) live();
-    const es = new EventSource(`/api/builds/${enc(id)}/events`);
-    onLeave(() => es.close());
-    es.addEventListener("line", (e) => {
-      logLine(JSON.parse(e.data));
-      if (follow) logPre.scrollTop = logPre.scrollHeight;
-    });
-    es.addEventListener("step", (e) => {
-      if (finished) return;
-      step = JSON.parse(e.data);
-      live();
-    });
-    es.addEventListener("done", (e) => {
-      es.close();
-      if (!logPre.childNodes.length) for (const l of b.log) logLine(l);
-      settle(JSON.parse(e.data));
-    });
-    es.addEventListener("error", () => {
-      if (!finished || card.querySelector(".build-head")) return;
-      es.close();
-      for (const l of b.log) logLine(l);
-      settle(b);
-    });
+    const open = () => {
+      const s = (es = new EventSource(`/api/builds/${enc(id)}/events`));
+      // A stream opened again replays the log: the first line starts it afresh.
+      let replay = logPre.childNodes.length > 0;
+      s.addEventListener("line", (e) => {
+        if (replay) ((replay = false), logPre.replaceChildren());
+        logLine(JSON.parse(e.data));
+        if (follow) logPre.scrollTop = logPre.scrollHeight;
+      });
+      s.addEventListener("step", (e) => {
+        if (finished) return;
+        step = JSON.parse(e.data);
+        live();
+      });
+      const dropped = () => {
+        s.close();
+        es = null;
+        closedAt = Date.now();
+      };
+      s.addEventListener("done", (e) => {
+        const v = JSON.parse(e.data);
+        // The stream's wait ran out before the build did.
+        if (LIVE_BUILD.has(v.status)) return dropped();
+        end(v);
+      });
+      s.addEventListener("error", () => {
+        dropped();
+        if (finished && !card.querySelector(".build-head")) end(b);
+      });
+    };
+    open();
+    onLeave(() => es?.close());
+    // A hidden tab makes no requests: the stream closes (else the browser reconnects it, hidden or not), and the page
+    // draws itself again once the tab is shown.
+    const hidden = () => {
+      if (!document.hidden) return;
+      es?.close();
+      document.removeEventListener("visibilitychange", hidden);
+      shown().then(() => document.body.contains(card) && route());
+    };
+    document.addEventListener("visibilitychange", hidden);
+    onLeave(() => document.removeEventListener("visibilitychange", hidden));
     if (finished) return;
     // Pick up the icon as soon as the builder has written it (it does that first), and the attempt clock.
-    const tick = setInterval(async () => {
-      const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`).catch(() => null), caps(true).catch(() => null)]);
+    let ticking = false;
+    tick = setInterval(async () => {
+      if (ticking) return;
+      ticking = true;
+      const [v, fresh] = await Promise.all([api(`/builds/${enc(id)}`, { refresh: true }).catch(() => null), caps(true, { poll: true }).catch(() => null)]).finally(() => (ticking = false));
       if (fresh) for (const [k, x] of fresh) all.set(k, x);
+      if (ended) return;
+      // With the stream gone, the build's end comes from here.
+      if (!es && v && !LIVE_BUILD.has(v.status)) return end(v);
+      if (!es && v && Date.now() - closedAt >= 60_000) open();
       if (v?.progress) startedAt = Date.now() - v.progress.elapsedSeconds * 1000;
       if (v && b.status === "waiting" && v.status !== "waiting") b = v;
       if (v?.step && LIVE_BUILD.has(v.status)) ((step = v.step), live());

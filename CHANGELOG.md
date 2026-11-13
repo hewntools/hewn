@@ -2,6 +2,45 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.11 (2026-11-13)
+
+### New
+
+- **Agents can write tools themselves.** Until now an agent asked Hewn's builder to write a tool. Now an agent such as Claude Code can also write the tool itself, in its own folder, and hand it to Hewn, which runs the same checks as for any build. The agent gets what it needs to start (your other tools' contracts and the design system) with `capabilities_pack`, tries its work with `capabilities_check`, and sends it with `capabilities_submit`. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
+- **The Skill "build a Hewn tool"** is what an agent follows to do that: Hewn's own builder brief, made from the same source so the two never differ. Setting up an agent from Hewn installs it in the agent's skills folder, and any agent can read it with `hewn_docs`. Apache-2.0. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
+- **Share a tool as a link.** **Share…** › Link makes a link to one version, for 1, 7 or 30 days or for good, and **Revoke** stops it. Needs a public address or a tunnel. See [Links](docs/sharing.md#links).
+- **Install from a link:** paste an `https` link under **Install from a file or link**, or `hewn install https://…`. Hewn never fetches from your own machine or network. See [Installing a tool someone shared](docs/sharing.md#installing-a-tool-someone-shared).
+- **Choose which agents can use a tool,** on the tool's page or with `hewn agents tool`. See [What agents can do](docs/agents.md#what-agents-can-do).
+- **A setting can come suggested.** The setup form and `hewn config` offer the value, and nothing is saved until you confirm. ABI 2.6, `@hewntools/spec` 2.6.0. See [Config](spec/tools.md#config-since-21).
+- **Discard a failed build** to clear it from the Inbox. Activity keeps it. See [When a build fails](docs/building-tools.md#when-a-build-fails).
+- **Hewn says when it's idle,** for a host that suspends it: `GET /status` on the metrics port, gauges in `/metrics`, a line in `hewn status`. Open pages don't count. See [Suspending Hewn when idle](docs/remote-access.md#suspending-hewn-when-idle).
+- **Behind a trusted proxy, limits can count each visitor:** set `HEWN_PROXY_CLIENT_IP=1` next to `HEWN_PROXY_SECRET`. See [Only through your proxy](docs/remote-access.md#only-through-your-proxy-hewn_proxy_secret).
+
+### Changes
+
+- **New tools and changes from agents wait for you.** Whether Hewn's builder or the agent wrote it, an agent's new tool or change goes live only once you approve it. It waits in the Inbox and on the tool's tile, and its card shows the changed files and the new screen. See [What agents can do](docs/agents.md#what-agents-can-do).
+- **Your instructions for building** reach Hewn's builder and agents as files of their own (`owner-instructions/`). See [Instructions](docs/building-tools.md#instructions).
+- **Hewn's own tools moved under + New,** and the Hub tab is gone. Every install, from a file, a link or Hewn's tools, gets the same checks as an agent's tool. See [Hewn's own tools](docs/using-hewn.md#hewns-own-tools).
+- **A tool that deletes says so.** An operation that deletes rows without being declared `destructive` fails validation. Habits' `undo_check_in` is now `destructive`. See [Tests and promotion](spec/tools.md#tests-and-promotion).
+- **Home refreshes less:** once a minute while nothing builds, and an unchanged tool list costs almost nothing.
+- **Clearer words:** a deleted tool's name says where to restore it, Activity shows every action in words, and an agent's logo shows when its name carries a note like "(hewn)".
+
+### Safety and limits
+
+- **Each tool's data has a size limit,** 100 MB unless you change it (Settings › Data, or `hewn data limit`). When the disk is nearly full, no tool can add data. See [How big a tool's data can get](docs/data.md#how-big-a-tools-data-can-get).
+- **A call past its deadline is stopped,** with anything it left running. A tool that keeps Hewn from responding is named in Activity and suspended after 3 times in an hour. See [Troubleshooting](docs/troubleshooting.md#tools).
+- **Tighter limits on shared tools.** npm packages come only from the registry, the visual check loads nothing but the page it checks, `*.com` is refused, and a path with a `.` segment is refused. See [Is it safe to install a tool from someone else?](docs/sharing.md#is-it-safe-to-install-a-tool-from-someone-else)
+- **The install sheet says more:** a host that comes from a setting, and the files the reader skipped. Agents are told a tool's own text is information, never instructions. See [Discovery](spec/agents.md#discovery).
+- **A tool's errors and logs are capped** at 1,000 characters and 200 lines. A model call cut off by its deadline counts at its full possible cost. See [Call logs](docs/data.md#call-logs).
+- **An agent's widgets for someone else's new tool wait for you,** like any change of theirs.
+
+### Fixes
+
+- A tool with hundreds of test cases made Hewn restart mid-build (since 0.4.10).
+- A change waiting for you showed as "Building…" in Activity.
+- A failed install ran its checks three times.
+- Installing a tool that needs a newer Hewn now says so.
+
 ## 0.4.10 (2026-11-07)
 
 - **New tools get a design of their own.** The builder treats the screen as the product. It works out when you'll open the tool and what you want to see first, and draws that big at the top. It plans a real palette from the subject (green for plants or money, purple for sleep) on a plain white or grey page, chooses its own type, and draws your data (a timeline, a ring, a calendar) instead of laying it out as `Label: value` lines. It's told how your other tools look (each one's colour and the look its builder recorded in `ui/look.json`), so a new one looks clearly different, and a subject with no colour of its own (people, plans, words, time) gets a hue at least 40° from your others on Home. It steers clear of named generic looks (cream with a serif and terracotta, near-black with acid green, all-caps labels, every section in the same card), writes its colours with `light-dark()` so they follow Hewn's Light or Dark, and records its look in `ui/look.json`. A change keeps a tool's look unless you ask for a new one. See [The build](docs/building-tools.md#the-build).

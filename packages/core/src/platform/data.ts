@@ -9,6 +9,7 @@ import { sampleOrNull } from "../bundle.ts";
 import { type CapabilityManifest, opKey } from "../manifest.ts";
 import { migrationsOf, rollbackProblems } from "../migrations.ts";
 import { Domain, type Domains } from "./context.ts";
+import { REVIEW_SHOTS, reviewShotKey } from "./validation.ts";
 
 /** How many of a capability's latest calls Info › Data looks through for its last write. */
 const WRITE_LOOKBACK = 500;
@@ -27,12 +28,14 @@ export interface DataSummary {
 export class Data extends Domain {
   /**
    * "Delete" archives: the capability disappears for the owner and every agent, its state and
-   * versions are kept, and the id stays reserved. `hewn restore <id>` brings it back.
+   * versions are kept, and the id stays reserved. `hewn restore <id>` brings it back. Its share
+   * links stop for good (a restore doesn't bring them back).
    */
   archive(owner: Agent, capabilityId: string) {
     requireOwner(owner);
     this.visibleActive(owner, capabilityId);
     this.registry.setOwnerPrefs(capabilityId, { archivedAt: new Date().toISOString() });
+    this.registry.revokeShareLinks(capabilityId);
     this.registry.addLifecycleEvent(capabilityId, "delete", "", owner.id);
     this.logger(`${capabilityId} deleted (archived, data kept) by ${owner.id}`);
   }
@@ -90,6 +93,7 @@ export class Data extends Domain {
       await this.blobs.delete(`transcripts/${b}.log`);
       await this.blobs.delete(`screenshots/${b}.png`);
       await this.blobs.delete(`screenshots/${b}-dark.png`);
+      for (const name of REVIEW_SHOTS) await this.blobs.delete(reviewShotKey(b, name));
     }
     for (const h of hashes) await this.blobs.delete(`versions/${h}.json`);
     await this.blobs.delete(`icons/${capabilityId}`);

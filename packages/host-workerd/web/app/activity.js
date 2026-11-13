@@ -84,17 +84,18 @@ function activityRow(g, all, showCap) {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
     const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
-    if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], ran && h("span", { class: "faint" }, `· ${ran}`));
+    if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], g.submittedBy ? h("span", { class: "faint" }, `· submitted by ${g.submittedBy}`) : ran && h("span", { class: "faint" }, `· ${ran}`));
+    else if (g.outcome === "review") (dot = "warn"), (text = on(g.submittedBy ? `Submitted by ${g.submittedBy}: waits for you` : "Waits for your review", ref && ["·", ref]));
     else if (g.outcome === "failed" && g.failure?.paused) (dot = "warn"), (text = on("Build paused", ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
-    else if (g.outcome === "failed") (dot = "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
+    else if (g.outcome === "failed") (dot = g.discarded ? "" : "danger"), (text = on(`Build failed: ${g.reason || g.failure?.title || "see log"}`, ref && ["·", ref], g.discarded && h("span", { class: "faint" }, "· discarded"), g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));
     else if (g.outcome === "cancelled") text = on("Build cancelled", ref && ["·", ref]);
     else (dot = "live"), (text = on("Building…", ref && ["·", ref]));
   } else if (g.kind === "lifecycle") {
     // Schedule details read "created <id>: op@1 daily 07:00" / "paused <id> after 3 failures": drop the id.
     const sm = /^(\w+) [\w-]+:? ?(.*)$/.exec(g.detail ?? "");
     const schedule = sm ? `Schedule ${sm[1]}${sm[2] ? `: ${sm[2].replace(/@\d+/, "")}` : ""}` : "Schedule";
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}` };
-    dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : "";
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), "kept Hewn from responding: restarted"] };
+    dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : g.outcome === "stalled" || g.outcome === "suspend" ? "danger" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
     const subject = actorLabel(g.subject, all);
@@ -102,10 +103,16 @@ function activityRow(g, all, showCap) {
       agent_connected: () => ((dot = "ok"), on(`Connected ${subject}`, g.detail && h("span", { class: "faint" }, g.detail))),
       agent_declined: () => on(`Declined ${g.subject}`),
       agent_revoked: () => ((dot = "warn"), on(`Disconnected ${subject}`)),
+      agent_tool: () => on(g.detail === "on" ? `${subject} can use` : `${subject} can no longer use`, ref ?? "this tool"),
       agent_scopes: () => on(`${subject} may now: ${g.detail || "nothing"}`),
       agent_capabilities: () => on(`${subject} sees: ${g.detail === "*" ? "everything" : g.detail || "nothing"}`),
+      agent_approval_mode: () => on(g.detail === "live" ? `${subject}'s changes go live after the checks` : `${subject}'s changes wait for your approval`),
       secret_set: () => on("Set secret", h("span", { class: "mono" }, g.subject), ref && ["·", ref]),
       secret_removed: () => ((dot = "warn"), on("Removed secret", h("span", { class: "mono" }, g.subject), ref && ["·", ref])),
+      config_set: () => on("Set", h("span", { class: "mono" }, g.subject), ref && ["·", ref]),
+      build_approved: () => ((dot = "ok"), on(`Approved ${subject}'s change`, ref && ["to", ref])),
+      build_rejected: () => on(`Declined ${subject}'s change`, ref && ["to", ref]),
+      signed_in: () => ((dot = "ok"), on("Signed in", ref && ["to", ref])),
       destructive_confirmed: () => ((dot = "warn"), on(`Let ${subject} run`, h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), ref && ["on", ref])),
       destructive_rejected: () => on(`Stopped ${subject} running`, h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), ref && ["on", ref]),
       models_set: () => on("Changed model settings", h("span", { class: "faint" }, g.detail)),
@@ -211,7 +218,7 @@ async function activityPage(q) {
  */
 async function buildsView(head, only, all0) {
   const here = stillHere();
-  const load = () => Promise.all([api("/builds?n=200&brief=1"), caps(true).catch(() => all0)]);
+  const load = (poll = false) => Promise.all([api("/builds?n=200&brief=1", { refresh: poll }), caps(true, { poll }).catch(() => all0)]);
   const root = h("div", { class: "card timeline builds" });
   const render = (builds, all) => {
     const list = only ? builds.filter((b) => b.capabilityId === only) : builds;
@@ -232,7 +239,9 @@ async function buildsView(head, only, all0) {
       b.status === "promoted"
         ? kindTag(b.resultVersion ? `v${b.resultVersion}` : "done", "ok")
         : b.status === "failed"
-          ? failed.has(b.buildId) && retryable(b)
+          ? b.discardedAt
+            ? kindTag("discarded")
+            : failed.has(b.buildId) && retryable(b)
             ? b.failure?.paused
               ? h("a", { class: "btn sm", href: `#/b/${enc(b.buildId)}`, onclick: (e) => e.stopPropagation() }, "Continue…")
               : h("button", { class: "sm", onclick: (e) => (e.stopPropagation(), api(`/builds/${enc(b.buildId)}/retry`, { method: "POST" }).then((n) => go(`#/b/${n.buildId}`), fail)) }, "Retry")
@@ -268,7 +277,7 @@ async function buildsView(head, only, all0) {
   let timer;
   const poll = async () => {
     if (!document.body.contains(root)) return;
-    const next = await load().catch(() => null);
+    const next = await load(true).catch(() => null);
     if (!document.body.contains(root)) return;
     timer = setTimeout(poll, !next || render(...next) ? 2500 : 15000);
   };

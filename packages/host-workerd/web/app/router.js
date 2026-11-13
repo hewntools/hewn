@@ -59,12 +59,12 @@ async function route() {
     if (p === "") return await home();
     if (p === "app") return await appPage(id, q);
     if (p === "run") return await runPage(id, q);
-    if (p === "hub" && id) return await hubToolPage(id);
-    if (p === "hub") return await hubPage(q);
     if (p === "c" && sub === "versions") return await versionsPage(id);
     if (p === "c" && sub === "sample") return await samplePage(id);
     if (p === "c" && sub === "v") return await versionPage(id, Number(arg), q);
     if (p === "c") return await infoPage(id);
+    if (p === "new" && id === "tools" && sub) return await hubToolPage(sub);
+    if (p === "new" && id === "tools") return await hubPage(q);
     if (p === "new") return await intakePage(q);
     if (p === "b") return await buildPage(id);
     if (p === "activity") return await activityPage(q);

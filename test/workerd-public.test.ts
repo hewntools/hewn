@@ -4,7 +4,11 @@ import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
 import { after, before, describe, test } from "node:test";
-import { startTestHost, type TestHost } from "./workerd-helpers.ts";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { readZip } from "@hewntools/core/bundle.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
+import { oauthToken, parse, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 /** The workerd socket a tunnel points at: the Public entrypoint in front of the owner's DO. */
 describe("workerd: the public socket", () => {
@@ -56,6 +60,31 @@ describe("workerd: the public socket", () => {
 
   test("the local socket is unchanged (web client, health)", async () => {
     assert.equal((await fetch(`${h.sv.url}/health`)).status, 200);
+  });
+
+  test("a pack's download link: on the address the agent reached Hewn at, served on the public socket, once", async () => {
+    const token = await oauthToken(h.sv.url, h.sv.admin, "packer", ["discover", "create"]);
+    const client = new Client({ name: "packer", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${h.sv.publicUrl}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}`, "x-forwarded-host": "hewn.example.com" } } }));
+    const pack = parse(await client.callTool({ name: "capabilities_pack", arguments: { kind: "create" } }));
+    await client.close();
+    const link = new URL(pack.download.url);
+    assert.equal(link.origin, "https://hewn.example.com");
+    assert.match(link.pathname, /^\/_platform\/pack\/~[A-Za-z0-9_-]{43}$/);
+    const zip = await get(link.pathname);
+    assert.equal(zip.status, 200);
+    assert.equal(zip.headers.get("content-type"), "application/zip");
+    assert.equal(zip.headers.get("cache-control"), "no-store");
+    assert.ok("PLATFORM_UI.css" in readZip(new Uint8Array(await zip.arrayBuffer())));
+    assert.equal((await get(link.pathname)).status, 404, "once");
+    assert.equal((await get("/_platform/pack/~nope")).status, 404);
+  });
+
+  test("the Agent Skill answers there too, as the design system does", async () => {
+    const r = await get(SKILL_URL);
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get("content-type")!, /^text\/markdown/);
+    assert.match(await r.text(), /^---\nname: build-a-hewn-tool\n/);
   });
 
   test("registration is rate limited per client address", async () => {

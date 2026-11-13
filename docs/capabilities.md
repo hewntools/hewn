@@ -52,7 +52,7 @@ It goes through the same validation as a built one.
 
 ## Examples
 
-Hewn's own tools, the Hub's Official shelf, are in the repo's [`seeds/`](../seeds) to be read and copied (Apache-2.0). Three to start with:
+Hewn's own tools (Official, under **+ New** in the web client) are in the repo's [`seeds/`](../seeds) to be read and copied (Apache-2.0). Three to start with:
 
 - [Running Log](../seeds/running-log): operations, a migration, test cases, sample data and a screen
 - [Reading List](../seeds/reading-list): a widget, an operation marked `destructive`, and a screen
@@ -64,4 +64,4 @@ From a checkout of the repo: `hewn install seeds/habits`.
 
 ## Reference
 
-The manifest and the ABI (the module, `ctx`, environment, versions) are described in full in [capability-model.md](../spec/capability-model.md#capability-manifest). Hewn implements ABI 2.5. A capability declares the lowest version it needs in `"abi"`; minor versions only add, so a capability built for 2.0 keeps running.
+The manifest and the ABI (the module, `ctx`, environment, versions) are described in full in [capability-model.md](../spec/capability-model.md#capability-manifest). Hewn implements ABI 2.6. A capability declares the lowest version it needs in `"abi"`; minor versions only add, so a capability built for 2.0 keeps running.

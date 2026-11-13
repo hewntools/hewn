@@ -77,7 +77,7 @@ async function accountsPage() {
   if (!conns().some((c) => c.building)) return;
   const poll = async () => {
     if (!location.hash.startsWith("#/accounts")) return;
-    const now = [...(await caps(true).catch(() => new Map())).values()].filter((c) => c.kind === "connection");
+    const now = [...(await caps(true, { poll: true }).catch(() => new Map())).values()].filter((c) => c.kind === "connection");
     if (signature(now) !== last) return accountsPage();
     timer = setTimeout(poll, 2500);
   };

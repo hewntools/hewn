@@ -1,6 +1,6 @@
 {
   "name": "hewn",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "private": true,
   "type": "module",
   "description": "Hewn: your own capabilities (small tools with their own data) that every agent you connect can use",
@@ -14,6 +14,7 @@
     "e2e": "node --disable-warning=ExperimentalWarning test/e2e/first-run.e2e.ts",
     "bench": "node --disable-warning=ExperimentalWarning bench/bench.ts",
     "spec:schemas": "node --disable-warning=ExperimentalWarning spec/build-schemas.ts",
+    "skill": "node --disable-warning=ExperimentalWarning scripts/build-skill.ts",
     "build:npm": "node --disable-warning=ExperimentalWarning scripts/build-npm.ts"
   },
   "dependencies": {
@@ -22,7 +23,7 @@
     "ajv": "^8.20.0",
     "esbuild": "^0.28.2",
     "uqr": "^0.1.3",
-    "workerd": "^1.20261006.1",
+    "workerd": "1.20261006.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {

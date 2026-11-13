@@ -104,7 +104,7 @@ function connectDialog(agentId) {
       };
 
       const connecting = async (x) => {
-        const words = (s) => (s.kind === "cleanup" ? "Removing the old token" : s.kind === "register" ? `Adding ${BRAND} to ${x.label}` : s.kind === "pointer" ? `Telling ${x.label} where to look` : `${x.label} signs in`);
+        const words = (s) => (s.kind === "cleanup" ? "Removing the old token" : s.kind === "register" ? `Adding ${BRAND} to ${x.label}` : s.kind === "pointer" ? `Telling ${x.label} where to look` : s.kind === "skill" ? `Giving ${x.label} the Skill to build tools` : `${x.label} signs in`);
         let plan = [];
         const state = []; // per step: done | live | fail
         let error = null;
@@ -154,10 +154,15 @@ function connectDialog(agentId) {
         // While it signs in, its request appears here to approve without leaving the sheet.
         const seen = new Set((await api("/agents/pending").catch(() => [])).map((p) => p.id));
         let poll = null;
+        let asking = false;
         const watch = () => {
           if (poll) return;
           poll = setInterval(async () => {
-            const fresh = (await api("/agents/pending").catch(() => [])).filter((p) => !seen.has(p.id));
+            // One at a time: a hidden tab's ticks don't pile up behind the first.
+            if (asking) return;
+            asking = true;
+            const fresh = (await api("/agents/pending", { refresh: true }).catch(() => [])).filter((p) => !seen.has(p.id));
+            asking = false;
             if (!fresh.length) return;
             fresh.forEach((p) => seen.add(p.id));
             put(waiting, await agentRequestSheet(fresh[0], { inline: () => put(waiting) }));

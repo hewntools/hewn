@@ -31,13 +31,15 @@ export async function runOperation(
     /** A widget's call: the state may only be read (writes throw), and secret updates are dropped. */
     readOnly?: boolean;
   },
-): Promise<{ output: unknown; secretUpdates: Record<string, string> }> {
+): Promise<{ output: unknown; secretUpdates: Record<string, string>; inserted: string[] }> {
   const fn = mod.operations?.[key];
   if (typeof fn !== "function") throw new Error(`operation ${key} is not exported`);
   const secretUpdates: Record<string, string> = {};
   const updateSecret = (name: string, value: string) => void (env.readOnly || (secretUpdates[name] = value));
+  const inserted = new Set<string>();
   const ctx: AbiContext = {
-    db: env.readOnly ? readOnlyDb(env.db) : env.db,
+    // Only validation's calls (tests, sample data) note what they insert: the delete check reads it; live calls skip it.
+    db: env.readOnly ? readOnlyDb(env.db) : env.caller?.kind === "test" ? insertsInto(env.db, inserted) : env.db,
     secrets: { ...(env.secrets ?? {}) },
     config: { ...(env.config ?? {}) },
     updateSecret,
@@ -49,7 +51,44 @@ export async function runOperation(
   if (model) ctx.model = { generate: (req) => model(req) };
   const output = await fn(input, ctx);
   // Outputs cross a process/isolate boundary as JSON.
-  return { output: output === undefined ? null : JSON.parse(JSON.stringify(output)), secretUpdates };
+  return { output: output === undefined ? null : JSON.parse(JSON.stringify(output)), secretUpdates, inserted: [...inserted] };
+}
+
+/**
+ * The tables a statement inserts into (INSERT, INSERT OR …, REPLACE INTO, also after WITH), lowercased:
+ * validation's delete check tells a replace (fewer rows, but new ones added) from a delete.
+ */
+export function insertTargets(sql: string): string[] {
+  const s = sql.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/'(?:[^']|'')*'/g, "''");
+  // A table name, bare or quoted ("…", `…`, […]); optionally after a schema ("main.").
+  const name = '(?:"((?:[^"]|"")+)"|\\x60([^\\x60]+)\\x60|\\[([^\\]]+)\\]|([\\p{L}\\p{N}_$]+))';
+  const re = new RegExp(`\\b(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into\\s+${name}(?:\\s*\\.\\s*${name})?`, "giu");
+  return [...s.matchAll(re)].map((m) => (m[5] ?? m[6] ?? m[7] ?? m[8] ?? m[1] ?? m[2] ?? m[3] ?? m[4]).replace(/""/g, '"').toLowerCase());
+}
+
+/**
+ * The db an operation gets in validation, noting each table a statement that ran inserted into: for run(), only when
+ * it changed a row (an INSERT OR IGNORE or DO NOTHING that added none isn't a replace).
+ */
+function insertsInto(db: AbiDb, into: Set<string>): AbiDb {
+  const note = (sql: string) => insertTargets(sql).forEach((t) => into.add(t));
+  return {
+    exec: (sql) => (db.exec(sql), note(sql)),
+    prepare: (sql) => {
+      const st = db.prepare(sql);
+      const ran = <T>(r: T) => (note(sql), r);
+      return {
+        run: (...p) => {
+          const r = st.run(...p);
+          if (Number(r.changes) > 0) note(sql);
+          return r;
+        },
+        all: (...p) => ran(st.all(...p)),
+        get: (...p) => ran(st.get(...p)),
+      };
+    },
+    transaction: (fn) => db.transaction(fn),
+  };
 }
 
 // Words that only appear in statements that change something (once literals are removed).
@@ -161,11 +200,26 @@ function b64(b: Uint8Array) {
   return btoa(s);
 }
 
-/** Cap and prefix a call's console lines ("| " log, "! " error/warn). */
-export function capLines(lines: string[]): string[] {
-  const out = lines.slice(0, 200).map((l) => (l.length > 500 ? l.slice(0, 500) + "…" : l));
-  if (lines.length > 200) out.push(`… ${lines.length - 200} more lines`);
-  return out;
+/** The console lines of a call Hewn keeps, and the characters of each. */
+export const LOG_LINES = 200;
+export const LOG_LINE_CHARS = 500;
+/** The characters of a failed call's error Hewn keeps and passes on (as many as its failure record keeps). */
+export const ERROR_CHARS = 1000;
+
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+/**
+ * Cap a call's console lines ("| " log, "! " error/warn): at most LOG_LINES, the last one saying how
+ * many more there were, each at most LOG_LINE_CHARS. Anything but strings is left out. Capping
+ * again changes nothing, so the platform caps what comes back from a tool's isolate once more.
+ */
+export function capLines(lines: unknown): string[] {
+  const all = Array.isArray(lines) ? lines.filter((l): l is string => typeof l === "string") : [];
+  if (all.length <= LOG_LINES) return all.map((l) => cut(l, LOG_LINE_CHARS));
+  return [...all.slice(0, LOG_LINES - 1).map((l) => cut(l, LOG_LINE_CHARS)), `… ${all.length - LOG_LINES + 1} more lines`];
 }
+
+/** A failed call's error, cut to ERROR_CHARS. */
+export const capError = (message: string) => cut(message, ERROR_CHARS);
 
 export const CALL_TIMEOUT_MS = 30_000;

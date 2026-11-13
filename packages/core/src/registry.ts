@@ -71,6 +71,10 @@ export interface BuildReview {
     /** Operations it no longer has (deprecated ones nothing uses). */
     removedOperations: string[];
   };
+  /** Held because the agent's changes wait for the owner's approval (its approval mode), whatever the change adds. */
+  approval?: "wait";
+  /** The candidate's screen as validation rendered it (`desktop-light`, `desktop-dark`, `mobile-light`, `mobile-dark`): blobs `screenshots/<build>/<name>.png`. */
+  shots?: string[];
 }
 
 /** What a build ran on (Settings › AI, or what was asked for), for the build page and Activity. */
@@ -111,12 +115,18 @@ export interface BuildFeedback {
   at: string;
 }
 
+/** The owner's instructions for building, as a build runs with them: one rule per line. */
+export interface OwnerInstructions {
+  everyTool: string[];
+  thisTool: string[];
+}
+
 /** What led to a build, kept with it for the capability's life (`build_context`). */
 export interface BuildContext {
   /** The web client's conversation; an agent's build has none (its request is on the build). */
   conversation?: BuildTurn[];
-  /** The owner's instructions the build ran with. */
-  instructions?: string;
+  /** The owner's instructions the build ran with: its rules for every tool, and this tool's (a build of an existing tool only). */
+  ownerInstructions?: OwnerInstructions;
   /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
   brief?: string;
 }
@@ -139,6 +149,8 @@ export interface BuildRow {
   log: string[];
   createdAt: string;
   updatedAt: string;
+  /** When the owner discarded it (a failed build put aside: gone from the Inbox, kept in Activity). */
+  discardedAt: string | null;
 }
 
 const SCHEMA = `
@@ -326,8 +338,9 @@ CREATE TABLE IF NOT EXISTS build_charges (
   unit           TEXT NOT NULL
 );
 -- What led to a build, kept for the capability's life: the owner's conversation with the intake
--- (the web client's turns), the owner's instructions it ran with, and which brief it ran on (the
--- spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
+-- (the web client's turns), the owner's instructions it ran with (owner_instructions, the lines as
+-- JSON; a build from before 0.4.11 has BUILDER.md's section in instructions instead, not read), and
+-- which brief it ran on (the spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
 CREATE TABLE IF NOT EXISTS build_context (
   build_id       TEXT PRIMARY KEY,
   conversation   TEXT,
@@ -361,10 +374,44 @@ CREATE TABLE IF NOT EXISTS host_charges (
   unit           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS host_charges_by_month ON host_charges (month);
+-- Share links (/share/<token>): the version each serves, until when, and how often it was fetched
+-- (a count, never who). Only the token's hash is kept: the link is shown once, when it's made.
+CREATE TABLE IF NOT EXISTS share_links (
+  id             TEXT PRIMARY KEY,
+  token_hash     TEXT NOT NULL UNIQUE,
+  capability_id  TEXT NOT NULL,
+  version        INTEGER NOT NULL,
+  created_at     TEXT NOT NULL,
+  expires_at     TEXT,
+  revoked_at     TEXT,
+  downloads      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS share_links_by_cap ON share_links (capability_id);
+-- Tool code running now (a call, a build's tests): a row while it runs. Rows left when Hewn stopped
+-- responding say what was running then. \`state\`: '' for the tool's own data, else the scratch state.
+CREATE TABLE IF NOT EXISTS running_code (
+  id             TEXT PRIMARY KEY,
+  capability_id  TEXT NOT NULL,
+  state          TEXT NOT NULL,
+  what           TEXT NOT NULL,
+  caller         TEXT NOT NULL,
+  started_at     TEXT NOT NULL
+);
 `;
 
 type Row = Record<string, any>;
 const now = () => new Date().toISOString();
+
+/** A share link as the owner sees it in Share…: never its token. `expiresAt` null: until revoked. */
+export interface ShareLink {
+  id: string;
+  capabilityId: string;
+  version: number;
+  createdAt: string;
+  expiresAt: string | null;
+  downloads: number;
+}
+const toShareLink = (r: Row): ShareLink => ({ id: r.id, capabilityId: r.capability_id, version: r.version, createdAt: r.created_at, expiresAt: r.expires_at ?? null, downloads: r.downloads });
 
 export interface Confirmation {
   id: string;
@@ -443,6 +490,7 @@ const toBuild = (r: Row): BuildRow => ({
   log: JSON.parse(r.log),
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+  discardedAt: r.discarded_at ?? null,
 });
 
 const passkeyRow = (r: Row) => ({
@@ -459,6 +507,8 @@ const passkeyRow = (r: Row) => ({
 const ADDED_COLUMNS: [string, string, string][] = [
   ["capabilities", "saturation", "INTEGER"],
   ["capabilities", "source", "TEXT"],
+  ["builds", "discarded_at", "TEXT"],
+  ["build_context", "owner_instructions", "TEXT"],
 ];
 
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
@@ -583,6 +633,27 @@ export class Registry {
       )
       .all(month)
       .map((r) => ({ capabilityId: r.capability_id, model: r.model, calls: Number(r.calls), costUsd: Number(r.cost), inputTokens: Number(r.tin), outputTokens: Number(r.tout) }));
+  }
+
+  // ---------- tool code running now ----------
+
+  codeStarted(c: { capabilityId: string; state: string; what: string; caller: string }): string {
+    const id = crypto.randomUUID();
+    this.db.prepare("INSERT INTO running_code (id, capability_id, state, what, caller, started_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, c.capabilityId, c.state, c.what, c.caller, now());
+    return id;
+  }
+
+  codeEnded(id: string) {
+    this.db.prepare("DELETE FROM running_code WHERE id = ?").run(id);
+  }
+
+  /** What was running when the previous process ended, oldest first; the rows go. */
+  takeRunningCode(): { capabilityId: string; state: string; what: string; caller: string; startedAt: string }[] {
+    return this.transaction(() => {
+      const rows = this.db.prepare("SELECT * FROM running_code ORDER BY started_at").all().map((r) => ({ capabilityId: r.capability_id as string, state: r.state as string, what: r.what as string, caller: r.caller as string, startedAt: r.started_at as string }));
+      this.db.prepare("DELETE FROM running_code").run();
+      return rows;
+    });
   }
 
   /** Builds left mid-flight by a previous process can never finish. Returns their ids. */
@@ -723,14 +794,14 @@ export class Registry {
   setBuildContext(buildId: string, c: BuildContext) {
     const next = { ...this.buildContext(buildId), ...c };
     this.db
-      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, instructions, brief) VALUES (?, ?, ?, ?)")
-      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.instructions ?? null, next.brief ?? null);
+      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, owner_instructions, brief) VALUES (?, ?, ?, ?)")
+      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.ownerInstructions ? JSON.stringify(next.ownerInstructions) : null, next.brief ?? null);
   }
 
   buildContext(buildId: string): BuildContext | undefined {
-    const r = this.db.prepare("SELECT conversation, instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
+    const r = this.db.prepare("SELECT conversation, owner_instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
     if (!r) return undefined;
-    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.instructions ? { instructions: r.instructions } : {}), ...(r.brief ? { brief: r.brief } : {}) };
+    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.owner_instructions ? { ownerInstructions: JSON.parse(r.owner_instructions) } : {}), ...(r.brief ? { brief: r.brief } : {}) };
   }
 
   insertAttachment(a: AttachmentRef & { session: string }) {
@@ -786,6 +857,35 @@ export class Registry {
 
   deleteAttachment(ref: string) {
     this.db.prepare("DELETE FROM attachments WHERE ref = ?").run(ref);
+  }
+
+  // ---------- share links ----------
+
+  insertShareLink(l: { id: string; tokenHash: string; capabilityId: string; version: number; expiresAt: string | null }) {
+    this.db.prepare("INSERT INTO share_links (id, token_hash, capability_id, version, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)").run(l.id, l.tokenHash, l.capabilityId, l.version, now(), l.expiresAt);
+  }
+
+  /** A tool's links that still work (not revoked, not expired), newest first. */
+  shareLinks(capabilityId: string): ShareLink[] {
+    return this.db.prepare("SELECT * FROM share_links WHERE capability_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC, rowid DESC").all(capabilityId, now()).map((r) => toShareLink(r as Row));
+  }
+
+  /** The link a token opens, if it still works. */
+  workingShareLink(tokenHash: string): ShareLink | undefined {
+    const r = this.db.prepare("SELECT * FROM share_links WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)").get(tokenHash, now()) as Row | undefined;
+    return r && toShareLink(r);
+  }
+
+  /** A link's file was served: one more download. */
+  countShareDownload(id: string) {
+    this.db.prepare("UPDATE share_links SET downloads = downloads + 1 WHERE id = ?").run(id);
+  }
+
+  /** Stop a link (or, without `id`, every link of the tool). How many that still worked were stopped. */
+  revokeShareLinks(capabilityId: string, id?: string): number {
+    const live = this.shareLinks(capabilityId).filter((l) => !id || l.id === id);
+    for (const l of live) this.db.prepare("UPDATE share_links SET revoked_at = ? WHERE id = ?").run(now(), l.id);
+    return live.length;
   }
 
   /** The owner's answer to "Got what you asked for?" on a build; a later answer replaces it. */
@@ -1153,8 +1253,8 @@ export class Registry {
     });
   }
 
-  /** Owner lifecycle actions for the activity timeline: delete, restore, rollback, purge. */
-  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share", detail: string, actor: string) {
+  /** Lifecycle actions for the activity timeline: delete, restore, rollback, purge …, and Hewn's own (stalled, suspend). */
+  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "suspend" | "resume", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
   }
 
@@ -1179,12 +1279,12 @@ export class Registry {
     this.transaction(() => {
       // Attachments go first (`releaseAttachments`): shared ones move to a sibling build, the rest with their blobs.
       for (const table of ["build_context", "build_feedback"]) this.db.prepare(`DELETE FROM ${table} WHERE build_id IN (SELECT id FROM builds WHERE capability_id = ?)`).run(id);
-      for (const table of ["grants", "grant_declines", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations"]) {
+      for (const table of ["grants", "grant_declines", "config_values", "grant_events", "access_requests", "ui_sessions", "builds", "capability_versions", "capability_logs", "confirmations", "share_links"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
       // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?)").run(`failures:${id}`, `instructions:${id}`);
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`);
     });
   }
 
@@ -1206,11 +1306,11 @@ export class Registry {
   }
 
   /** The most recent build per capability (for Home badges). */
-  latestBuilds(): Map<string, { id: string; status: BuildStatus; builder: string | null }> {
-    const out = new Map<string, { id: string; status: BuildStatus; builder: string | null }>();
-    for (const r of this.db.prepare("SELECT id, capability_id, status, builder FROM builds ORDER BY created_at ASC").all()) {
+  latestBuilds(): Map<string, { id: string; status: BuildStatus; builder: string | null; discardedAt: string | null }> {
+    const out = new Map<string, { id: string; status: BuildStatus; builder: string | null; discardedAt: string | null }>();
+    for (const r of this.db.prepare("SELECT id, capability_id, status, builder, discarded_at FROM builds ORDER BY created_at ASC").all()) {
       const x = r as Row;
-      out.set(x.capability_id, { id: x.id, status: x.status, builder: x.builder ?? null });
+      out.set(x.capability_id, { id: x.id, status: x.status, builder: x.builder ?? null, discardedAt: x.discarded_at ?? null });
     }
     return out;
   }
@@ -1245,6 +1345,11 @@ export class Registry {
     this.db
       .prepare("UPDATE builds SET status = ?, result_version = ?, log = ?, base_version = ?, depends_on = ?, review = ?, updated_at = ? WHERE id = ?")
       .run(next.status, next.resultVersion, JSON.stringify(next.log), next.baseVersion, next.dependsOn, next.review ? JSON.stringify(next.review) : null, now(), id);
+  }
+
+  /** Put a failed build aside (its status and time stay as they were: Activity shows it where it ended). */
+  discardBuild(id: string) {
+    this.db.prepare("UPDATE builds SET discarded_at = ? WHERE id = ?").run(now(), id);
   }
 
   /** Whether any version (of any capability) is stored under this content hash. */

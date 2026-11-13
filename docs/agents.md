@@ -20,6 +20,8 @@ Or, in the web client: **Agents → Add… → An agent that uses your tools**. 
 - **Codex:** adds a pointer to `~/.codex/AGENTS.md` (Codex needs it to think of Hewn), then `codex mcp add hewn --url …`, which signs it in.
 - **OpenCode:** registers Hewn in its global config (`opencode mcp add hewn --url …`, in `~/.config/opencode/opencode.json`), adds a pointer to `~/.config/opencode/AGENTS.md` (OpenCode reads that, not Hewn's own description), then signs it in (`opencode mcp auth hewn`). If you had no `~/.config/opencode/AGENTS.md` before, OpenCode now reads it instead of `~/.claude/CLAUDE.md`: move any rules you kept there.
 
+Each one also gets the Skill **build a Hewn tool** (see [Tools an agent writes itself](#tools-an-agent-writes-itself)) in its skills folder: Claude Code in `~/.claude/skills/build-a-hewn-tool/`, Codex and OpenCode in `~/.agents/skills/build-a-hewn-tool/`. Setup writes it again each time, and so does `hewn upgrade` for every agent set up with Hewn, so it matches your Hewn; Hewn never touches the other skills there. An agent set up by an older Hewn gets it when you set it up again (or on the next upgrade).
+
 Start a new agent session afterwards, so it sees the tools.
 
 The same agent can also [build your tools](concepts.md#hewns-two-jobs). The last step of connecting it offers that, or choose later in Settings › AI.
@@ -46,7 +48,7 @@ Then:
 
 ### Without a public URL: a tunnel
 
-To try a cloud agent without setting up a domain, Hewn can open a tunnel to a separate listener. There, only MCP and the sign-in pages answer: never the web client, tool UIs or admin. Requests there are rate limited and logged.
+To try a cloud agent without setting up a domain, Hewn can open a tunnel to a separate listener. There, only MCP, the sign-in pages and [share links](sharing.md#links) answer: never the web client, tool UIs or admin. Requests there are rate limited and logged.
 
 1. Install `cloudflared` (macOS: `brew install cloudflared`; Linux: [Cloudflare's packages](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)).
 2. `hewn tunnel start --quick`. It prints an `https://….trycloudflare.com` address and the connector address, `…/mcp`.
@@ -77,13 +79,29 @@ When you approve an agent, you choose its scopes. You can narrow what it asked f
 | Make | ask for new tools (the builder builds them) |
 | Change | ask for changes to existing ones |
 
-You can also limit it to **some tools**. Later, click the agent on **Agents** to turn scopes off and back on, within what you approved, or to disconnect it. To give it more, disconnect it and let it ask again.
+You can also limit it to **some tools**. Later, click the agent on **Agents** to turn scopes off and back on, within what you approved, or to disconnect it. To give it a scope it didn't ask for, disconnect it and let it ask again.
+
+**Which agents can use a tool** is on the tool's own page, under **Agents**: a switch for each agent. Switch off an agent that sees every tool, and it no longer sees that one or can use it. Switch on an agent limited to some tools, and the tool joins its list. Switching back undoes either, and open sessions see it at once. On **Agents**, each agent says what it can use: "every tool except Aurora Watch, Gift Ideas", or "only" the tools on its list. Turning **Only some tools** on or off for an agent forgets what you switched for it on tools' pages, and so does disconnecting it. An agent that connects again without being disconnected first keeps them.
+
+**Its new tools and changes** (its approval mode, on the same sheet): a new tool an agent makes, or a change to one you have, waits for your approval once it passes its checks, whether Hewn's builder wrote it or the agent did. The Inbox shows it with what it adds, what else changes, the files it changes and the screen after the change, on a desktop and a phone, light and dark. So does opening the tool, whose tile says it needs you: **Later** opens the tool as it is. A new tool shows what agents can do with it, its screen and its files. **Go live after the checks** is shown but can't be chosen yet: it comes once Hewn's own tests guard your data. Whatever the mode, what a tool asks for (a host, a key, another tool, a model) waits for you, as it always has: it can't run, reach the network or start a schedule until you approve it.
 
 Whatever their scopes, agents can't approve grants or secrets, enable schedules, or manage other agents. Those are yours. When an agent calls an operation marked **destructive**, it waits until you allow it (once) in Hewn: a banner shows on every page until you answer.
 
 ## What agents see
 
-Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, follow a build, propose a schedule, ask for access, and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, write one itself (below), follow a build, propose a schedule, ask for access, and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+
+## Tools an agent writes itself
+
+An agent with **Make** or **Change** can write a tool in its own folder instead of asking Hewn's builder, and hand it to Hewn. Claude Code in a repo of yours, say, or an agent on another computer. Hewn checks it exactly as it checks its own builder's work, so the agent writing it never decides what goes live:
+
+1. **The pack** (`capabilities_pack`): what Hewn's builder finds in its workspace besides your request. Your [instructions for building](building-tools.md#instructions) (for every tool, and for a change the tool's own), your other tools' contracts (only the tools the agent may see), their looks, so the new one looks different, and Hewn's design system; for a change, the tool's files as they are now and its schedules. Never your conversations with Hewn or your data. An agent with a shell downloads the pack as a zip and unzips it into its workspace (its own folder): the link is made for that agent inside its signed-in call and works once, for 10 minutes. One without a shell reads the pack a page at a time.
+2. **The check** (`capabilities_check`), as often as it likes while it works, up to 30 an hour: the checks a build gets, with what failed and pictures of its screen at 1280 and 390 px, light and dark (the top of a long page, the rest if it asks). Nothing goes live. Its migrations run on a copy of your data only once it submits.
+3. **The submission** (`capabilities_submit`): a build like any other, with "submitted by" and the agent's name on its page, in Activity and on the version. Once it passes, a new tool or a change waits for your approval (above).
+
+Agents learn how from the Skill **build a Hewn tool**: the brief Hewn's own builder works from, with these three steps in place of its folder. An agent you set up from Hewn has it in its skills folder (above); any agent connected to Hewn finds it through `hewn_docs`; another that loads skills from files can take it from `<your Hewn>/_platform/skills/build-a-hewn-tool/SKILL.md`, or from the npm package (`dist/skills/`).
+
+A submission carries the tool's own files only. Files Hewn never keeps in a tool (a builder's settings such as `.claude/` or `CLAUDE.md`, `AGENTS.md`, other dotfiles, the pack's own files, screenshots) are refused with the rule named, never dropped quietly, and so is anything over 5 MB. A change is refused while another change to the tool is on its way, or when the tool has moved on since the agent's pack.
 
 ## CLI reference
 
@@ -93,6 +111,7 @@ hewn agents pending             requests waiting for you, with their codes
 hewn agents approve <code> [--scopes discover,invoke] [--name <name>] [--only <id>,<id>]
 hewn agents deny <code>
 hewn agents scopes <agent> discover,invoke
+hewn agents tool <agent> <tool> on|off
 hewn agents revoke <agent>
 hewn tunnel [status|start …|stop]
 ```

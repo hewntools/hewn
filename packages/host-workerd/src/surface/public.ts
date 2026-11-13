@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The public path: what a reverse proxy or a tunnel (cloudflared, Tailscale Funnel) reaches. MCP
-// and the OAuth endpoints answer on any host; the web client and capability UIs only on the
-// public URL's hosts (the surface decides, see index.ts). Admin never answers here. Requests are
-// rate limited per client address (and in total).
+// The public path: what a reverse proxy or a tunnel (cloudflared, Tailscale Funnel) reaches. MCP,
+// the OAuth endpoints, the Agent Skill, a pack's download link (/_platform/pack/~<token>), share
+// links (/share/<token>) and robots.txt answer on any host; the web
+// client and capability UIs only on the public URL's hosts (the surface decides, see index.ts).
+// Admin never answers here. Requests are rate limited per client address (and in total).
+import { PACK_PATH } from "@hewntools/core/platform/submissions.ts";
+import { SKILL_URL } from "@hewntools/core/skill.ts";
 import { OAUTH_PATHS } from "./oauth.ts";
 
 /** Header the public listener sets on everything it forwards (local requests never need it). */
@@ -13,8 +16,24 @@ export const CLIENT_IP_HEADER = "x-hewn-client-ip";
  * every request here, whether or not a secret is set, so it never reaches the surface or logs.
  */
 export const PROXY_SECRET_HEADER = "x-hewn-proxy-secret";
+/**
+ * The visitor's address, from a trusted reverse proxy: read only when the host opted in (HEWN_PROXY_CLIENT_IP: its
+ * proxy sets the header itself, replacing any copy a client sent) and the request carried the proxy secret; removed
+ * from every request here, like the secret.
+ */
+export const PROXY_CLIENT_IP_HEADER = "x-hewn-proxy-client-ip";
 
-export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS]);
+export const PUBLIC_PATHS = new Set(["/mcp", ...OAUTH_PATHS, SKILL_URL]);
+
+/** Share links: `/share/<token>`, the bundle of one version, for anyone with the link. */
+export const SHARE_PREFIX = "/share/";
+/** What search engines are told on every share link's response, a refusal included. */
+export const SHARE_ROBOTS = { "x-robots-tag": "noindex, nofollow" };
+/** The public listener's robots.txt: share links stay out of search engines. */
+export const ROBOTS_TXT = `User-agent: *\nDisallow: ${SHARE_PREFIX}\n`;
+const robotsFor = (path: string): Record<string, string> => (path.startsWith(SHARE_PREFIX) ? SHARE_ROBOTS : {});
+/** A path as it goes in a log: a share link's token and a capability UI's ticket left out. */
+export const loggedPath = (path: string) => (path.startsWith(SHARE_PREFIX) ? `${SHARE_PREFIX}…` : path.replace(/\/~[^/]+/, "/~…"));
 
 interface Rule {
   /** Requests allowed per window, per client address. */
@@ -32,15 +51,28 @@ export const RULES: Record<string, Rule> = {
   token: { perClient: 60, total: 300, windowMs: MIN },
   metadata: { perClient: 60, total: 600, windowMs: MIN },
   mcp: { perClient: 600, total: 2000, windowMs: MIN },
+  /** A pack's download link (capabilities_pack): one per pack an agent fetches; the total only a backstop, so a few clients can't use it up for a real one. */
+  pack: { perClient: 30, total: 3000, windowMs: 10 * MIN },
   /** Sign-in links and passkey sign-in: nobody needs many. */
   signin: { perClient: 30, total: 120, windowMs: 10 * MIN },
   /** The web client and capability UIs on the public URL. */
   web: { perClient: 1200, total: 3000, windowMs: MIN },
+  /**
+   * Share links, per address: a person installs a tool now and then; a token can't be guessed, and
+   * this keeps anyone from trying. The total is only a backstop, so busy addresses can't use it up.
+   */
+  share: { perClient: 30, total: 3000, windowMs: 10 * MIN },
+  /**
+   * And per link (its path stands for the client): one link fetched this often is being hammered. No total of its own:
+   * share's counts the same requests. Counted where the link is known to work (surface/index.ts), so a revoked or
+   * expired one answers 404 at once, never "retry later".
+   */
+  shareLink: { perClient: 30, total: Infinity, windowMs: 10 * MIN },
 };
 
 const ruleFor = (path: string) =>
-  path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
-  : path === "/auth" || path.startsWith("/passkey/") ? "signin" : PUBLIC_PATHS.has(path) ? "metadata" : "web";
+  path.startsWith(PACK_PATH) ? "pack" : path === "/register" ? "register" : path === "/authorize" ? "authorize" : path === "/authorize/poll" ? "poll" : path === "/token" || path === "/revoke" ? "token" : path === "/mcp" ? "mcp"
+  : path === "/auth" || path.startsWith("/passkey/") ? "signin" : path.startsWith(SHARE_PREFIX) ? "share" : PUBLIC_PATHS.has(path) ? "metadata" : "web";
 
 /** Fixed-window counters, in memory (one process serves the public path). */
 export class RateLimiter {
@@ -54,6 +86,7 @@ export class RateLimiter {
   take(rule: string, client: string, now = Date.now()): number {
     const r = this.rules[rule];
     if (this.counts.size > 50_000) this.counts.clear();
+    client = rateKey(client);
     for (const [key, limit] of [[`${rule}|${client}`, r.perClient], [`${rule}|*`, r.total]] as const) {
       const c = this.counts.get(key);
       if (c && now - c.start < r.windowMs && c.n >= limit) return Math.ceil((c.start + r.windowMs - now) / 1000);
@@ -68,12 +101,34 @@ export class RateLimiter {
 }
 
 /**
- * The client's address: the last X-Forwarded-For hop, the one the proxy in front of Hewn added
- * (Caddy, nginx's proxy_add_x_forwarded_for, Cloudflare in front of cloudflared). Earlier hops and
- * CF-Connecting-IP are whatever the client sent when Hewn isn't behind Cloudflare.
+ * The client's address: behind a trusted reverse proxy (`trusted`: the request carried the proxy secret), the
+ * visitor's address it sends in x-hewn-proxy-client-ip; otherwise, or without a valid one, the last X-Forwarded-For
+ * hop, the one the proxy in front of Hewn added (Caddy, nginx's proxy_add_x_forwarded_for, Cloudflare in front of
+ * cloudflared). Earlier hops and CF-Connecting-IP are whatever the client sent when Hewn isn't behind Cloudflare.
  */
-export function clientAddress(req: Request): string {
+export function clientAddress(req: Request, trusted = false): string {
+  const sent = trusted ? req.headers.get(PROXY_CLIENT_IP_HEADER)?.trim() : undefined;
+  if (sent && /^[0-9A-Fa-f:.]{2,45}$/.test(sent) && (sent.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(sent))) return sent;
   return req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() || "unknown";
+}
+
+/**
+ * What a per-client limit counts by: an IPv4 address as it is, an IPv6 one by its /64 (one visitor usually has a whole
+ * /64, and could otherwise step past a limit by changing addresses inside it); an IPv4-mapped IPv6 address as IPv4.
+ */
+export function rateKey(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const bare = ip.toLowerCase().replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(bare);
+  if (mapped) return mapped[1];
+  const halves = bare.split("::");
+  if (halves.length > 2) return ip;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const groups = halves.length === 2 ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right] : left;
+  const head = groups.slice(0, 4);
+  if (head.length < 4 || head.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return ip;
+  return `${head.map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
 }
 
 /** Constant-time string comparison (only the secret's length shows in timing). */
@@ -89,29 +144,33 @@ function sameSecret(given: string, secret: string): boolean {
  *
  * With a proxy secret (HEWN_PROXY_SECRET, for a host whose public listener is reachable directly
  * as well as through its proxy), only requests carrying it in x-hewn-proxy-secret get through;
- * the rest get 403 before their X-Forwarded-For or X-Forwarded-Host is looked at.
+ * the rest get 403 before their X-Forwarded-For or X-Forwarded-Host is looked at. The proxy's x-hewn-proxy-client-ip
+ * (the visitor's address) counts only then, and only with `proxyClientIp` (the host opted in: a proxy that forwards
+ * client headers as they are would let a visitor choose it); it's removed either way.
  */
-export function gatePublic(req: Request, limiter: RateLimiter, log: (line: string) => void, proxySecret?: string): Response | Request {
+export function gatePublic(req: Request, limiter: RateLimiter, log: (line: string) => void, proxySecret?: string, proxyClientIp = false): Response | Request {
   const url = new URL(req.url);
   if (proxySecret && !sameSecret(req.headers.get(PROXY_SECRET_HEADER) ?? "", proxySecret)) {
-    log(`[public] ? ${req.method} ${url.pathname} -> 403 (not from the trusted proxy)`);
-    return new Response(JSON.stringify({ error: "forbidden", message: "not from the trusted proxy" }), { status: 403, headers: { "content-type": "application/json" } });
+    log(`[public] ? ${req.method} ${loggedPath(url.pathname)} -> 403 (not from the trusted proxy)`);
+    return new Response(JSON.stringify({ error: "forbidden", message: "not from the trusted proxy" }), { status: 403, headers: { "content-type": "application/json", ...robotsFor(url.pathname) } });
   }
-  const ip = clientAddress(req);
+  // Past the check above, a set secret means the trusted proxy sent this request.
+  const ip = clientAddress(req, !!proxySecret && proxyClientIp);
   if (url.pathname.startsWith("/_admin/")) {
     log(`[public] ${ip} ${req.method} ${url.pathname} -> 404 (not exposed)`);
     return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
   }
   const wait = limiter.take(ruleFor(url.pathname), ip);
   if (wait) {
-    log(`[public] ${ip} ${req.method} ${url.pathname} -> 429 (retry in ${wait}s)`);
+    log(`[public] ${ip} ${req.method} ${loggedPath(url.pathname)} -> 429 (retry in ${wait}s)`);
     return new Response(JSON.stringify({ error: "rate_limited", message: `Too many requests; retry in ${wait}s` }), {
       status: 429,
-      headers: { "content-type": "application/json", "retry-after": String(wait) },
+      headers: { "content-type": "application/json", "retry-after": String(wait), ...robotsFor(url.pathname) },
     });
   }
   const headers = new Headers(req.headers);
   headers.delete(PROXY_SECRET_HEADER);
+  headers.delete(PROXY_CLIENT_IP_HEADER);
   headers.set(PUBLIC_HEADER, "1");
   headers.set(CLIENT_IP_HEADER, ip);
   return new Request(req, { headers });

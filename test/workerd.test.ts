@@ -13,7 +13,7 @@ import { DOC_PAGES } from "@hewntools/core/docs.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { startSupervisor, type Supervisor } from "@hewntools/cli/supervisor/index.ts";
 import { editJson, editText, type Script, SEED } from "./helpers.ts";
-import { oauthToken, onFreePorts, waitBuild } from "./workerd-helpers.ts";
+import { oauthToken, onFreePorts, waitApproved } from "./workerd-helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 const parse = (r: any) => JSON.parse(r.content[0].text);
@@ -68,7 +68,7 @@ describe("workerd host (integration)", () => {
     });
     const opened = parse(await client.callTool({ name: "capabilities_create", arguments: { name: "Bike Log", purpose: "rides", requirements: "like running log" } }));
     assert.equal(opened.status, "building");
-    const done = await waitBuild(client, opened.buildId, 60);
+    const done = await waitApproved(client, sv, opened.buildId, 60);
     assert.equal(done.status, "promoted", done.log.join("\n"));
     const list = parse(await client.callTool({ name: "capabilities_list", arguments: {} }));
     assert.deepEqual(list.capabilities.map((c: any) => c.id).sort(), ["bike-log", "running-log"]);
@@ -83,7 +83,8 @@ describe("workerd host (integration)", () => {
     const client = new Client({ name: "test", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${sv.url}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     const text = async (args: Record<string, string>) => ((await client.callTool({ name: "hewn_docs", arguments: args })) as any).content[0].text as string;
-    assert.match(await text({}), new RegExp(`^Hewn's docs: ${DOC_PAGES.length} pages[^]*docs/concepts\\.md: Concepts[^]*spec/builder-brief\\.md:`));
+    // The pages, and the Skill made from the brief on the workerd host too.
+    assert.match(await text({}), new RegExp(`^Hewn's docs: ${DOC_PAGES.length + 1} pages[^]*docs/concepts\\.md: Concepts[^]*spec/builder-brief\\.md:[^]*skills/build-a-hewn-tool/SKILL\\.md: Build a Hewn tool`));
     assert.match(await text({ query: "how do grants work?" }), /--- docs\/concepts\.md#grants \(Concepts › Grants\) ---/);
     assert.match(await text({ page: "spec/agents.md#hewns-docs" }), /^spec\/agents\.md#hewns-docs\n\n## Hewn's docs\n/);
     await client.close();

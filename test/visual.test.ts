@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
+import { createSocket } from "node:dgram";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -153,6 +156,39 @@ describe("visual validation", () => {
     const fixed = await render("body { background: rgb(0 0 255); } @media (prefers-color-scheme: dark) { body { background: rgb(255 0 0); } }", `class="primary" style="background: rgb(0 160 0)"`);
     assert.deepEqual(own[0], fixed[0], "light: the tool's background and button");
     assert.deepEqual(own[1], fixed[1], "dark: the tool's dark background wins over ui.css's dark tokens");
+  });
+
+  test("a real headless browser: the page reaches nothing but itself (no window, navigation or WebRTC elsewhere)", { skip: !browser && "no Chromium-based browser on this machine" }, async () => {
+    // Somewhere else on this machine, as a LAN address or a metadata service would be: what reaches it, over HTTP or UDP.
+    const hits: string[] = [];
+    const sink = createServer((req, res) => (hits.push(`http ${req.url}`), res.end("ok")));
+    await new Promise<void>((ok) => sink.listen(0, "127.0.0.1", ok));
+    const udp = createSocket("udp4").on("message", () => hits.push("udp"));
+    await new Promise<void>((ok) => udp.bind(0, "127.0.0.1", ok));
+    const away = `http://127.0.0.1:${(sink.address() as AddressInfo).port}`;
+    const uiDir = mkdtempSync(join(tmpdir(), "hewn-ui-"));
+    writeFileSync(join(uiDir, "index.html"), `<!doctype html><html><head><script src="app.js"></script></head><body><main class="page">Hello</main></body></html>`);
+    writeFileSync(
+      join(uiDir, "app.js"),
+      `fetch("/api/invoke", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation: "get" }) });
+window.open(${JSON.stringify(`${away}/popup`)});
+const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:127.0.0.1:${udp.address().port}" }] });
+pc.createDataChannel("x");
+pc.createOffer().then((o) => pc.setLocalDescription(o));
+setTimeout(() => (location.href = ${JSON.stringify(`${away}/navigate`)}), 300);
+`,
+    );
+    try {
+      // Its own origin still works: it calls its API.
+      let calls = 0;
+      await chromiumCheck(browser)({ uiDir, manifest: {}, invoke: async () => (calls++, {}) });
+      await new Promise((r) => setTimeout(r, 500));
+      assert.ok(calls > 0, "the page ran and reached its own API");
+      assert.deepEqual(hits, []);
+    } finally {
+      sink.close();
+      udp.close();
+    }
   });
 });
 
