@@ -368,8 +368,9 @@ function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
         timer.clear();
       }
     },
-    // Describing only loads code; any capability id's host can do it.
-    describe: (code) => host("_describe").describe(code),
+    // Describing only loads code; any capability id's host can do it. With the limit tools have unless the owner
+    // gave one its own: the isolate it loads is the one the build's tests and the tool's data then use, not one more.
+    describe: (code) => host("_describe").describe(code, data.limit("")),
     migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit)),
     hasState: (state) => host(state.capabilityId).hasState(state.scratch ?? null),
     copyState: (from, to) => host(from.capabilityId).copyState(from.scratch ?? null, to.scratch ?? null),
@@ -845,8 +846,8 @@ export class CapabilityHost extends DurableObject<Env> {
     return this.on(scratch, code, hosts, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
   }
 
-  async describe(code: CodeRef): Promise<string[]> {
-    return (this.worker(code, [], 0).stub.getEntrypoint() as any).describe();
+  async describe(code: CodeRef, limit = 0): Promise<string[]> {
+    return (this.worker(code, [], limit).stub.getEntrypoint() as any).describe();
   }
 
   async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0): Promise<string[]> {
