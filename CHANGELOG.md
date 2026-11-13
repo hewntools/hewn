@@ -2,6 +2,10 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.12 (unreleased)
+
+- **Hewn's mark moves.** The turning H behind the first run, a new tool, a build and the sign-in page is now Hewn's mark: the H's thirteen pixels, in polished chrome, run together into one pixel and part again every 26 seconds, drawn in braille characters in the page's accent colour. The GPU draws it (WebGL 2), 15 times a second, and not at all while the tab or the mark is out of sight. With reduce motion on, it rests on the H instead of disappearing; a browser without WebGL 2, or one that draws it in software, shows the H standing still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+
 ## 0.4.11 (unreleased)
 
 - **A deleted tool's name says so.** Installing (or building) a tool with the name of one you deleted used to say only "already exists". Now it says the tool is deleted and kept with its data, and where to bring it back or delete it for good (Settings › Data › Deleted tools; in the terminal, `hewn restore`, `hewn purge` or `--name`). An agent is told to use another name or ask you.
