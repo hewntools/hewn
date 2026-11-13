@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Secrets, rollback, export and purge on the real workerd host.
+// Secrets, rollback, export and purge on the real workerd host, and what Hewn keeps of a tool's calls.
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -32,7 +32,7 @@ describe("trust on the workerd host", () => {
   let h: TestHost;
   before(async () => {
     h = await startTestHost();
-    for (const [name, dir] of [["Running Log", SEED], ["Secret Echo", join(FIX, "secret-echo")]] as const) {
+    for (const [name, dir] of [["Running Log", SEED], ["Secret Echo", join(FIX, "secret-echo")], ["Runtime Patcher", join(FIX, "runtime-patcher")]] as const) {
       const b = await h.sv.admin("install", { name, purpose: "x", dir, wait: true });
       assert.equal(b.status, "promoted", b.log.join("\n"));
     }
@@ -52,6 +52,23 @@ describe("trust on the workerd host", () => {
     assert.ok(!disk.includes(Buffer.from("TOPSECRET")), "no plaintext secret anywhere in the workerd data dir");
     const key = readFileSync(join(h.root, "master.key"), "utf8").trim();
     assert.ok(!disk.includes(Buffer.from(key)), "the key is kept outside the data dir");
+  });
+
+  test("a tool's error and log lines are capped outside its isolate, also when its code changes the runtime there", async () => {
+    await h.invoke("runtime-patcher", "patch");
+    await h.invoke("runtime-patcher", "loud");
+    const lines = (await h.sv.admin("logs", { capabilityId: "runtime-patcher", n: 2000 })).lines as string[];
+    const loud = lines.slice(lines.findLastIndex((l) => / user loud ok /.test(l)) + 1);
+    assert.equal(loud.length, 200, "200 lines kept of the call's 1,000");
+    assert.equal(loud.at(-1), "  … 801 more lines");
+    assert.ok(loud.every((l) => l.length <= 2 + 500), "each line at most 500 characters");
+    await assert.rejects(h.invoke("runtime-patcher", "fail"), (e: Error) => {
+      assert.ok(e.message.length <= 1000, `the error passed on: ${e.message.length} characters`);
+      assert.match(e.message, /^fail@1 failed: EEE+…$/);
+      return true;
+    });
+    const header = (await h.sv.admin("logs", { capabilityId: "runtime-patcher", n: 300 })).lines.findLast((l: string) => / user fail ERROR /.test(l));
+    assert.ok(header.length < 1200, `the error kept: ${header.length} characters`);
   });
 
   test("rollback keeps data; refused when newer migrations aren't safe for older code", async () => {

@@ -94,7 +94,7 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[]; resume?: SupervisorOptions["resume"]; watchdog?: SupervisorOptions["watchdog"] } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; proxyClientIp?: boolean; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[]; resume?: SupervisorOptions["resume"]; watchdog?: SupervisorOptions["watchdog"]; disk?: SupervisorOptions["disk"] } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
   const scripts: Script[] = [];
   const scripted: CapabilityBuilder = {
@@ -106,7 +106,7 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
     },
   };
   // A host that doesn't start leaves nothing behind: the suite's after() has no host to stop.
-  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, ...(opts.intake ? { intake: () => opts.intake! } : {}), log, watchdog: opts.watchdog ?? { intervalMs: 200, stallMs: 1500 }, ...(opts.resume !== undefined ? { resume: opts.resume } : {}), keySource: "file" })).catch((e) => {
+  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", proxyClientIp: !!opts.proxyClientIp, builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, ...(opts.intake ? { intake: () => opts.intake! } : {}), log, watchdog: opts.watchdog ?? { intervalMs: 200, stallMs: 1500 }, ...(opts.resume !== undefined ? { resume: opts.resume } : {}), ...(opts.disk ? { disk: opts.disk } : {}), keySource: "file" })).catch((e) => {
     rmSync(root, { recursive: true, force: true });
     throw e;
   });

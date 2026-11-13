@@ -314,7 +314,7 @@ export function readZip(zip: Uint8Array): Files {
     next = start + size;
     if (path.endsWith("/")) continue;
     if (method !== 0) throw new BundleError(`${path} is compressed. Hewn reads bundles that Hewn made: share the tool again from Hewn and use that file.`);
-    if (path.startsWith("/") || path.split("/").some((s) => s === ".." || s === "") || path.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(path)) throw new BundleError(`${JSON.stringify(path)} isn't a path Hewn accepts.`);
+    if (path.startsWith("/") || path.split("/").some((s) => s === ".." || s === "." || s === "") || path.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/.test(path)) throw new BundleError(`${JSON.stringify(path)} isn't a path Hewn accepts.`);
     // On a disk that ignores case (or Unicode normalisation), SRC/index.ts would overwrite src/index.ts.
     const key = path.normalize("NFC").toLowerCase();
     const twin = seen.get(key);

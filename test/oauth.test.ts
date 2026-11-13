@@ -155,7 +155,7 @@ describe("OAuth: the agent store", () => {
     const card = store().pending().find((p) => p.id === again.id)!;
     assert.equal(card.reconnects, agentId);
     assert.deepEqual(card.suggested, ["discover"], "pre-checked: what it has now");
-    assert.deepEqual(card.current, { scopes: ["discover"], capabilities: ["running-log"] });
+    assert.deepEqual(card.current, { scopes: ["discover"], capabilities: ["running-log"], except: [] });
     store().decide(again.id, { approve: true });
     const a = store().get(agentId!)!;
     assert.deepEqual([[...a.scopes], a.capabilities === "*" ? "*" : [...a.capabilities]], [["discover"], ["running-log"]], "approved as suggested: still narrowed");
@@ -163,6 +163,27 @@ describe("OAuth: the agent store", () => {
     store().decide(third.id, { approve: true, scopes: ["discover", "invoke"], capabilities: "*" });
     const b = store().get(agentId!)!;
     assert.deepEqual([[...b.scopes].sort(), b.capabilities], [["discover", "invoke"], "*"], "the owner widened it on purpose");
+  });
+
+  test("reconnecting keeps the tools the owner switched it off for, unless some tools are chosen; disconnecting forgets them", () => {
+    const { client_id } = register();
+    const ask = (n: string) => start(client_id, { code_challenge: pkceChallenge(n.repeat(50)) });
+    const except = () => [...(store().get("test-agent")?.except ?? [])];
+    store().decide(ask("a").id, { approve: true });
+    store().setTool("test-agent", "running-log", false);
+    const again = ask("b");
+    assert.deepEqual(store().pending().find((p) => p.id === again.id)!.current, { scopes: ["discover", "invoke", "create"], capabilities: "*", except: ["running-log"] });
+    store().decide(again.id, { approve: true, capabilities: "*" });
+    assert.deepEqual(except(), ["running-log"], "every tool, as the approval card sends it: still not that one");
+    store().decide(ask("c").id, { approve: true });
+    assert.deepEqual(except(), ["running-log"], "tools left unsaid: as before");
+    store().decide(ask("d").id, { approve: true, capabilities: ["running-log"] });
+    assert.deepEqual([except(), [...(store().get("test-agent")!.capabilities as Set<string>)]], [[], ["running-log"]], "some tools chosen: they replace it");
+    store().update("test-agent", { capabilities: "*" });
+    store().setTool("test-agent", "running-log", false);
+    t.platform.updateAgent(USER, "test-agent", "revoke");
+    assert.equal(store().decide(ask("e").id, { approve: true }).agentId, "test-agent");
+    assert.deepEqual(except(), [], "connected anew: nothing switched off");
   });
 
   test("declined: the agent is sent back with access_denied", () => {

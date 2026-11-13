@@ -400,4 +400,17 @@ describe("platform-assigned builder", () => {
     hang.close();
     again.close();
   });
+
+  test("after a restart, an agent's change isn't retried on a tool it was switched off for since", async () => {
+    await installSeed(t.platform);
+    useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
+    const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index" });
+    platform.setCapabilityAgent(USER, "running-log", "claude-code", false);
+    const logs: string[] = [];
+    const restarted = withBuilder(t.home, () => fakeBuilder("fake", (job) => cpSync(SEED, job.workspace, { recursive: true })), { logger: (m) => void logs.push(m) });
+    assert.deepEqual(await restarted.recoverInterruptedBuilds(), []);
+    assert.equal(restarted.getBuild(USER, opened.buildId).status, "failed");
+    assert.ok(logs.some((l) => l.includes(`build ${opened.buildId} not retried: no capability 'running-log'`)), logs.join("\n"));
+    restarted.close();
+  });
 });

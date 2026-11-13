@@ -117,6 +117,17 @@ exec /path/to/chrome-headless-shell --no-sandbox "$@"
 
 Better still, run Hewn as a user other than root.
 
+## Tools
+
+**A call fails with "timed out (call chain deadline)", or "stopped: … ran past its deadline"**
+A call chain has 30 seconds (a widget 15), and past that the call is stopped, code and all. Other calls running on the same tool then stop with it and say which call ran out of time. A tool with long work should do part of it per call ([Writing a tool](../spec/tools.md#runtime)): **Ask builder to fix this** on the failed call.
+
+**"Suspended: it kept Hewn from responding 3 times within an hour"**
+A tool whose code never lets go (an endless loop) holds up all of Hewn, not only itself: Hewn restarts about 5 seconds later, and calls and builds running then fail (a build is tried again once). Afterwards, the tool that was running has a line in its log (`hewn logs <id>`: `ERROR stalled: Hewn stopped responding while this ran and was restarted`) and in Activity. If two tools were running at that moment, both have it: Hewn can't tell which one looped. A tool named 3 times within an hour is suspended: its calls, schedules and widgets are refused, saying why, until you resume it. Its page has **Ask builder to fix** and **Resume**; `hewn resume <id>` does the same. A schedule refused while the tool is suspended doesn't count as a failure, and runs again once it's resumed.
+
+**A build fails with "Its code kept Hewn from responding"**
+Its tests, sample data or screen ran code that never let go, so Hewn restarted. The build isn't tried again by itself: it would do the same. **Ask builder to fix** starts a new attempt with that as the reason.
+
 ## Agents
 
 **An agent can't connect, or keeps asking to sign in**

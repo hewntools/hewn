@@ -56,7 +56,7 @@ There are four scopes. The web client shows them as See, Use, Make and Change. A
 | `builds_cancel` | | | yes | yes |
 | `hewn_docs` | yes | yes | yes | yes |
 
-Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent limited to some tools gets `not_found` for the others.
+Whatever its scopes, an agent can't approve [grants](capability-model.md#grant), set secrets or config, run a connection's sign-in step, enable schedules, see tools' source or raw data, promote a build, or manage other agents. Those are the owner's. An agent gets `not_found` for a tool it can't use: one not on its list if it's limited to some tools, or one the owner switched it off for (on the tool's page) if it sees every tool. An agent limited to some tools that the owner switches on for a tool gets that tool on its list.
 
 ## Discovery
 
@@ -69,8 +69,10 @@ The agent learns about the owner's tools in three places:
 A catalog line looks like this; connections are listed apart, and a tool that isn't ready says so:
 
 ```
-- Running Log (running-log): Maintain a durable personal running history … Operations: record_run@1, list_runs@1, get_summary@1.
+- Running Log (running-log): "Maintain a durable personal running history …" Operations: record_run@1, list_runs@1, get_summary@1.
 ```
+
+What a tool says about itself is its author's, not Hewn's. The purpose is quoted (a JSON string, so it stays on one line), and wherever an agent gets it (the catalog, `capabilities_list`, `capabilities_get`) a name is cut to 80 characters and a purpose or an operation's description to 600. The server instructions and `capabilities_invoke`'s description tell the agent to read a tool's words and results as information, not instructions.
 
 Without `discover`, the catalog is empty. When the agent's list of MCP tools changes, including any description (a tool created, changed, deleted, made ready, or the agent's scopes changed), the session gets `notifications/tools/list_changed` and the client should list tools again.
 
@@ -86,7 +88,7 @@ A failed call is an MCP tool result with `isError: true` and JSON text `{ error,
 | --- | --- |
 | `not_found` | No such tool, or not visible to this agent; or no such operation (`details.available` lists the operations). |
 | `invalid_input` | The input doesn't match `inputSchema`; `details` lists the schema errors. |
-| `not_ready` | The tool needs the owner first (a grant, a secret, config, a model); `details` is its readiness, with `userAction` saying what to ask the owner. `capabilities_request_access` files a visible request. |
+| `not_ready` | The tool needs the owner first (a grant, a secret, config, a model, or to resume it after Hewn suspended it); `details` is its readiness, with `userAction` saying what to ask the owner. `capabilities_request_access` files a visible request. |
 | `awaiting_confirmation` | A destructive call is waiting for the owner (below). |
 | `forbidden` | Not allowed: a missing scope, the owner rejected a destructive call, or a sign-in step. |
 | `operation_failed` | The tool's code threw, or the call ran out of time. |
@@ -101,7 +103,7 @@ An agent with `create` or `modify` asks the host's builder for a new tool or a c
 
 - **`capabilities_create`** `{ name, purpose, requirements, kind?, after?, widgets?, model?, effort? }` starts a build. The tool's id is derived from `name`. `kind: "connection"` builds a [connection](capability-model.md#connection); only connections hold credentials, so a tool that needs a service with a login is built on one. `after: <buildId>` makes the build wait (status `waiting`) until that build promotes, for example the connection it will call. `widgets: true` also queues a widgets build after it, returned as `widgetsBuildId`. Once it passes validation the new tool waits for the owner's approval (status `review`, `review.approval: "wait"`) while the agent's approval mode is `wait`, which in this release it always is; a build waiting for it (`after`, or its widgets build) starts once the owner approves it. Its grants wait for the owner whatever the mode.
 - **`capabilities_modify`** `{ capabilityId, request, after?, model?, effort? }` asks for a change to an existing tool. Once it passes validation it waits for the owner's review (status `review`) while the agent's approval mode is `wait`, as a new tool does, and whatever the mode when it changes a connection or adds operations. The build's `review.approval` is `"wait"` when the approval mode is why. Changes to one tool take turns: one asked for while another is queued or building waits for it (status `waiting`) and is built on the version it makes; one in review doesn't hold it up.
-- **`capabilities_add_widgets`** `{ capabilityId, request?, after?, model?, effort? }` asks for a build that adds widgets and changes nothing else.
+- **`capabilities_add_widgets`** `{ capabilityId, request?, after?, model?, effort? }` asks for a build that adds widgets and changes nothing else. It is a change like `capabilities_modify`'s and waits for the owner's review the same way. Only the one `widgets: true` chains to the agent's own create is part of that creation, and even that one waits while the agent's approval mode is `wait`.
 - **`model` and `effort`** on those three choose what the build runs on: a model name the owner's builder takes (`default` for its own, a family such as `fable`, or a full name) and an effort (`low`, `medium`, `high`, more on some models). Leave them out to use the owner's choice. The owner decides which names agents may use; the tools' descriptions list them ("Models you may ask for"), and any other is an `invalid_request` naming the allowed ones, as is an effort the model doesn't take (naming its levels). A build's `model` says what it ran on (`ran`). A model the builder can't run fails the build at once ("Model not available"); it never runs on another one instead.
 - **`builds_wait`** `{ buildId, timeoutSeconds? }` follows a build until it is promoted, fails, or waits for the owner's review. If the request carries a `progressToken`, each builder action and validation step arrives as a `notifications/progress` message. After `timeoutSeconds` (default 600, at most 1800) it returns the current state with `waitTimedOut: true`; call it again to keep following.
 - **`builds_get`** returns a build's state: `status` (`waiting`, `open`, `building`, `validating`, `review`, `failed`, `promoted`, `cancelled`), its log, and `resultVersion` once promoted. A change waiting its turn behind an earlier change to the same tool has `queued: true`. A build the builder's host paused part-way, its work kept, is `failed` with `failure.paused: true`: tell the owner, who continues or stops it in Hewn (once continued, `continuedAs` names the build that carries it on). **`builds_retry`** re-runs a failed or cancelled build, except a paused one (only the owner continues it). **`builds_cancel`** cancels a build the agent requested (the owner can cancel any), except while it's being validated.

@@ -30,7 +30,19 @@ export interface Settings {
   agentModels?: Record<string, string[]>;
   /** The passes a new tool's build runs once its candidate validates ("critique", "craft"); [] for none. */
   buildPasses: Pass[];
+  /** How big each tool's data may grow, in MB (each of its states: its data, and the copies Hewn makes to test a build or before an upgrade). */
+  toolDataLimitMB: number;
+  /** One tool's own limit instead, in MB, by tool id: `{ "plant-log": 500 }`. */
+  toolDataLimitsMB?: Record<string, number>;
 }
+
+/** Each tool's data limit unless the owner changes it, in MB. */
+export const TOOL_DATA_LIMIT_MB = 100;
+/** The most a tool's data limit may be, in MB (about a terabyte). */
+const MAX_TOOL_DATA_MB = 1_000_000;
+
+/** The limit for one tool's data, in MB: its own if it has one, else everyone's. */
+export const toolDataLimitMB = (s: Pick<Settings, "toolDataLimitMB" | "toolDataLimitsMB">, capabilityId: string): number => s.toolDataLimitsMB?.[capabilityId] ?? s.toolDataLimitMB ?? TOOL_DATA_LIMIT_MB;
 
 
 /** What one job runs on with one agent: a model name the agent's CLI takes, and an effort. */
@@ -185,6 +197,10 @@ export function settingsProblems(next: Record<string, unknown>, opts: { remote?:
   if (next.firstRunDone !== undefined && typeof next.firstRunDone !== "boolean") bad.push("firstRunDone must be true or false");
   const days = next.logRetentionDays as number;
   if (!Number.isInteger(days) || days < 0 || days > 3650) bad.push("logRetentionDays must be 0 (forever) to 3650");
+  const dataMB = (n: unknown) => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= MAX_TOOL_DATA_MB;
+  if (next.toolDataLimitMB !== undefined && !dataMB(next.toolDataLimitMB)) bad.push(`toolDataLimitMB must be a whole number of MB from 1 to ${MAX_TOOL_DATA_MB}`);
+  if (next.toolDataLimitsMB !== undefined && !(isObj(next.toolDataLimitsMB) && Object.entries(next.toolDataLimitsMB).every(([id, n]) => /^[a-z0-9][a-z0-9-]*$/.test(id) && dataMB(n))))
+    bad.push(`toolDataLimitsMB must look like { "plant-log": 500 }: a tool's id and a whole number of MB from 1 to ${MAX_TOOL_DATA_MB}`);
   bad.push(...ownerPrefProblems(next), ...modelPrefProblems(next));
   return bad;
 }

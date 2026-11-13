@@ -138,6 +138,19 @@ const QUIET = [
   "--disable-features=Translate,MediaRouter,OptimizationHints",
 ];
 
+/**
+ * Keep a browser to one origin (`http://127.0.0.1:<port>`, the candidate's): the page being checked
+ * is a tool's own code, run on this machine before anything is granted it, and its CSP doesn't stop
+ * it navigating or opening a window, nor WebRTC. Every other request goes to a proxy that isn't
+ * there (loopback too, which Chromium otherwise never proxies: `<-loopback>` comes first), no other
+ * name is looked up (the rules apply to an address too, so the origin's own is left out), and
+ * WebRTC sends no UDP of its own.
+ */
+export function onlyOrigin(origin: string): string[] {
+  const { host, hostname } = new URL(origin);
+  return ["--proxy-server=http://127.0.0.1:9", `--proxy-bypass-list=<-loopback>;${host}`, `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${hostname}`, "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"];
+}
+
 /** A screen to render on: its size in CSS px, whether it's a touch screen, and its pixels per CSS px. */
 export interface Screen {
   name: string;
@@ -408,16 +421,17 @@ export function chromiumCheck(browser: string | undefined = findBrowser()): Visu
   return async (req) => {
     if (!browser) return { skipped: "no Chromium-based browser found (Chrome, Edge, Brave or Chromium)", errors: [] };
     const desktop: Screen = { name: "desktop", width: req.width ?? 1280, height: req.height ?? 800, mobile: false, scale: 1 };
+    const site = await serveCandidate(req);
     let b: Browser;
     try {
-      b = await launchBrowser(browser, { flags: [`--window-size=${desktop.width},${desktop.height}`], loadTimeoutMs: req.timeoutMs });
+      b = await launchBrowser(browser, { flags: [`--window-size=${desktop.width},${desktop.height}`, ...onlyOrigin(site.url)], loadTimeoutMs: req.timeoutMs });
     } catch (e) {
+      await site.close().catch(() => {});
       // The machine's problem, not the candidate's: skip the check (and say why) rather than fail the build.
       // Chromium won't run as root with its sandbox (containers): say how, rather than turn the sandbox off here.
       const root = process.getuid?.() === 0 ? " (Hewn runs as root: set HEWN_BROWSER to a browser that can, see docs/troubleshooting.md)" : "";
       return { skipped: `${(e as Error).message}${root}`, errors: [] };
     }
-    const site = await serveCandidate(req);
     try {
       // The widget sheet: on the desktop screen, light and dark.
       if (req.widgets) {

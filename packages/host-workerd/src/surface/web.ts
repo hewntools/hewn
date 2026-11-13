@@ -340,6 +340,10 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST restore":
         platform.restore(owner, id);
         return { ok: true };
+      // A tool Hewn suspended (it kept Hewn from responding) runs again.
+      case "POST resume":
+        platform.resume(owner, id);
+        return { ok: true };
       case "POST rollback":
         return platform.rollback(owner, id, (await readJson(req)).version);
       case "POST purge":
@@ -417,6 +421,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.createSchedule(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input, cadence: String(body.cadence ?? "") });
       }
+      // Info › Agents: which agents can use it; switching one overrides its default (every tool, or only some).
+      case "GET agents":
+        return platform.capabilityAgents(owner, id);
+      case "PUT agents":
+        return platform.setCapabilityAgent(owner, id, arg ?? "", (await readJson(req)).canUse);
       case "POST grants":
         if (arg === "approve") {
           // A body names one grant; no body approves everything the version requests.
@@ -569,7 +578,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "settings") {
     platform.agents(owner); // owner only
     if (method === "PUT") {
-      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"]));
+      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
       return { ...next, ...(host.hosted ? { hosted: true } : {}) };
     }
@@ -792,9 +801,9 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
       if (!summary) throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
       // The owner moved on (Install anyway, Cancel, closed the sheet): a reading that ends now isn't theirs to keep.
       if (signal.aborted) throw new PlatformError("operation_failed", "stopped");
-      await platform.keepSummary(owner, token, summary);
+      const kept = await platform.keepSummary(owner, token, summary);
       log(`${summary.findings.filter((f) => f.kind === "warn").length} warning(s)`);
-      return { summary, seconds: Math.round((Date.now() - started) / 1000), by };
+      return { summary: kept, unread: bundle.cut, seconds: Math.round((Date.now() - started) / 1000), by };
     } catch (e) {
       log(`ERROR ${(e as Error).message}`);
       throw NO_READER.test((e as Error).message) && !signal.aborted ? new PlatformError("not_found", NO_BUILDER) : e;
@@ -973,7 +982,7 @@ export const failureReason = (f?: { title: string; detail: string }) => (!f ? ""
 
 export interface InboxItem {
   /** "builder-model": the model the owner picked for building has a successor. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model";
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model" | "suspended";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -1021,6 +1030,12 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const c of caps) {
     const m = platform.activeManifest(c.id);
     if (m.requires?.model) modelUsers = true;
+    // Suspended by Hewn: nothing runs it until the owner resumes it, a fix on its way or not.
+    const suspended = platform.suspension(c.id);
+    if (suspended) {
+      needs.push({ kind: "suspended", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: `Suspended: ${suspended.reason}`, severity: "danger", action: "Resume…", at: suspended.at });
+      continue;
+    }
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
     // Held back only by what the owner said no to (Deny): nothing to ask.

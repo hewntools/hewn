@@ -73,6 +73,12 @@ const scopeWords = (scopes) => {
   const parts = [s.has("discover") && "see", s.has("invoke") && "use", s.has("create") && "make", s.has("modify") && "change"].filter(Boolean);
   return parts.length ? parts.join(", ") : "no access";
 };
+/** Its tools in words: "every tool except Aurora Watch, Gift Ideas", "only Running Log", or "" for every tool. Deleted tools aren't named. */
+const toolWords = (a, all) => {
+  const names = (a.capabilities === "*" ? a.except ?? [] : a.capabilities).map((id) => all.get(id)).filter((c) => c?.version).map((c) => c.name).join(", ");
+  if (a.capabilities === "*") return names && `every tool except ${names}`;
+  return names ? `only ${names}` : "no tools";
+};
 
 /**
  * Agents Hewn knows about. `where`: local (a CLI or app on this computer), cloud, or any (another MCP
@@ -300,7 +306,7 @@ async function agentsPage() {
         "div",
         { class: "grow stack-xs" },
         h("span", { class: "row tight strong" }, h("span", { class: `dot ${recent(a) ? "ok" : ""}` }), a.name),
-        h("span", { class: "sub" }, `${from(a)} · ${scopeWords(a.scopes)}${a.capabilities !== "*" ? " · some tools" : ""} · ${a.lastUsedAt ? ago(a.lastUsedAt) : "not used yet"}`),
+        h("span", { class: "sub" }, [from(a), scopeWords(a.scopes), toolWords(a, all), a.lastUsedAt ? ago(a.lastUsedAt) : "not used yet"].filter(Boolean).join(" · ")),
         roleChips(a),
       ),
     );
@@ -343,7 +349,12 @@ function agentSheet(a, all) {
           (() => {
             const some = a.capabilities !== "*";
             const sw = h("input", { type: "checkbox", class: "switch", checked: some, "aria-label": "Only some tools" });
-            sw.addEventListener("change", () => save({ capabilities: sw.checked ? [] : "*" }, sw.checked ? `${a.name} sees no tools until you pick some` : `${a.name} sees all your tools`).catch(fail));
+            sw.addEventListener("change", () => {
+              // Either way it starts afresh: no tool stays switched off (the server forgets them too).
+              const except = a.except;
+              a.except = [];
+              save({ capabilities: sw.checked ? [] : "*" }, sw.checked ? `${a.name} sees no tools until you pick some` : `${a.name} sees all your tools`).catch((e) => ((a.except = except), fail(e)));
+            });
             return [
               h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, "Only some tools")), sw),
               some &&
@@ -364,6 +375,7 @@ function agentSheet(a, all) {
                       });
                     }),
                 ),
+              !some && toolWords(a, all) && h("div", { class: "small faint" }, `Sees ${toolWords(a, all)}. Change that on each tool's page.`),
             ];
           })(),
           // Its approval mode: what happens to its new tools and its changes to yours once they pass the checks.
@@ -412,6 +424,10 @@ async function agentRequestSheet(p, { inline } = {}) {
   const onlySome = h("input", { type: "checkbox", class: "switch", checked: !!currentCaps, "aria-label": "Only some tools" });
   const capList = h("div", { class: "cap-pick row tight wrap", hidden: !currentCaps }, [...all.values()].filter((c) => c.version).map((c) => h("label", { class: "chip plain" }, h("input", { type: "checkbox", value: c.id, checked: !!currentCaps?.includes(c.id) }), appIcon(c, { size: 20 }), c.name)));
   onlySome.addEventListener("change", () => (capList.hidden = !onlySome.checked));
+  // On a reconnect: the tools it was switched off for stay off, unless you pick some.
+  const off = p.current?.capabilities === "*" && toolWords(p.current, all);
+  const keeps = off && h("div", { class: "small faint" }, `As now: ${off}.`);
+  if (keeps) onlySome.addEventListener("change", () => (keeps.hidden = onlySome.checked));
   const decide = async (approve) => {
     const body = approve ? { approve: true, name: name.value.trim() || p.suggestedName, scopes: [...picked], capabilities: onlySome.checked ? [...capList.querySelectorAll("input:checked")].map((x) => x.value) : "*" } : { approve: false };
     const r = await api(`/agents/pending/${enc(p.id)}`, { method: "POST", body });
@@ -431,6 +447,7 @@ async function agentRequestSheet(p, { inline } = {}) {
     "div",
     { class: "stack-sm" },
     h("label", { class: "setting compact" }, h("div", { class: "grow" }, h("span", {}, "Only some tools")), onlySome),
+    keeps,
     capList,
     h("label", { class: "field" }, h("span", { class: "label" }, p.reconnects ? `Name · replaces “${p.reconnects}” if kept` : "Name"), name),
     h("div", { class: "small faint row tight" }, "Check the code matches the one in its browser window:", h("code", { class: "user-code" }, p.userCode)),

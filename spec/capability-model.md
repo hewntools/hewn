@@ -402,7 +402,7 @@ export const operations: Record<string, (input: unknown, ctx: Ctx) => unknown | 
 
 - Every operation in the manifest must be exported; a version that doesn't is rejected.
 - A handler may be `async`. Its return value is the output, passed as JSON (`undefined` becomes `null`).
-- A thrown error fails the call (`operation_failed`) with the error's message.
+- A thrown error fails the call (`operation_failed`) with the error's message, cut to 1,000 characters.
 
 ### `ctx`
 
@@ -428,7 +428,7 @@ interface Db {
 }
 ```
 
-- **`db`**: the capability's own private SQLite database, synchronous, and its only state. `transaction(fn)` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed.
+- **`db`**: the capability's own private SQLite database, synchronous, and its only state. `transaction(fn)` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed. Its size has a limit the owner sets (on Hewn, 100 MB unless they change it): a write that needs more room fails (`SQLITE_FULL`), and so does the operation. What it deletes makes room again.
 - **`secrets`**: the granted values of `requires.secrets`, per call (connections only).
 - **`updateSecret(name, value)`**: stores a new value for a declared secret, e.g. a refreshed token. Updates are kept only when the operation succeeds.
 - **`config`**: the owner's values for the manifest's `config`.
@@ -467,7 +467,7 @@ Images: at most 20 per request, 5 MB and 8000 px a side each. Text: at most 400 
 ### Calls
 
 - The input is validated against the operation's `inputSchema` before the handler runs, and the output against `outputSchema` after it returns.
-- A call chain (a call and every `ctx.call` it makes) has 30 seconds. Time spent waiting on `ctx.model` is added back, up to 120 seconds per chain. A widget's run has 15 seconds.
+- A call chain (a call and every `ctx.call` it makes) has 30 seconds. Time spent waiting on `ctx.model` is added back, up to 120 seconds per chain. A widget's run has 15 seconds. Past it the call's code is stopped, and so is anything a call leaves pending when it returns.
 - An agent's call to a `destructive` operation runs only once the owner confirms it.
 - **Read-only runs** (since 2.3): a widget's operation runs read-only. `ctx.db` refuses any statement that would write before it runs, secret updates are dropped, `ctx.call` reaches read operations only, and there is no `ctx.model`.
 

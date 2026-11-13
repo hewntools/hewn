@@ -31,6 +31,7 @@ import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 import { Activity, type ActivityView } from "./platform/activity.ts";
+import { Stalls, type Suspension } from "./platform/stalls.ts";
 import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
@@ -38,7 +39,7 @@ import { Events, type Shared, type Domains, type LoadedVersion } from "./platfor
 export { type CapabilitySummary } from "./platform/discovery.ts";
 export { type DataSummary } from "./platform/data.ts";
 export { MAX_SATURATION } from "./platform/presentation.ts";
-export { type Readiness, hostOf, resolveHosts } from "./platform/grants.ts";
+export { type Readiness, hostOf, hostWords, resolveHosts } from "./platform/grants.ts";
 export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
 export { MODEL_KEYS } from "./platform/models.ts";
 export { type ConnectionHealth, HEALTH_DEADLINE_MS, HEALTH_CACHE_MS } from "./platform/connections.ts";
@@ -46,6 +47,7 @@ export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH } from 
 export { WIDGET_DEADLINE_MS, type HomeEntry, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
+export { type Suspension, STALLS_TO_SUSPEND, STALL_WINDOW_MS } from "./platform/stalls.ts";
 export { type SummaryInput } from "./platform/sharing.ts";
 export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReportRow, type BuildReport, slugify, RESERVED_IDS, type SubmitEntry } from "./platform/builds.ts";
 export { CHECKS_PER_HOUR, type ClientCheck, type FileEntry, type Pack, candidateFiles, PACK_PATH } from "./platform/submissions.ts";
@@ -199,6 +201,7 @@ export class Platform {
     d.sharing = new Sharing(s);
     d.sessions = new Sessions(s);
     d.submissions = new Submissions(s);
+    d.stalls = new Stalls(s);
     d.validation = new Validation(s);
     d.widgets = new Widgets(s);
   }
@@ -286,6 +289,8 @@ export class Platform {
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke") { return this.d.grants.updateAgent(owner, id, change); }
   pendingAgents(owner: Agent): PendingRequest[] { return this.d.grants.pendingAgents(owner); }
   decideAgent(owner: Agent, requestId: string, d: { approve: false } | { approve: true; name?: string; scopes?: Scope[]; capabilities?: "*" | string[] }): { agentId?: string } { return this.d.grants.decideAgent(owner, requestId, d); }
+  capabilityAgents(owner: Agent, capabilityId: string) { return this.d.grants.capabilityAgents(owner, capabilityId); }
+  setCapabilityAgent(owner: Agent, capabilityId: string, agentId: string, canUse: boolean) { return this.d.grants.setCapabilityAgent(owner, capabilityId, agentId, canUse); }
   unreadableSecrets(owner: Agent): { capabilityId: string; name: string }[] { return this.d.grants.unreadableSecrets(owner); }
   setSecret(owner: Agent, capabilityId: string, name: string, value: string) { return this.d.grants.setSecret(owner, capabilityId, name, value); }
   setConfig(owner: Agent, capabilityId: string, name: string, value: string) { return this.d.grants.setConfig(owner, capabilityId, name, value); }
@@ -344,6 +349,13 @@ export class Platform {
   invoke(agent: Agent, req: InvokeRequest, trace?: string[], within?: Deadline | number, opts?: { record?: boolean; readOnly?: boolean; readChain?: boolean; origin?: Agent }) { return this.d.invocation.invoke(agent, req, trace, within, opts); }
   recentFailures(owner: Agent, capabilityId: string) { return this.d.invocation.recentFailures(owner, capabilityId); }
   logLines(capabilityId: string, n: number): string[] { return this.d.invocation.logLines(capabilityId, n); }
+
+  // ---------- stalls: what was running when Hewn stopped responding, suspended tools (platform/stalls.ts) ----------
+
+  /** Once at start, before `recoverInterruptedBuilds`. `stalledAt`: when the host restarted Hewn for not responding, if it did. */
+  recoverStall(stalledAt?: string): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt); }
+  suspension(capabilityId: string): Suspension | undefined { return this.d.stalls.suspension(capabilityId); }
+  resume(owner: Agent, capabilityId: string) { return this.d.stalls.resume(owner, capabilityId); }
 
   // ---------- widgets and Home (platform/widgets.ts) ----------
 

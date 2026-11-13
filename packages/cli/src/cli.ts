@@ -80,11 +80,14 @@ Use it (as the owner; talks to the running Hewn)
   review [approve|reject <buildId>]
                       agents' changes waiting for you (to a connection, or adding operations)
   restore <id>        bring back a deleted tool, with its data
+  resume <id>         let a tool Hewn suspended run again (it kept Hewn from responding, 3 times in an hour)
   rollback <id> [version]
   export <id> [--out file.json]
   data reset <id> [--sample]
                       Start over: empty a tool's data and keep the tool (a backup is kept; asks you to
                       type the id); --sample replays its sample data after
+  data limit [<MB>] | data limit <id> <MB>|default
+                      how big each tool's data may grow (100 MB unless you change it), or one tool's own
   purge <id>          permanently delete a deleted tool (asks you to type the id)
   backup now|list|restore <date|file>|dir <path>
                       zipped snapshots (never secrets in plain text, never agent tokens)
@@ -93,7 +96,7 @@ Agents (MCP clients sign in with OAuth; you approve them)
   setup [--agents claude-code,codex,opencode] [--yes] [--dry-run]
                       connect local agents: registers Hewn with them, then they sign in
   agents              connected agents; agents pending | approve <code> [--scopes a,b] [--name n] [--only id,id]
-                      | deny <code> | scopes <agent> a,b | revoke <agent>
+                      | deny <code> | scopes <agent> a,b | tool <agent> <tool> on|off | revoke <agent>
   tunnel [status]     reach Hewn from cloud agents (claude.ai, ChatGPT): only MCP and sign-in are exposed
   tunnel start [--quick | --cloudflared <tunnel> --hostname <host> | --tailscale] | stop`;
 
@@ -448,6 +451,13 @@ async function main() {
       });
       return;
 
+    case "resume":
+      await owner(async (c) => {
+        await c.call("resume", positional()[0] ?? "");
+        console.log(`✔ ${positional()[0]} resumed: its calls, schedules and widgets run again`);
+      });
+      return;
+
     case "rollback":
       await owner(async (c) => {
         const [id, v] = positional();
@@ -493,8 +503,12 @@ async function main() {
     }
 
     case "data": {
-      const [sub, id] = positional();
-      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample]");
+      const [sub, id, mb] = positional();
+      if (sub === "limit") {
+        await owner((c) => dataLimit(c, id, mb));
+        return;
+      }
+      if (sub !== "reset" || !id) throw new Error("usage: hewn data reset <id> [--sample] | hewn data limit [<MB>] | hewn data limit <id> <MB>|default");
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const typed = (await rl.question(`Start ${id} over: its data is emptied (a backup is kept), the tool stays.\nType ${id} to confirm: `)).trim();
       rl.close();
@@ -718,9 +732,9 @@ async function agentsCommand(c: PlatformClient) {
   };
   switch (sub ?? "list") {
     case "list": {
-      const agents = (await c.call("agents")) as { id: string; name: string; scopes: string[]; capabilities: "*" | string[]; via: string; lastUsedAt: string | null }[];
+      const agents = (await c.call("agents")) as { id: string; name: string; scopes: string[]; capabilities: "*" | string[]; except: string[]; via: string; lastUsedAt: string | null }[];
       if (!agents.length) console.log("No agents yet. Connect one: hewn setup (local), or add Hewn's address in the agent (hewn tunnel for cloud agents).");
-      for (const a of agents) console.log(`${a.id.padEnd(16)} ${a.scopes.join(",") || "(no access)"}${a.capabilities === "*" ? "" : ` · only ${a.capabilities.join(", ")}`} · ${a.via} · ${a.lastUsedAt ? `last used ${a.lastUsedAt.slice(0, 16).replace("T", " ")}` : "not used yet"}`);
+      for (const a of agents) console.log(`${a.id.padEnd(16)} ${a.scopes.join(",") || "(no access)"}${a.capabilities === "*" ? (a.except.length ? ` · every tool except ${a.except.join(", ")}` : "") : ` · only ${a.capabilities.join(", ")}`} · ${a.via} · ${a.lastUsedAt ? `last used ${a.lastUsedAt.slice(0, 16).replace("T", " ")}` : "not used yet"}`);
       const pending = (await c.call("pendingAgents")) as unknown[];
       if (pending.length) console.log(`\n${pending.length} waiting for approval: hewn agents pending`);
       return;
@@ -752,14 +766,35 @@ async function agentsCommand(c: PlatformClient) {
       await c.call("updateAgent", target, { scopes: extra.split(",").filter(Boolean) });
       return console.log(`✔ ${target}: ${extra}`);
     }
+    case "tool": {
+      // Over its default: an agent that sees every tool switched off for this one, or one limited to some given it.
+      const onOff = positional()[3];
+      if (!target || !extra || (onOff !== "on" && onOff !== "off")) throw new Error("usage: hewn agents tool <agent> <tool> on|off");
+      await c.call("setCapabilityAgent", extra, target, onOff === "on");
+      return console.log(onOff === "on" ? `✔ ${target} can use ${extra}` : `✔ ${target} can no longer use ${extra}: it doesn't see it`);
+    }
     case "revoke": {
       if (!target) throw new Error("usage: hewn agents revoke <agent>");
       await c.call("updateAgent", target, "revoke");
       return console.log(`✔ ${target} revoked: its next call fails. Connect it again to restore access.`);
     }
     default:
-      throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | revoke <agent>]");
+      throw new Error("usage: hewn agents [list | pending | approve <code> | deny <code> | scopes <agent> <scopes> | tool <agent> <tool> on|off | revoke <agent>]");
   }
+}
+
+/** `hewn data limit`: how big each tool's data may grow; with <MB>, everyone's; with <id> <MB>|default, one tool's own. */
+async function dataLimit(c: PlatformClient, first?: string, second?: string) {
+  let s = await c.settings();
+  if (first !== undefined && second === undefined) s = await c.settings({ toolDataLimitMB: Number(first) });
+  else if (first !== undefined) {
+    const own: Record<string, number> = { ...s.toolDataLimitsMB };
+    if (second === "default") delete own[first];
+    else own[first] = Number(second);
+    s = await c.settings({ toolDataLimitsMB: own });
+  }
+  console.log(`Each tool's data: up to ${s.toolDataLimitMB} MB`);
+  for (const [id, n] of Object.entries((s.toolDataLimitsMB ?? {}) as Record<string, number>)) console.log(`  ${id}: up to ${n} MB`);
 }
 
 /** hewn url: the public URL (where the owner reaches Hewn from anywhere), its DNS records and proxy. */

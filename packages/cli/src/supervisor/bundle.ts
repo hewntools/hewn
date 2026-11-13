@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Build the workerd host: the Worker bundle and the capability runtime wrapper (a text module
-// loaded into every capability's isolate). A checkout builds them from the TypeScript sources at
+// Build the workerd host: the Worker bundle, and the capability runtime wrapper and its storage guard
+// (text modules loaded into every capability's isolate). A checkout builds them from the TypeScript sources at
 // start; the npm package ships them prebuilt (dist/host/, by scripts/build-npm.ts).
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -21,31 +21,37 @@ const common = {
   logLevel: "silent" as const,
 };
 
-/** The host's files, built from the sources: { "worker.js", "capability-runtime.js", "builder-brief.md" }. */
+/** The host's files, built from the sources: { "worker.js", "capability-runtime.js", "capability-guard.js", "builder-brief.md" }. */
 export async function buildHostFiles(root = APP_DIR): Promise<Record<string, string>> {
   const { build } = await import("esbuild");
   const host = packageDir("@hewntools/host-workerd");
   const worker = await build({
     ...common,
     entryPoints: [join(host, "src", "worker.ts")],
-    external: ["cloudflare:*", "node:*", "./builder-brief.md", "./capability-runtime.js"],
+    external: ["cloudflare:*", "node:*", "./builder-brief.md", "./capability-runtime.js", "./capability-guard.js"],
   });
   const runtime = await build({
     ...common,
     entryPoints: [join(host, "src", "capability-main.ts")],
-    external: ["cloudflare:*", "node:*", "./capability.js"],
+    external: ["cloudflare:*", "node:*", "./capability.js", "./hewn-guard.js"],
+  });
+  const guard = await build({
+    ...common,
+    entryPoints: [join(host, "src", "capability-guard.ts")],
+    external: ["cloudflare:*", "./hewn-limit.js"],
   });
   const { readFileSync } = await import("node:fs");
   return {
     "worker.js": worker.outputFiles![0].text,
     "capability-runtime.js": runtime.outputFiles![0].text,
+    "capability-guard.js": guard.outputFiles![0].text,
     "builder-brief.md": readFileSync(join(root, "spec", "builder-brief.md"), "utf8"),
   };
 }
 
-const HOST_FILES = ["worker.js", "capability-runtime.js", "builder-brief.md"];
+const HOST_FILES = ["worker.js", "capability-runtime.js", "capability-guard.js", "builder-brief.md"];
 
-/** Write worker.js, capability-runtime.js and builder-brief.md into `dir`. */
+/** Write worker.js, capability-runtime.js, capability-guard.js and builder-brief.md into `dir`. */
 export async function buildHost(dir: string): Promise<void> {
   mkdirSync(dir, { recursive: true });
   if (BUNDLED) {

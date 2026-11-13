@@ -36,13 +36,27 @@ const logArgs = (args: Record<string, unknown>) =>
   JSON.stringify(Array.isArray(args.files) ? { ...args, files: `${args.files.length} files, ${Math.round(args.files.reduce((n: number, f: { content?: unknown }) => n + (typeof f?.content === "string" ? f.content.length : 0), 0) / 1024)} KB` } : args);
 
 
+/** How much of what a capability says about itself agents get: its author's words, not Hewn's. */
+export const AGENT_TEXT = { name: 80, purpose: 600, description: 600 };
+
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+/** A name on one line, cut to size. */
+const nameText = (s: string) => cut(s.replace(/\s+/g, " ").trim(), AGENT_TEXT.name);
+
+/** A capability as agents see it: its name and purpose cut to size. */
+const toAgent = <T extends { name: string; purpose: string }>(c: T): T => ({ ...c, name: nameText(c.name), purpose: cut(c.purpose, AGENT_TEXT.purpose) });
+
 /**
- * "Running Log (running-log): purpose …" lines the agent sees in tool descriptions: the user's
- * capabilities, then their connections (the external services those capabilities use) apart.
+ * "Running Log (running-log): "purpose …"" lines the agent sees in tool descriptions: the user's
+ * capabilities, then their connections (the external services those capabilities use) apart. The
+ * purpose is quoted (as a JSON string, so it stays on its line): the capability's words, not Hewn's.
  */
 function catalog(caps: CapabilitySummary[]): string {
   if (!caps.length) return "The user has no capabilities yet.";
-  const line = (c: CapabilitySummary) => `- ${c.name} (${c.id})${c.kind === "connection" ? " [connection]" : ""}: ${c.purpose} Operations: ${c.operations.join(", ")}.${c.widgets ? ` Widgets: ${c.widgets.join(", ")}.` : ""}${c.ready ? "" : " NOT READY: needs user setup (see capabilities_get status)."}`;
+  const line = (summary: CapabilitySummary) => {
+    const c = toAgent(summary);
+    return `- ${c.name} (${c.id})${c.kind === "connection" ? " [connection]" : ""}: ${JSON.stringify(c.purpose)} Operations: ${c.operations.join(", ")}.${c.widgets ? ` Widgets: ${c.widgets.join(", ")}.` : ""}${c.ready ? "" : " NOT READY: needs user setup (see capabilities_get status)."}`;
+  };
   const { capabilities, connections } = grouped(caps);
   return [
     capabilities.length ? `The user's capabilities right now:\n${capabilities.map(line).join("\n")}` : "The user has no capabilities yet (only connections).",
@@ -74,10 +88,11 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
   const known = `\n\n${catalog(caps)}`;
   // The tools themselves (names, scopes, descriptions, input schemas) are the spec's; these run them.
   const run: Record<string, Pick<Tool, "handler" | "format">> = {
-    capabilities_list: { handler: (a) => grouped(platform.list(agent, a)) },
+    capabilities_list: { handler: (a) => grouped(platform.list(agent, a).map(toAgent)) },
     capabilities_get: {
       handler: (a) => {
-        const m = platform.get(agent, a.capabilityId);
+        const got = platform.get(agent, a.capabilityId);
+        const m = { ...toAgent(got), operations: got.operations.map((o) => ({ ...o, description: cut(o.description, AGENT_TEXT.description) })) };
         // For an agent that can change it: the changes on their way, which a new one lands after.
         const coming = agent.scopes.has("modify") ? platform.changesComing(agent, a.capabilityId) : [];
         return coming.length ? { ...m, changesComing: coming } : m;

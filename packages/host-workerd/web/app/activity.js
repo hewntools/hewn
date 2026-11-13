@@ -94,8 +94,8 @@ function activityRow(g, all, showCap) {
     // Schedule details read "created <id>: op@1 daily 07:00" / "paused <id> after 3 failures": drop the id.
     const sm = /^(\w+) [\w-]+:? ?(.*)$/.exec(g.detail ?? "");
     const schedule = sm ? `Schedule ${sm[1]}${sm[2] ? `: ${sm[2].replace(/@\d+/, "")}` : ""}` : "Schedule";
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}` };
-    dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : "";
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), "kept Hewn from responding: restarted"] };
+    dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : g.outcome === "stalled" || g.outcome === "suspend" ? "danger" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
     const subject = actorLabel(g.subject, all);
@@ -103,6 +103,7 @@ function activityRow(g, all, showCap) {
       agent_connected: () => ((dot = "ok"), on(`Connected ${subject}`, g.detail && h("span", { class: "faint" }, g.detail))),
       agent_declined: () => on(`Declined ${g.subject}`),
       agent_revoked: () => ((dot = "warn"), on(`Disconnected ${subject}`)),
+      agent_tool: () => on(g.detail === "on" ? `${subject} can use` : `${subject} can no longer use`, ref ?? "this tool"),
       agent_scopes: () => on(`${subject} may now: ${g.detail || "nothing"}`),
       agent_capabilities: () => on(`${subject} sees: ${g.detail === "*" ? "everything" : g.detail || "nothing"}`),
       agent_approval_mode: () => on(g.detail === "live" ? `${subject}'s changes go live after the checks` : `${subject}'s changes wait for your approval`),

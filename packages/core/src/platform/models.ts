@@ -461,8 +461,10 @@ export class Models extends Domain {
       } catch (e) {
         const timedOut = (e as Error)?.name === "TimeoutError" || (e as Error)?.name === "AbortError";
         const err = e instanceof PlatformError ? e : new PlatformError("operation_failed", timedOut ? `model provider ${provider}: no reply in time` : `model provider ${provider}: ${(e as Error).message}`);
-        // A failed request isn't billed by the providers; nothing is spent.
-        this.registry.settleModelSpend(id, { costUsd: 0, inputTokens: 0, outputTokens: 0, error: err.message.slice(0, 300) });
+        // A failed request isn't billed by the providers; nothing is spent. One cut off by the deadline may
+        // still be: it counts at what was reserved for it, as one a crash left open does.
+        this.registry.settleModelSpend(id, { costUsd: timedOut ? reserve : 0, inputTokens: 0, outputTokens: 0, error: err.message.slice(0, 300) });
+        if (timedOut) this.warnNearCap(capabilityId, month, settings);
         throw err;
       } finally {
         deadline.endWait();
