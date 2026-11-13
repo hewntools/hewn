@@ -9,7 +9,10 @@
 // "experimental" flag, which these isolates have for this. `lockStorage` takes that method off
 // SqlStorage's prototype the first time a facet starts here, before any capability code holds a
 // storage object, and keeps it to itself; with it go the other members the flag adds to storage,
-// and `facets` (each facet would be a database of its own). Capability code can import this module
+// and `facets` (each facet would be a database of its own). The flag adds a few things outside
+// storage too (workerd's test hooks, and a class for UDP ingress): those go as well, so capability
+// code sees what it would see without the flag, except one method on its own entrypoint's context
+// (test/workerd-experimental.test.ts holds the list). Capability code can import this module
 // and patch any global: everything used here once that code has run was captured when this module
 // was evaluated, a state that workerd didn't make is refused (DurableObject's constructor checks),
 // and calling `lockStorage` again only applies the same limit.
@@ -29,6 +32,7 @@ const floor = Math.floor;
 const has = WeakSet.prototype.has;
 const add = WeakSet.prototype.add;
 const Failure = Error;
+const ObjectProto = Object.prototype;
 const pages = Math.max(1, floor(Number(LIMIT) / PAGE));
 const limited = new WeakSet<object>();
 
@@ -37,10 +41,12 @@ const INSTANCE: [string, string[]][] = [
   ["ctx", ["facets", "primaryStub"]],
   ["storage", ["primary"]],
 ];
-/** Methods taken off the prototypes, once per isolate. */
+/** Methods taken off the prototypes, wherever along the chain workerd put them, once per isolate. */
 const PROTOTYPE: [string, string[]][] = [
   ["sql", ["setMaxPageCountForTest", "ingest", "prepare"]],
   ["storage", ["snapshot", "waitForBookmark", "onNextSessionRestore", "deleteAll"]],
+  ["cursor", ["reusedCachedQueryForTest"]],
+  ["fetcher", ["getRpcMethodForTestOnly"]],
 ];
 
 let setMax: ((pages: number) => void) | undefined;
@@ -53,6 +59,15 @@ function strip(on: Record<string, unknown>, names: string[]) {
     if (own(on, name)) throw new Failure(`can't limit this tool's data: ${name} stays`);
   }
 }
+
+/** `strip` on each of `on`'s prototypes. */
+function stripProtos(on: object, names: string[]) {
+  for (let p = protoOf(on); p !== null && p !== ObjectProto; p = protoOf(p)) strip(p, names);
+}
+
+// The flag's additions any code here can reach: before the capability's own bundle runs.
+strip(protoOf(globalThis), ["Datagram"]);
+strip(AbortSignal.prototype as unknown as Record<string, unknown>, ["skipReleaseForTest", "getNativeRegistrationCountForTest"]);
 
 /** Limit the database of the facet being constructed (call before `super`). */
 export function lockStorage(ctx: DurableObjectState): void {
@@ -67,7 +82,10 @@ export function lockStorage(ctx: DurableObjectState): void {
     // The first facet in this isolate: the prototypes are as workerd made them.
     const found = own(protoOf(sql), "setMaxPageCountForTest")?.value;
     if (typeof found !== "function") throw new Failure("can't limit this tool's data: this workerd has no setMaxPageCountForTest");
-    for (let i = 0; i < PROTOTYPE.length; i++) strip(protoOf(objects[PROTOTYPE[i][0]]), PROTOTYPE[i][1]);
+    // A cursor and a Fetcher (the isolate's own entrypoint) for their prototypes.
+    objects.cursor = apply(own(protoOf(sql), "exec")!.value, sql, ["SELECT 0"]);
+    objects.fetcher = (ctx as unknown as { exports: Record<string, Record<string, unknown>> }).exports.default;
+    for (let i = 0; i < PROTOTYPE.length; i++) stripProtos(objects[PROTOTYPE[i][0]], PROTOTYPE[i][1]);
     setMax = found as (pages: number) => void;
   }
   if (apply(has, limited, [sql])) return;
