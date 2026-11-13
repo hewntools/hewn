@@ -4,8 +4,9 @@
 // braille character, its dots by an ordered dither: characters only, never the picture itself. Drawn into a <pre>.
 //
 // window.hewnAscii(preEl, { cols, rows, speed, ink, opacity, fill, focal, shade, aspect, at, still, reduced }) → stop()
-//   ink: "tone" (the default: the <pre>'s own colour, fainter where the metal is darker), "mono" (the <pre>'s colour,
-//        even) or "colour" (the chrome's own colours, which need a dark page).
+//   ink: "auto" (the default: "colour" on a dark page, "tone" on a light one, judged by the <pre>'s own colour),
+//        "colour" (the chrome's own colours; on a light page they wash out), "tone" (the <pre>'s colour, fainter where
+//        the metal is darker) or "mono" (the <pre>'s colour, even).
 //   fill: how readily a dot lights (1); more makes the mark denser and bolder. Braille's dots are small: the mark
 //   carries about a third of the ink the old ASCII field did at the same opacity, so it wants twice the opacity or more.
 //   aspect: a character cell's height over its width. Measured from the <pre> unless given.
@@ -234,10 +235,23 @@ void main() {
   const BIT = [0x01, 0x08, 0x02, 0x10, 0x04, 0x20, 0x40, 0x80]; // a cell's dots, row by row, as braille numbers them
   const sl = new Float32Array(8);
   const TONE = 0.4; // "tone": the darkest metal still gets this much of the ink
+  /** Whether a CSS colour is light, so the page behind it is dark. A canvas reads any colour CSS can write. */
+  const lightCache = new Map();
+  let swatch;
+  function isLight(css) {
+    if (!lightCache.has(css)) {
+      swatch = swatch || document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+      swatch.clearRect(0, 0, 1, 1); swatch.fillStyle = "#000"; swatch.fillStyle = css; swatch.fillRect(0, 0, 1, 1);
+      const [r, g, b] = swatch.getImageData(0, 0, 1, 1).data;
+      lightCache.set(css, 0.2126 * r + 0.7152 * g + 0.0722 * b > 128);
+    }
+    return lightCache.get(css);
+  }
   /** The samples as cells: each cell's braille dots by an ordered dither, and its ink (look): for "tone", tenths of
    *  the <pre>'s colour (-1 for all of it); for "colour", the chrome's own as 0xRGB. */
   function encode(m, z) {
     const { cols, rows, pix, dots, look } = m, fw = cols * 2, fh = rows * 4;
+    m.inkNow = m.ink === "auto" ? (isLight(getComputedStyle(m.el).color) ? "colour" : "tone") : m.ink;
     for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
       let peak = 0, wr = 0, wg = 0, wb = 0, ws = 0;
       for (let j = 0; j < 4; j++) {
@@ -253,7 +267,7 @@ void main() {
       dots[c] = bits;
       if (!bits) continue;
       const top = lerp(245, 255 * clamp(0.26 + 0.82 * Math.pow(peak, 0.8), 0.26, 0.97), Math.min(1, m.shade * z.sh * 1.25));
-      if (m.ink === "colour") {
+      if (m.inkNow === "colour") {
         const f = top / Math.max(wr / ws, wg / ws, wb / ws, 1), q4 = (v) => Math.min(15, Math.round((v / ws) * f / 17));
         look[c] = (q4(wr) << 8) | (q4(wg) << 4) | q4(wb);
       } else {
@@ -279,7 +293,7 @@ void main() {
   /** The cells into the <pre>, as runs of one ink. Braille throughout, U+2800 for a dark cell, so every character comes
    *  from the same font and the columns stay true. */
   function write(m) {
-    const { el, cols, rows, dots, look } = m, inked = !m.flat && m.ink !== "mono", runs = [];
+    const { el, cols, rows, dots, look } = m, inked = !m.flat && m.inkNow !== "mono", runs = [];
     let text = "", cur = -1;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -300,7 +314,7 @@ void main() {
       if (v < 0) { f.append(runs[i]); continue; }
       const s = document.createElement("span");
       s.textContent = runs[i];
-      s.style.color = m.ink === "colour" ? "#" + v.toString(16).padStart(3, "0") : `color-mix(in srgb, currentColor ${v * 10}%, transparent)`;
+      s.style.color = m.inkNow === "colour" ? "#" + v.toString(16).padStart(3, "0") : `color-mix(in srgb, currentColor ${v * 10}%, transparent)`;
       f.append(s);
     }
     el.replaceChildren(f);
@@ -323,13 +337,13 @@ void main() {
     const q = new URLSearchParams(location.search);
     for (const k of ["fill", "focal", "shade", "speed", "aspect", "opacity", "at"]) { const v = q.get("mark-" + k); if (v && isFinite(+v)) KNOBS[k] = +v; }
     const ink = q.get("mark-ink");
-    if (ink === "tone" || ink === "mono" || ink === "colour") KNOBS.ink = ink;
+    if (ink === "auto" || ink === "colour" || ink === "tone" || ink === "mono") KNOBS.ink = ink;
     for (const k of ["still", "reduced"]) if (q.has("mark-" + k)) KNOBS[k] = q.get("mark-" + k) !== "0";
   } catch {}
 
   window.hewnAscii = function (el, opts = {}) {
     const o = { ...opts, ...KNOBS }, cols = o.cols || 72, rows = o.rows || 34, speed = o.speed ?? 1;
-    const m = { el, cols, rows, ink: o.ink || "tone", fill: o.fill || 1, focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
+    const m = { el, cols, rows, ink: o.ink || "auto", inkNow: "mono", fill: o.fill || 1, focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
     const reduced = o.reduced ?? matchMedia("(prefers-reduced-motion: reduce)").matches;
     let mode = o.still ? "still" : "live", u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false, spent = 0;
     el.setAttribute("aria-hidden", "true"); // braille would be read out dot by dot
@@ -384,11 +398,19 @@ void main() {
       box = [r.width, r.height]; m.measured = false; want = true; kick();
     }) : null;
     if (ro) ro.observe(el);
+    // "auto" follows a theme switch, from the system or from the page's own data-theme
+    const dark = m.ink === "auto" ? matchMedia("(prefers-color-scheme: dark)") : null;
+    const retheme = () => { want = true; kick(); };
+    const mo = dark && typeof MutationObserver === "function" ? new MutationObserver(retheme) : null;
+    if (dark) dark.addEventListener("change", retheme);
+    if (mo) mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     function stop() {
       stopped = true; pause();
       if (io) io.disconnect();
       if (ro) ro.disconnect();
+      if (mo) mo.disconnect();
+      if (dark) dark.removeEventListener("change", retheme);
       document.removeEventListener("visibilitychange", onVisibility);
       if (GL && !GL.lost) { if (m.fence) GL.gl.deleteSync(m.fence); if (m.pbo) GL.gl.deleteBuffer(m.pbo); }
       m.fence = m.pbo = null;

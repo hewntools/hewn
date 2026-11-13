@@ -27,7 +27,7 @@
 <body>
 <header>
   <label>Theme <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
-  <label>Inks <input id="inks" type="text" title="tone, mono, colour"></label>
+  <label>Inks <input id="inks" type="text" title="auto, colour, tone, mono"></label>
   <label>Opacities <input id="opacity" type="text"></label>
   <label>Fill <input id="fill" type="number" step="0.1" min="0.5" max="4"></label>
   <label>Weight <select id="weight"><option value="400">Regular</option><option value="700">Bold</option></select></label>
@@ -43,7 +43,7 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const DEF = { theme: "dark", inks: "tone,mono", opacity: "0.8,0.9", fill: "1", weight: "400", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
+  const DEF = { theme: "dark", inks: "auto,tone", opacity: "0.8,0.9", fill: "1", weight: "400", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
   const q = new URLSearchParams(location.search), S = {};
   for (const k in DEF) S[k] = q.has(k) ? q.get(k) || "1" : DEF[k];
   let marks = [];
