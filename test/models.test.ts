@@ -15,7 +15,7 @@ const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPh
 const HAIKU = "anthropic/claude-haiku-5-5";
 
 /** A fake network: the model catalog, providers' model lists, and an Anthropic Messages endpoint. */
-function fakeNet(o: { delayMs?: number; status?: number; keyStatus?: number; reply?: (body: any) => unknown } = {}) {
+function fakeNet(o: { delayMs?: number; hang?: boolean; status?: number; keyStatus?: number; reply?: (body: any) => unknown } = {}) {
   const calls: { url: string; body: any; headers: Record<string, string> }[] = [];
   const fetch = async (url: string, init: RequestInit): Promise<Response> => {
     if (url.startsWith("https://api.anthropic.com/v1/models") || url === "https://api.openai.com/v1/models") {
@@ -35,6 +35,8 @@ function fakeNet(o: { delayMs?: number; status?: number; keyStatus?: number; rep
     const body = JSON.parse(String(init.body));
     calls.push({ url, body, headers: init.headers as Record<string, string> });
     if (o.delayMs) await new Promise((ok) => setTimeout(ok, o.delayMs));
+    // No reply until the caller gives up, as fetch does when its signal fires.
+    if (o.hang) await new Promise((_, no) => init.signal!.addEventListener("abort", () => no(init.signal!.reason)));
     if (o.status) return new Response(JSON.stringify({ error: { message: "nope" } }), { status: o.status });
     return Response.json(o.reply?.(body) ?? { content: [{ type: "text", text: JSON.stringify({ explanation: "Pleased." }) }], stop_reason: "end_turn", usage: { input_tokens: 1000, output_tokens: 100 } });
   };
@@ -243,6 +245,20 @@ describe("model port: the platform", () => {
       /timed out|no reply in time|no time left/,
       "but only up to the allowance",
     );
+  });
+
+  test("a call cut off by its deadline counts at what was reserved for it: the provider may still bill it", async () => {
+    await setUp({ hang: true });
+    await configure();
+    const call = t.platform.invoke(t.claude, { capabilityId: "word-explainer", operation: "explain", input: { word: "x" } }, [t.claude.id], new Deadline(Date.now() + 200, 1000));
+    while (!net.calls.length) await new Promise((ok) => setTimeout(ok, 10));
+    const reserved = t.platform.modelSpend(USER).totalUsd;
+    assert.ok(reserved > 0, "the call holds its reservation");
+    await assert.rejects(call, /timed out|no reply in time/);
+    while (t.platform.registry.recentModelCalls(1)[0].status === "reserved") await new Promise((ok) => setTimeout(ok, 10));
+    const [m] = t.platform.registry.recentModelCalls(1);
+    assert.equal(m.error, "model provider anthropic: no reply in time");
+    assert.equal(t.platform.modelSpend(USER).totalUsd, reserved, "spent what was reserved, not 0");
   });
 
   test("the model grant can be revoked like any other", async () => {

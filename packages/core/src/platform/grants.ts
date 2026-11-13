@@ -32,6 +32,8 @@ export interface Readiness {
   missingModel?: string;
   /** Set when a pinned model was retired: the platform's suggested successor, if it knows one. */
   retiredModel?: { model: string; successor?: string };
+  /** Set while Hewn has it suspended (it kept Hewn from responding): nothing runs it until the owner resumes it. */
+  suspended?: { at: string; reason: string };
   /** For agents: what to ask the user to do. */
   userAction?: string;
 }
@@ -53,8 +55,9 @@ export class Grants extends Domain {
     const missingDependencies = (req.capabilities ?? []).flatMap((c) => c.operations.filter((op) => !this.offers(c.id, op)).map((op) => `${c.id}/${op}`));
     const unsupportedAbi = abiUnsupported(abiOf(manifest));
     const missingModel = req.model ? this.platform.modelProblem(req.model) : undefined;
-    const ready = !pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
-    const onlySaidNo = declinedGrants.length > 0 && declinedGrants.length === pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel;
+    const suspended = this.platform.suspension(capabilityId);
+    const ready = !pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel && !suspended;
+    const onlySaidNo = declinedGrants.length > 0 && declinedGrants.length === pendingGrants.length && !missingSecrets.length && !missingConfig.length && !missingDependencies.length && !unsupportedAbi && !missingModel && !suspended;
     return {
       ready,
       missingSecrets,
@@ -66,10 +69,13 @@ export class Grants extends Domain {
       ...(unsupportedAbi ? { unsupportedAbi } : {}),
       ...(missingModel ? { missingModel } : {}),
       ...(req.model?.model && this.platform.retiredModel(req.model.model) ? { retiredModel: { model: req.model.model, ...this.platform.retiredModel(req.model.model) } } : {}),
+      ...(suspended ? { suspended } : {}),
       ...(ready
         ? {}
         : {
-            userAction: unsupportedAbi
+            userAction: suspended
+              ? `Hewn suspended it: ${suspended.reason}. It runs again once the owner resumes it in the Hewn web client (or with hewn resume ${capabilityId}), best after a fix.`
+              : unsupportedAbi
               ? `It ${unsupportedAbi}: upgrade Hewn, or roll it back to a version this Hewn can run.`
               : missingModel && !pendingGrants.length
               ? `It needs a model: ${missingModel}. The owner sets that up under Settings › AI › Models in the Hewn web client.`
@@ -116,7 +122,7 @@ export class Grants extends Domain {
     const manifest = this.activeManifest(capabilityId);
     const req = manifest.requires ?? {};
     const granted = this.registry.grants(capabilityId);
-    const items: { grant: string; kind: "capability" | "host" | "secret" | "model"; approved: boolean; label: string; sideEffect?: string; target?: string; description?: string }[] = [];
+    const items: { grant: string; kind: "capability" | "host" | "secret" | "model"; approved: boolean; label: string; sideEffect?: string; target?: string; description?: string; host?: string | null }[] = [];
     for (const c of req.capabilities ?? []) {
       const callee = this.registry.getCapability(c.id);
       const calleeName = callee?.displayName ?? callee?.name ?? c.id;
@@ -137,8 +143,9 @@ export class Grants extends Domain {
     const values = this.registry.config(capabilityId);
     for (const h of req.hosts ?? []) {
       const derived = h.startsWith("config:") ? h.slice(7) : undefined;
-      const label = derived ? `connect to the host in ${derived} (${hostOf(values[derived] ?? "") ?? "not set yet"})` : `connect to ${h}`;
-      items.push({ grant: `host:${h}`, kind: "host", approved: granted.has(`host:${h}`), label });
+      const host = derived ? (hostOf(values[derived] ?? "") ?? null) : h;
+      const label = derived ? `connect to the host in ${derived} (${host ?? "not set yet"})` : `connect to ${hostWords(h)}`;
+      items.push({ grant: `host:${h}`, kind: "host", approved: granted.has(`host:${h}`), label, host });
     }
     for (const s of req.secrets ?? []) {
       items.push({ grant: `secret:${s.name}`, kind: "secret", approved: granted.has(`secret:${s.name}`), label: `use secret ${s.name}`, description: s.description });
@@ -247,7 +254,9 @@ export class Grants extends Domain {
   /** Delegated agents (owner only). */
   agents(owner: Agent): AgentDetails[] {
     requireOwner(owner);
-    return this.agentStore.list();
+    // A deleted tool an agent was switched off for isn't named; restored, it stays off.
+    const there = new Set(this.registry.listActiveCapabilities().map((c) => c.id));
+    return this.agentStore.list().map((a) => ({ ...a, except: a.except.filter((id) => there.has(id)) }));
   }
 
   updateAgent(owner: Agent, id: string, change: { scopes?: Scope[]; capabilities?: "*" | string[]; approvalMode?: ApprovalMode } | "revoke") {
@@ -280,6 +289,27 @@ export class Grants extends Domain {
     } else this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_declined", subject: request?.clientName ?? "agent" });
     this.logger(d.approve ? `agent ${r.agentId} approved (${(d.scopes ?? []).join(", ") || "requested scopes"}) by ${owner.id}` : `agent connection request declined by ${owner.id}`);
     return r;
+  }
+
+  /** The agents that can use a tool, and those that can't (owner only): each by its default, or as the owner switched it here. */
+  capabilityAgents(owner: Agent, capabilityId: string) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    return this.agentStore.forTool(capabilityId);
+  }
+
+  /**
+   * Switch one agent on or off for a tool (owner only), over its default: one that sees every tool
+   * can be kept off this one, one limited to some can be given it. Its open sessions see it at once.
+   */
+  setCapabilityAgent(owner: Agent, capabilityId: string, agentId: string, canUse: boolean) {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    if (typeof canUse !== "boolean") throw new PlatformError("invalid_request", "canUse must be true or false");
+    this.agentStore.setTool(agentId, capabilityId, canUse);
+    this.registry.addAuthorityEvent({ actor: owner.id, action: "agent_tool", subject: agentId, capabilityId, detail: canUse ? "on" : "off" });
+    this.logger(`agent ${agentId} ${canUse ? "can use" : "can no longer use"} ${capabilityId} (by ${owner.id})`);
+    return this.agentStore.forTool(capabilityId).find((a) => a.id === agentId)!;
   }
 
   /** Secrets stored under another key (a backup from another machine): they count as not set until set again. */
@@ -370,6 +400,9 @@ export class Grants extends Domain {
     return { ok: true };
   }
 }
+
+/** A declared host as the owner reads it: "*.example.com" is any site ending in .example.com. */
+export const hostWords = (h: string) => (h.startsWith("*.") ? `any site ending in ${h.slice(1)}` : h);
 
 /** The host name in a URL or bare host ("https://example.com/blog" → "example.com"), if valid. */
 export function hostOf(value: string): string | undefined {

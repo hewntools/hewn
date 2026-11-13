@@ -17,12 +17,16 @@ export interface Agent {
   scopes: ReadonlySet<Scope>;
   /** Capability ids this agent may see, or "*" for all. */
   capabilities: "*" | ReadonlySet<string>;
+  /** With "*": the tools the owner switched it off for (on each tool's page). */
+  except?: ReadonlySet<string>;
 }
 
 export interface AgentInfo {
   id: string;
   scopes: Scope[];
   capabilities: "*" | string[];
+  /** With "*": the tools the owner switched it off for. */
+  except: string[];
 }
 
 /** The user is root authority. Only local admin tooling (the CLI) acts as the user. */
@@ -42,8 +46,9 @@ export function requireOwner(principal: Agent): void {
   if (principal.kind !== "user") throw new PlatformError("forbidden", `'${principal.id}' cannot perform owner actions`);
 }
 
+/** Every tool but the ones it was switched off for, or only the ones on its list. */
 export function canSee(agent: Agent, capabilityId: string): boolean {
-  return agent.capabilities === "*" || agent.capabilities.has(capabilityId);
+  return agent.capabilities === "*" ? !agent.except?.has(capabilityId) : agent.capabilities.has(capabilityId);
 }
 
 export function validScopes(scopes: string[]): Scope[] {

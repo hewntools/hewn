@@ -5,7 +5,7 @@
 // /health is answered by a restart.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { hostname, platform as osPlatform } from "node:os";
@@ -50,6 +50,11 @@ export interface SupervisorOptions {
    * own proxy). Default: HEWN_PROXY_SECRET; unset or "" = off.
    */
   proxySecret?: string;
+  /**
+   * Take the visitor's address from the trusted proxy's x-hewn-proxy-client-ip (only with a proxy secret, and only
+   * for a proxy that sets the header itself, replacing any copy a client sent). Default: HEWN_PROXY_CLIENT_IP=1.
+   */
+  proxyClientIp?: boolean;
   builders: Record<string, CapabilityBuilder>;
   /** The intake on agent `which`, running on `run` (the owner's model and effort for building). */
   intake?: (which: string, run: JobModel) => Intake;
@@ -85,7 +90,22 @@ export interface SupervisorOptions {
   hosted?: Hosted;
   /** Each agent's model list (default: read from its CLI, or the remote service). Tests stub it. */
   models?: (agent: string) => Promise<ModelCatalog>;
+  /**
+   * The check on the disk with Hewn's data, every `intervalMs` (default 5 s): with less than its
+   * floor free (diskFloor), tools' data doesn't grow. `space` says how big the disk is and how much
+   * is free instead of asking it (tests).
+   */
+  disk?: { intervalMs?: number; space?: () => { free: number; total: number } };
 }
+
+/** The most free space Hewn keeps for itself and the system: below it, tools can't add data. */
+export const DISK_FLOOR = 1024 ** 3;
+
+/** The floor on a disk of `total` bytes: 1 GB, or a tenth of a small disk (a disk of 1 GB or less would never have 1 GB free). */
+export const diskFloor = (total: number) => Math.floor(Math.min(DISK_FLOOR, total / 10));
+
+/** "1.4 GB", "80 MB". */
+const sized = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`);
 
 export type { Hosted };
 
@@ -160,6 +180,7 @@ const hewn :Workerd.Worker = (
     (name = "worker.js", esModule = embed "worker.js"),
     (name = "builder-brief.md", text = embed "builder-brief.md"),
     (name = "capability-runtime.js", text = embed "capability-runtime.js"),
+    (name = "capability-guard.js", text = embed "capability-guard.js"),
   ],
   compatibilityDate = "2026-09-01",
   # enable_request_signal: a request's signal aborts when its client goes (Stop in the chat stops the intake's CLI).
@@ -179,9 +200,11 @@ const hewn :Workerd.Worker = (
     (name = "SECRETS_KEY", fromEnvironment = "HEWN_SECRETS_KEY"),
     (name = "TIMEZONE", fromEnvironment = "HEWN_TIMEZONE"),
     (name = "PROXY_SECRET", fromEnvironment = "HEWN_PROXY_SECRET"),
+    (name = "PROXY_CLIENT_IP", fromEnvironment = "HEWN_PROXY_CLIENT_IP"),
     (name = "REMOTE_JOBS", fromEnvironment = "HEWN_REMOTE_JOBS"),
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
+    (name = "STALLED", fromEnvironment = "HEWN_STALLED"),
     (name = "PORT", text = "${o.port}"),
     (name = "VERSION", text = "${VERSION}"),
   ],
@@ -241,6 +264,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // Never logged: only whether it's on.
   const proxySecret = o.proxySecret ?? process.env.HEWN_PROXY_SECRET ?? "";
   if (proxySecret) log("public listener: only requests from the trusted proxy (HEWN_PROXY_SECRET)");
+  const proxyClientIp = !!proxySecret && (o.proxyClientIp ?? process.env.HEWN_PROXY_CLIENT_IP === "1");
+  if (proxyClientIp) log("public listener: the visitor's address from the trusted proxy (HEWN_PROXY_CLIENT_IP)");
   const controlToken = randomBytes(24).toString("hex");
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
@@ -466,6 +491,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   let stopping = false;
   let restarts = 0;
   let quickExits = 0;
+  /** When the watchdog last restarted workerd for not responding: the next workerd says what was running then. */
+  let stalledAt = "";
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
   // A workerd left behind by a supervisor that died (macOS has no die-with-parent) would hold the port.
   const pidFile = join(data, "workerd.pid");
@@ -485,7 +512,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     child = spawn(command[0], command.slice(1), {
       // Run in its own data dir: workerd opens its working directory, and the sandbox only allows that.
       cwd: data,
-      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" },
+      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "", HEWN_STALLED: stalledAt },
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (child.pid) writeFileSync(pidFile, String(child.pid));
@@ -577,6 +604,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       else if (Date.now() - lastOk > stallMs) {
         log(`workerd unresponsive for ${Math.round((Date.now() - lastOk) / 1000)}s (a capability may be stuck in a loop); restarting it`);
         lastOk = Date.now() + 5000;
+        stalledAt = new Date().toISOString();
         child?.kill("SIGKILL");
       }
       checking = false;
@@ -636,6 +664,32 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     return out;
   };
 
+  // ---------- the disk ----------
+  // A tool's data can't grow while the disk with Hewn's data is nearly full. workerd is told while it is
+  // (on every check: a restarted workerd starts out not knowing), and once when it no longer is.
+  const { intervalMs: diskMs = 5000, space = () => { const f = statfsSync(data); return { free: f.bavail * f.bsize, total: f.blocks * f.bsize }; } } = o.disk ?? {};
+  let diskLow = false;
+  let diskChecking = false;
+  const checkDisk = async () => {
+    if (diskChecking) return;
+    diskChecking = true;
+    try {
+      const { free, total } = space();
+      const floor = diskFloor(total);
+      const low = free < floor;
+      if (low || diskLow) await admin("disk", { low, free, floor });
+      if (low !== diskLow) log(low ? `the disk with Hewn's data has ${sized(free)} free, under ${sized(floor)}: tools can't add data until there's more room` : `the disk with Hewn's data has ${sized(free)} free again: tools can add data`);
+      diskLow = low;
+    } catch {
+      // workerd restarting, or the disk unreadable for a moment: the next check
+    } finally {
+      diskChecking = false;
+    }
+  };
+  void checkDisk();
+  const diskTimer = setInterval(checkDisk, diskMs);
+  diskTimer.unref();
+
   return {
     url,
     adminToken,
@@ -657,6 +711,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     },
     async stop() {
       if (timer) clearInterval(timer);
+      clearInterval(diskTimer);
       if (resumeTimer) clearInterval(resumeTimer);
       for (const t of recheckTimers) clearTimeout(t);
       for (const t of backupTimers) clearTimeout(t as ReturnType<typeof setTimeout>);

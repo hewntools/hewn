@@ -7,11 +7,12 @@ import type { Agent, Scope } from "@hewntools/core/auth.ts";
 import { AGENT_POINTER } from "../pointer.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import { readSummary } from "@hewntools/core/bundle.ts";
-import { explainFailure } from "@hewntools/core/failure.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { failureOf } from "@hewntools/core/platform/builds.ts";
+import { sha256 } from "@hewntools/core/sha256.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
@@ -249,7 +250,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "capabilities" && !id) {
     if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
-    return capabilityList(platform, owner);
+    return withEtag(req, await capabilityList(platform, owner));
   }
 
   if (resource === "capabilities" && id) {
@@ -339,6 +340,10 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST restore":
         platform.restore(owner, id);
         return { ok: true };
+      // A tool Hewn suspended (it kept Hewn from responding) runs again.
+      case "POST resume":
+        platform.resume(owner, id);
+        return { ok: true };
       case "POST rollback":
         return platform.rollback(owner, id, (await readJson(req)).version);
       case "POST purge":
@@ -416,6 +421,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const body = await readJson(req);
         return platform.createSchedule(owner, { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input, cadence: String(body.cadence ?? "") });
       }
+      // Info › Agents: which agents can use it; switching one overrides its default (every tool, or only some).
+      case "GET agents":
+        return platform.capabilityAgents(owner, id);
+      case "PUT agents":
+        return platform.setCapabilityAgent(owner, id, arg ?? "", (await readJson(req)).canUse);
       case "POST grants":
         if (arg === "approve") {
           // A body names one grant; no body approves everything the version requests.
@@ -568,7 +578,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "settings") {
     platform.agents(owner); // owner only
     if (method === "PUT") {
-      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"]));
+      const next = await host.settings.write(pick(await readJson(req), ["builder", "intake", "maxBuildAttempts", "sandbox", "backupDir", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"]));
       host.log(`web settings changed: ${JSON.stringify(next)}`);
       return { ...next, ...(host.hosted ? { hosted: true } : {}) };
     }
@@ -791,9 +801,9 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
       if (!summary) throw new PlatformError("operation_failed", "the reading didn't come back as a summary");
       // The owner moved on (Install anyway, Cancel, closed the sheet): a reading that ends now isn't theirs to keep.
       if (signal.aborted) throw new PlatformError("operation_failed", "stopped");
-      await platform.keepSummary(owner, token, summary);
+      const kept = await platform.keepSummary(owner, token, summary);
       log(`${summary.findings.filter((f) => f.kind === "warn").length} warning(s)`);
-      return { summary, seconds: Math.round((Date.now() - started) / 1000), by };
+      return { summary: kept, unread: bundle.cut, seconds: Math.round((Date.now() - started) / 1000), by };
     } catch (e) {
       log(`ERROR ${(e as Error).message}`);
       throw NO_READER.test((e as Error).message) && !signal.aborted ? new PlatformError("not_found", NO_BUILDER) : e;
@@ -866,14 +876,15 @@ async function capabilityList(platform: Platform, owner: Agent) {
   const created = (id: string) => platform.registry.getCapability(id)?.createdAt ?? "";
   for (const c of platform.list(owner).sort((a, b) => order(a.id) - order(b.id) || created(a.id).localeCompare(created(b.id)))) {
     const m = platform.get(owner, c.id);
-    const icon = await platform.icon(c.id).catch(() => undefined);
+    // Its kind only: the icon itself is fetched by the page, and Home asks for this list again and again.
+    const iconKind = await platform.iconKind(c.id).catch(() => null);
     const row = platform.registry.getCapability(c.id);
     const last = latest.get(c.id);
     caps.push({
       ...c,
-      hasIcon: !!icon,
+      hasIcon: !!iconKind,
       // "image": an owner upload (shown as is); "glyph": a 5×5 glyph, the owner's or the builder's ui/icon.svg (tinted by the tile).
-      iconKind: !icon ? null : icon.glyph ? "glyph" : "image",
+      iconKind,
       hue: platform.hueOf(c.id),
       saturation: platform.saturationOf(c.id),
       ui: !!m.ui?.available,
@@ -882,7 +893,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
       // A failed build the owner discarded isn't shown on the tool (Home's badge, Info's notice): it's put aside.
-      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
+      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && failureOf(last.id, () => platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
       held: held.get(c.id) ?? null,
     });
@@ -922,6 +933,19 @@ async function capabilityList(platform: Platform, owner: Agent) {
   return [...caps, ...pending];
 }
 
+/**
+ * A list a page polls (Home's tools), with an ETag of what it says: the browser asks again with If-None-Match, and an
+ * unchanged list is a 304 it answers from its own cache.
+ */
+function withEtag(req: Request, value: unknown): Response {
+  const text = JSON.stringify(value);
+  const etag = `"${sha256(text).slice(0, 32)}"`;
+  const headers = { "content-security-policy": WEB_CSP, "cache-control": "private, no-cache", etag };
+  // Weak comparison (RFC 9110): a proxy that compresses the answer may hand the browser W/"…".
+  if (req.headers.get("if-none-match")?.split(",").some((t) => t.trim().replace(/^W\//, "") === etag)) return new Response(null, { status: 304, headers });
+  return new Response(text, { status: 200, headers: { "content-type": "application/json", ...headers } });
+}
+
 const LIVE = new Set(["waiting", "open", "building", "validating"]);
 
 /**
@@ -946,7 +970,7 @@ export const failureReason = (f?: { title: string; detail: string }) => (!f ? ""
 
 export interface InboxItem {
   /** "builder-model": the model the owner picked for building has a successor. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model";
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model" | "suspended";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -994,6 +1018,12 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const c of caps) {
     const m = platform.activeManifest(c.id);
     if (m.requires?.model) modelUsers = true;
+    // Suspended by Hewn: nothing runs it until the owner resumes it, a fix on its way or not.
+    const suspended = platform.suspension(c.id);
+    if (suspended) {
+      needs.push({ kind: "suspended", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: `Suspended: ${suspended.reason}`, severity: "danger", action: "Resume…", at: suspended.at });
+      continue;
+    }
     if (live.has(c.id)) continue;
     const st = platform.readiness(c.id);
     // Held back only by what the owner said no to (Deny): nothing to ask.

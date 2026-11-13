@@ -46,7 +46,9 @@ export class Connections extends Domain {
     const status = this.platform.readiness(capabilityId);
     if (!status.ready) {
       const signIn = !!connectOperation(this.activeManifest(capabilityId));
-      const detail = status.unsupportedAbi
+      const detail = status.suspended
+        ? `suspended: ${status.suspended.reason}`
+        : status.unsupportedAbi
         ? `this version ${status.unsupportedAbi}`
         : status.missingDependencies.length
           ? "it depends on operations that no longer exist"

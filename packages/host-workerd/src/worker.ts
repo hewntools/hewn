@@ -23,14 +23,16 @@ import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
 import { handle, McpSessions } from "./surface/index.ts";
 import { defaultPasses } from "@hewntools/core/passes.ts";
-import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost } from "./surface/host.ts";
-import { CLIENT_IP_HEADER, gatePublic, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
+import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost, TOOL_DATA_LIMIT_MB, toolDataLimitMB } from "./surface/host.ts";
+import { CLIENT_IP_HEADER, gatePublic, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 import { fetchLink } from "./surface/fetch-link.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
 // @ts-expect-error text module
 import RUNTIME from "./capability-runtime.js";
+// @ts-expect-error text module
+import GUARD from "./capability-guard.js";
 
 interface Env {
   HEWN: DurableObjectNamespace;
@@ -54,6 +56,8 @@ interface Env {
   PORT: string;
   /** HEWN_PROXY_SECRET: when set, the public sockets take only requests carrying it ("" = off). */
   PROXY_SECRET?: string;
+  /** HEWN_PROXY_CLIENT_IP: "1" takes the visitor's address from the trusted proxy's x-hewn-proxy-client-ip. */
+  PROXY_CLIENT_IP?: string;
   /** "1" when the host runs Hewn's builder and intake (HEWN_BUILD_URL): "remote" is a choice, and the default. */
   REMOTE_JOBS?: string;
   /** "1" when a host runs this Hewn for its owner (HEWN_HOSTED): no terminal, no local agents. */
@@ -62,6 +66,8 @@ interface Env {
   VERSION?: string;
   /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
   HOST_SIGNIN_URL?: string;
+  /** When the supervisor's watchdog last restarted workerd for not responding (ISO time; "" = never, in this supervisor's run). */
+  STALLED?: string;
 }
 
 const COMPAT_DATE = "2026-09-01";
@@ -72,11 +78,12 @@ const CALL_TIMEOUT_MS = 30_000;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Only the Public entrypoint may mark a request public (and say who sent it).
-    if (request.headers.has(PUBLIC_HEADER) || request.headers.has(CLIENT_IP_HEADER) || request.headers.has(PROXY_SECRET_HEADER)) {
+    if ([PUBLIC_HEADER, CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PROXY_CLIENT_IP_HEADER].some((h) => request.headers.has(h))) {
       const headers = new Headers(request.headers);
       headers.delete(PUBLIC_HEADER);
       headers.delete(CLIENT_IP_HEADER);
       headers.delete(PROXY_SECRET_HEADER);
+      headers.delete(PROXY_CLIENT_IP_HEADER);
       request = new Request(request, { headers });
     }
     return env.HEWN.get(env.HEWN.idFromName("owner")).fetch(request);
@@ -88,7 +95,7 @@ const limiter = new RateLimiter();
 
 export class Public extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    const gated = gatePublic(request, limiter, (l) => console.log(`[${new Date().toISOString()}] ${l}`), this.env.PROXY_SECRET);
+    const gated = gatePublic(request, limiter, (l) => console.log(`[${new Date().toISOString()}] ${l}`), this.env.PROXY_SECRET, this.env.PROXY_CLIENT_IP === "1");
     if (gated instanceof Response) return gated;
     return this.env.HEWN.get(this.env.HEWN.idFromName("owner")).fetch(gated);
   }
@@ -302,10 +309,32 @@ function diskBlobs(env: Env): Blobs {
   };
 }
 
+/**
+ * How big a capability's states may grow (bytes; 0: not at all), and what to say when a call needed
+ * more: the owner's limit, or none while the disk is nearly full.
+ */
+interface DataLimits {
+  limit(capabilityId: string): number;
+  full(capabilityId: string, limit: number): string;
+}
+
+/** SQLite's error for a write past a state's limit (or a full disk). */
+const isFull = (message: string | undefined) => /SQLITE_FULL/.test(message ?? "");
+
 /** The runtime port: capability code runs in its CapabilityHost, isolated, with its own state. */
-function workerdRuntime(env: Env): CapabilityRuntime {
+function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
   // RPC stub of a CapabilityHost (typed loosely: the generated stub types are too deep for tsc).
   const host = (capabilityId: string) => env.CAPS.get(env.CAPS.idFromName(capabilityId)) as unknown as CapabilityHostApi;
+  /** Run against a state with its limit; a write past it fails saying so. */
+  const limited = async <T>(capabilityId: string, run: (limit: number) => Promise<T>): Promise<T> => {
+    const limit = data.limit(capabilityId);
+    try {
+      return await run(limit);
+    } catch (e) {
+      if (isFull((e as Error).message)) throw new PlatformError("operation_failed", data.full(capabilityId, limit));
+      throw e;
+    }
+  };
   return {
     async invoke(target, key, input, onCall, onModel) {
       const call = async (capabilityId: string, operation: string, callInput: unknown) => {
@@ -313,40 +342,57 @@ function workerdRuntime(env: Env): CapabilityRuntime {
         return onCall({ capabilityId, operation, input: callInput });
       };
       const timer = deadlineTimer(deadlineOf(target.deadline, CALL_TIMEOUT_MS), () => new PlatformError("operation_failed", `${key} timed out (call chain deadline)`));
+      // Past the deadline the call is stopped, not only no longer waited for: its code, and anything
+      // else running on that state with it, ends there. (Code that never yields can't be stopped from
+      // here: it holds the thread this runs on too, until the supervisor's watchdog restarts workerd.)
+      let late: Error | undefined;
+      const expired = timer.expired.catch(async (e: Error) => {
+        late = e;
+        await host(target.capabilityId).stop(target.state.scratch ?? null, `stopped: ${target.capabilityId}/${key} ran past its deadline`).catch(() => {});
+        throw e;
+      });
+      const limit = data.limit(target.capabilityId);
       try {
         const r = await Promise.race([
-          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly),
-          timer.expired,
+          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit),
+          expired,
         ]);
-        if (!r.ok) throw new PlatformError("operation_failed", `${key} failed: ${r.error}`, { logs: r.logs });
+        if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
         return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs, inserted: r.inserted };
       } catch (e) {
+        // Out of time: whatever came back once it was stopped, it timed out.
+        if (late) throw late;
         if (e instanceof PlatformError) throw e;
-        throw new PlatformError("operation_failed", `${key} failed: ${(e as Error).message}`);
+        throw new PlatformError("operation_failed", isFull((e as Error).message) ? data.full(target.capabilityId, limit) : `${key} failed: ${(e as Error).message}`);
       } finally {
         timer.clear();
       }
     },
-    // Describing only loads code; any capability id's host can do it.
-    describe: (code) => host("_describe").describe(code),
-    migrate: (state, migrations, code) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code),
+    // Describing only loads code; any capability id's host can do it. With the limit tools have unless the owner
+    // gave one its own: the isolate it loads is the one the build's tests and the tool's data then use, not one more.
+    describe: (code) => host("_describe").describe(code, data.limit("")),
+    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit)),
     hasState: (state) => host(state.capabilityId).hasState(state.scratch ?? null),
     copyState: (from, to) => host(from.capabilityId).copyState(from.scratch ?? null, to.scratch ?? null),
     dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
     listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
-    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code),
-    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code),
-    loadState: (state, tables, code) => host(state.capabilityId).load(state.scratch ?? null, tables, code),
+    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId)),
+    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId)),
+    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit)),
   };
 }
 
 type CapabilityHostApi = {
-  [K in "invoke" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
+  [K in "invoke" | "stop" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
 };
 
 // ---------- HewnDO: the owner's platform ----------
 
-const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses() };
+const DEFAULT_SETTINGS: Settings = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses(), toolDataLimitMB: TOOL_DATA_LIMIT_MB };
+
+const MB = 1024 * 1024;
+/** "100 MB", "2 GB". */
+const sizeText = (bytes: number) => (bytes >= 1024 * MB && bytes % (1024 * MB) === 0 ? `${bytes / (1024 * MB)} GB` : `${Math.round(bytes / MB)} MB`);
 
 export class HewnDO extends DurableObject<Env> {
   private platform!: Platform;
@@ -354,6 +400,8 @@ export class HewnDO extends DurableObject<Env> {
   private secrets!: EncryptedSecretStore;
   private visualInvokers = new Map<string, VisualInvoke>();
   private sql: Sql;
+  /** The supervisor's word that the disk with Hewn's data is nearly full: tools' data doesn't grow while it is. */
+  private diskLow: { floor: number } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -365,7 +413,7 @@ export class HewnDO extends DurableObject<Env> {
       this.platform = new Platform({
         sql: this.sql,
         blobs: diskBlobs(env),
-        runtime: workerdRuntime(env),
+        runtime: workerdRuntime(env, { limit: (id) => this.dataLimit(id), full: (id, limit) => this.dataFull(id, limit) }),
         workbench: remoteWorkbench(env, this.visualInvokers),
         secrets: this.secrets,
         brief: BRIEF,
@@ -400,9 +448,30 @@ export class HewnDO extends DurableObject<Env> {
       });
       this.sessions = new McpSessions(this.platform, (m) => console.log(`[${new Date().toISOString()}] ${m}`), (p) => this.surfaceHost().asset(p));
       await this.armAlarm();
+      // What was running when workerd stopped responding is told so first: a build whose own code did it fails rather than being retried.
+      try {
+        this.platform.recoverStall(env.STALLED || undefined);
+      } catch (e) {
+        console.log(`[${new Date().toISOString()}] couldn't tell what was running when Hewn stopped responding: ${(e as Error).message}`);
+      }
       // Not awaited: retried builds run in the background.
       void this.platform.recoverInterruptedBuilds().then(() => this.platform.cleanup());
     });
+  }
+
+  /** How big a capability's states may grow, in bytes: its limit, or 0 while the disk is nearly full. */
+  private dataLimit(capabilityId: string): number {
+    return this.diskLow ? 0 : toolDataLimitMB(this.settings(), capabilityId) * MB;
+  }
+
+  /** What a call that needed more room than `limit` gives fails with; the owner's log says so too. */
+  private dataFull(capabilityId: string, limit: number): string {
+    const name = this.platform.registry.getCapability(capabilityId)?.name ?? capabilityId;
+    const message = limit
+      ? `${name}'s data is at its ${sizeText(limit)} limit, so it can't save more. The limit is in Settings › Data.`
+      : `${name} can't save more: the disk with Hewn's data has less than ${sizeText(this.diskLow?.floor ?? 1024 * MB)} free.`;
+    console.log(`[${new Date().toISOString()}] ${capabilityId}: ${message}`);
+    return message;
   }
 
   /** One DO alarm for the next due schedule (re-armed whenever that may change). */
@@ -440,7 +509,7 @@ export class HewnDO extends DurableObject<Env> {
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses"] as const)
+    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"] as const)
       if (k in change && next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
   }
@@ -552,6 +621,10 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/changed":
           // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });
+        case "/_admin/disk":
+          // The supervisor checks the disk with Hewn's data: while it's nearly full, tools' data doesn't grow.
+          this.diskLow = body.low === true ? { floor: Number.isFinite(body.floor) ? body.floor : 1024 * MB } : null;
+          return Response.json({ ok: true });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.
           const invoke = this.visualInvokers.get(body.buildId);
@@ -654,7 +727,7 @@ export class HewnDO extends DurableObject<Env> {
 }
 
 /** Admin routes that change nothing a backup keeps (`/_admin/invoke` counts its own writes). */
-const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed"]);
+const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed", "/_admin/disk"]);
 
 /** Whether an admin request changes what a backup keeps (the idle report's backup reason). */
 function adminChanges(path: string, body: any): boolean {
@@ -671,7 +744,7 @@ function adminChanges(path: string, body: any): boolean {
 const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   list: { owner: true }, get: { owner: true }, authorization: { owner: false }, readiness: { owner: false },
   setSecret: { owner: true, changes: true }, deleteSecret: { owner: true, changes: true }, setConfig: { owner: true, changes: true }, connect: { owner: true, changes: true }, accounts: { owner: true }, approveGrants: { owner: true, changes: true }, approveGrant: { owner: true, changes: true }, revokeGrant: { owner: true, changes: true }, declineGrant: { owner: true, changes: true },
-  archive: { owner: true, changes: true }, restore: { owner: true, changes: true }, archived: { owner: true }, rollback: { owner: true, changes: true }, exportData: { owner: true }, importData: { owner: true, changes: true }, purge: { owner: true, changes: true }, startOver: { owner: true, changes: true },
+  archive: { owner: true, changes: true }, restore: { owner: true, changes: true }, resume: { owner: true, changes: true }, archived: { owner: true }, rollback: { owner: true, changes: true }, exportData: { owner: true }, importData: { owner: true, changes: true }, purge: { owner: true, changes: true }, startOver: { owner: true, changes: true },
   logLines: { owner: false }, getBuild: { owner: true }, retryBuild: { owner: true }, cancelBuild: { owner: true },
   buildsInReview: { owner: true }, approveBuild: { owner: true }, rejectBuild: { owner: true },
   buildReport: { owner: true },
@@ -679,6 +752,7 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   listSchedules: { owner: true }, createSchedule: { owner: true, changes: true }, updateSchedule: { owner: true, changes: true }, deleteSchedule: { owner: true, changes: true },
   createWebTicket: { owner: true }, createUiTicket: { owner: false }, publicUrl: { owner: false }, setPublicUrl: { owner: true, changes: true }, passkeys: { owner: true }, removePasskey: { owner: true, changes: true },
   agents: { owner: true }, updateAgent: { owner: true, changes: true }, pendingAgents: { owner: true }, decideAgent: { owner: true, changes: true }, unreadableSecrets: { owner: true },
+  capabilityAgents: { owner: true }, setCapabilityAgent: { owner: true, changes: true },
   confirmations: { owner: true }, decideConfirmation: { owner: true },
   models: { owner: true }, setModelSettings: { owner: true, changes: true }, setModelKey: { owner: true, changes: true }, checkModelProvider: { owner: true }, replacePinnedModel: { owner: true }, setCapabilityModel: { owner: true }, modelSpend: { owner: true }, refreshModelCatalog: { owner: false },
   metrics: { owner: true }, idleActivity: { owner: false },
@@ -692,59 +766,104 @@ const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : "live"
 export class CapabilityHost extends DurableObject<Env> {
   /** Which loaded code each running facet was started with. */
   private running = new Map<string, string>();
+  /** Calls (and other work) in progress on each facet. */
+  private busy = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS states (name TEXT PRIMARY KEY)");
   }
 
-  private worker(code: CodeRef, hosts: string[]) {
-    const key = `${code.hash}|${hosts.join(",")}`;
+  /**
+   * Stop a state's code: whatever it has running (awaits, timers, writes) ends, and calls in progress
+   * on it fail with `reason`. Its data stays; the next call starts it afresh. How a tool's code is
+   * stopped is this host's business: code in a process of its own would be stopped by ending that.
+   */
+  stop(scratch: string | null, reason: string) {
+    this.halt(facetName(scratch), reason);
+  }
+
+  private halt(name: string, reason: string) {
+    if (this.running.has(name)) this.ctx.facets.abort(name, new Error(reason));
+    this.running.delete(name);
+  }
+
+  /**
+   * Work on a facet. When the last piece of work on it ends, the facet is stopped, so nothing a call
+   * leaves behind (a timer, a promise it didn't await) runs on after it.
+   */
+  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], limit: number, work: (facet: any) => Promise<T>): Promise<T> {
+    const name = facetName(scratch);
+    const facet = this.facet(scratch, code, hosts, limit);
+    this.busy.set(name, (this.busy.get(name) ?? 0) + 1);
+    try {
+      return await work(facet);
+    } finally {
+      const left = this.busy.get(name)! - 1;
+      if (left > 0) this.busy.set(name, left);
+      else {
+        this.busy.delete(name);
+        this.halt(name, "finished");
+      }
+    }
+  }
+
+  /**
+   * The isolate for `code` with these hosts and this size limit (bytes) for each state it runs.
+   * "experimental" is for the limit's setter, sql.setMaxPageCountForTest: hewn-guard.js
+   * (capability-guard.ts) takes it, with what else the flag adds to storage, out of the
+   * capability's reach before its code can use any.
+   */
+  private worker(code: CodeRef, hosts: string[], limit: number) {
+    const bytes = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
+    const key = `${code.hash}|${hosts.join(",")}|${bytes}`;
     return {
       key,
       stub: this.env.LOADER.get(key, () => ({
         compatibilityDate: COMPAT_DATE,
-        compatibilityFlags: ["nodejs_compat"],
+        compatibilityFlags: ["nodejs_compat", "experimental"],
+        allowExperimental: true,
         mainModule: "hewn-runtime.js",
-        modules: { "hewn-runtime.js": RUNTIME, "capability.js": code.js },
+        modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
         env: {},
         globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts } }),
       })),
     };
   }
 
-  /** The facet for a state, running `code` (restarted if it was running other code). */
-  private facet(scratch: string | null, code: CodeRef, hosts: string[]) {
+  /** The facet for a state, running `code` with `limit` (restarted if it was running other code or another limit). */
+  private facet(scratch: string | null, code: CodeRef, hosts: string[], limit: number) {
     const name = facetName(scratch);
-    const w = this.worker(code, hosts);
+    const w = this.worker(code, hosts, limit);
     if (this.running.has(name) && this.running.get(name) !== w.key) this.ctx.facets.abort(name, new Error("new version"));
     this.running.set(name, w.key);
     this.ctx.storage.sql.exec("INSERT OR IGNORE INTO states (name) VALUES (?)", name);
     return this.ctx.facets.get(name, () => ({ class: w.stub.getDurableObjectClass("Capability") })) as any;
   }
 
-  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false) {
-    return this.facet(scratch, code, hosts).invoke(key, input, secrets, caller, call, config, model, readOnly);
+  // `limit`: how big the state may grow, in bytes (0: not at all; workerdRuntime passes the owner's).
+  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0) {
+    return this.on(scratch, code, hosts, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
   }
 
-  async describe(code: CodeRef): Promise<string[]> {
-    return (this.worker(code, []).stub.getEntrypoint() as any).describe();
+  async describe(code: CodeRef, limit = 0): Promise<string[]> {
+    return (this.worker(code, [], limit).stub.getEntrypoint() as any).describe();
   }
 
-  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef): Promise<string[]> {
-    return this.facet(scratch, code, []).migrate(migrations);
+  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0): Promise<string[]> {
+    return this.on(scratch, code, [], limit, (f) => f.migrate(migrations));
   }
 
-  async dump(scratch: string | null, code: CodeRef) {
-    return this.facet(scratch, code, []).dump();
+  async dump(scratch: string | null, code: CodeRef, limit = 0) {
+    return this.on(scratch, code, [], limit, (f) => f.dump());
   }
 
-  async count(scratch: string | null, code: CodeRef): Promise<Record<string, number>> {
-    return this.facet(scratch, code, []).count();
+  async count(scratch: string | null, code: CodeRef, limit = 0): Promise<Record<string, number>> {
+    return this.on(scratch, code, [], limit, (f) => f.count());
   }
 
-  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef): Promise<number> {
-    return this.facet(scratch, code, []).load(tables);
+  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0): Promise<number> {
+    return this.on(scratch, code, [], limit, (f) => f.load(tables));
   }
 
   hasState(scratch: string | null): boolean {
@@ -764,8 +883,7 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   private drop(name: string) {
-    if (this.running.has(name)) this.ctx.facets.abort(name, new Error("dropped"));
-    this.running.delete(name);
+    this.halt(name, "dropped");
     this.ctx.facets.delete(name);
     this.ctx.storage.sql.exec("DELETE FROM states WHERE name = ?", name);
   }

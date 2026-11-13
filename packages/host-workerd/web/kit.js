@@ -217,7 +217,7 @@ function inline(text) {
 
 // ---------- agents and actors ----------
 
-const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client" };
+const AGENT_LABELS = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", claude: "Claude", agent: "the asking agent", "mcp-client": "MCP client", hewn: "Hewn" };
 /** Agents' own names (from the Agents API), for activity and cards. */
 export const rememberAgents = (list) => list.forEach((a) => a.name && (AGENT_LABELS[a.id] = a.name));
 /** Human name for an actor id: agents by label; the owner (web, CLI, an opened app) is "You". */

@@ -1,0 +1,25 @@
+{
+  "id": "runaway",
+  "name": "Runaway",
+  "purpose": "Test fixture: code that keeps running after its call, past its deadline, or forever.",
+  "abi": "2.3",
+  "operations": [
+    { "name": "tick", "description": "Write one row", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "properties": { "tag": { "type": "string" } } }, "outputSchema": { "type": "object" } },
+    { "name": "count", "description": "Rows written, by tag", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" } },
+    { "name": "linger", "description": "Leave a timer writing rows behind, and return", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" } },
+    { "name": "overrun", "description": "Write a row every 200 ms, never returning", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" } },
+    { "name": "slow", "description": "Wait, then write a row", "version": 1, "sideEffect": "write",
+      "inputSchema": { "type": "object", "properties": { "ms": { "type": "integer" } } }, "outputSchema": { "type": "object" } },
+    { "name": "spin", "description": "Never returns, never yields (CPU loop)", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object" }, "outputSchema": { "type": "object" } },
+    { "name": "widget_rows", "description": "Rows written, as a widget", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object" }, "outputSchema": { "type": "object", "required": ["template"], "properties": { "template": { "type": "string" } } } }
+  ],
+  "widgets": [
+    { "name": "rows", "version": 1, "title": "Rows", "operation": "widget_rows@1", "sizes": ["small"], "refresh": { "every": "15m" } }
+  ]
+}

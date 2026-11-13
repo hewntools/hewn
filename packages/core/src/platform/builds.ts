@@ -253,7 +253,9 @@ export class Builds extends Domain {
       // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
       if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
-      const requester: Agent = { id: b.requestedBy, kind: owner ? "user" : "agent", scopes: new Set([scopeOf(b.kind)]), capabilities: "*" };
+      // An agent's retry sees only the tools it may use now: the owner may have switched it off for this one since.
+      const now = owner ? undefined : this.agentStore.get(b.requestedBy);
+      const requester: Agent = { id: b.requestedBy, kind: owner ? "user" : "agent", scopes: new Set([scopeOf(b.kind)]), capabilities: now?.capabilities ?? "*", ...(now?.except ? { except: now.except } : {}) };
       try {
         const next = await this.retryBuild(requester, id, { auto: true });
         retried.push(next.buildId);
@@ -1229,7 +1231,7 @@ export class Builds extends Domain {
         ...(b.ranModel ? { ranModel: b.ranModel } : {}),
         ...(b.brief ? { brief: b.brief } : {}),
         attempts,
-        ...(b.status === "failed" ? { failure: explainFailure(b.log).title } : {}),
+        ...(b.status === "failed" ? { failure: failureOf(b.id, () => b.log).title } : {}),
         ...(b.feedback ? { feedback: b.feedback } : {}),
         signals: {
           fixed: later.some((x) => retry(x) && x.status === "promoted"),
@@ -1929,7 +1931,7 @@ export class Builds extends Domain {
     if (step && (b.status === "waiting" || b.status === "open" || b.status === "building" || b.status === "validating")) view.step = step;
     const tests = testCounts(b.log);
     if (tests) view.tests = tests;
-    if (b.status === "failed") view.failure = explainFailure(b.log);
+    if (b.status === "failed") view.failure = failureOf(b.id, () => b.log);
     if (view.failure?.paused) {
       const next = this.registry.retryOf(b.id);
       if (next) view.continuedAs = next;
@@ -2019,7 +2021,22 @@ const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bu
 const scopeOf = (kind: BuildKind): Scope => (kind === "create" ? "create" : "modify");
 
 /** Paused by the builder's host, its work kept: failed for waits and agents, the owner's to Continue or Stop. */
-const isPaused = (b: BuildRow) => b.status === "failed" && !!explainFailure(b.log).paused;
+const isPaused = (b: BuildRow) => b.status === "failed" && !!failureOf(b.id, () => b.log).paused;
+
+/**
+ * A failed build's explanation, read from its log once and kept: a failed build's log doesn't change, and pages poll
+ * the builds (the Inbox, Home's tiles). At most 500, the oldest out first. Only for a build that has failed.
+ */
+const failures = new Map<string, BuildFailure>();
+export function failureOf(buildId: string, log: () => readonly string[]): BuildFailure {
+  let f = failures.get(buildId);
+  if (!f) {
+    f = explainFailure([...log()]);
+    if (failures.size >= 500) failures.delete(failures.keys().next().value!);
+    failures.set(buildId, f);
+  }
+  return f;
+}
 
 /**
  * The most of the owner's conversation OWNERS_WORDS.md carries, in UTF-8 bytes (the turns, the blank

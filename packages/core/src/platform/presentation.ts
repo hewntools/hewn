@@ -65,6 +65,14 @@ export class Presentation extends Domain {
     return this.registry.getCapability(capabilityId)?.saturation ?? this.activeManifest(capabilityId).saturation ?? null;
   }
 
+  /** The kind of icon a tile shows, without reading it: the owner's (the registry row's iconType), else ui/icon.svg's glyph, else none. */
+  async iconKind(capabilityId: string): Promise<"glyph" | "image" | null> {
+    const cap = this.registry.getCapability(capabilityId);
+    if (cap?.iconType) return cap.iconType === "glyph" ? "glyph" : "image";
+    if (!cap?.activeVersion) return null;
+    return (await this.loadVersion(capabilityId, cap.activeVersion)).files["ui/icon.svg"] ? "glyph" : null;
+  }
+
   /** The icon to show (owner's first, then the capability's ui/icon.svg), and whether it is a glyph. `owner: false`: the builder's only (Set icon's Use default). */
   async icon(capabilityId: string, { owner = true }: { owner?: boolean } = {}): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> {
     const cap = this.registry.getCapability(capabilityId);

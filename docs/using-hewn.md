@@ -24,6 +24,8 @@ Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget tha
 
 A widget shows a tool's data at a glance: today's habits, tonight's aurora forecast, a quote. It refreshes by itself. When it couldn't refresh, it keeps the last view and says how old it is.
 
+Home keeps itself up to date while it's open: a tool being built fills in as it goes, and a tool an agent made or changed elsewhere shows up within a minute.
+
 ## Hewn's own tools
 
 **New** offers, under its box, **Or install**: **One of Hewn's tools**, or **A file or a link someone shared** ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
@@ -48,6 +50,7 @@ The **Inbox** button on the right of the top bar holds everything that needs you
 - builds that failed, and builds a host's builder paused (**Continue** or **Stop**)
 - connections that need you to sign in again
 - model spend at 80% of your budget, or calls refused over it
+- tools Hewn suspended because they kept it from responding ([Troubleshooting](troubleshooting.md#tools))
 
 Each row has one action. **Activity** in the Inbox shows what just happened, and builds in progress pulse.
 
@@ -60,13 +63,14 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 **Info** (in the tool's menu) is one page about the tool: what it's for, its status, and each part of it as a section you act on right there:
 - **Operations:** each with **Run**, which opens it as a form and shows the result; the first five, then **Show all**
 - **Allowed to:** the hosts, keys, other tools and model it may use. **Authorize** or **Deny** a host, another tool or the model it asks for (a no is kept until its next version, and through a quick change such as another tier; it can't run without it, so Info offers **Ask builder to work without it**), **Set…** a key it asks for, **Revoke** what it has. The model's row has its tier (or **A specific model…**) in a menu, what it spent this month, and its own monthly cap ([Models](models.md))
+- **Agents:** a switch for each connected agent: whether it can use this tool. Off keeps an agent that sees every tool away from this one; on gives it to an agent limited to some tools ([Connecting agents](agents.md#what-agents-can-do))
 - **Data:** how many rows it keeps, when it last wrote, **Export**, and **Start over** (empty it, keep the tool: [Sharing tools](sharing.md#start-over))
 - **Schedules:** a switch each, **+ Add schedule**, and **Try again** on a failed run (one run now, as the schedule runs; if it works, one paused after failing stays paused until you switch it on)
 - **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
 - **Versions:** the last two, and **All versions**; a version's **Details** has its conversation, spec, log and code ([Building tools](building-tools.md#versions))
 
-Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
+Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule, **Resume** for a suspended tool) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)). **Polish…** in the tool's menu, under **Change…**, opens the change panel for a second look at its design: the intake proposes a Polish (say what you'd like it to lead with), and the builder reviews the tool on screenshots and fixes what it finds, keeping what the tool does and its character. Your own data is shown to the builder only if you tick it on the proposal ([Polishing a tool](building-tools.md#polishing-a-tool)).
 
@@ -114,7 +118,7 @@ Each step shows how long it took, by Hewn's clock, so it's the same whenever you
 - **General:** appearance (system, light or dark; a tool open in Hewn follows it too, if its screen uses Hewn's styles or handles light and dark itself: [Tool UIs](../spec/tools.md#tool-uis)), your time zone, and whether the sandbox is on.
 - **AI:** who does [Hewn's two jobs](concepts.md#hewns-two-jobs) (builds tools, on which model, and thinks inside tools), which models agents may ask for, your [instructions for building](building-tools.md#instructions), and the Models page ([Models](models.md)).
 - **Remote access:** the public URL, your passkeys and signed-in browsers ([Using Hewn from anywhere](remote-access.md)).
-- **Data:** backups and their folder, how long call logs are kept, and deleted tools ([Your data](data.md)).
+- **Data:** backups and their folder, how long call logs are kept, how big each tool's data can get, and deleted tools ([Your data](data.md)).
 - **About:** the version, whether a newer one is out (with the command to upgrade), and shortcuts.
 
 ![Settings › AI: Builds tools set to Claude Code on the default model, the models agents may ask for, Instructions for building (none yet), and Thinks inside tools with no provider yet](images/settings-ai.png)

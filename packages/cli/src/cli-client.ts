@@ -9,6 +9,8 @@ export interface PlatformClient {
   call<T = any>(method: string, ...args: unknown[]): Promise<T>;
   /** Supervisor control (backups, status). */
   control<T = any>(path: string, body?: unknown): Promise<T>;
+  /** Your settings (Settings in the web client); with `change`, saved first. */
+  settings<T = any>(change?: Record<string, unknown>): Promise<T>;
   close(): void;
 }
 
@@ -40,6 +42,7 @@ export async function connect(home: Home): Promise<PlatformClient> {
       url: info.url,
       call: async (method, ...args) => (await post(`${info.url}/_admin/call`, { "x-hewn-admin": info.adminToken }, { method, args })).result,
       control: (path, body) => post(`${info.control.url}${path}`, { "x-hewn-control": info.control.token }, body ?? {}),
+      settings: (change) => post(`${info.url}/_admin/settings`, { "x-hewn-admin": info.adminToken }, change),
       close: () => {},
     };
   }

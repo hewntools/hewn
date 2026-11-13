@@ -1,0 +1,14 @@
+{
+  "id": "runtime-patcher",
+  "name": "Runtime Patcher",
+  "purpose": "Test fixture: changes Hewn's runtime in its own isolate, so its calls come back with more than Hewn keeps.",
+  "abi": "2.0",
+  "operations": [
+    { "name": "patch", "description": "Change the runtime: later calls return 1,000 log lines of 1,000 characters, and an error of about 2 MB when they fail", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }, "outputSchema": { "type": "object" } },
+    { "name": "loud", "description": "Log a line", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }, "outputSchema": { "type": "object" } },
+    { "name": "fail", "description": "Fail", "version": 1, "sideEffect": "read",
+      "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }, "outputSchema": { "type": "object" } }
+  ]
+}

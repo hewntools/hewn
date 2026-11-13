@@ -457,6 +457,25 @@ describe("create with widgets", () => {
     assert.deepEqual(t.platform.activeManifest("ui-counter").widgets?.map((x) => x.name), ["count"]);
     await assert.rejects(t.platform.create(t.claude, { name: "Conn", purpose: "p", requirements: "r", kind: "connection", widgets: true }), /connection has no widgets/);
   });
+
+  test("an agent's widgets build chained after the owner's create is the agent's change: it waits for review", async () => {
+    // An agent whose builds go live by themselves (approval mode "live", not offered yet): "wait" would hold it anyway.
+    (t.platform.agentStore as unknown as { sql: { prepare(q: string): { run(...a: unknown[]): unknown } } }).sql.prepare("UPDATE agents SET approval_mode = 'live' WHERE id = ?").run(t.claude.id);
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    t.queue(async (ws) => {
+      await gate;
+      cpSync(join(FIXTURES, "ui-counter"), ws, { recursive: true });
+    }, addCountWidget);
+    const own = await t.platform.create(USER, { name: "UI Counter", purpose: "Count taps.", requirements: "A counter." });
+    const w = await t.platform.addWidgets(t.claude, { capabilityId: "ui-counter", after: own.buildId });
+    open();
+    assert.equal((await t.platform.settle(own.buildId)).status, "promoted");
+    const done = await t.platform.settle(w.buildId);
+    assert.equal(done.status, "review", done.log.join("\n"));
+    assert.deepEqual(done.review!.newOperations.map((o) => o.key), ["widget_count@1"]);
+    assert.equal(t.platform.activeManifest("ui-counter").widgets, undefined, "not live");
+  });
 });
 
 describe("create with widgets across a restart", () => {

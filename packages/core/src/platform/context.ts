@@ -27,6 +27,7 @@ import type { Builds } from "./builds.ts";
 import type { Validation } from "./validation.ts";
 import type { Widgets } from "./widgets.ts";
 import type { Housekeeping } from "./housekeeping.ts";
+import type { Stalls } from "./stalls.ts";
 import type { Platform } from "../platform.ts";
 
 /** Minimal event emitter (no node:events in the core). */
@@ -71,6 +72,7 @@ export interface Domains {
   sharing: Sharing;
   sessions: Sessions;
   submissions: Submissions;
+  stalls: Stalls;
   validation: Validation;
   widgets: Widgets;
 }
