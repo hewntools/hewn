@@ -6,7 +6,7 @@
 // window.hewnAscii(preEl, { cols, rows, speed, ink, opacity, fill, focal, shade, aspect, at, still, reduced }) → stop()
 //   ink: "tone" (the default: the <pre>'s own colour, fainter where the metal is darker), "mono" (the <pre>'s colour,
 //        even) or "colour" (the chrome's own colours, which need a dark page).
-//   fill: how readily a dot lights (1.4); more makes the mark denser and bolder. Braille's dots are small: the mark
+//   fill: how readily a dot lights (1); more makes the mark denser and bolder. Braille's dots are small: the mark
 //   carries about a third of the ink the old ASCII field did at the same opacity, so it wants twice the opacity or more.
 //   aspect: a character cell's height over its width. Measured from the <pre> unless given.
 //   at: hold the loop at this point (0 to 1). still: the H standing still, as without WebGL 2. reduced: the logo seen
@@ -329,7 +329,7 @@ void main() {
 
   window.hewnAscii = function (el, opts = {}) {
     const o = { ...opts, ...KNOBS }, cols = o.cols || 72, rows = o.rows || 34, speed = o.speed ?? 1;
-    const m = { el, cols, rows, ink: o.ink || "tone", fill: o.fill || 1.4, focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
+    const m = { el, cols, rows, ink: o.ink || "tone", fill: o.fill || 1, focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
     const reduced = o.reduced ?? matchMedia("(prefers-reduced-motion: reduce)").matches;
     let mode = o.still ? "still" : "live", u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false, spent = 0;
     el.setAttribute("aria-hidden", "true"); // braille would be read out dot by dot

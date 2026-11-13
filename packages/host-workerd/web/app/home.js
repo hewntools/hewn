@@ -403,7 +403,7 @@ async function firstRun() {
   const renderAll = () => Promise.all([renderAgents(), renderJobs()]);
   view(
     moment(
-      { right: "20px", top: "140px", opacity: 0.7 },
+      { right: "20px", top: "140px", opacity: 0.9 },
       bar({ left: brand(), right: inboxBtn }),
       h(
         "main",

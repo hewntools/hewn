@@ -351,7 +351,7 @@ dialog h2, .dialog h2 { margin-top: 0; }
 /* ASCII field: Hewn's mark (ascii.js) as an ambient backdrop for "moment" screens only (first run, intake, build).
    Under reduced motion it rests on the logo instead of moving. */
 .ascii-field { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
-.ascii-field pre { position: absolute; margin: 0; font: 13px/13px var(--mono); color: var(--accent-ink); opacity: .6; white-space: pre; }
+.ascii-field pre { position: absolute; margin: 0; font: 13px/13px var(--mono); color: var(--accent-ink); opacity: .8; white-space: pre; }
 .ascii-field + * { position: relative; z-index: 1; }
 
 /* ======================= charts (see /_platform/chart.js) ======================= */

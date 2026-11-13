@@ -43,7 +43,7 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const DEF = { theme: "dark", inks: "tone,mono", opacity: "0.6,0.7", fill: "1.4", weight: "400", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
+  const DEF = { theme: "dark", inks: "tone,mono", opacity: "0.8,0.9", fill: "1", weight: "400", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
   const q = new URLSearchParams(location.search), S = {};
   for (const k in DEF) S[k] = q.has(k) ? q.get(k) || "1" : DEF[k];
   let marks = [];
