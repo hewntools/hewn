@@ -167,13 +167,14 @@ async function home({ editing = false } = {}) {
     if (signature(next) !== last && !busy) return home();
     for (const c of next) if (c.building) tiles.get(c.id)?.update(c);
     last = busy ? last : signature(next);
-    timer = setTimeout(poll, list.some((c) => c.building) || next.some((c) => c.building) ? 2500 : IDLE_POLL);
+    timer = setTimeout(poll, list.some((c) => c.building) || next.some((c) => c.building) ? BUILDING_POLL : IDLE_POLL);
   };
-  let timer = setTimeout(poll, list.some((c) => c.building) ? 2500 : IDLE_POLL);
+  let timer = setTimeout(poll, list.some((c) => c.building) ? BUILDING_POLL : IDLE_POLL);
   onLeave(() => clearTimeout(timer));
 }
 
-/** How often Home looks for changes made elsewhere (an agent's new tool, a build started) while nothing builds. */
+/** How often Home looks for changes: while something builds (its tile fills in live), and otherwise (an agent's new tool, a build started elsewhere). */
+const BUILDING_POLL = 2500;
 const IDLE_POLL = 60_000;
 
 /** Home label for a building tile: real milestones only (there's no honest % while code is written). */

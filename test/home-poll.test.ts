@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Home asks for the tool list every few seconds while it's open: an answer reads no icon and no build log, and an
+// Home asks for the tool list again and again while it's open: an answer reads no icon and no build log, and an
 // unchanged list is a 304 the browser answers from its own cache.
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo, Server } from "node:net";
 import { join } from "node:path";
@@ -79,6 +79,8 @@ describe("Home's tool list, as an open Home polls it", () => {
     const same = await poll({ "if-none-match": etag });
     assert.equal(same.status, 304);
     assert.equal(same.body, "");
+    // As a proxy that compresses the answer hands it on: a weak tag matches too.
+    assert.equal((await poll({ "if-none-match": `W/${etag}` })).status, 304);
     assert.equal((await http("/api/capabilities/running-log/icon", { method: "PUT", body: { hue: 120 } })).status, 200);
     const changed = await poll({ "if-none-match": etag });
     assert.equal(changed.status, 200);
@@ -86,10 +88,20 @@ describe("Home's tool list, as an open Home polls it", () => {
     assert.equal(JSON.parse(changed.body).find((c: { id: string }) => c.id === "running-log").hue, 120);
   });
 
-  test("the icon's kind comes from what icon() would serve: an owner's image, a builder's glyph, or none", async () => {
-    assert.equal(await t.platform.iconKind("running-log"), "image");
+  test("the icon's kind is what icon() serves: an owner's image or glyph, the builder's glyph, or none", async () => {
+    const kinds = async () => [await t.platform.iconKind("running-log"), ((await t.platform.icon("running-log")) ?? null) && ((await t.platform.icon("running-log"))!.glyph ? "glyph" : "image")];
+    assert.deepEqual(await kinds(), ["image", "image"]);
+    const glyph = '<svg viewBox="0 0 5 5"><rect x="0" y="0" width="5" height="1"/></svg>';
+    assert.equal((await http("/api/capabilities/running-log/icon", { method: "PUT", body: { glyph } })).status, 200);
+    assert.deepEqual(await kinds(), ["glyph", "glyph"], "the owner's glyph");
     await t.platform.setIcon(USER, "running-log", null);
-    assert.equal(await t.platform.iconKind("running-log"), null, "the seed ships no ui/icon.svg");
-    assert.equal((await t.platform.icon("running-log")) ?? null, null);
+    assert.deepEqual(await kinds(), [null, null], "the seed ships no ui/icon.svg");
+    t.queue((ws) => {
+      mkdirSync(join(ws, "ui"), { recursive: true });
+      writeFileSync(join(ws, "ui/icon.svg"), glyph);
+    });
+    const b = await t.platform.settle((await t.platform.modify(USER, { capabilityId: "running-log", request: "An icon" })).buildId);
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+    assert.deepEqual(await kinds(), ["glyph", "glyph"], "the builder's glyph");
   });
 });

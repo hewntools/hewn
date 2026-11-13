@@ -65,7 +65,7 @@ export class Presentation extends Domain {
     return this.registry.getCapability(capabilityId)?.saturation ?? this.activeManifest(capabilityId).saturation ?? null;
   }
 
-  /** What icon() would show, without reading it: the owner's (from the registry row), else ui/icon.svg's glyph, else none. */
+  /** The kind of icon a tile shows, without reading it: the owner's (the registry row's iconType), else ui/icon.svg's glyph, else none. */
   async iconKind(capabilityId: string): Promise<"glyph" | "image" | null> {
     const cap = this.registry.getCapability(capabilityId);
     if (cap?.iconType) return cap.iconType === "glyph" ? "glyph" : "image";
