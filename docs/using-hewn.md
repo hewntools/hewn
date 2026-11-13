@@ -129,6 +129,10 @@ On a narrow screen, Home is a four-column grid, the menu folds into ☰ (the Inb
 
 ![Home on a phone: tools in a four-column grid, the menu folded into ☰ next to the Inbox, and widgets full width below](images/phone-home.png)
 
+## Hewn's mark
+
+Behind the first run, a new tool, a build and the sign-in page is Hewn's mark, drawn in characters: the thirteen pixels of the H run together into one pixel and part again, every 26 seconds. It pauses while the tab is hidden. With your system's reduce motion setting on, it rests on the H. A browser without WebGL 2 shows the H standing still.
+
 ## Shortcuts
 
 | Key | |

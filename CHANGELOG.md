@@ -2,6 +2,12 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.12 (unreleased)
+
+### New
+
+- **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+
 ## 0.4.11 (2026-11-13)
 
 ### New

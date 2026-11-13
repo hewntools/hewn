@@ -1,0 +1,87 @@
+<!doctype html>
+<!-- Hewn's mark as the web client draws it (packages/ui/src/ascii.js), in looks side by side: inks by opacities, over the
+     app's own ink and wallpaper. Open the file in a browser; nothing serves it. The address keeps the choice, so a look
+     can be passed on as a link. On a real page, ?mark-ink=…&mark-opacity=… does the same for the marks it already has. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hewn · the mark on the web</title>
+<link rel="stylesheet" href="../../packages/ui/src/ui.css">
+<script src="../../packages/ui/src/ascii.js"></script>
+<style>
+  body { margin: 0; min-height: 100vh; }
+  header { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; padding: 14px 20px; background: var(--bg); border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); font-size: 13px; }
+  header label { display: inline-flex; gap: 6px; align-items: center; }
+  header input[type=text] { width: 9em; }
+  header input[type=number] { width: 4.5em; }
+  #board { display: grid; gap: 18px; padding: 20px; }
+  .row { display: grid; grid-template-columns: 7em repeat(var(--n), max-content); gap: 18px; align-items: start; }
+  .row > b { font: 600 12px/1.4 var(--mono); padding-top: 6px; }
+  .box { position: relative; overflow: hidden; border-radius: 18px; border: 1px solid rgba(127,127,127,.2); background: var(--bg); }
+  .box .ascii-field { position: relative; inset: auto; }
+  .box .ascii-field pre { position: relative; display: block; margin: 18px; }
+  .box .cap { position: absolute; left: 12px; bottom: 8px; z-index: 2; font: 11px/1 var(--mono); opacity: .7; }
+</style>
+</head>
+<body>
+<header>
+  <label>Theme <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+  <label>Inks <input id="inks" type="text" title="auto, colour, tone, mono"></label>
+  <label>Opacities <input id="opacity" type="text"></label>
+  <label>Fill <input id="fill" type="number" step="0.1" min="0.5" max="4"></label>
+  <label>Weight <select id="weight"><option value="400">Regular</option><option value="700">Bold</option></select></label>
+  <label>Focal <input id="focal" type="number" step="0.05" min="1.2" max="4"></label>
+  <label>Shade <input id="shade" type="number" step="0.05" min="0" max="1"></label>
+  <label>Font px <input id="font" type="number" step="1" min="6" max="24"></label>
+  <label>Cells <input id="cols" type="number" min="8" max="160"> × <input id="rows" type="number" min="4" max="100"></label>
+  <label><input id="still" type="checkbox"> Without WebGL 2</label>
+  <label><input id="reduced" type="checkbox"> Reduced motion</label>
+  <span id="cost" class="faint"></span>
+</header>
+<div id="board"></div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const DEF = { theme: "dark", inks: "auto,tone", opacity: "0.8,0.9", fill: "1", weight: "400", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
+  const q = new URLSearchParams(location.search), S = {};
+  for (const k in DEF) S[k] = q.has(k) ? q.get(k) || "1" : DEF[k];
+  let marks = [];
+  function build() {
+    for (const m of marks) m.stop();
+    marks = [];
+    document.documentElement.dataset.theme = S.theme;
+    const inks = S.inks.split(",").map((s) => s.trim()).filter(Boolean), ops = S.opacity.split(",").map(Number).filter((x) => x >= 0);
+    const board = $("board");
+    board.replaceChildren();
+    for (const ink of inks) {
+      const row = document.createElement("div");
+      row.className = "row"; row.style.setProperty("--n", ops.length);
+      row.append(Object.assign(document.createElement("b"), { textContent: ink }));
+      for (const op of ops) {
+        const box = document.createElement("div"), field = document.createElement("div"), pre = document.createElement("pre"), cap = document.createElement("span");
+        box.className = "box"; field.className = "ascii-field"; cap.className = "cap";
+        box.innerHTML = '<div class="wallpaper dim" aria-hidden="true"><i style="--h:125;--x:-20%;--y:-10%;--w:420px"></i></div>';
+        pre.style.font = `${S.weight} ${S.font}px/${S.font}px var(--mono)`;
+        field.append(pre); box.append(field, cap); row.append(box);
+        const stop = window.hewnAscii(pre, { cols: +S.cols, rows: +S.rows, ink, opacity: op, fill: +S.fill, focal: +S.focal, shade: +S.shade, still: !!S.still, reduced: !!S.reduced });
+        marks.push({ stop, cap, op });
+      }
+      board.append(row);
+    }
+    for (const k in DEF) { const el = $(k); if (el.type === "checkbox") el.checked = !!S[k]; else el.value = S[k]; }
+    const u = new URLSearchParams();
+    for (const k in DEF) if (S[k] !== DEF[k]) u.set(k, S[k]);
+    history.replaceState(null, "", u.size ? `?${u}` : location.pathname);
+  }
+  for (const k in DEF) $(k).addEventListener("change", (e) => { S[k] = e.target.type === "checkbox" ? (e.target.checked ? "1" : "") : e.target.value; build(); });
+  setInterval(() => {
+    let sum = 0;
+    for (const m of marks) { m.cap.textContent = `${Math.round(m.op * 100)}% · ${m.stop.ms.toFixed(1)} ms a frame`; sum += m.stop.ms; }
+    $("cost").textContent = `${marks.length} marks, ${sum.toFixed(1)} ms of the main thread a frame together (15 frames a second each)`;
+  }, 1000);
+  build();
+})();
+</script>
+</body>
+</html>
