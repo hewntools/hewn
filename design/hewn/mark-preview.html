@@ -29,6 +29,8 @@
   <label>Theme <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
   <label>Inks <input id="inks" type="text" title="tone, mono, colour"></label>
   <label>Opacities <input id="opacity" type="text"></label>
+  <label>Fill <input id="fill" type="number" step="0.1" min="0.5" max="4"></label>
+  <label>Weight <select id="weight"><option value="400">Regular</option><option value="700">Bold</option></select></label>
   <label>Focal <input id="focal" type="number" step="0.05" min="1.2" max="4"></label>
   <label>Shade <input id="shade" type="number" step="0.05" min="0" max="1"></label>
   <label>Font px <input id="font" type="number" step="1" min="6" max="24"></label>
@@ -41,7 +43,7 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const DEF = { theme: "dark", inks: "tone,mono,colour", opacity: "0.22,0.3,0.4", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
+  const DEF = { theme: "dark", inks: "tone,mono", opacity: "0.6,0.7", fill: "1.4", weight: "400", focal: "2.05", shade: "0.75", font: "13", cols: "64", rows: "40", still: "", reduced: "" };
   const q = new URLSearchParams(location.search), S = {};
   for (const k in DEF) S[k] = q.has(k) ? q.get(k) || "1" : DEF[k];
   let marks = [];
@@ -60,9 +62,9 @@
         const box = document.createElement("div"), field = document.createElement("div"), pre = document.createElement("pre"), cap = document.createElement("span");
         box.className = "box"; field.className = "ascii-field"; cap.className = "cap";
         box.innerHTML = '<div class="wallpaper dim" aria-hidden="true"><i style="--h:125;--x:-20%;--y:-10%;--w:420px"></i></div>';
-        pre.style.font = `${S.font}px/${S.font}px var(--mono)`;
+        pre.style.font = `${S.weight} ${S.font}px/${S.font}px var(--mono)`;
         field.append(pre); box.append(field, cap); row.append(box);
-        const stop = window.hewnAscii(pre, { cols: +S.cols, rows: +S.rows, ink, opacity: op, focal: +S.focal, shade: +S.shade, still: !!S.still, reduced: !!S.reduced });
+        const stop = window.hewnAscii(pre, { cols: +S.cols, rows: +S.rows, ink, opacity: op, fill: +S.fill, focal: +S.focal, shade: +S.shade, still: !!S.still, reduced: !!S.reduced });
         marks.push({ stop, cap, op });
       }
       board.append(row);

@@ -3,16 +3,19 @@
 // again, in one 26 s loop. A shader draws it small (WebGL 2), 2×4 samples a character cell, and each cell becomes a
 // braille character, its dots by an ordered dither: characters only, never the picture itself. Drawn into a <pre>.
 //
-// window.hewnAscii(preEl, { cols, rows, speed, ink, opacity, focal, shade, aspect, at, still, reduced }) → stop()
+// window.hewnAscii(preEl, { cols, rows, speed, ink, opacity, fill, focal, shade, aspect, at, still, reduced }) → stop()
 //   ink: "tone" (the default: the <pre>'s own colour, fainter where the metal is darker), "mono" (the <pre>'s colour,
 //        even) or "colour" (the chrome's own colours, which need a dark page).
+//   fill: how readily a dot lights (1.4); more makes the mark denser and bolder. Braille's dots are small: the mark
+//   carries about a third of the ink the old ASCII field did at the same opacity, so it wants twice the opacity or more.
 //   aspect: a character cell's height over its width. Measured from the <pre> unless given.
 //   at: hold the loop at this point (0 to 1). still: the H standing still, as without WebGL 2. reduced: the logo seen
 //   square on, as under prefers-reduced-motion.
 // It paints 15 frames a second, and none while the page or the <pre> is out of sight. One GL context serves every mark
 // on the page. stop() ends it; stop.ms is what a frame has cost lately, in ms.
 // To compare looks on a real page, its address can set these for every mark on it, over what the page asks:
-// ?mark-ink=mono&mark-opacity=0.4 (also mark-focal, mark-shade, mark-speed, mark-aspect, mark-at, mark-still, mark-reduced).
+// ?mark-ink=mono&mark-opacity=0.4 (also mark-fill, mark-focal, mark-shade, mark-speed, mark-aspect, mark-at, mark-still,
+// mark-reduced).
 (function () {
   const GLYPH = ["##..#", ".#..#", ".####", ".#..#", ".#..#"]; // Hewn's pixel H
   const HOME = [];
@@ -230,6 +233,7 @@ void main() {
   const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const BIT = [0x01, 0x08, 0x02, 0x10, 0x04, 0x20, 0x40, 0x80]; // a cell's dots, row by row, as braille numbers them
   const sl = new Float32Array(8);
+  const TONE = 0.4; // "tone": the darkest metal still gets this much of the ink
   /** The samples as cells: each cell's braille dots by an ordered dither, and its ink (look): for "tone", tenths of
    *  the <pre>'s colour (-1 for all of it); for "colour", the chrome's own as 0xRGB. */
   function encode(m, z) {
@@ -245,7 +249,7 @@ void main() {
       }
       const c = cy * cols + cx;
       let bits = 0;
-      if (peak >= 0.06) for (let q = 0; q < 8; q++) if (sl[q] * z.gain > (BAYER[((cy * 4 + (q >> 1)) & 3) * 4 + ((cx * 2 + (q & 1)) & 3)] + 0.5) / 16) bits |= BIT[q];
+      if (peak >= 0.06) for (let q = 0; q < 8; q++) if (sl[q] * z.gain * m.fill > (BAYER[((cy * 4 + (q >> 1)) & 3) * 4 + ((cx * 2 + (q & 1)) & 3)] + 0.5) / 16) bits |= BIT[q];
       dots[c] = bits;
       if (!bits) continue;
       const top = lerp(245, 255 * clamp(0.26 + 0.82 * Math.pow(peak, 0.8), 0.26, 0.97), Math.min(1, m.shade * z.sh * 1.25));
@@ -253,7 +257,7 @@ void main() {
         const f = top / Math.max(wr / ws, wg / ws, wb / ws, 1), q4 = (v) => Math.min(15, Math.round((v / ws) * f / 17));
         look[c] = (q4(wr) << 8) | (q4(wg) << 4) | q4(wb);
       } else {
-        const t = Math.round(top / 25.5);
+        const t = Math.round(10 * (TONE + (1 - TONE) * (top / 255)));
         look[c] = t >= 10 ? -1 : t;
       }
     }
@@ -317,7 +321,7 @@ void main() {
   const KNOBS = {};
   try {
     const q = new URLSearchParams(location.search);
-    for (const k of ["focal", "shade", "speed", "aspect", "opacity", "at"]) { const v = q.get("mark-" + k); if (v && isFinite(+v)) KNOBS[k] = +v; }
+    for (const k of ["fill", "focal", "shade", "speed", "aspect", "opacity", "at"]) { const v = q.get("mark-" + k); if (v && isFinite(+v)) KNOBS[k] = +v; }
     const ink = q.get("mark-ink");
     if (ink === "tone" || ink === "mono" || ink === "colour") KNOBS.ink = ink;
     for (const k of ["still", "reduced"]) if (q.has("mark-" + k)) KNOBS[k] = q.get("mark-" + k) !== "0";
@@ -325,7 +329,7 @@ void main() {
 
   window.hewnAscii = function (el, opts = {}) {
     const o = { ...opts, ...KNOBS }, cols = o.cols || 72, rows = o.rows || 34, speed = o.speed ?? 1;
-    const m = { el, cols, rows, ink: o.ink || "tone", focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
+    const m = { el, cols, rows, ink: o.ink || "tone", fill: o.fill || 1.4, focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
     const reduced = o.reduced ?? matchMedia("(prefers-reduced-motion: reduce)").matches;
     let mode = o.still ? "still" : "live", u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false, spent = 0;
     el.setAttribute("aria-hidden", "true"); // braille would be read out dot by dot

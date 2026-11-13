@@ -4,7 +4,9 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.12 (unreleased)
 
-- **Hewn's mark moves.** The turning H behind the first run, a new tool, a build and the sign-in page is now Hewn's mark: the H's thirteen pixels, in polished chrome, run together into one pixel and part again every 26 seconds, drawn in braille characters in the page's accent colour. The GPU draws it (WebGL 2), 15 times a second, and not at all while the tab or the mark is out of sight. With reduce motion on, it rests on the H instead of disappearing; a browser without WebGL 2, or one that draws it in software, shows the H standing still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+### New
+
+- **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
 
 ## 0.4.11 (2026-11-13)
 
