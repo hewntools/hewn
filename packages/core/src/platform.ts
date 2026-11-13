@@ -229,6 +229,7 @@ export class Platform {
   hueOf(capabilityId: string): number | null { return this.d.presentation.hueOf(capabilityId); }
   setSaturation(owner: Agent, capabilityId: string, saturation: number | null) { return this.d.presentation.setSaturation(owner, capabilityId, saturation); }
   saturationOf(capabilityId: string): number | null { return this.d.presentation.saturationOf(capabilityId); }
+  iconKind(capabilityId: string): Promise<"glyph" | "image" | null> { return this.d.presentation.iconKind(capabilityId); }
   icon(capabilityId: string, opts?: { owner?: boolean }): Promise<{ data: Uint8Array; type: string; glyph: boolean } | undefined> { return this.d.presentation.icon(capabilityId, opts); }
 
   // ---------- data: archive, restore, rollback, purge, export, import (platform/data.ts) ----------

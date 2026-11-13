@@ -12,6 +12,7 @@ import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
+import { sha256 } from "@hewntools/core/sha256.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
@@ -249,7 +250,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "capabilities" && !id) {
     if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
-    return capabilityList(platform, owner);
+    return unchanged(req, await capabilityList(platform, owner));
   }
 
   if (resource === "capabilities" && id) {
@@ -866,14 +867,15 @@ async function capabilityList(platform: Platform, owner: Agent) {
   const created = (id: string) => platform.registry.getCapability(id)?.createdAt ?? "";
   for (const c of platform.list(owner).sort((a, b) => order(a.id) - order(b.id) || created(a.id).localeCompare(created(b.id)))) {
     const m = platform.get(owner, c.id);
-    const icon = await platform.icon(c.id).catch(() => undefined);
+    // Its kind only: the icon itself is fetched by the page, and Home asks for this list every few seconds.
+    const iconKind = await platform.iconKind(c.id).catch(() => null);
     const row = platform.registry.getCapability(c.id);
     const last = latest.get(c.id);
     caps.push({
       ...c,
-      hasIcon: !!icon,
+      hasIcon: !!iconKind,
       // "image": an owner upload (shown as is); "glyph": a 5×5 glyph, the owner's or the builder's ui/icon.svg (tinted by the tile).
-      iconKind: !icon ? null : icon.glyph ? "glyph" : "image",
+      iconKind,
       hue: platform.hueOf(c.id),
       saturation: platform.saturationOf(c.id),
       ui: !!m.ui?.available,
@@ -882,7 +884,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
       // Not ready only because the owner said no (Deny) to what it asks: nothing to nag about.
       saidNo: !c.ready && !!platform.readiness(c.id).onlySaidNo,
       // A failed build the owner discarded isn't shown on the tool (Home's badge, Info's notice): it's put aside.
-      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && explainFailure(platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
+      lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && pausedFailure(platform, last.id) ? { paused: true } : {}) } : null,
       building: building(c.id),
       held: held.get(c.id) ?? null,
     });
@@ -920,6 +922,31 @@ async function capabilityList(platform: Platform, owner: Agent) {
     pending.push(unbuilt({ id: b.capabilityId, name, purpose: req.purpose ?? "", buildId: b.id, status: "review", connection: !!b.review?.connection || req.kind === "connection" }));
   }
   return [...caps, ...pending];
+}
+
+/**
+ * A list a page polls (Home's tools), with an ETag of what it says: the browser asks again with If-None-Match, and an
+ * unchanged list is a 304 it answers from its own cache.
+ */
+function unchanged(req: Request, value: unknown): Response {
+  const text = JSON.stringify(value);
+  const etag = `"${sha256(text).slice(0, 32)}"`;
+  const headers = { "content-security-policy": WEB_CSP, "cache-control": "private, no-cache", etag };
+  if (req.headers.get("if-none-match")?.split(",").some((t) => t.trim() === etag)) return new Response(null, { status: 304, headers });
+  return new Response(text, { status: 200, headers: { "content-type": "application/json", ...headers } });
+}
+
+/** Whether a failed build was the builder's pause, per build: a failed build's log doesn't change, so it's read once. */
+const pausedFailures = new Map<string, boolean>();
+function pausedFailure(platform: Platform, buildId: string): boolean {
+  let paused = pausedFailures.get(buildId);
+  if (paused === undefined) {
+    paused = !!explainFailure(platform.registry.getBuild(buildId)?.log ?? []).paused;
+    // The oldest goes first; a few hundred is far more than one Home shows.
+    if (pausedFailures.size >= 500) pausedFailures.delete(pausedFailures.keys().next().value!);
+    pausedFailures.set(buildId, paused);
+  }
+  return paused;
 }
 
 const LIVE = new Set(["waiting", "open", "building", "validating"]);

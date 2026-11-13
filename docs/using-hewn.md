@@ -24,6 +24,8 @@ Right-click a widget for **Open**, **Refresh**, **Options…** (for a widget tha
 
 A widget shows a tool's data at a glance: today's habits, tonight's aurora forecast, a quote. It refreshes by itself. When it couldn't refresh, it keeps the last view and says how old it is.
 
+Home keeps itself up to date while it's open: a tool being built fills in as it goes, and a tool an agent made or changed elsewhere shows up within a minute.
+
 ## Hewn's own tools
 
 **New** offers, under its box, **Or install**: **One of Hewn's tools**, or **A file or a link someone shared** ([Sharing tools](sharing.md#installing-a-tool-someone-shared)).
