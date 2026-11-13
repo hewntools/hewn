@@ -293,20 +293,38 @@ describe("share links and install from a link, over HTTP", () => {
     assert.ok(!logs.some((l) => l.includes("c".repeat(32))), "nor in the rate limit's log line");
   });
 
-  test("the limit is per address and per link: busy addresses don't use it up for everyone, and one link fetched too often waits on its own", async () => {
-    const limited = await startPublicServer(server, 0, () => {}, new RateLimiter({ ...RULES, share: { perClient: 4, total: 1000, windowMs: 60_000 }, shareLink: { perClient: 3, total: 1000, windowMs: 60_000 } }));
+  test("the limit is per address: busy addresses don't use it up for everyone, and a link that doesn't work is a 404 from any address", async () => {
+    const limited = await startPublicServer(server, 0, () => {}, new RateLimiter({ ...RULES, share: { perClient: 4, total: 1000, windowMs: 60_000 } }));
     try {
       const link = (c: string) => `/share/${c.repeat(32)}`;
-      // One link from three addresses: the fourth address waits for that link, not for another.
-      for (const from of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from })).status, 404, from);
-      assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from: "198.51.100.4" })).status, 429);
-      assert.equal((await http(limited, link("e"), { host: "hewn.example.com", from: "198.51.100.4" })).status, 404);
       // One address trying many links waits on its own; another address doesn't.
       for (const c of ["f", "g", "h", "i"]) assert.equal((await http(limited, link(c), { host: "hewn.example.com", from: "198.51.100.5" })).status, 404, c);
       assert.equal((await http(limited, link("j"), { host: "hewn.example.com", from: "198.51.100.5" })).status, 429);
       assert.equal((await http(limited, link("j"), { host: "hewn.example.com", from: "198.51.100.6" })).status, 404);
+      // A link that doesn't work never counts against itself: many addresses, still 404.
+      for (const from of ["198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4"]) for (let i = 0; i < 4; i++) assert.equal((await http(limited, link("d"), { host: "hewn.example.com", from })).status, 404, from);
     } finally {
       await new Promise((r) => limited.close(r));
+    }
+  });
+
+  test("one link fetched too often waits on its own, from any address; revoked, it's a 404 at once, not a wait", async () => {
+    t.platform.setPublicUrl(USER, "https://hewn.example.com");
+    try {
+      const made = await api("/capabilities/running-log/links", { method: "POST", body: { expires: "1d" } });
+      const token = String(made.json.url).split("/share/")[1];
+      const other = String((await api("/capabilities/running-log/links", { method: "POST", body: { expires: "1d" } })).json.url).split("/share/")[1];
+      // RULES.shareLink: 30 in 10 minutes, from three addresses (each under its own limit).
+      for (let i = 0; i < RULES.shareLink.perClient; i++) assert.equal((await http(pub, `/share/${token}`, { host: "hewn.example.com", from: `198.51.100.${20 + (i % 3)}` })).status, 200, String(i));
+      const waits = await http(pub, `/share/${token}`, { host: "hewn.example.com", from: "198.51.100.23" });
+      assert.equal(waits.status, 429);
+      assert.ok(Number(waits.headers["retry-after"]) > 0);
+      assert.equal(waits.headers["x-robots-tag"], "noindex, nofollow");
+      assert.equal((await http(pub, `/share/${other}`, { host: "hewn.example.com", from: "198.51.100.23" })).status, 200, "another link doesn't wait");
+      assert.equal((await api(`/capabilities/running-log/links/${made.json.link.id}`, { method: "DELETE" })).status, 200);
+      assert.equal((await http(pub, `/share/${token}`, { host: "hewn.example.com", from: "198.51.100.23" })).status, 404, "a dead link says so, not 'retry later'");
+    } finally {
+      t.platform.setPublicUrl(USER, null);
     }
   });
 
@@ -373,8 +391,8 @@ describe("fetchLink: what Hewn fetches when it installs from a link", () => {
   const redirect = (to: string, status = 302) => () => new Response(null, { status, headers: { location: to } });
 
   test("names and addresses on this machine or its network are refused, public ones aren't", () => {
-    for (const h of ["localhost", "a.localhost", "printer.local", "app.internal", "box.home.arpa", "intranet", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.169.254", "100.64.0.1", "127.0.0.1", "0.0.0.0", "224.0.0.1", "[::1]", "[::]", "[fd00::1]", "[fc00::1]", "[fe80::1]", "[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:a00:1]", "198.18.0.1", "198.19.255.255", "[::7f00:1]", "[::127.0.0.1]", "[64:ff9b::7f00:1]", "[64:ff9b::a9fe:a9fe]", "[64:ff9b:1::1]", "[2002:7f00:1::]", "[2002:c0a8:101::1]", "[fec0::1]", "[ff02::1]", "[::ffff:0:7f00:1]", "[::ffff:0:a00:1]", "[2001:0:4136:e378:8000:63bf:3fff:fdd2]", "[1:2:3:4:5:6:7:8:9]", "[::g]"]) assert.equal(privateHost(h), true, h);
-    for (const h of ["example.com", "hewn.example.com", "8.8.8.8", "172.32.0.1", "100.128.0.1", "[2606:4700:4700::1111]", "[::ffff:808:808]", "198.20.0.1", "[64:ff9b::808:808]", "[2002:808:808::1]", "[2001:db8:1::ffff:7f00:1]", "[::ffff:0:808:808]", "[2001:4860:4860::8888]"]) assert.equal(privateHost(h), false, h);
+    for (const h of ["localhost", "a.localhost", "printer.local", "app.internal", "app.flycast", "APP.FLYCAST.", "box.home.arpa", "intranet", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.169.254", "100.64.0.1", "127.0.0.1", "0.0.0.0", "224.0.0.1", "[::1]", "[::]", "[fd00::1]", "[fc00::1]", "[fe80::1]", "[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:a00:1]", "198.18.0.1", "198.19.255.255", "[::7f00:1]", "[::127.0.0.1]", "[64:ff9b::7f00:1]", "[64:ff9b::a9fe:a9fe]", "[64:ff9b:1::1]", "[2002:7f00:1::]", "[2002:c0a8:101::1]", "[fec0::1]", "[ff02::1]", "[::ffff:0:7f00:1]", "[::ffff:0:a00:1]", "[2001:0:4136:e378:8000:63bf:3fff:fdd2]", "[1:2:3:4:5:6:7:8:9]", "[::g]"]) assert.equal(privateHost(h), true, h);
+    for (const h of ["example.com", "hewn.example.com", "flycast.example.com", "internal.example.org", "8.8.8.8", "172.32.0.1", "100.128.0.1", "[2606:4700:4700::1111]", "[::ffff:808:808]", "198.20.0.1", "[64:ff9b::808:808]", "[2002:808:808::1]", "[2001:db8:1::ffff:7f00:1]", "[::ffff:0:808:808]", "[2001:4860:4860::8888]"]) assert.equal(privateHost(h), false, h);
     // URL parsing turns other spellings of an address into the dotted one first.
     assert.equal(privateHost(new URL("https://0x7f000001/").hostname), true);
     assert.equal(privateHost(new URL("https://[::FFFF:127.0.0.1]/").hostname), true);

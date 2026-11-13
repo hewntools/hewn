@@ -64,10 +64,10 @@ function linkUrl(raw: string, what: string): URL {
   return url;
 }
 
-/** Names and IP addresses that aren't on the public internet. */
+/** Names and IP addresses that aren't on the public internet: internal names (one word, or one only a private network resolves) too. */
 export function privateHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/\.$/, "");
-  if (h === "localhost" || /\.(localhost|local|internal|home\.arpa)$/.test(h) || (!h.includes(".") && !h.startsWith("["))) return true;
+  if (h === "localhost" || /\.(localhost|local|internal|flycast|home\.arpa)$/.test(h) || (!h.includes(".") && !h.startsWith("["))) return true;
   const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
   if (v4) return privateV4(v4.slice(1).map(Number));
   if (!h.startsWith("[")) return false;

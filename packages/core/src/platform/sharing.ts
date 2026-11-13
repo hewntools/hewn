@@ -211,13 +211,23 @@ export class Sharing extends Domain {
    * token is the authority, so anything that isn't a working link is the same not_found. Each file
    * served is counted, never who fetched it.
    */
+  /** Whether a link still works: not revoked or expired, and its tool and version still there. */
+  shareLinkWorks(token: string): boolean {
+    return !!this.workingLink(token);
+  }
+
   async sharedBundle(token: string): Promise<{ name: string; bundle: Uint8Array }> {
-    const link = SHARE_TOKEN.test(token) ? this.registry.workingShareLink(sha256(token)) : undefined;
-    const cap = link && this.registry.getCapability(link.capabilityId);
-    if (!link || !cap?.activeVersion || cap.archivedAt || !this.registry.getVersion(link.capabilityId, link.version)) throw new PlatformError("not_found", "no such link");
+    const link = this.workingLink(token);
+    if (!link) throw new PlatformError("not_found", "no such link");
     const shared = await this.packShare(link.capabilityId, link.version);
     this.registry.countShareDownload(link.id);
     return shared;
+  }
+
+  private workingLink(token: string) {
+    const link = SHARE_TOKEN.test(token) ? this.registry.workingShareLink(sha256(token)) : undefined;
+    const cap = link && this.registry.getCapability(link.capabilityId);
+    return link && cap?.activeVersion && !cap.archivedAt && this.registry.getVersion(link.capabilityId, link.version) ? link : undefined;
   }
 
   /** A version's files as they travel: its own `source` goes (an install writes its own). */

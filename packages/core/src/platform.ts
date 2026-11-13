@@ -252,6 +252,7 @@ export class Platform {
   createShareLink(owner: Agent, capabilityId: string, req: { version?: number; expires?: string }): Promise<{ token: string; link: ShareLink }> { return this.d.sharing.createShareLink(owner, capabilityId, req); }
   shareLinks(owner: Agent, capabilityId: string): ShareLink[] { return this.d.sharing.shareLinks(owner, capabilityId); }
   revokeShareLink(owner: Agent, capabilityId: string, id: string) { return this.d.sharing.revokeShareLink(owner, capabilityId, id); }
+  shareLinkWorks(token: string): boolean { return this.d.sharing.shareLinkWorks(token); }
   sharedBundle(token: string): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.sharedBundle(token); }
   stageBundle(owner: Agent, zip: Uint8Array, origin?: BundleOrigin): Promise<BundlePreview> { return this.d.sharing.stageBundle(owner, zip, origin); }
   stagedBundle(owner: Agent, token: string): Promise<BundlePreview> { return this.d.sharing.stagedBundle(owner, token); }

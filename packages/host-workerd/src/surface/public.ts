@@ -56,7 +56,11 @@ export const RULES: Record<string, Rule> = {
    * this keeps anyone from trying. The total is only a backstop, so busy addresses can't use it up.
    */
   share: { perClient: 30, total: 3000, windowMs: 10 * MIN },
-  /** And per link (its path stands for the client): one link fetched this often is being hammered. No total of its own: share's counts the same requests. */
+  /**
+   * And per link (its path stands for the client): one link fetched this often is being hammered. No total of its own:
+   * share's counts the same requests. Counted where the link is known to work (surface/index.ts), so a revoked or
+   * expired one answers 404 at once, never "retry later".
+   */
   shareLink: { perClient: 30, total: Infinity, windowMs: 10 * MIN },
 };
 
@@ -124,7 +128,7 @@ export function gatePublic(req: Request, limiter: RateLimiter, log: (line: strin
     log(`[public] ${ip} ${req.method} ${url.pathname} -> 404 (not exposed)`);
     return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
   }
-  const wait = limiter.take(ruleFor(url.pathname), ip) || (url.pathname.startsWith(SHARE_PREFIX) ? limiter.take("shareLink", url.pathname) : 0);
+  const wait = limiter.take(ruleFor(url.pathname), ip);
   if (wait) {
     log(`[public] ${ip} ${req.method} ${loggedPath(url.pathname)} -> 429 (retry in ${wait}s)`);
     return new Response(JSON.stringify({ error: "rate_limited", message: `Too many requests; retry in ${wait}s` }), {
