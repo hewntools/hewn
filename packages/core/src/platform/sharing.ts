@@ -16,7 +16,7 @@ import type { Files } from "../ports.ts";
 import type { BuildRow, ShareLink } from "../registry.ts";
 import { randomToken, sha256 } from "../sha256.ts";
 import { archivedConflict, type BuildView, RESERVED_IDS, slugify } from "./builds.ts";
-import { Domain } from "./context.ts";
+import { breather, Domain } from "./context.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
 import { candidateFiles } from "./submissions.ts";
@@ -528,7 +528,9 @@ export class Sharing extends Domain {
     const calls = readSample(v.files);
     if (!calls) throw new PlatformError("not_found", `${capabilityId} has no sample data`);
     const target = { capabilityId, code: v.code, state: { capabilityId }, secrets: {}, config: {}, caller: { kind: "user", id: actor } };
+    const breathe = breather();
     for (const [i, c] of calls.entries()) {
+      await breathe();
       try {
         await this.d.validation.replayCall(v.row.manifest, target, c);
       } catch (e) {

@@ -15,7 +15,7 @@ import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
-import { Domain } from "./context.ts";
+import { breather, Domain } from "./context.ts";
 
 /** A candidate that passed validation, held in memory: nothing about the tool has changed yet. */
 export interface Candidate {
@@ -177,6 +177,8 @@ export class Validation extends Domain {
     let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean; real?: boolean } = {};
     let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
+      // One for all its loops of calls, so the time between them counts too.
+      const breathe = breather();
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
       let cases: TestCase[];
@@ -194,6 +196,7 @@ export class Validation extends Domain {
       const failed: string[] = [];
       onTests(0, cases.length);
       for (const [i, c] of cases.entries()) {
+        await breathe();
         try {
           const op = caseOperation(manifest, c);
           const before = await this.runtime.countState(testState, code);
@@ -226,6 +229,7 @@ export class Validation extends Domain {
         await this.runtime.migrate(sampleState, migrations, code);
         let replayed = true;
         for (const [i, c] of sample.entries()) {
+          await breathe();
           const before = await this.runtime.countState(sampleState, code);
           let inserted: string[];
           try {
@@ -330,6 +334,7 @@ export class Validation extends Domain {
         const sampled = new Map<string, unknown>();
         if (sample)
           for (const w of manifest.widgets!) {
+            await breathe();
             const [operation, version] = w.operation.split("@");
             const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
