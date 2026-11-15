@@ -161,6 +161,7 @@ describe("a tool that won't stop when its call's deadline comes", () => {
     const before = { platform: h.sv.restarts(), tools: h.sv.toolsRestarts() };
     const e = await h.invoke("runaway", "spin").then(() => assert.fail("spin returned"), (x: Error) => x);
     assert.match(e.message, /spin@1 timed out/);
+    for (const end = Date.now() + 5000; h.sv.toolsRestarts() === before.tools && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
     assert.equal(h.sv.toolsRestarts(), before.tools + 1, "the tools were restarted once");
     assert.equal(h.sv.restarts(), before.platform, "the platform wasn't");
     const log: string[] = (await h.sv.admin("logs", { capabilityId: "runaway", n: 20 })).lines;

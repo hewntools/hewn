@@ -431,7 +431,7 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
           .catch(async (x) => {
             if (!(x instanceof ToolsUnreachable && x.timeout)) return;
             Object.assign(e, { stalled: true });
-            await tools.stuck(`${reason} and didn't stop`).catch(() => {});
+            await tools.stuck(`${reason} and didn't stop`).catch((err) => console.log(`[${new Date().toISOString()}] couldn't have the tools restarted: ${(err as Error).message}`));
           });
         throw e;
       });
