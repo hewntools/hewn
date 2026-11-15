@@ -18,13 +18,14 @@ export type SentCode = { hash: string; js?: string };
 
 /** What each route takes (the platform → the tools process). */
 export interface HostCalls {
-  invoke: { code: SentCode; scratch: string | null; key: string; input: unknown; secrets: Record<string, string>; hosts: string[]; caller: { kind: string; id: string } | undefined; config: Record<string, string>; readOnly: boolean; limit: number; call: string; model: boolean };
+  // `named`: the live tool's own isolate; `hosts`, a data op's: its calls' (CapabilityHost.worker).
+  invoke: { code: SentCode; scratch: string | null; key: string; input: unknown; secrets: Record<string, string>; hosts: string[]; caller: { kind: string; id: string } | undefined; config: Record<string, string>; readOnly: boolean; limit: number; named: boolean; call: string; model: boolean };
   stop: { scratch: string | null; reason: string };
-  describe: { code: SentCode; limit: number };
-  migrate: { scratch: string | null; migrations: Migration[]; code: SentCode; limit: number };
-  dump: { scratch: string | null; code: SentCode; limit: number };
-  count: { scratch: string | null; code: SentCode; limit: number };
-  load: { scratch: string | null; tables: Record<string, Record<string, unknown>[]>; code: SentCode; limit: number };
+  describe: { code: SentCode };
+  migrate: { scratch: string | null; migrations: Migration[]; code: SentCode; limit: number; hosts: string[]; named: boolean };
+  dump: { scratch: string | null; code: SentCode; limit: number; hosts: string[]; named: boolean };
+  count: { scratch: string | null; code: SentCode; limit: number; hosts: string[]; named: boolean };
+  load: { scratch: string | null; tables: Record<string, Record<string, unknown>[]>; code: SentCode; limit: number; hosts: string[]; named: boolean };
   hasState: { scratch: string | null };
   copyState: { from: string | null; to: string | null };
   dropState: { scratch: string | null };

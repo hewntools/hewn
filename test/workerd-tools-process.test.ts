@@ -66,10 +66,10 @@ describe("the channel's code by hash", () => {
     let forgot = false;
     const { bodies, fetcher } = recorder((b) => (forgot && !b.code.js ? Response.json({ missing: b.code.hash }, { status: 409 }) : Response.json({ result: ["x@1"] })));
     const host = toolsChannel(fetcher, "t")("cap");
-    assert.deepEqual(await host.describe({ code, limit: 0 }), ["x@1"]);
-    await host.describe({ code, limit: 0 });
+    assert.deepEqual(await host.describe({ code }), ["x@1"]);
+    await host.describe({ code });
     forgot = true;
-    await host.describe({ code, limit: 0 });
+    await host.describe({ code });
     assert.deepEqual(bodies.map((b) => !!b.code.js), [true, false, false, true]);
     assert.ok(bodies.every((b) => b.capabilityId === "cap"));
   });

@@ -12,6 +12,11 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 - **The platform and the tools run in separate processes.** Your tools run in a workerd process of their own, with their data and network access and nothing else of yours (not the secrets key, Hewn's database or its files), behind a sandbox of its own. A tool stuck in a loop now restarts only the tools: the web client, your agents' connections and schedules keep answering meanwhile. `hewn status` counts the tools' restarts next to Hewn's. Your data stays where it is: nothing to migrate. See [the threat model](docs/threat-model.md).
 
+### Fixes
+
+- A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.
+- A build's code stayed in memory until Hewn restarted, failed builds too, and a tool that reaches the internet took twice the memory.
+
 ## 0.4.11 (2026-11-13)
 
 ### New
