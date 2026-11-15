@@ -15,6 +15,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- A failed build that was retried still offered Retry and Ask builder to fix, which were then refused; its card now says "Retried as …" and how that build went. The tool's version at the top follows a change that goes live without a reload.
 - A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.
 - A build's code stayed in memory until Hewn restarted, failed builds too, and a tool that reaches the internet took twice the memory.
 

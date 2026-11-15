@@ -70,7 +70,7 @@ function resizable(el, grip) {
  * then "vN is ready" with Reload and Undo (P4). The tool stays live on the left. Closing it while
  * a build runs is fine: the tile and the Inbox take over.
  */
-function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
+function changeDrawer(c, q, { onReload, onClose, onPromoted: promoted, noUi = false }) {
   const body = h("div", { class: "drawer-body" });
   const close = h("button", { class: "ghost sm icon-only", "aria-label": "Close", onclick: () => onClose() }, "×");
   // Its left edge drags to make it wider or narrower; the width is kept (in this browser).
@@ -85,6 +85,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
     const panel = buildPanel(buildId, {
       compact: true,
       onPromoted: (b) => {
+        promoted?.();
         const v = `v${b.resultVersion ?? ""}`;
         const notice = h("div", { class: "notice ok drawer-ready" });
         const more = () => h("button", { class: "sm", onclick: showIntake }, "Change more");
@@ -120,6 +121,13 @@ async function undoChange(c, b) {
 /** Opened tool or Run view with the drawer when ?change=1. Toggling it keeps the tool where it is. */
 function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const { el: barEl, change } = appBar(c, { onChange: () => toggle() });
+  // A build of this tool went live: the bar's version follows at once (the tool's own screen waits for Reload).
+  const version = async () => {
+    invalidateCaps();
+    const now = (await caps(true).catch(() => new Map())).get(c.id);
+    const pill = barEl.querySelector(".app-title .pill");
+    if (now?.version && pill) pill.textContent = `v${now.version}`;
+  };
   const layout = h("div", { class: "with-drawer" }, h("div", { class: "drawer-main" }, main));
   let drawer = null;
   const setUrl = (open) => {
@@ -132,7 +140,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const shown = () => !!drawer && drawer.el.style.display !== "none";
   const open = () => {
     if (!drawer) {
-      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
+      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), onPromoted: () => void version(), noUi });
       layout.append(drawer.el);
     } else drawer.el.style.display = "";
     change.setAttribute("aria-pressed", "true");

@@ -50,6 +50,11 @@ const submittedSteps = (b) => [
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || b.builder === "submitted" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file, a submission or your own edit had none (Hewn refuses), so it's done again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep" && b.builder !== "submitted";
+
+/** How the build that took a retried one over stands, in words. */
+const retryState = (r) => (r.status === "promoted" ? `promoted as v${r.version ?? "?"}` : r.status === "failed" ? "failed too" : r.status === "cancelled" ? "stopped" : r.status === "review" ? "waiting for your approval" : "building");
+/** "Retried as b-… · promoted as v3", linking to that build. */
+const retriedLine = (r) => h("div", { class: "small muted row tight wrap" }, "Retried as ", h("a", { href: `#/b/${enc(r.id)}` }, r.id), ` · ${retryState(r)}`);
 /** A Polish's steps: its builder writes no code, only sample data when the tool has none (else that step is done at once). */
 const POLISH_STEPS = STEPS.map(([k, label]) => [k, k === "code" ? "Sample data" : label]);
 /** The steps, with the passes the build runs (`passes`, from its step) right after its tests. */
@@ -356,6 +361,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         } catch (e) {
           btn.disabled = false;
           fail(e);
+          // Retried meanwhile (elsewhere, or by Hewn): the card says by which build instead.
+          const now = await api(`/builds/${enc(id)}`).catch(() => null);
+          if (now?.retriedAs) (b = now), failed();
         }
       };
       if (fix) fix.addEventListener("click", again("fix", fix));
@@ -384,7 +392,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         convoView,
         specView,
-        retry ? h("div", { class: "row tight" }, fix, retry, discard) : [h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more."), discard && h("div", { class: "row tight" }, discard)],
+        // Retried already: the choice is made; the build that took it over is one link away.
+        b.retriedAs ? [retriedLine(b.retriedAs), discard && h("div", { class: "row tight" }, discard)] : retry ? h("div", { class: "row tight" }, fix, retry, discard) : [h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more."), discard && h("div", { class: "row tight" }, discard)],
         b.discardedAt && h("div", { class: "small muted" }, "Discarded: it's out of the Inbox, and stays in Activity."),
         logBlock(true),
       );
@@ -403,7 +412,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         }
       });
       // What it was asked to do stays, as on a failed build: the conversation and the spec, to start again from.
-      put(card, head(appIcon(cap(), { size: compact ? 36 : 56 }), "Build cancelled", `${cap().name} · nothing changed`), convoView, specView, h("div", { class: "row tight" }, retry, !compact && h("a", { class: "btn", href: "#/" }, "Home")), logBlock(false));
+      put(card, head(appIcon(cap(), { size: compact ? 36 : 56 }), "Build cancelled", `${cap().name} · nothing changed`), convoView, specView, b.retriedAs && retriedLine(b.retriedAs), h("div", { class: "row tight" }, !b.retriedAs && retry, !compact && h("a", { class: "btn", href: "#/" }, "Home")), logBlock(false));
     };
 
     const inReview = () => {
