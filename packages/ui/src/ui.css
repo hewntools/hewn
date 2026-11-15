@@ -348,11 +348,11 @@ dialog h2, .dialog h2 { margin-top: 0; }
 .blocks i.live { background: var(--accent); box-shadow: var(--glow); animation: ws-pulse 1.2s var(--ease) infinite; }
 .blocks.fail i.on { background: var(--danger); }
 
-/* ASCII field: ambient backdrop for "moment" screens only (first run, intake, build). */
+/* ASCII field: Hewn's mark (ascii.js) as an ambient backdrop for "moment" screens only (first run, intake, build).
+   Under reduced motion it rests on the logo instead of moving. */
 .ascii-field { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
-.ascii-field pre { position: absolute; margin: 0; font: 13px/13px var(--mono); color: var(--accent-ink); opacity: .22; white-space: pre; }
+.ascii-field pre { position: absolute; margin: 0; font: 13px/13px var(--mono); color: var(--accent-ink); opacity: .8; white-space: pre; }
 .ascii-field + * { position: relative; z-index: 1; }
-@media (prefers-reduced-motion: reduce) { .ascii-field { display: none; } }
 
 /* ======================= charts (see /_platform/chart.js) ======================= */
 .chart { width: 100%; }
