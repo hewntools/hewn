@@ -262,6 +262,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     },
     remove: async (buildId) => void (await sv.json("/workbench/remove", { buildId })),
     snapshot: async (buildId, to) => void (await sv.json("/workbench/snapshot", { buildId, to })),
+    carryOver: async (from, to, overlay) => (await sv.json<{ carried: boolean }>("/workbench/carry-over", { from, to, overlay: encodeFiles(overlay) })).carried,
     writeFolder: async (buildId, folder, files) => void (await sv.json("/workbench/write-folder", { buildId, folder, files: encodeFiles(files) })),
     build: async (job: BuildJob, hooks) => {
       let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean } | undefined;

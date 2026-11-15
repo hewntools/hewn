@@ -223,6 +223,8 @@ export class Builds extends Domain {
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
   private aborts = new Map<string, AbortController>();
+  /** Retries that carry on from the failed build they retry (its workspace and builder session): their first attempt resumes. */
+  private carried = new Set<string>();
   private progress = new Map<
     string,
     { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number }
@@ -781,28 +783,34 @@ export class Builds extends Domain {
     // No builder runs (an install, a submission): the workspace is the candidate, with nothing for a builder to read.
     const reads = !noBuilderRuns(b.builder!);
     const attached = reads ? await this.d.attachments.attachmentsForBuild(buildId) : { note: "", files: {} };
-    await this.workbench.open(buildId, {
-      ...(seed ? versionFiles(seed) : {
-        "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
-        "src/index.ts": bytes("// See BRIEF.md for the implementation contract.\nexport const operations = {};\n"),
-        "tests/cases.json": bytes("[]\n"),
-      }),
-      ...(reads
-        ? {
-            "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
-            ...this.briefFile(),
-            ...this.ownersWordsFile(buildId),
-            ...ownerInstructionFiles(this.registry.buildContext(buildId)?.ownerInstructions),
-            ...this.contractFiles(id),
-            ...(connection ? {} : await this.looksFile(id, "create")),
-            ...attached.files,
-            ...this.agentsFile(buildId),
-            ...(await this.designSystemFile()),
-          }
-        : {}),
-    });
+    // What a builder reads: written over a failed build's workspace when this retry carries on from it.
+    const readFiles: Files = reads
+      ? {
+          "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+          ...this.briefFile(),
+          ...this.ownersWordsFile(buildId),
+          ...ownerInstructionFiles(this.registry.buildContext(buildId)?.ownerInstructions),
+          ...this.contractFiles(id),
+          ...(connection ? {} : await this.looksFile(id, "create")),
+          ...attached.files,
+          ...this.agentsFile(buildId),
+          ...(await this.designSystemFile()),
+        }
+      : {};
+    const from = this.carriesOn(b);
+    const carried = !!from && (await this.workbench.carryOver(from, buildId, readFiles));
+    if (!carried)
+      await this.workbench.open(buildId, {
+        ...(seed ? versionFiles(seed) : {
+          "capability.json": bytes(JSON.stringify(skeleton, null, 2) + "\n"),
+          "src/index.ts": bytes("// See BRIEF.md for the implementation contract.\nexport const operations = {};\n"),
+          "tests/cases.json": bytes("[]\n"),
+        }),
+        ...readFiles,
+      });
+    if (carried) this.carried.add(buildId);
     if (this.cancelledWhileOpening(buildId)) return;
-    this.buildEvent(buildId, `opened${req.retryOf ? ` (retry of ${req.retryOf})` : ""}, ${b.builder === "submitted" ? `submitted by ${req.submittedBy ?? b.requestedBy}` : `builder: ${b.builder}`}`, `build ${buildId} [create ${id} by ${b.requestedBy}]`);
+    this.buildEvent(buildId, `opened${req.retryOf ? ` (retry of ${req.retryOf})` : ""}, ${carried ? `carrying on from its workspace, ` : ""}${b.builder === "submitted" ? `submitted by ${req.submittedBy ?? b.requestedBy}` : `builder: ${b.builder}`}`, `build ${buildId} [create ${id} by ${b.requestedBy}]`);
     this.setStep(buildId, id, "spec");
     this.startBuilder(buildId, b.builder!);
   }
@@ -1039,9 +1047,15 @@ export class Builds extends Domain {
     const ask = `${requestText}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it. A Polish's
     // request says where its owner's words are (BUILDER.md's own note on them is for a single conversation).
-    await this.workbench.open(buildId, { ...versionFiles(base.files), "BUILDER.md": bytes(this.builderText(b.kind, cap.id, ask, polish && context ? { ...context, conversation: undefined } : context)), ...this.briefFile(), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...ownerInstructionFiles(context?.ownerInstructions), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) });
+    const readFiles: Files = { "BUILDER.md": bytes(this.builderText(b.kind, cap.id, ask, polish && context ? { ...context, conversation: undefined } : context)), ...this.briefFile(), ...(polish ? (words ? { "OWNERS_WORDS.md": bytes(words) } : {}) : this.ownersWordsFile(buildId)), ...ownerInstructionFiles(context?.ownerInstructions), ...this.contractFiles(cap.id), ...(isConnection(this.activeManifest(cap.id)) ? {} : await this.looksFile(cap.id, b.kind)), ...attached.files, ...this.agentsFile(buildId), ...(await this.designSystemFile()) };
+    // A retry carries on from the failed build's workspace when it started from this same version; else from the version.
+    const from = this.carriesOn(b, cap.activeVersion);
+    const carried = !!from && (await this.workbench.carryOver(from, buildId, readFiles));
+    if (!carried) await this.workbench.open(buildId, { ...versionFiles(base.files), ...readFiles });
+    if (carried) this.carried.add(buildId);
     if (this.cancelledWhileOpening(buildId)) return;
-    this.buildEvent(buildId, `opened from v${cap.activeVersion}, builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
+    const retryOf = (b.request as RetryMarks).retryOf;
+    this.buildEvent(buildId, `opened from v${cap.activeVersion}${retryOf ? ` (retry of ${retryOf})` : ""}, ${carried ? `carrying on from its workspace, ` : ""}builder: ${b.builder}`, `build ${buildId} [${b.kind} ${cap.id} by ${b.requestedBy}]`);
     this.setStep(buildId, cap.id, "spec");
     this.startBuilder(buildId, b.builder!);
   }
@@ -1052,6 +1066,23 @@ export class Builds extends Domain {
    */
   private retried(marks: RetryMarks): BuildTurn[] | undefined {
     return marks.retryOf ? this.registry.buildContext(marks.retryOf)?.conversation : undefined;
+  }
+
+  /**
+   * The failed build a retry carries on from (Retry, Ask builder to fix, or Hewn's own after a restart): its workspace
+   * as it was left and, on the same builder, its session, as a later attempt does. Only a builder on this machine's
+   * (a host's builder keeps its own work and carries on from it by `retryOf`), not a paused one (that's the host's
+   * Continue), and for a change only from the version it started from (a newer one would be undone). Not a
+   * Polish: its passes work on a candidate that validated, so it starts from the version, as each pass's try does.
+   */
+  private carriesOn(b: BuildRow, activeVersion?: number): string | undefined {
+    if (isPolish(b.request)) return undefined;
+    const from = (b.request as RetryMarks).retryOf;
+    const old = from ? this.registry.getBuild(from) : undefined;
+    if (!old || old.status !== "failed" || isPaused(old) || !old.builder || old.builder !== b.builder) return undefined;
+    if (noBuilderRuns(old.builder) || old.builder === "remote" || old.builder.startsWith("copy:")) return undefined;
+    if (b.kind !== "create" && (old.baseVersion ?? undefined) !== activeVersion) return undefined;
+    return old.id;
   }
 
   /** Cancelled while its workspace was being opened (nothing to abort yet): don't start it. */
@@ -1526,7 +1557,7 @@ export class Builds extends Domain {
     try {
       const asked = this.registry.buildModel(buildId);
       await this.workbench.build(
-        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}) },
+        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}), ...(this.carried.delete(buildId) ? { continues: true } : {}) },
         {
           signal,
           onActivity: (line) => {

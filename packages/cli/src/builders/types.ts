@@ -35,6 +35,8 @@ export interface BuildJob {
   check?: (id: string) => Promise<CheckResult>;
   /** A pass on a candidate that already validated: what it asks, with its screenshots in `screenshots/`. Unset: an attempt. */
   pass?: BuildPass;
+  /** It carries on from the failed build it retries (workspace and session carried over): its first attempt resumes. */
+  continues?: boolean;
 }
 
 /**

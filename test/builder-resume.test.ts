@@ -181,3 +181,23 @@ echo '${lines.done}'
     calls: () => (existsSync(join(bin, "calls")) ? readFileSync(join(bin, "calls"), "utf8").trim().split("\n") : []),
   };
 }
+
+test("a retry carries on: the failed build's workspace with the new request over it, its builder's home and session; its first attempt resumes", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hewn-carry-"));
+  const root = join(home, "builds");
+  const wb = localWorkbench({ root, builders: {} });
+  await wb.open("b-old", { "src/half.ts": new TextEncoder().encode("half"), "BUILDER.md": new TextEncoder().encode("old request") });
+  mkdirSync(join(claudeBuildHome(home, "b-old"), "projects"), { recursive: true });
+  writeFileSync(join(claudeBuildHome(home, "b-old"), "projects", "s-old.jsonl"), "{}");
+  noteSession("claude", "b-old", "s-old");
+  assert.equal(await wb.carryOver("b-old", "b-new", { "BUILDER.md": new TextEncoder().encode("new request") }), true);
+  assert.equal(readFileSync(join(root, "b-new", "src", "half.ts"), "utf8"), "half");
+  assert.equal(readFileSync(join(root, "b-new", "BUILDER.md"), "utf8"), "new request");
+  assert.ok(existsSync(join(claudeBuildHome(home, "b-new"), "projects", "s-old.jsonl")), "the session's files, in the new build's own home");
+  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 1 })), undefined, "a plain first attempt starts fresh");
+  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 1, continues: true })), "s-old");
+  assert.match(resumePrompt(job({ buildId: "b-new", attempt: 1, continues: true })), /^This build carries on from an earlier build of the same request that didn't finish: the workspace is as it left it\. Read BUILDER\.md again/);
+  // Nothing kept (the workspace cleaned up after a day): the retry opens afresh.
+  assert.equal(await wb.carryOver("b-gone", "b-other", {}), false);
+  for (const b of ["b-old", "b-new"]) await wb.remove(b);
+});
