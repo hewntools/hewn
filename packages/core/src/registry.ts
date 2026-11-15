@@ -514,6 +514,11 @@ const ADDED_COLUMNS: [string, string, string][] = [
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
 export class Registry {
   db: Sql;
+  /**
+   * Versions read so far, decoded: a version never changes once stored (purging its tool forgets them). Every
+   * reader shares the one object, so nothing may change it (the schema validator's own markers aside).
+   */
+  private versionRows = new Map<string, VersionRow>();
 
   constructor(db: Sql) {
     this.db = db;
@@ -752,10 +757,16 @@ export class Registry {
   }
 
   getVersion(capabilityId: string, version: number): VersionRow | undefined {
+    const key = `${capabilityId}@${version}`;
+    const kept = this.versionRows.get(key);
+    if (kept) return kept;
     const r = this.db
       .prepare("SELECT * FROM capability_versions WHERE capability_id = ? AND version = ?")
       .get(capabilityId, version);
-    return r ? toVersion(r) : undefined;
+    if (!r) return undefined;
+    const v = toVersion(r);
+    this.versionRows.set(key, v);
+    return v;
   }
 
   latestVersionNumber(capabilityId: string): number {
@@ -1283,6 +1294,7 @@ export class Registry {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
+      for (const key of this.versionRows.keys()) if (key.startsWith(`${id}@`)) this.versionRows.delete(key);
       // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
       this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`);
     });

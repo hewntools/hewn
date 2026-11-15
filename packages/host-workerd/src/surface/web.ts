@@ -12,7 +12,6 @@ import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { failureOf } from "@hewntools/core/platform/builds.ts";
-import { sha256 } from "@hewntools/core/sha256.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
@@ -250,7 +249,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "capabilities" && !id) {
     if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
-    return withEtag(req, await capabilityList(platform, owner));
+    return await withEtag(req, await capabilityList(platform, owner));
   }
 
   if (resource === "capabilities" && id) {
@@ -870,15 +869,16 @@ async function capabilityList(platform: Platform, owner: Agent) {
   };
   // A build held for the owner, per tool (the newest): opening the tool shows it, whatever was built since.
   const held = new Map(platform.registry.buildsInReview().map((b) => [b.capabilityId, b.id]));
-  const order = (id: string) => platform.registry.getCapability(id)?.homeOrder ?? Number.MAX_SAFE_INTEGER;
+  // Each tool's row, read once (the sort below would read it at every comparison).
+  const listed = platform.list(owner).map((c) => ({ c, row: platform.registry.getCapability(c.id) }));
+  const order = (x: (typeof listed)[number]) => x.row?.homeOrder ?? Number.MAX_SAFE_INTEGER;
   const caps: Record<string, any>[] = [];
   // Unplaced tiles follow in creation order, so a new capability lands last (next to "New").
-  const created = (id: string) => platform.registry.getCapability(id)?.createdAt ?? "";
-  for (const c of platform.list(owner).sort((a, b) => order(a.id) - order(b.id) || created(a.id).localeCompare(created(b.id)))) {
+  const created = (x: (typeof listed)[number]) => x.row?.createdAt ?? "";
+  for (const { c, row } of listed.sort((a, b) => order(a) - order(b) || created(a).localeCompare(created(b)))) {
     const m = platform.get(owner, c.id);
     // Its kind only: the icon itself is fetched by the page, and Home asks for this list again and again.
     const iconKind = await platform.iconKind(c.id).catch(() => null);
-    const row = platform.registry.getCapability(c.id);
     const last = latest.get(c.id);
     caps.push({
       ...c,
@@ -937,9 +937,11 @@ async function capabilityList(platform: Platform, owner: Agent) {
  * A list a page polls (Home's tools), with an ETag of what it says: the browser asks again with If-None-Match, and an
  * unchanged list is a 304 it answers from its own cache.
  */
-function withEtag(req: Request, value: unknown): Response {
+async function withEtag(req: Request, value: unknown): Promise<Response> {
   const text = JSON.stringify(value);
-  const etag = `"${sha256(text).slice(0, 32)}"`;
+  // WebCrypto's digest: the core's sync sha256 makes several times the body in garbage, at every poll.
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  const etag = `"${[...digest.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("")}"`;
   const headers = { "content-security-policy": WEB_CSP, "cache-control": "private, no-cache", etag };
   // Weak comparison (RFC 9110): a proxy that compresses the answer may hand the browser W/"…".
   if (req.headers.get("if-none-match")?.split(",").some((t) => t.trim().replace(/^W\//, "") === etag)) return new Response(null, { status: 304, headers });
