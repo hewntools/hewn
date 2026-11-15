@@ -24,6 +24,8 @@ export interface LocalWorkbenchOptions {
   /** Confine builders (Seatbelt / bubblewrap): this is the platform home they may not read. Unset = unconfined. */
   confineTo?: () => string | undefined;
   visualCheck?: VisualCheck;
+  /** How long a builder may go with no activity before it's stopped and resumed (ms), read for each build. Unset: the builder's default. */
+  builderIdleMs?: () => number;
 }
 
 /** Files of a directory as a map, artefacts (node_modules …) excluded; `skip`: paths (files or folders) not to read either. */
@@ -316,6 +318,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         onCharge: hooks.onCharge,
         ...(hooks.onCheck ? { check: hooks.onCheck } : {}),
         ...(job.pass ? { pass: job.pass } : {}),
+        ...(opts.builderIdleMs ? { idleMs: opts.builderIdleMs() } : {}),
         ...(job.continues ? { continues: true } : {}),
       });
     },

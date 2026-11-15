@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, constants, copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, constants, copyFileSync, createWriteStream, existsSync, type FSWatcher, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { cp } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { homedir, platform, tmpdir } from "node:os";
@@ -38,6 +38,8 @@ const BRIEF_IF_NOT_READ = "If you haven't read all of BRIEF.md, read it before y
  * only the failure is new. Or a pass on the candidate that validated: what the pass asks.
  */
 export function resumePrompt(job: BuildJob): string {
+  // Stopped for no activity within this attempt: carry on, whatever it had been asked.
+  if (job.resumedAfterIdle) return `Hewn stopped your previous run after ${minutesText(job.idleMs ?? BUILDER_IDLE_MS)} with no activity, before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
   // The first attempt of a retry that carries on from a failed build: BUILDER.md may say why it failed.
   if (job.continues && job.attempt === 1 && !job.pass) return `This build carries on from an earlier build of the same request that didn't finish: the workspace is as it left it. Read BUILDER.md again (it says why the earlier build failed, if you're asked to fix that), then carry on in place, with the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
   if (job.pass && !job.feedback) return `${job.pass.request}\n\n${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
@@ -84,7 +86,21 @@ const BUILDER_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TZ|TMPDIR|LC_\w+|(
 export const OPENCODE_PROVIDER_ENV = /^((OPENROUTER|GEMINI|GOOGLE_GENERATIVE_AI|XAI|GROQ|MISTRAL|DEEPSEEK|OPENCODE)_API_KEY|OLLAMA_HOST)$/;
 export const builderEnv = (env: NodeJS.ProcessEnv = process.env, also?: RegExp): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(env).filter(([k]) => BUILDER_ENV.test(k) || (also?.test(k) ?? false)));
 
-function runCli(command: string, args: string[], job: BuildJob, format: Formatter, timeoutMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
+/** How long a builder may go with no activity (no output, no file change in its workspace) before it's stopped, unless platform.json says otherwise. */
+export const BUILDER_IDLE_MS = 15 * 60_000;
+
+/** "15 minutes", "1 minute". */
+const minutesText = (ms: number) => {
+  const n = Math.max(1, Math.round(ms / 60_000));
+  return `${n} minute${n === 1 ? "" : "s"}`;
+};
+
+/**
+ * Run the CLI until it ends. It is stopped only after `idleMs` with no activity: nothing on its output and no
+ * file changed in the workspace (a hung run: a prompt it can't answer, a dead network call). That rejects with
+ * `idle`, and `active` says whether the run did anything at all before it went quiet.
+ */
+export function runCli(command: string, args: string[], job: BuildJob, format: Formatter, idleMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
   const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
   write(`===== attempt ${job.attempt}${job.pass ? `, the ${job.pass.name} pass` : ""}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
   if (job.platformRoot) {
@@ -104,8 +120,35 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
     let stalled = false;
     let quiet = quietStartMs ? setTimeout(() => ((stalled = true), child.kill("SIGTERM")), quietStartMs) : undefined;
     const spoke = () => (clearTimeout(quiet), (quiet = undefined));
+    let idle = false;
+    let active = false;
+    const stopIdle = () => ((idle = true), child.kill("SIGTERM"));
+    let idleTimer = setTimeout(stopIdle, idleMs);
+    const busy = () => {
+      active = true;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(stopIdle, idleMs);
+    };
+    // A file it writes counts as activity too (a long edit, a write that prints nothing). Only one written
+    // since the run started: macOS replays the last moments' events (the workspace being written) to a new watch.
+    const started = Date.now();
+    const changed = (file: string | null) => {
+      try {
+        if (file && statSync(join(job.workspace, file)).mtimeMs >= started) busy();
+      } catch {
+        // Gone, or not a path in the workspace: nothing to tell.
+      }
+    };
+    let watcher: FSWatcher | undefined;
+    try {
+      watcher = watch(job.workspace, { recursive: true }, (_event, file) => changed(file));
+      watcher.on("error", () => watcher?.close());
+    } catch {
+      // No watching here: its output alone counts.
+    }
     createInterface({ input: child.stdout }).on("line", (line) => {
       spoke();
+      busy();
       raw.write(line + "\n");
       let activity: string | null;
       try {
@@ -127,21 +170,22 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
     createInterface({ input: child.stderr }).on("line", (line) => {
       if (!line.trim()) return;
       spoke();
+      busy();
       if (!unavailable && UNAVAILABLE.test(line)) unavailable = line.trim();
       checkModel(line);
       write(`! ${line}`);
     });
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
     const cancel = () => child.kill("SIGTERM");
+    const done = () => (clearTimeout(idleTimer), watcher?.close(), spoke());
     job.signal?.addEventListener("abort", cancel, { once: true });
-    child.once("error", (e) => (clearTimeout(timer), reject(e)));
+    child.once("error", (e) => (done(), reject(e)));
     child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      spoke();
+      done();
       job.signal?.removeEventListener("abort", cancel);
       if (job.signal?.aborted) return reject(Object.assign(new Error("cancelled"), { cancelled: true }));
       raw.end();
       if (code === 0) resolve();
+      else if (idle && !stalled) reject(Object.assign(new Error(`no activity for ${minutesText(idleMs)}`), { idle: true, active, usedTools }));
       else if (stalled) reject(Object.assign(new Error(`${command} said nothing for ${Math.round(quietStartMs! / 60_000)} minutes, so Hewn stopped it (it never started); try again`), { usedTools }));
       else if (modelRejected) reject(Object.assign(new Error(modelRejected), { modelRejected: true }));
       else if (unavailable) reject(Object.assign(new Error(`${unavailable} (log in to ${job.builderName ?? "the builder CLI"}, or switch "builder" in platform.json)`), { unavailable: true }));
@@ -150,7 +194,6 @@ function runCli(command: string, args: string[], job: BuildJob, format: Formatte
   });
 }
 
-const TIMEOUT_MS = 15 * 60_000;
 /** How long OpenCode gets to say its first word (its model list, then a step): a run stuck before that is stopped. */
 export const OPENCODE_QUIET_START_MS = 3 * 60_000;
 
@@ -475,35 +518,52 @@ export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): 
  * Run an attempt: resuming the earlier session when there is one, else fresh. A resume that fails
  * before the builder used any tool (the session gone, the CLI changed) starts over in the same
  * attempt; one that fails after is a failed attempt like any other (the workspace may be half-changed).
+ * A run stopped for no activity resumes its session in the same attempt: that isn't a failure, unless it
+ * did nothing at all before it went quiet (then it's hung, and resuming would hang again).
  */
-export async function withResume(builder: keyof typeof sessions, job: BuildJob, run: (resume: string | undefined) => Promise<void>) {
-  const earlier = sessionOf(builder, job);
-  if (!earlier) return run(undefined);
-  try {
-    await run(earlier);
-  } catch (e) {
-    const err = e as { usedTools?: boolean; cancelled?: boolean; unavailable?: boolean; modelRejected?: boolean };
-    if (err.usedTools !== false || err.cancelled || err.unavailable || err.modelRejected) throw e;
-    forgetSession(job.buildId);
-    appendFileSync(job.logPath, `${stamp()} couldn't resume the earlier session; starting over\n`);
-    job.onActivity?.("couldn't resume the earlier session; starting over");
-    await run(undefined);
+export async function withResume(builder: keyof typeof sessions, job: BuildJob, run: (resume: string | undefined, job: BuildJob) => Promise<void>) {
+  const note = (line: string) => (appendFileSync(job.logPath, `${stamp()} ${line}\n`), job.onActivity?.(line));
+  const once = async (resume: string | undefined, attempt: BuildJob) => {
+    if (!resume) return run(undefined, attempt);
+    try {
+      await run(resume, attempt);
+    } catch (e) {
+      const err = e as { usedTools?: boolean; cancelled?: boolean; unavailable?: boolean; modelRejected?: boolean; idle?: boolean };
+      if (err.usedTools !== false || err.cancelled || err.unavailable || err.modelRejected || err.idle) throw e;
+      forgetSession(job.buildId);
+      note("couldn't resume the earlier session; starting over");
+      await run(undefined, attempt);
+    }
+  };
+  let resume = sessionOf(builder, job);
+  let attempt = job;
+  for (;;) {
+    try {
+      return await once(resume, attempt);
+    } catch (e) {
+      const err = e as { idle?: boolean; active?: boolean; message: string };
+      if (!err.idle || !err.active) throw e;
+      note(`${err.message}; resuming`);
+      // Its own session, where it stopped: the prompt says so, not the failure it had already been given.
+      resume = sessions[builder].get(job.buildId);
+      attempt = { ...job, resumedAfterIdle: true };
+    }
   }
 }
 
 async function codexRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the thread; the login only for a run.
   const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("codex", job, async (resume) => {
+  await withResume("codex", job, async (resume, attempt) => {
     const isolated = codexHome(home);
     const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "codex",
-        codexArgs(job, resume, check?.server),
-        job,
+        codexArgs(attempt, resume, check?.server),
+        attempt,
         codexActivity,
-        TIMEOUT_MS,
+        job.idleMs ?? BUILDER_IDLE_MS,
         // Codex has a shell: no Keychain. Its auth lives in its own home.
         { ownState: [isolated.dir], denyKeychain: true },
         isolated.env,
@@ -535,7 +595,7 @@ export function opencodeArgs(job: BuildJob, resume?: string): string[] {
 async function opencodeRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("opencode", job, async (resume) => {
+  await withResume("opencode", job, async (resume, attempt) => {
     const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     const isolated = await opencodeHome(home, check ? opencodeCheck(check.server) : { rules: OPENCODE_BUILDER_RULES });
     try {
@@ -543,10 +603,10 @@ async function opencodeRun(job: BuildJob) {
       if (job.model && !(await opencodeHasModel(job.model, isolated.env, isolated.dir))) throw opencodeModelRejected(job.model);
       await runCli(
         "opencode",
-        opencodeArgs(job, resume),
-        job,
+        opencodeArgs(attempt, resume),
+        attempt,
         opencodeActivity,
-        TIMEOUT_MS,
+        job.idleMs ?? BUILDER_IDLE_MS,
         // Its logins come as a file in its own home: no Keychain, none of your ~/.config/opencode. A local model server's port stays open.
         { ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback },
         isolated.env,
@@ -598,17 +658,17 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
 async function claudeRun(job: BuildJob) {
   // Its own dir per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = claudeBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("claude", job, async (resume) => {
+  await withResume("claude", job, async (resume, attempt) => {
     const session = { id: resume ?? randomUUID(), resume: !!resume };
     const isolated = claudeHome(home, undefined, { keepSessions: true });
     const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "claude",
-        claudeArgs(job, session, check?.server),
-        job,
+        claudeArgs(attempt, session, check?.server),
+        attempt,
         claudeActivity,
-        TIMEOUT_MS,
+        job.idleMs ?? BUILDER_IDLE_MS,
         // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
         { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
         // A check takes longer than an MCP call usually does.
