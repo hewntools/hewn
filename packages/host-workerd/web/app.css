@@ -362,7 +362,7 @@ dialog.lightbox { width: min(1200px, 94vw); }
 .inbox-panel .inbox-row .grow { gap: 1px; }
 .inbox-panel .inbox-row > .app-icon { flex: none; }
 .inbox-eyebrow { padding: 6px 10px; }
-.inbox-panel hr { width: 100%; }
+.inbox-panel hr { width: auto; }
 .inbox-recent { padding: 0 10px; }
 .inbox-recent > li { min-height: 36px; padding: 4px 0; }
 .blocking-banner .dot { flex: none; }
