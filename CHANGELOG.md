@@ -2,6 +2,13 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.12 (unreleased)
+
+### Fixes
+
+- A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.
+- Every build's code stayed in memory until Hewn restarted, failed builds too, and a tool that reaches the internet was loaded twice. Now each tool version is loaded once and a build's code goes when the build ends.
+
 ## 0.4.11 (2026-11-13)
 
 ### New
