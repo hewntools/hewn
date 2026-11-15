@@ -8,6 +8,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 - **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille dots. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
 
+### Changes
+
+- **No time limit on a build's attempt.** A builder on your machine is stopped only when it has done nothing for 15 minutes (no output, no file written), and then carries on in the same attempt; `builderIdleMinutes` in `platform.json` changes the 15. Before, every attempt stopped at 15 minutes, and big builds used up their attempts on it. See [When a build fails](docs/building-tools.md#when-a-build-fails).
+
 ### Fixes
 
 - A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.

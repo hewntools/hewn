@@ -35,6 +35,10 @@ export interface BuildJob {
   check?: (id: string) => Promise<CheckResult>;
   /** A pass on a candidate that already validated: what it asks, with its screenshots in `screenshots/`. Unset: an attempt. */
   pass?: BuildPass;
+  /** How long a run may go with no activity before it's stopped and resumed (ms; platform.json's builderIdleMinutes). Unset: 15 minutes. */
+  idleMs?: number;
+  /** This run resumes one Hewn stopped for no activity, in the same attempt. */
+  resumedAfterIdle?: boolean;
 }
 
 /**
