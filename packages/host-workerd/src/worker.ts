@@ -323,8 +323,8 @@ interface DataLimits {
 const isFull = (message: string | undefined) => /SQLITE_FULL/.test(message ?? "");
 
 /**
- * The hosts a tool's calls run with when `code` is its live version (null when it isn't: code
- * going live, not yet active).
+ * The hosts a tool's calls run with when `code` is its active version (null when it isn't: code
+ * going live).
  */
 type LiveHosts = (capabilityId: string, code: CodeRef) => string[] | null;
 
@@ -332,9 +332,15 @@ type LiveHosts = (capabilityId: string, code: CodeRef) => string[] | null;
 function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts): CapabilityRuntime {
   // RPC stub of a CapabilityHost (typed loosely: the generated stub types are too deep for tsc).
   const host = (capabilityId: string) => env.CAPS.get(env.CAPS.idFromName(capabilityId)) as unknown as CapabilityHostApi;
+  /** The tool's calls' hosts when this is its live state running its active version (null: it isn't). */
+  const liveOf = (state: StateRef, code: CodeRef) => (state.scratch ? null : liveHosts(state.capabilityId, code));
   // Data ops run with the hosts the tool's calls have, so on the live state they share the calls' isolate
-  // and never stop a call in progress; a build's states run with none, as validation's calls do.
-  const hostsOf = (state: StateRef, code: CodeRef) => (state.scratch ? [] : liveHosts(state.capabilityId, code));
+  // and never stop a call in progress; a build's states run with none, as validation's calls do. Only the
+  // live tool's own isolate is named (workerd keeps it): `named`.
+  const dataIsolate = (state: StateRef, code: CodeRef): [string[], boolean] => {
+    const live = liveOf(state, code);
+    return [live ?? [], live !== null];
+  };
   /** Run against a state with its limit; a write past it fails saying so. */
   const limited = async <T>(capabilityId: string, run: (limit: number) => Promise<T>): Promise<T> => {
     const limit = data.limit(capabilityId);
@@ -362,9 +368,13 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts): Capab
         throw e;
       });
       const limit = data.limit(target.capabilityId);
+      const hosts = target.hosts ?? [];
+      // A call on the live state with other hosts (sample data replayed, nothing granted yet) gets an isolate of its own.
+      const live = liveOf(target.state, target.code);
+      const named = live !== null && live.join(",") === hosts.join(",");
       try {
         const r = await Promise.race([
-          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit),
+          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, hosts, target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit, named),
           expired,
         ]);
         if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
@@ -379,15 +389,15 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts): Capab
       }
     },
     // Describing only loads code (in an isolate of its own, gone once described); any capability id's host can do it.
-    describe: (code) => host("_describe").describe(code, data.limit("")),
-    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit, hostsOf(state, code))),
+    describe: (code) => host("_describe").describe(code),
+    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit, ...dataIsolate(state, code))),
     hasState: (state) => host(state.capabilityId).hasState(state.scratch ?? null),
     copyState: (from, to) => host(from.capabilityId).copyState(from.scratch ?? null, to.scratch ?? null),
     dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
     listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
-    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId), hostsOf(state, code)),
-    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId), hostsOf(state, code)),
-    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit, hostsOf(state, code))),
+    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId), ...dataIsolate(state, code)),
+    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId), ...dataIsolate(state, code)),
+    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code))),
   };
 }
 
@@ -778,7 +788,11 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
 // ---------- CapabilityHost: one per capability ----------
 
 /** A capability's states are facets of its host: "live", or "s:<scratch name>". */
-const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : "live");
+const LIVE = "live";
+const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : LIVE);
+
+/** A state's size limit in bytes, as its isolate's code carries it (0: not at all). */
+const limitBytes = (limit: number) => (Number.isSafeInteger(limit) && limit > 0 ? limit : 0);
 
 export class CapabilityHost extends DurableObject<Env> {
   /** Which loaded code each running facet was started with. */
@@ -811,9 +825,9 @@ export class CapabilityHost extends DurableObject<Env> {
    * Work on a facet. When the last piece of work on it ends, the facet is stopped, so nothing a call
    * leaves behind (a timer, a promise it didn't await) runs on after it.
    */
-  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[] | null, limit: number, work: (facet: any) => Promise<T>): Promise<T> {
+  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], named: boolean, limit: number, work: (facet: any) => Promise<T>): Promise<T> {
     const name = facetName(scratch);
-    const facet = this.facet(scratch, code, hosts, limit);
+    const facet = this.facet(scratch, code, hosts, named, limit);
     this.busy.set(name, (this.busy.get(name) ?? 0) + 1);
     try {
       return await work(facet);
@@ -847,25 +861,26 @@ export class CapabilityHost extends DurableObject<Env> {
 
   /**
    * The isolate a state runs `code` in. workerd keeps a named isolate until it restarts, so only the
-   * live state's active code is named (one per tool version, its calls and data ops alike). A build's
-   * states, and code on its way to going live, get unnamed ones, which go once nothing holds them:
-   * a build's states share one per code until they're dropped, the other is held only while it runs.
+   * live tool's own (`named`: its active version, with its calls' hosts) is named: one per tool
+   * version, its calls and data ops alike. Anything else gets an unnamed one, which goes once nothing
+   * holds it: a build's states share one per code until they're dropped; on the live state (code
+   * going live, sample data replayed) it's held only while it runs.
    */
-  private worker(name: string, code: CodeRef, hosts: string[] | null, limit: number) {
-    const bytes = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
-    const key = `${code.hash}|${hosts?.join(",") ?? "(going live)"}|${bytes}`;
-    if (name === "live" && hosts) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes)) };
-    if (name === "live") return { key, stub: this.env.LOADER.load(this.workerCode(code, [], bytes)) };
-    let shared = this.buildIsolates.get(key);
-    if (!shared) this.buildIsolates.set(key, (shared = { stub: this.env.LOADER.load(this.workerCode(code, hosts ?? [], bytes)), states: new Set() }));
-    shared.states.add(name);
-    return { key, stub: shared.stub };
+  private worker(name: string, code: CodeRef, hosts: string[], named: boolean, limit: number) {
+    const bytes = limitBytes(limit);
+    const key = `${code.hash}|${hosts.join(",")}|${bytes}${named ? "" : "|unnamed"}`;
+    if (named) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes)) };
+    if (name === LIVE) return { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes)) };
+    let entry = this.buildIsolates.get(key);
+    if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes)), states: new Set() }));
+    entry.states.add(name);
+    return { key, stub: entry.stub };
   }
 
   /** The facet for a state, running `code` with `limit` (restarted if it was running other code or another limit). */
-  private facet(scratch: string | null, code: CodeRef, hosts: string[] | null, limit: number) {
+  private facet(scratch: string | null, code: CodeRef, hosts: string[], named: boolean, limit: number) {
     const name = facetName(scratch);
-    const w = this.worker(name, code, hosts, limit);
+    const w = this.worker(name, code, hosts, named, limit);
     if (this.running.has(name) && this.running.get(name) !== w.key) this.ctx.facets.abort(name, new Error("new version"));
     this.running.set(name, w.key);
     this.ctx.storage.sql.exec("INSERT OR IGNORE INTO states (name) VALUES (?)", name);
@@ -873,31 +888,31 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   // `limit`: how big the state may grow, in bytes (0: not at all; workerdRuntime passes the owner's).
-  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0) {
-    return this.on(scratch, code, hosts, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
+  // `named`: the live tool's own isolate (see `worker`).
+  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0, named = false) {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
   }
 
-  // Validation's: an unnamed isolate, gone once described.
-  async describe(code: CodeRef, limit = 0): Promise<string[]> {
-    const bytes = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
-    return (this.env.LOADER.load(this.workerCode(code, [], bytes)).getEntrypoint() as any).describe();
+  // Validation's: an unnamed isolate, gone once described (it opens no state, so no limit).
+  async describe(code: CodeRef): Promise<string[]> {
+    return (this.env.LOADER.load(this.workerCode(code, [], 0)).getEntrypoint() as any).describe();
   }
 
-  // The data ops' `hosts`: the tool's calls', when `code` is live (null: it isn't yet).
-  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0, hosts: string[] | null = null): Promise<string[]> {
-    return this.on(scratch, code, hosts, limit, (f) => f.migrate(migrations));
+  // The data ops' `hosts` and `named`: the tool's calls', when this is the live tool (see `worker`).
+  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<string[]> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.migrate(migrations));
   }
 
-  async dump(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] | null = null) {
-    return this.on(scratch, code, hosts, limit, (f) => f.dump());
+  async dump(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false) {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.dump());
   }
 
-  async count(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] | null = null): Promise<Record<string, number>> {
-    return this.on(scratch, code, hosts, limit, (f) => f.count());
+  async count(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<Record<string, number>> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.count());
   }
 
-  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0, hosts: string[] | null = null): Promise<number> {
-    return this.on(scratch, code, hosts, limit, (f) => f.load(tables));
+  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<number> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.load(tables));
   }
 
   hasState(scratch: string | null): boolean {
@@ -918,7 +933,7 @@ export class CapabilityHost extends DurableObject<Env> {
 
   private drop(name: string) {
     this.halt(name, "dropped");
-    for (const [key, shared] of this.buildIsolates) if (shared.states.delete(name) && !shared.states.size) this.buildIsolates.delete(key);
+    for (const [key, entry] of this.buildIsolates) if (entry.states.delete(name) && !entry.states.size) this.buildIsolates.delete(key);
     this.ctx.facets.delete(name);
     this.ctx.storage.sql.exec("DELETE FROM states WHERE name = ?", name);
   }
