@@ -4,6 +4,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.12 (unreleased)
 
+### New
+
+- **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille dots. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+
 ### Fixes
 
 - A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.
