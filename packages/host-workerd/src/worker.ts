@@ -18,6 +18,7 @@ import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import { checkToJson } from "@hewntools/core/checks.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
+import { resolveHosts } from "@hewntools/core/platform/grants.ts";
 import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, Sql, StateRef, Workbench } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
@@ -321,10 +322,25 @@ interface DataLimits {
 /** SQLite's error for a write past a state's limit (or a full disk). */
 const isFull = (message: string | undefined) => /SQLITE_FULL/.test(message ?? "");
 
+/**
+ * The hosts a tool's calls run with when `code` is its active version (null when it isn't: code
+ * going live).
+ */
+type LiveHosts = (capabilityId: string, code: CodeRef) => string[] | null;
+
 /** The runtime port: capability code runs in its CapabilityHost, isolated, with its own state. */
-function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
+function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts): CapabilityRuntime {
   // RPC stub of a CapabilityHost (typed loosely: the generated stub types are too deep for tsc).
   const host = (capabilityId: string) => env.CAPS.get(env.CAPS.idFromName(capabilityId)) as unknown as CapabilityHostApi;
+  /** The tool's calls' hosts when this is its live state running its active version (null: it isn't). */
+  const liveOf = (state: StateRef, code: CodeRef) => (state.scratch ? null : liveHosts(state.capabilityId, code));
+  // Data ops run with the hosts the tool's calls have, so on the live state they share the calls' isolate
+  // and never stop a call in progress; a build's states run with none, as validation's calls do. Only the
+  // live tool's own isolate is named (workerd keeps it): `named`.
+  const dataIsolate = (state: StateRef, code: CodeRef): [string[], boolean] => {
+    const live = liveOf(state, code);
+    return [live ?? [], live !== null];
+  };
   /** Run against a state with its limit; a write past it fails saying so. */
   const limited = async <T>(capabilityId: string, run: (limit: number) => Promise<T>): Promise<T> => {
     const limit = data.limit(capabilityId);
@@ -352,9 +368,13 @@ function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
         throw e;
       });
       const limit = data.limit(target.capabilityId);
+      const hosts = target.hosts ?? [];
+      // A call on the live state with other hosts (sample data replayed, nothing granted yet) gets an isolate of its own.
+      const live = liveOf(target.state, target.code);
+      const named = live !== null && live.join(",") === hosts.join(",");
       try {
         const r = await Promise.race([
-          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit),
+          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, hosts, target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit, named),
           expired,
         ]);
         if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
@@ -368,17 +388,16 @@ function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
         timer.clear();
       }
     },
-    // Describing only loads code; any capability id's host can do it. With the limit tools have unless the owner
-    // gave one its own: the isolate it loads is the one the build's tests and the tool's data then use, not one more.
-    describe: (code) => host("_describe").describe(code, data.limit("")),
-    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit)),
+    // Describing only loads code (in an isolate of its own, gone once described); any capability id's host can do it.
+    describe: (code) => host("_describe").describe(code),
+    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit, ...dataIsolate(state, code))),
     hasState: (state) => host(state.capabilityId).hasState(state.scratch ?? null),
     copyState: (from, to) => host(from.capabilityId).copyState(from.scratch ?? null, to.scratch ?? null),
     dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
     listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
-    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId)),
-    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId)),
-    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit)),
+    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId), ...dataIsolate(state, code)),
+    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId), ...dataIsolate(state, code)),
+    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code))),
   };
 }
 
@@ -413,7 +432,7 @@ export class HewnDO extends DurableObject<Env> {
       this.platform = new Platform({
         sql: this.sql,
         blobs: diskBlobs(env),
-        runtime: workerdRuntime(env, { limit: (id) => this.dataLimit(id), full: (id, limit) => this.dataFull(id, limit) }),
+        runtime: workerdRuntime(env, { limit: (id) => this.dataLimit(id), full: (id, limit) => this.dataFull(id, limit) }, (id, code) => this.liveHosts(id, code)),
         workbench: remoteWorkbench(env, this.visualInvokers),
         secrets: this.secrets,
         brief: BRIEF,
@@ -462,6 +481,14 @@ export class HewnDO extends DurableObject<Env> {
   /** How big a capability's states may grow, in bytes: its limit, or 0 while the disk is nearly full. */
   private dataLimit(capabilityId: string): number {
     return this.diskLow ? 0 : toolDataLimitMB(this.settings(), capabilityId) * MB;
+  }
+
+  /** The hosts the tool's calls run with (as invocation resolves them), when `code` is its active version. */
+  private liveHosts(capabilityId: string, code: CodeRef): string[] | null {
+    const registry = this.platform.registry;
+    const active = registry.getCapability(capabilityId)?.activeVersion;
+    const version = active ? registry.getVersion(capabilityId, active) : undefined;
+    return version && version.contentHash === code.hash ? resolveHosts(version.manifest, registry.config(capabilityId)) : null;
   }
 
   /** What a call that needed more room than `limit` gives fails with; the owner's log says so too. */
@@ -761,11 +788,17 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
 // ---------- CapabilityHost: one per capability ----------
 
 /** A capability's states are facets of its host: "live", or "s:<scratch name>". */
-const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : "live");
+const LIVE = "live";
+const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : LIVE);
+
+/** A state's size limit in bytes, as its isolate's code carries it (0: not at all). */
+const limitBytes = (limit: number) => (Number.isSafeInteger(limit) && limit > 0 ? limit : 0);
 
 export class CapabilityHost extends DurableObject<Env> {
   /** Which loaded code each running facet was started with. */
   private running = new Map<string, string>();
+  /** The isolates a build's states run, by code: each kept until every state that ran it is dropped (the build is done with them). */
+  private buildIsolates = new Map<string, { stub: WorkerStub; states: Set<string> }>();
   /** Calls (and other work) in progress on each facet. */
   private busy = new Map<string, number>();
 
@@ -792,9 +825,9 @@ export class CapabilityHost extends DurableObject<Env> {
    * Work on a facet. When the last piece of work on it ends, the facet is stopped, so nothing a call
    * leaves behind (a timer, a promise it didn't await) runs on after it.
    */
-  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], limit: number, work: (facet: any) => Promise<T>): Promise<T> {
+  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], named: boolean, limit: number, work: (facet: any) => Promise<T>): Promise<T> {
     const name = facetName(scratch);
-    const facet = this.facet(scratch, code, hosts, limit);
+    const facet = this.facet(scratch, code, hosts, named, limit);
     this.busy.set(name, (this.busy.get(name) ?? 0) + 1);
     try {
       return await work(facet);
@@ -809,32 +842,45 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   /**
-   * The isolate for `code` with these hosts and this size limit (bytes) for each state it runs.
+   * The code for `code`'s isolate with these hosts and this size limit (bytes) for each state it runs.
    * "experimental" is for the limit's setter, sql.setMaxPageCountForTest: hewn-guard.js
    * (capability-guard.ts) takes it, with what else the flag adds to storage, out of the
    * capability's reach before its code can use any.
    */
-  private worker(code: CodeRef, hosts: string[], limit: number) {
-    const bytes = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
-    const key = `${code.hash}|${hosts.join(",")}|${bytes}`;
+  private workerCode(code: CodeRef, hosts: string[], bytes: number): WorkerLoaderWorkerCode {
     return {
-      key,
-      stub: this.env.LOADER.get(key, () => ({
-        compatibilityDate: COMPAT_DATE,
-        compatibilityFlags: ["nodejs_compat", "experimental"],
-        allowExperimental: true,
-        mainModule: "hewn-runtime.js",
-        modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
-        env: {},
-        globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts } }),
-      })),
+      compatibilityDate: COMPAT_DATE,
+      compatibilityFlags: ["nodejs_compat", "experimental"],
+      allowExperimental: true,
+      mainModule: "hewn-runtime.js",
+      modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
+      env: {},
+      globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts } }),
     };
   }
 
+  /**
+   * The isolate a state runs `code` in. workerd keeps a named isolate until it restarts, so only the
+   * live tool's own (`named`: its active version, with its calls' hosts) is named: one per tool
+   * version, its calls and data ops alike. Anything else gets an unnamed one, which goes once nothing
+   * holds it: a build's states share one per code until they're dropped; on the live state (code
+   * going live, sample data replayed) it's held only while it runs.
+   */
+  private worker(name: string, code: CodeRef, hosts: string[], named: boolean, limit: number) {
+    const bytes = limitBytes(limit);
+    const key = `${code.hash}|${hosts.join(",")}|${bytes}${named ? "" : "|unnamed"}`;
+    if (named) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes)) };
+    if (name === LIVE) return { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes)) };
+    let entry = this.buildIsolates.get(key);
+    if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes)), states: new Set() }));
+    entry.states.add(name);
+    return { key, stub: entry.stub };
+  }
+
   /** The facet for a state, running `code` with `limit` (restarted if it was running other code or another limit). */
-  private facet(scratch: string | null, code: CodeRef, hosts: string[], limit: number) {
+  private facet(scratch: string | null, code: CodeRef, hosts: string[], named: boolean, limit: number) {
     const name = facetName(scratch);
-    const w = this.worker(code, hosts, limit);
+    const w = this.worker(name, code, hosts, named, limit);
     if (this.running.has(name) && this.running.get(name) !== w.key) this.ctx.facets.abort(name, new Error("new version"));
     this.running.set(name, w.key);
     this.ctx.storage.sql.exec("INSERT OR IGNORE INTO states (name) VALUES (?)", name);
@@ -842,28 +888,31 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   // `limit`: how big the state may grow, in bytes (0: not at all; workerdRuntime passes the owner's).
-  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0) {
-    return this.on(scratch, code, hosts, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
+  // `named`: the live tool's own isolate (see `worker`).
+  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0, named = false) {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
   }
 
-  async describe(code: CodeRef, limit = 0): Promise<string[]> {
-    return (this.worker(code, [], limit).stub.getEntrypoint() as any).describe();
+  // Validation's: an unnamed isolate, gone once described (it opens no state, so no limit).
+  async describe(code: CodeRef): Promise<string[]> {
+    return (this.env.LOADER.load(this.workerCode(code, [], 0)).getEntrypoint() as any).describe();
   }
 
-  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0): Promise<string[]> {
-    return this.on(scratch, code, [], limit, (f) => f.migrate(migrations));
+  // The data ops' `hosts` and `named`: the tool's calls', when this is the live tool (see `worker`).
+  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<string[]> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.migrate(migrations));
   }
 
-  async dump(scratch: string | null, code: CodeRef, limit = 0) {
-    return this.on(scratch, code, [], limit, (f) => f.dump());
+  async dump(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false) {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.dump());
   }
 
-  async count(scratch: string | null, code: CodeRef, limit = 0): Promise<Record<string, number>> {
-    return this.on(scratch, code, [], limit, (f) => f.count());
+  async count(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<Record<string, number>> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.count());
   }
 
-  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0): Promise<number> {
-    return this.on(scratch, code, [], limit, (f) => f.load(tables));
+  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<number> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.load(tables));
   }
 
   hasState(scratch: string | null): boolean {
@@ -884,6 +933,7 @@ export class CapabilityHost extends DurableObject<Env> {
 
   private drop(name: string) {
     this.halt(name, "dropped");
+    for (const [key, entry] of this.buildIsolates) if (entry.states.delete(name) && !entry.states.size) this.buildIsolates.delete(key);
     this.ctx.facets.delete(name);
     this.ctx.storage.sql.exec("DELETE FROM states WHERE name = ?", name);
   }
