@@ -1,27 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 // Hewn's mark, moving: the thirteen pixels of the pixel H, in polished chrome, run together into one pixel and part
-// again, in one 26 s loop. A shader draws it small (WebGL 2), 2×4 samples a character cell, and each cell becomes a
-// braille character, its dots by an ordered dither: characters only, never the picture itself. Drawn into a <pre>.
+// again, in one 26 s loop. A shader draws it small (WebGL 2), 2×4 samples a braille character, and a second pass
+// turns each character's samples into its dots by an ordered dither and draws them: characters only, never the picture
+// itself. Each dot is a small square on an even, square grid of whole device pixels, with a faint glow of the
+// character's colour behind it on a dark page. It all stays on the GPU; the page only says when.
+// The <pre> keeps blank braille (cols × rows), so it has the size its characters give it; the mark's canvas lies over
+// it, as wide as it is tall (the mark's own square), centred.
 //
-// window.hewnAscii(preEl, { cols, rows, speed, ink, opacity, fill, focal, shade, aspect, at, still, reduced }) → stop()
+// window.hewnAscii(preEl, { cols, rows, speed, fps, ink, opacity, fill, dot, focal, shade, at, still, reduced }) → stop()
 //   ink: "auto" (the default: "colour" on a dark page, "tone" on a light one, judged by the <pre>'s own colour),
 //        "colour" (the chrome's own colours; on a light page they wash out), "tone" (the <pre>'s colour, fainter where
 //        the metal is darker) or "mono" (the <pre>'s colour, even).
-//   fill: how readily a dot lights (1); more makes the mark denser and bolder. Braille's dots are small: the mark
-//   carries about a third of the ink the old ASCII field did at the same opacity, so it wants twice the opacity or more.
-//   aspect: a character cell's height over its width. Measured from the <pre> unless given.
+//   fill: how readily a dot lights (1); more makes the mark denser. dot: a dot's side, against the space between dots
+//   (0.6).
 //   at: hold the loop at this point (0 to 1). still: the H standing still, as without WebGL 2. reduced: the logo seen
 //   square on, as under prefers-reduced-motion.
-// It paints 15 frames a second, and none while the page or the <pre> is out of sight. One GL context serves every mark
-// on the page. stop() ends it; stop.ms is what a frame has cost lately, in ms.
+// It paints 30 frames a second (fps), and none while the page or the <pre> is out of sight. stop() ends it and frees
+// its GL context; stop.ms is what a frame has cost the page lately, in ms.
 // To compare looks on a real page, its address can set these for every mark on it, over what the page asks:
-// ?mark-ink=mono&mark-opacity=0.4 (also mark-fill, mark-focal, mark-shade, mark-speed, mark-aspect, mark-at, mark-still,
-// mark-reduced).
+// ?mark-ink=mono&mark-opacity=0.4 (also mark-fps, mark-fill, mark-dot, mark-focal, mark-shade, mark-speed, mark-at,
+// mark-still, mark-reduced).
 (function () {
   const GLYPH = ["##..#", ".#..#", ".####", ".#..#", ".#..#"]; // Hewn's pixel H
   const HOME = [];
   for (let gy = 0; gy < 5; gy++) for (let gx = 0; gx < 5; gx++) if (GLYPH[gy][gx] === "#") HOME.push([gx - 2, 2 - gy]);
-  const TAU = Math.PI * 2, T = 26, FPS = 15, CAM = 14; // the loop in seconds, frames a second, how far away the eye is
+  const TAU = Math.PI * 2, T = 26, FPS = 30, CAM = 14; // the loop in seconds, frames a second, how far away the eye is
   // Where the loop rests: the logo seen square on, where the eye's yaw in pose(), 0.34·sin(2πu + 0.6), is 0.
   const REST = (Math.PI - 0.6) / TAU;
   const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
@@ -157,252 +160,237 @@ void main() {
   o = vec4(c / (n * n), sg / (n * n));
 }`;
 
-  // ───────────────────────── GL: one context for every mark on the page ─────────────────────────
-  let GL; // undefined until a mark asks for it; null when the browser has no WebGL 2, or only one drawn in software
-  function context() {
-    if (GL !== undefined) return GL;
-    GL = null;
-    const canvas = document.createElement("canvas");
-    // in software, a 64×40 mark costs 11 ms a frame where a GPU takes 1: such a browser gets the H standing still
-    const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false, powerPreference: "low-power", failIfMajorPerformanceCaveat: true });
+  // the second pass: from the samples, each character's dots by an ordered dither, as squares; and the glow
+  const FS_DOTS = `#version 300 es
+precision highp float;
+uniform sampler2D uS;               // the samples, 2×4 a character, bottom row first
+uniform ivec2 uGrid;                // characters across and down
+uniform int uP, uSide, uInk;        // dot pitch and side, in device px; 0 "colour", 1 "tone", 2 "mono"
+uniform float uH, uGain, uShade, uHalo;
+uniform vec3 uColor;                // the <pre>'s colour, for "tone" and "mono"
+out vec4 o;
+const float TONE = 0.4;             // "tone": the darkest metal still gets this much of the ink
+const int BAYER[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+void main() {
+  ivec2 px = ivec2(int(gl_FragCoord.x), int(uH - gl_FragCoord.y)), d = px / uP, c = d / ivec2(2, 4);
+  o = vec4(0.);
+  if (c.x >= uGrid.x || c.y >= uGrid.y) return;
+  float peak = 0., ws = 0., sig = 0., Ld = 0.; vec3 w = vec3(0.), a = vec3(0.);
+  for (int j = 0; j < 4; j++) for (int k = 0; k < 2; k++) {
+    ivec2 s = c * ivec2(2, 4) + ivec2(k, j);
+    vec4 t = texelFetch(uS, ivec2(s.x, uGrid.y * 4 - 1 - s.y), 0);
+    float L = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * min(1., t.a * 1.5);
+    peak = max(peak, L); w += t.rgb * L; ws += L; a += t.rgb; sig += t.a;
+    if (s == d) Ld = L;
+  }
+  float g = uInk == 0 ? uHalo * min(1., sig / 8. * 255. / 60.) : 0.;   // as faint as the haze the mark leaves there
+  ivec2 r = px - d * uP; int inset = (uP - uSide) / 2;
+  if (peak < 0.06 || any(lessThan(r, ivec2(inset))) || any(greaterThanEqual(r, ivec2(inset + uSide)))
+      || Ld * uGain <= (float(BAYER[(d.y & 3) * 4 + (d.x & 3)]) + 0.5) / 16.) { o = vec4(a / 8. * g, g); return; }
+  float top = mix(245. / 255., clamp(0.26 + 0.82 * pow(peak, 0.8), 0.26, 0.97), min(1., uShade));
+  if (uInk == 0) { vec3 m = w / ws; o = vec4(m * (top / max(max(m.r, m.g), max(m.b, 1. / 255.))), 1.); }
+  else { float al = uInk == 1 ? min(1., TONE + (1. - TONE) * top) : 1.; o = vec4(uColor * al, al); }
+}`;
+
+  // ───────────────────────── GL: each mark its own context, on its own canvas ─────────────────────────
+  /** The mark's GL: a context on a canvas of its own, both passes' programs, and a texture for the samples. null when
+   *  the browser has no WebGL 2, or draws it in software (a 64×40 mark costs 11 ms a frame there, where a GPU takes 1:
+   *  such a browser gets the H standing still). */
+  function makeGL() {
+    const cv = document.createElement("canvas");
+    const gl = cv.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: "low-power", failIfMajorPerformanceCaveat: true });
     if (!gl) return null;
     let renderer = gl.getParameter(gl.RENDERER);
     if (/^webkit webgl$/i.test(renderer)) { const x = gl.getExtension("WEBGL_debug_renderer_info"); if (x) renderer = gl.getParameter(x.UNMASKED_RENDERER_WEBGL); }
     if (/swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer)) { const x = gl.getExtension("WEBGL_lose_context"); if (x) x.loseContext(); return null; }
-    const p = gl.createProgram(), loc = {};
-    for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, FS]]) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); gl.attachShader(p, s); }
-    gl.linkProgram(p); // where the browser can, this goes on in the background: see linked()
-    const g = { gl, p, tex: gl.createTexture(), fbo: gl.createFramebuffer(), w: 0, h: 0, state: 0, lost: false, par: gl.getExtension("KHR_parallel_shader_compile"), u: (n) => (n in loc ? loc[n] : (loc[n] = gl.getUniformLocation(p, n))) };
+    const program = (fs) => {
+      const p = gl.createProgram(), loc = {};
+      for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, fs]]) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); gl.attachShader(p, s); }
+      gl.linkProgram(p); // where the browser can, this goes on in the background: see linked()
+      return { p, u: (n) => (n in loc ? loc[n] : (loc[n] = gl.getUniformLocation(p, n))) };
+    };
+    const g = { cv, gl, scene: program(FS), dots: program(FS_DOTS), tex: gl.createTexture(), fbo: gl.createFramebuffer(), fw: 0, fh: 0, state: 0, lost: false, par: gl.getExtension("KHR_parallel_shader_compile") };
     gl.bindTexture(gl.TEXTURE_2D, g.tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
-    canvas.addEventListener("webglcontextlost", () => { g.lost = true; });
-    return (GL = g);
+    cv.addEventListener("webglcontextlost", () => { g.lost = true; });
+    return g;
   }
-  /** 1 once the shader is ready, 0 while it still compiles, -1 if it can't be used. */
+  /** 1 once both programs are ready, 0 while they still compile, -1 if they can't be used. */
   function linked(g) {
     if (g.lost) return -1;
     if (g.state) return g.state;
-    const gl = g.gl;
-    if (g.par && !gl.getProgramParameter(g.p, g.par.COMPLETION_STATUS_KHR)) return 0;
-    g.state = gl.getProgramParameter(g.p, gl.LINK_STATUS) ? 1 : -1;
-    if (g.state < 0) console.warn("hewnAscii: the mark's shader didn't build here, so it stands still.", gl.getProgramInfoLog(g.p));
+    const gl = g.gl, progs = [g.scene.p, g.dots.p];
+    if (g.par && progs.some((p) => !gl.getProgramParameter(p, g.par.COMPLETION_STATUS_KHR))) return 0;
+    g.state = progs.every((p) => gl.getProgramParameter(p, gl.LINK_STATUS)) ? 1 : -1;
+    if (g.state < 0) console.warn("hewnAscii: the mark's shaders didn't build here, so it stands still.", progs.map((p) => gl.getProgramInfoLog(p)).join(" "));
     return g.state;
   }
-  /** How a size is drawn, from how many cells the mark spans: the fewer the dots, the more rays each gets, the readier
-   *  it is to light (but not so ready that the block's faces look alike), and the less shadow: a small mark can't spare
-   *  the dots. */
+  /** How a size is drawn, from how many characters the mark spans: the fewer the dots, the more rays each gets, the
+   *  readier it is to light (but not so ready that the block's faces look alike), the less shadow (a small mark can't
+   *  spare the dots) and the less glow behind it. */
   function sizing(m) {
-    const R = Math.min(m.cols, m.rows * m.aspect) / 2;
-    return { aa: R <= 12 ? 4 : R <= 24 ? 3 : 2, gain: 1.3 + 0.35 * (1 - smooth(8, 30, R)), sh: 0.4 + 0.6 * smooth(8, 30, R) };
+    const R = Math.min(m.cols, m.rows * 2) / 2;
+    return { aa: R <= 12 ? 4 : R <= 24 ? 3 : 2, gain: 1.3 + 0.35 * (1 - smooth(8, 30, R)), sh: 0.4 + 0.6 * smooth(8, 30, R), halo: 0.22 * smooth(6, 28, R) };
   }
-  /** Asks the GPU for the loop at u, for one mark: 2×4 samples a cell, copied into the mark's own buffer. It answers
-   *  in the background (collect() takes the samples once it has), so the page never waits for it. */
-  function sample(g, m, z, u) {
-    const gl = g.gl, U = g.u, fw = m.cols * 2, fh = m.rows * 4;
-    if (fw > g.w || fh > g.h) {
-      g.w = Math.max(g.w, fw); g.h = Math.max(g.h, fh);
-      gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, g.w, g.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  /** The loop at u, drawn: the scene into the samples (2×4 a character), then the dots onto the canvas. */
+  function render(g, m, u) {
+    const gl = g.gl, S = g.scene.u, D = g.dots.u, z = sizing(m), fw = m.cols * 2, fh = m.rows * 4;
+    if (fw !== g.fw || fh !== g.fh) {
+      g.fw = fw; g.fh = fh;
+      gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, g.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, g.tex, 0);
     }
-    if (!m.pbo) { m.pix = new Uint8Array(fw * fh * 4); m.pbo = gl.createBuffer(); }
     pose(u);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, g.fbo); gl.viewport(0, 0, fw, fh); gl.useProgram(g.p);
-    gl.uniform1f(U("uPh"), TAU * u); gl.uniform1f(U("uFocal"), m.focal); gl.uniform1f(U("uShade"), m.shade * z.sh);
-    gl.uniform1f(U("uHalf"), P.half); gl.uniform1f(U("uK"), P.k); gl.uniform1f(U("uOne"), P.one); gl.uniform1f(U("uOneHalf"), P.oneHalf); gl.uniform1f(U("uWob"), P.wob);
-    gl.uniform1f(U("uPix"), P.pix); gl.uniform1f(U("uOneW"), P.oneW); gl.uniform4fv(U("uBlob[0]"), P.blob); gl.uniform3f(U("uCam"), P.yaw, P.pitch, CAM);
-    gl.uniform3fv(U("uBMin"), P.bmin); gl.uniform3fv(U("uBMax"), P.bmax); gl.uniform2f(U("uOneCS"), Math.cos(P.yaw + P.oneTurn), Math.sin(P.yaw + P.oneTurn));
-    gl.uniform2f(U("uView"), m.cols, m.rows * m.aspect); gl.uniform2f(U("uTexel"), 0.5, m.aspect / 4); gl.uniform2f(U("uFbo"), fw, fh); gl.uniform1i(U("uAA"), z.aa);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, g.fbo); gl.viewport(0, 0, fw, fh); gl.useProgram(g.scene.p);
+    gl.uniform1f(S("uPh"), TAU * u); gl.uniform1f(S("uFocal"), m.focal); gl.uniform1f(S("uShade"), m.shade * z.sh);
+    gl.uniform1f(S("uHalf"), P.half); gl.uniform1f(S("uK"), P.k); gl.uniform1f(S("uOne"), P.one); gl.uniform1f(S("uOneHalf"), P.oneHalf); gl.uniform1f(S("uWob"), P.wob);
+    gl.uniform1f(S("uPix"), P.pix); gl.uniform1f(S("uOneW"), P.oneW); gl.uniform4fv(S("uBlob[0]"), P.blob); gl.uniform3f(S("uCam"), P.yaw, P.pitch, CAM);
+    gl.uniform3fv(S("uBMin"), P.bmin); gl.uniform3fv(S("uBMax"), P.bmax); gl.uniform2f(S("uOneCS"), Math.cos(P.yaw + P.oneTurn), Math.sin(P.yaw + P.oneTurn));
+    gl.uniform2f(S("uView"), m.cols, m.rows * 2); gl.uniform2f(S("uTexel"), 0.5, 0.5); gl.uniform2f(S("uFbo"), fw, fh); gl.uniform1i(S("uAA"), z.aa);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    // a fresh buffer every time: Chrome keeps a copy of a reused one and warns that it threw it away
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, m.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, m.pix.length, gl.STREAM_READ);
-    gl.readPixels(0, 0, fw, fh, gl.RGBA, gl.UNSIGNED_BYTE, 0); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    m.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    gl.flush();
-  }
-  /** The samples sample() asked for, into m.pix (bottom row first), once the GPU has drawn them: false until then. */
-  function collect(g, m) {
-    const gl = g.gl;
-    if (gl.clientWaitSync(m.fence, 0, 0) === gl.TIMEOUT_EXPIRED) return false;
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, m.pbo); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, m.pix); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    gl.deleteSync(m.fence); m.fence = null;
-    return true;
+    const ink = m.ink === "auto" ? (light(m.color) ? 0 : 1) : { colour: 0, tone: 1, mono: 2 }[m.ink] ?? 1, c = rgb(m.color);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, m.W, m.H); gl.useProgram(g.dots.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.uniform1i(D("uS"), 0);
+    gl.uniform2i(D("uGrid"), m.cols, m.rows); gl.uniform1i(D("uP"), m.p); gl.uniform1i(D("uSide"), m.side); gl.uniform1i(D("uInk"), ink);
+    gl.uniform1f(D("uH"), m.H); gl.uniform1f(D("uGain"), z.gain * m.fill); gl.uniform1f(D("uShade"), m.shade * z.sh * 1.25); gl.uniform1f(D("uHalo"), z.halo);
+    gl.uniform3f(D("uColor"), c[0] / 255, c[1] / 255, c[2] / 255);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  // ───────────────────────── characters ─────────────────────────
-  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  // ───────────────────────── without WebGL 2: the H standing still ─────────────────────────
   const BIT = [0x01, 0x08, 0x02, 0x10, 0x04, 0x20, 0x40, 0x80]; // a cell's dots, row by row, as braille numbers them
-  const sl = new Float32Array(8);
-  const TONE = 0.4; // "tone": the darkest metal still gets this much of the ink
-  /** Whether a CSS colour is light, so the page behind it is dark. A canvas reads any colour CSS can write. */
-  const lightCache = new Map();
+  /** The H standing still, seen square on, for a browser without WebGL 2: a dot is on where most of it lies on a pixel.
+   *  Drawn once, in the <pre>'s colour, as the same squares on the same grid. */
+  function standStill(m) {
+    const { cols, rows } = m, vw = cols, vh = rows * 2, s = (CAM - 0.4) / m.focal / Math.min(vw, vh); // picture units to the pixels' faces
+    const onPixel = (x, y) => HOME.some(([hx, hy]) => { const dx = Math.abs(x - hx) - 0.32, dy = Math.abs(y - hy) - 0.32; return dx <= 0.08 && dy <= 0.08 && (dx <= 0 || dy <= 0 || Math.hypot(dx, dy) <= 0.08); });
+    const g = m.cv.getContext("2d"), { p, side } = m, inset = (p - side) >> 1;
+    g.clearRect(0, 0, m.W, m.H); g.fillStyle = m.color;
+    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) for (let q = 0; q < 8; q++) {
+      let n = 0;
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (onPixel((cx + ((q & 1) + (a + 0.5) / 3) / 2 - vw / 2) * s, (vh / 2 - (cy + ((q >> 1) + (b + 0.5) / 3) / 4) * 2) * s)) n++;
+      if (n >= 5) g.fillRect((cx * 2 + (q & 1)) * p + inset, (cy * 4 + (q >> 1)) * p + inset, side, side);
+    }
+  }
+
+  // ───────────────────────── the page ─────────────────────────
+  /** A CSS colour as [r, g, b] 0–255: a canvas reads any colour CSS can write. */
+  const rgbCache = new Map();
   let swatch;
-  function isLight(css) {
-    if (!lightCache.has(css)) {
+  function rgb(css) {
+    if (!rgbCache.has(css)) {
       swatch = swatch || document.createElement("canvas").getContext("2d", { willReadFrequently: true });
       swatch.clearRect(0, 0, 1, 1); swatch.fillStyle = "#000"; swatch.fillStyle = css; swatch.fillRect(0, 0, 1, 1);
-      const [r, g, b] = swatch.getImageData(0, 0, 1, 1).data;
-      lightCache.set(css, 0.2126 * r + 0.7152 * g + 0.0722 * b > 128);
+      rgbCache.set(css, [...swatch.getImageData(0, 0, 1, 1).data.slice(0, 3)]);
     }
-    return lightCache.get(css);
+    return rgbCache.get(css);
   }
-  /** The samples as cells: each cell's braille dots by an ordered dither, and its ink (look): for "tone", tenths of
-   *  the <pre>'s colour (-1 for all of it); for "colour", the chrome's own as 0xRGB. */
-  function encode(m, z) {
-    const { cols, rows, pix, dots, look } = m, fw = cols * 2, fh = rows * 4;
-    m.inkNow = m.ink === "auto" ? (isLight(getComputedStyle(m.el).color) ? "colour" : "tone") : m.ink;
-    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
-      let peak = 0, wr = 0, wg = 0, wb = 0, ws = 0;
-      for (let j = 0; j < 4; j++) {
-        let o = ((fh - 1 - (cy * 4 + j)) * fw + cx * 2) * 4;
-        for (let k = 0; k < 2; k++, o += 4) {
-          const r = pix[o], g = pix[o + 1], b = pix[o + 2], L = ((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255) * Math.min(1, pix[o + 3] / 170);
-          sl[j * 2 + k] = L; if (L > peak) peak = L; wr += r * L; wg += g * L; wb += b * L; ws += L;
-        }
-      }
-      const c = cy * cols + cx;
-      let bits = 0;
-      if (peak >= 0.06) for (let q = 0; q < 8; q++) if (sl[q] * z.gain * m.fill > (BAYER[((cy * 4 + (q >> 1)) & 3) * 4 + ((cx * 2 + (q & 1)) & 3)] + 0.5) / 16) bits |= BIT[q];
-      dots[c] = bits;
-      if (!bits) continue;
-      const top = lerp(245, 255 * clamp(0.26 + 0.82 * Math.pow(peak, 0.8), 0.26, 0.97), Math.min(1, m.shade * z.sh * 1.25));
-      if (m.inkNow === "colour") {
-        const f = top / Math.max(wr / ws, wg / ws, wb / ws, 1), q4 = (v) => Math.min(15, Math.round((v / ws) * f / 17));
-        look[c] = (q4(wr) << 8) | (q4(wg) << 4) | q4(wb);
-      } else {
-        const t = Math.round(10 * (TONE + (1 - TONE) * (top / 255)));
-        look[c] = t >= 10 ? -1 : t;
-      }
-    }
-  }
-  /** The H standing still, seen square on, for a browser without WebGL 2: a dot is on where most of it lies on a pixel. */
-  function standStill(m) {
-    const { cols, rows, aspect, dots } = m, vw = cols, vh = rows * aspect, s = (CAM - 0.4) / m.focal / Math.min(vw, vh); // picture units to the pixels' faces
-    const onPixel = (x, y) => HOME.some(([hx, hy]) => { const dx = Math.abs(x - hx) - 0.32, dy = Math.abs(y - hy) - 0.32; return dx <= 0.08 && dy <= 0.08 && (dx <= 0 || dy <= 0 || Math.hypot(dx, dy) <= 0.08); });
-    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
-      let bits = 0;
-      for (let q = 0; q < 8; q++) {
-        let n = 0;
-        for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (onPixel((cx + ((q & 1) + (a + 0.5) / 3) / 2 - vw / 2) * s, (vh / 2 - (cy + ((q >> 1) + (b + 0.5) / 3) / 4) * aspect) * s)) n++;
-        if (n >= 5) bits |= BIT[q];
-      }
-      dots[cy * cols + cx] = bits;
-    }
-  }
-  /** The cells into the <pre>, as runs of one ink. Braille throughout, U+2800 for a dark cell, so every character comes
-   *  from the same font and the columns stay true. */
-  function write(m) {
-    const { el, cols, rows, dots, look } = m, inked = !m.flat && m.inkNow !== "mono", runs = [];
-    let text = "", cur = -1;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const i = r * cols + c, v = inked && dots[i] ? look[i] : cur; // a dark cell joins the run it falls in
-        if (v !== cur) { if (text) runs.push(text, cur); text = ""; cur = v; }
-        text += String.fromCharCode(0x2800 + dots[i]);
-      }
-      if (r < rows - 1) text += "\n";
-    }
-    runs.push(text, cur);
-    const key = runs.join("\u0001");
-    if (key === m.drawn) return;
-    m.drawn = key;
-    if (runs.length === 2 && cur === -1) { el.textContent = text; return; }
-    const f = document.createDocumentFragment();
-    for (let i = 0; i < runs.length; i += 2) {
-      const v = runs[i + 1];
-      if (v < 0) { f.append(runs[i]); continue; }
-      const s = document.createElement("span");
-      s.textContent = runs[i];
-      s.style.color = m.inkNow === "colour" ? "#" + v.toString(16).padStart(3, "0") : `color-mix(in srgb, currentColor ${v * 10}%, transparent)`;
-      f.append(s);
-    }
-    el.replaceChildren(f);
-  }
-  /** A character cell's height over its width, as this <pre> sets braille; 0 while it isn't laid out. */
+  /** Whether the <pre>'s colour is light, so the page behind it is dark. */
+  const light = (css) => { const [r, g, b] = rgb(css); return 0.2126 * r + 0.7152 * g + 0.0722 * b > 128; };
+  /** The size of a character cell, as this <pre> sets braille, in CSS px; null while it isn't laid out. */
   function measure(el) {
-    if (!el.isConnected) return 0;
+    if (!el.isConnected) return null;
     const probe = document.createElement("span");
     probe.style.cssText = "position:absolute;left:0;top:0;display:inline-block;visibility:hidden;white-space:pre";
-    probe.textContent = Array(10).fill("\u28ff".repeat(10)).join("\n");
+    probe.textContent = Array(10).fill("⣿".repeat(10)).join("\n");
     el.append(probe);
     const r = probe.getBoundingClientRect();
     probe.remove();
-    return r.width > 0 && r.height > 0 ? r.height / r.width : 0;
+    return r.width > 0 && r.height > 0 ? { cw: r.width / 10, ch: r.height / 10 } : null;
+  }
+  /** The dots' grid: a square pitch of whole device pixels, about two dots to a character's width; as many characters
+   *  as fill the box the <pre>'s characters make, but no wider than tall (the mark is framed by the narrower side, so
+   *  past that there's only haze), centred in it. */
+  function regrid(m) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1), BW = m.tcols * m.cw * dpr, BH = m.trows * m.ch * dpr;
+    const p = Math.max(2, Math.round((m.cw * dpr) / 2)), fitC = Math.max(1, Math.floor(BW / (2 * p))), fitR = Math.max(1, Math.floor(BH / (4 * p)));
+    const cols = Math.min(fitC, fitR * 2), rows = Math.min(fitR, Math.ceil(fitC / 2)), W = cols * 2 * p, H = rows * 4 * p;
+    Object.assign(m, { dpr, p, side: Math.max(1, Math.round(m.dot * p)), cols, rows, W, H, gridded: true });
+    const { cv } = m, cs = getComputedStyle(m.el);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    cv.style.width = `${W / dpr}px`; cv.style.height = `${H / dpr}px`;
+    cv.style.left = `calc(${cs.paddingLeft} + ${(BW - W) / 2 / dpr}px)`; cv.style.top = `calc(${cs.paddingTop} + ${(BH - H) / 2 / dpr}px)`;
   }
 
   // To compare looks on a real page: ?mark-ink=mono&mark-opacity=0.4 and so on, over what the page asks.
   const KNOBS = {};
   try {
     const q = new URLSearchParams(location.search);
-    for (const k of ["fill", "focal", "shade", "speed", "aspect", "opacity", "at"]) { const v = q.get("mark-" + k); if (v && isFinite(+v)) KNOBS[k] = +v; }
+    for (const k of ["fps", "fill", "dot", "focal", "shade", "speed", "opacity", "at"]) { const v = q.get("mark-" + k); if (v && isFinite(+v)) KNOBS[k] = +v; }
     const ink = q.get("mark-ink");
     if (ink === "auto" || ink === "colour" || ink === "tone" || ink === "mono") KNOBS.ink = ink;
     for (const k of ["still", "reduced"]) if (q.has("mark-" + k)) KNOBS[k] = q.get("mark-" + k) !== "0";
   } catch {}
 
   window.hewnAscii = function (el, opts = {}) {
-    const o = { ...opts, ...KNOBS }, cols = o.cols || 72, rows = o.rows || 34, speed = o.speed ?? 1;
-    const m = { el, cols, rows, ink: o.ink || "auto", inkNow: "mono", fill: o.fill || 1, focal: o.focal || 2.05, shade: o.shade ?? 0.75, aspect: o.aspect || 2, measured: !!o.aspect, z: null, pix: null, pbo: null, fence: null, dots: new Uint8Array(cols * rows), look: new Int16Array(cols * rows), flat: false, drawn: "" };
+    const o = { ...opts, ...KNOBS }, cols = o.cols || 72, rows = o.rows || 34, speed = o.speed ?? 1, fps = Math.min(120, o.fps || FPS);
+    // the text's characters (tcols × trows) give the box; the dots' grid (cols × rows of 2×4 square dots) is set once it's measured
+    const m = { el, tcols: cols, trows: rows, cols: 0, rows: 0, ink: o.ink || "auto", fill: o.fill || 1, dot: o.dot || 0.6, focal: o.focal || 2.05, shade: o.shade ?? 0.75,
+      cw: 0, ch: 0, measured: false, gridded: false, dpr: 1, p: 0, side: 0, W: 0, H: 0, color: "", cv: null };
     const reduced = o.reduced ?? matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let mode = o.still ? "still" : "live", u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false, spent = 0;
+    let mode = o.still ? "still" : "live", g = null, u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false;
     el.setAttribute("aria-hidden", "true"); // braille would be read out dot by dot
     if (o.opacity != null) el.style.opacity = String(o.opacity);
-    write(m); // blank cells, so the <pre> has its size from the start
+    // blank braille: the <pre> keeps the size its characters give it, and the canvas lies over them
+    el.textContent = Array(rows).fill("⠀".repeat(cols)).join("\n");
+    /** The canvas to draw on: the GL one while it moves, a 2D one for the H standing still. */
+    const useCanvas = (cv) => {
+      if (m.cv) m.cv.remove();
+      m.cv = cv; cv.style.cssText = "position:absolute;pointer-events:none"; el.append(cv); m.gridded = false;
+    };
+    if (mode === "live" && !(g = makeGL())) mode = "still";
+    useCanvas(g ? g.cv : document.createElement("canvas"));
 
-    /** Writes the frame the GPU has finished, if it has, and asks for the one at u if one is wanted: a frame late, so
-     *  neither waits for the other. false while the shader still compiles. */
+    /** Draws the frame at u if one is wanted; false while the shaders still compile. */
     function step() {
-      if (!m.measured) { const a = measure(el); if (a) { m.aspect = a; m.measured = true; } }
-      if (mode === "live") {
-        const g = context(), s = g ? linked(g) : -1;
-        if (s === 0) return false;
-        if (s > 0) {
-          let t = performance.now();
-          if (m.fence && collect(g, m)) { encode(m, m.z); m.flat = false; write(m); cost(spent + performance.now() - t); }
-          else if (m.fence) spent += performance.now() - t;
-          if (want && !m.fence) { t = performance.now(); m.z = sizing(m); sample(g, m, m.z, u); want = false; spent = performance.now() - t; }
-          return true;
-        }
-        mode = "still";
+      if (!m.measured) {
+        const c = measure(el);
+        if (c) { if (getComputedStyle(el).position === "static") el.style.position = "relative"; m.cw = c.cw; m.ch = c.ch; m.measured = true; m.gridded = false; }
       }
-      if (want) { const t = performance.now(); standStill(m); m.flat = true; write(m); want = false; cost(performance.now() - t); }
+      if (m.measured && (!m.gridded || Math.min(2, window.devicePixelRatio || 1) !== m.dpr)) regrid(m);
+      if (!m.gridded || !want) return true; // not laid out yet, or nothing new to draw
+      if (mode === "live") {
+        const s = linked(g);
+        if (s === 0) return false;
+        if (s > 0) { const t = performance.now(); m.color = getComputedStyle(el).color; render(g, m, u); want = false; cost(performance.now() - t); return true; }
+        mode = "still"; g = null; useCanvas(document.createElement("canvas")); regrid(m);
+      }
+      const t = performance.now(); m.color = getComputedStyle(el).color; standStill(m); want = false; cost(performance.now() - t);
       return true;
     }
-    /** What a frame took on the page's thread, from asking the GPU to the characters, kept as a running mean. */
+    /** What a frame took on the page's thread, kept as a running mean. */
     const cost = (ms) => { stop.ms = stop.ms ? stop.ms + (ms - stop.ms) * 0.2 : ms; };
     const moving = () => mode === "live" && !reduced && o.at == null && speed !== 0;
     const shown = () => seen && document.visibilityState !== "hidden";
-    const busy = () => want || !!m.fence || moving();
+    const busy = () => want || moving();
     const pause = () => { cancelAnimationFrame(raf); raf = 0; last = 0; }; // the loop picks up where it was
     const kick = () => { if (!raf && !stopped && shown() && busy()) raf = requestAnimationFrame(tick); };
     function tick(now) {
       raf = 0;
       if (stopped || !shown()) return pause();
-      if (moving() && (!last || now - last >= 1000 / FPS - 4)) {
+      if (moving() && (!last || now - last >= 1000 / fps - 4)) {
         if (last) u = frac(u + (Math.min(250, now - last) / 1000) * (speed / T));
         last = now; want = true;
       }
-      if (!step()) last = 0; // while the shader compiles, the loop waits at its start
+      if (!step()) last = 0; // while the shaders compile, the loop waits at its start
       if (busy()) raf = requestAnimationFrame(tick);
     }
     const onVisibility = () => (document.visibilityState === "hidden" ? pause() : kick());
     document.addEventListener("visibilitychange", onVisibility);
     const io = typeof IntersectionObserver === "function" ? new IntersectionObserver((es) => { seen = es[es.length - 1].isIntersecting; if (seen) kick(); else pause(); }) : null;
     if (io) { seen = false; io.observe(el); }
-    // a font that loads late, or a new font size, changes the cell: measure again (runs of ink alone move it a hair)
+    // a font that loads late, or a new font size, changes the box: measure again (a hair's change is no change)
     let box = [0, 0];
-    const ro = !o.aspect && typeof ResizeObserver === "function" ? new ResizeObserver((es) => {
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver((es) => {
       const r = es[es.length - 1].contentRect;
       if (Math.abs(r.width - box[0]) < 1 && Math.abs(r.height - box[1]) < 1) return;
       box = [r.width, r.height]; m.measured = false; want = true; kick();
     }) : null;
     if (ro) ro.observe(el);
-    // "auto" follows a theme switch, from the system or from the page's own data-theme
-    const dark = m.ink === "auto" ? matchMedia("(prefers-color-scheme: dark)") : null;
-    const retheme = () => { want = true; kick(); };
-    const mo = dark && typeof MutationObserver === "function" ? new MutationObserver(retheme) : null;
-    if (dark) dark.addEventListener("change", retheme);
+    // the colours follow a theme switch, from the system or from the page's own data-theme
+    const dark = matchMedia("(prefers-color-scheme: dark)"), retheme = () => { want = true; kick(); };
+    const mo = typeof MutationObserver === "function" ? new MutationObserver(retheme) : null;
+    dark.addEventListener("change", retheme);
     if (mo) mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     function stop() {
@@ -410,10 +398,10 @@ void main() {
       if (io) io.disconnect();
       if (ro) ro.disconnect();
       if (mo) mo.disconnect();
-      if (dark) dark.removeEventListener("change", retheme);
+      dark.removeEventListener("change", retheme);
       document.removeEventListener("visibilitychange", onVisibility);
-      if (GL && !GL.lost) { if (m.fence) GL.gl.deleteSync(m.fence); if (m.pbo) GL.gl.deleteBuffer(m.pbo); }
-      m.fence = m.pbo = null;
+      if (g && !g.lost) { const x = g.gl.getExtension("WEBGL_lose_context"); if (x) x.loseContext(); }
+      if (m.cv) m.cv.remove();
     }
     stop.ms = 0;
     kick();
