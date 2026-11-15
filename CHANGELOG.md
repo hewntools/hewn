@@ -8,6 +8,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 - **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille dots. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
 
+### Changes
+
+- **The platform and the tools run in separate processes.** Your tools run in a workerd process of their own, with their data and network access and nothing else of yours (not the secrets key, Hewn's database or its files), behind a sandbox of its own. A tool stuck in a loop now restarts only the tools: the web client, your agents' connections and schedules keep answering meanwhile. `hewn status` counts the tools' restarts next to Hewn's. Your data stays where it is: nothing to migrate. See [the threat model](docs/threat-model.md).
+
 ## 0.4.11 (2026-11-13)
 
 ### New

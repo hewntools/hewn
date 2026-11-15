@@ -72,15 +72,16 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     assert.equal(await rows("next"), 1, "the next call starts it afresh");
   });
 
-  test("code that never yields: the restart says which tool was running, and the third time within an hour suspends it until the owner resumes it", async () => {
+  test("code that never yields: the tools' restart says which tool was running, and the third time within an hour suspends it until the owner resumes it", async () => {
     const s = await h.sv.admin("schedules", { capabilityId: "runaway", operation: "tick", input: { tag: "scheduled" }, cadence: "daily 05:00" });
     for (let i = 1; i <= 3; i++) {
-      const before = h.sv.restarts();
+      const before = { platform: h.sv.restarts(), tools: h.sv.toolsRestarts() };
       await assert.rejects(h.invoke("runaway", "spin"), "the stuck call fails");
-      await until(() => h.sv.restarts() > before);
+      await until(() => h.sv.toolsRestarts() > before.tools);
+      assert.equal(h.sv.restarts(), before.platform, "the platform kept running");
       await until(() => fetch(`${h.sv.url}/health`).then((r) => r.ok, () => false));
       const log: string[] = (await h.sv.admin("logs", { capabilityId: "runaway", n: 50 })).lines;
-      assert.equal(log.filter((l) => /^\S+ user spin@1 ERROR stalled: Hewn stopped responding while this ran and was restarted \d+ms$/.test(l)).length, i, log.join("\n"));
+      assert.equal(log.filter((l) => /^\S+ user spin@1 ERROR stalled: Hewn's tools stopped responding while this ran and were restarted \d+ms$/.test(l)).length, i, log.join("\n"));
       const st = await h.sv.admin("readiness", { capabilityId: "runaway" });
       assert.equal(!!st.suspended, i === 3, `suspended only the third time (${i})`);
     }
@@ -121,9 +122,9 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     const stalls = async () => (await h.sv.admin("logs", { capabilityId: "runaway", n: 100 })).lines.filter((l: string) => / ERROR stalled: /.test(l)).length;
     const blamed = await stalls();
     h.queue((ws) => editText(join(ws, "src", "index.ts"), (t) => t.replace("const SPIN_IN_TESTS = false", "const SPIN_IN_TESTS = true")));
-    const before = h.sv.restarts();
+    const before = { platform: h.sv.restarts(), tools: h.sv.toolsRestarts() };
     const started = await h.sv.admin("modify", { capabilityId: "runaway", request: "spin in its tests" });
-    await until(() => h.sv.restarts() > before);
+    await until(() => h.sv.toolsRestarts() > before.tools);
     await until(() => fetch(`${h.sv.url}/health`).then((r) => r.ok, () => false));
     const build = (await h.sv.admin("call", { method: "getBuild", args: [started.buildId] })).result;
     assert.equal(build.status, "failed");
@@ -132,7 +133,8 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     await sleep(1000);
     const builds = (await h.sv.admin("status")).builds;
     assert.ok(!builds.some((b: any) => b.request?.autoRetryOf === started.buildId), "not retried");
-    assert.equal(h.sv.restarts(), before + 1, "Hewn was restarted once");
+    assert.equal(h.sv.toolsRestarts(), before.tools + 1, "the tools were restarted once");
+    assert.equal(h.sv.restarts(), before.platform, "the platform wasn't");
     assert.equal(await stalls(), blamed, "nothing in the live tool's log");
     assert.equal((await h.sv.admin("readiness", { capabilityId: "runaway" })).ready, true);
     await h.invoke("runaway", "tick", { tag: "still-live" });

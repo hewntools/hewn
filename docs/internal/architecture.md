@@ -11,17 +11,21 @@ agents (Claude, Codex, ChatGPT…)   MCP over Streamable HTTP, OAuth 2.1 bearer 
 browser (web client, tool UIs)     cookies (web client) or a per-UI token (tool UIs)
           │                                   │
           ▼                                   ▼
-┌─ workerd (under Seatbelt on macOS, bubblewrap on Linux) ──────────────────────┐
+┌─ platform: workerd (under Seatbelt on macOS, bubblewrap on Linux) ────────────┐
 │  default fetch ─► HewnDO (one per owner)                                      │
 │                     surface: web client, tool UIs, MCP, OAuth, admin channel  │
 │                     core Platform on the DO's SQLite (the owner's database)   │
 │  Public (second socket) ─► HewnDO, rate limited, MCP and OAuth (+ public URL) │
+│  ToolCalls (a Unix socket) ─► HewnDO: a running call's callbacks              │
+└───────────────────────────────────────────────────────────────────────────────┘
+          │ HTTP on Unix sockets in the data dir, a token each way
+┌─ tools: workerd (its own sandbox: its storage and the sockets only) ──────────┐
 │  CapabilityHost (one per capability): versions run as DO facets,             │
 │                     each with its own private SQLite                          │
 │  Egress: the capabilities' globalOutbound, approved hosts only               │
 └───────────────────────────────────────────────────────────────────────────────┘
-          │ token-authenticated HTTP, both ways
-supervisor (Node, `hewn serve`): starts workerd and its watchdog, runs builders,
+          │ token-authenticated HTTP (the platform ⇄ the supervisor)
+supervisor (Node, `hewn serve`): starts both workerds and their watchdogs, runs builders,
 bundles candidates, runs the intake, connects local agents, backups, tunnels
           ▲
 hewn CLI ── the admin channel (as the owner) or the supervisor's control channel
@@ -50,7 +54,7 @@ Integration tests are in `test/`. Example tools are in `seeds/`.
 | --- | --- | --- | --- |
 | `Sql` | the owner's database, synchronous | DO `storage.sql` | `node:sqlite` |
 | `Blobs` | versions, owner icons, screenshots | the `disk` service | a directory |
-| `CapabilityRuntime` | invoke, describe, migrate, copy and drop state, dump and count it | CapabilityHost + facets | in-process |
+| `CapabilityRuntime` | invoke, describe, migrate, copy and drop state, dump and count it | CapabilityHost + facets, in the tools' process | in-process |
 | `Workbench` | build workspaces: open, run a builder, bundle, read back, visual check | the supervisor | local (`packages/cli/src/workbench.ts`) |
 | `SecretStore` | capability secrets and model keys | AES-256-GCM rows in the owner's database | memory |
 
@@ -90,12 +94,13 @@ Principals (`auth.ts`): `user` (the owner, from the web client or the CLI), `age
 
 ## The workerd host
 
-`hewn serve` runs one workerd process. The supervisor writes its config (`packages/cli/src/supervisor/index.ts`) and bundles the Worker from `packages/host-workerd/src/worker.ts`:
+`hewn serve` runs two workerd processes: the platform and the tools. The supervisor writes their configs (`config` and `toolsConfig` in `packages/cli/src/supervisor/index.ts`) and bundles a Worker for each, the platform's from `packages/host-workerd/src/worker.ts`, the tools' from `tools-worker.ts`. The platform calls the tools over HTTP on a Unix socket in the data dir (`workerd/run/`, 0700; loopback ports if the path is too long for a socket), one route per `CapabilityHost` method, each with the tools' token (`tools-channel.ts`); a bundle goes by hash once the tools process has it (it answers 409 when it hasn't). A running call's `call` and `model` come back on the platform's own socket for them (`ToolCalls`), each with its call's token, good only while that call runs. Both processes keep their storage in the same `do/` directory, each in its own namespace (`hewn-owner/`, `hewn-capability/`), as one process did before. The tools' process gets their token and nothing else of the supervisor's environment (not the secrets key), and its sandbox hides the data dir but for its storage and the sockets. workerd never removes a socket file and won't bind over one, so the supervisor removes it before each start.
 
 - **Default fetch** routes every request on the local socket (`127.0.0.1:<port>`, default 7717) to the owner's `HewnDO`.
 - **`Public`** serves a second socket (port + 1) for a tunnel or reverse proxy. It rate limits per client and in total, marks requests public and passes them on. Public requests reach only `/mcp`, the OAuth endpoints, the Agent Skill (`/_platform/skills/build-a-hewn-tool/SKILL.md`), a pack's download link (`/_platform/pack/~<token>`), share links (`/share/<token>`) and `robots.txt` on any host, plus the web client and tool UIs on the owner's public URL if one is set (`hewn url`). A share link's token never reaches a log line (`loggedPath`), and every answer under `/share/` (a 404, a 429 too) carries `X-Robots-Tag: noindex, nofollow`. With `HEWN_PROXY_SECRET` set, it takes only requests that carry the secret.
 - **`HewnDO`** (one per owner) holds the core on the DO's SQLite, the HTTP surface (`src/surface/`), MCP sessions in memory, and the admin channel. It arms one DO alarm for the next due schedule.
-- **`CapabilityHost`** (one per capability) loads a version's bundle with the Worker Loader and runs it as a DO facet with its own SQLite. `capability-main.ts` is the wrapper around every bundle: it builds `ctx` and talks back to the host. Tests and dry runs use scratch facets (`test:<build>`, `dryrun:<build>`); backups before a promotion are copies. Each facet's SQLite has a size limit (below).
+- **`ToolCalls`** answers a running tool call's callbacks on its own socket, which only the tools process is given: the call's token finds the call in `HewnDO`, which answers as it would a call made in its own process.
+- **`CapabilityHost`** (one per capability, in the tools process) loads a version's bundle with the Worker Loader and runs it as a DO facet with its own SQLite. `capability-main.ts` is the wrapper around every bundle: it builds `ctx` and talks back to the host. Tests and dry runs use scratch facets (`test:<build>`, `dryrun:<build>`); backups before a promotion are copies. Each facet's SQLite has a size limit (below).
 - **`Egress`** is every capability's `globalOutbound`. Its props carry the capability's approved hosts; anything else gets `403`.
 
 Secrets are encrypted with a per-home master key held outside the data directory (Keychain on macOS, libsecret or a 0600 file on Linux, `master-key.ts`). The supervisor passes it to workerd through the environment.
@@ -106,8 +111,8 @@ The local socket answers only to loopback host names (`127.0.0.1`, `localhost`, 
 
 The supervisor (`packages/cli/src/supervisor/`) is the Node process behind `hewn serve`. It does what an isolate can't:
 
-- builds the host bundle (or uses the prebuilt one in the npm package), writes the workerd config, and starts workerd inside the OS sandbox;
-- watches `/health` and restarts workerd when it stalls (a capability in a CPU loop blocks the single-threaded workerd), and kills a workerd left behind by a dead supervisor;
+- builds the host bundles (or uses the prebuilt ones in the npm package), writes the two workerd configs, and starts both inside the OS sandbox: the tools' process first, then the platform's;
+- watches each process's `/health`: the tools' stall when a capability is in a CPU loop (it blocks their single-threaded workerd), and they're restarted alone, the platform first told what was running (below); a stalled platform is restarted alone too. It kills a workerd left behind by a dead supervisor (a pid file each);
 - serves the workerd side of the `Workbench` port: workspaces, builders, bundling (esbuild and npm), the visual check;
 - runs the intake, connects local agents (`setup/`), deletes blobs, takes and restores backups, and runs tunnels (`tunnel.ts`: cloudflared or `tailscale funnel`);
 - checks the free space on the data's disk every 5 s, and tells `HewnDO` (`/_admin/disk`) while it's under its floor (`diskFloor`: 1 GB, or a tenth of a disk smaller than 10 GB): no capability's data grows then.
@@ -233,8 +238,8 @@ Each promoted version is one ESM bundle run in a V8 isolate against the ABI ([Ca
 - **Network:** `fetch` goes through `Egress`.
 - **Calls:** `ctx.call` goes back to `HewnDO`, which checks the [grant](../../spec/capability-model.md#grant), then runs the callee in its own isolate. A chain nests at most three deep, refuses cycles, and shares one deadline (30 s; time waiting on a model is added back, up to 120 s per chain; `core/deadline.ts`).
 - **Isolation:** no filesystem, processes or environment; workerd itself runs in the OS sandbox.
-- **Stopping:** a call past its deadline is stopped (`CapabilityHost.stop` aborts its facet: its awaits, timers and writes end, and other calls on that facet fail with it), and a facet is aborted whenever its last call (or migration, dump …) ends, so nothing a call leaves pending outlives it; the next call starts it afresh, its Dynamic Worker still cached by `LOADER`. Code that never yields holds the one thread every isolate runs on (standalone workerd doesn't enforce `limits.cpuMs`), so only the supervisor's watchdog stops it, by restarting workerd. Moving tool code into a process of its own would change how `stop` works, not who calls it.
-- **Stalls** (`core/platform/stalls.ts`): whatever runs tool code (`Invocation.execute`, a build's loading of its candidate) is a row in `running_code` while it runs. The watchdog's restart passes its time to the next workerd (`HEWN_STALLED`), and `HewnDO` hands it to `recoverStall` before builds are recovered: each live tool still in `running_code` gets an `ERROR stalled` line in its call log and a `stalled` lifecycle event; 3 within an hour suspend it (`stalls:<id>` in `platform_kv`, `Readiness.suspended`, so its calls, widgets and schedules are refused) until the owner resumes it (`POST /api/capabilities/:id/resume`, `hewn resume`). A build whose scratch state was in it fails as it is, not retried. Every tool running at the stall is named: which one looped can't be told apart.
+- **Stopping:** a call past its deadline is stopped (`CapabilityHost.stop` aborts its facet: its awaits, timers and writes end, and other calls on that facet fail with it), and a facet is aborted whenever its last call (or migration, dump …) ends, so nothing a call leaves pending outlives it; the next call starts it afresh, its Dynamic Worker still cached by `LOADER`. Code that never yields holds the one thread every tool's isolate runs on (standalone workerd doesn't enforce `limits.cpuMs`), so only a restart of the tools' process stops it: the supervisor's watchdog does it, and so does a `stop` that gets no answer within 1 s (the platform asks the supervisor, `/tools/stalled`). The platform keeps answering meanwhile: it's a process of its own. Calls running in the tools' process when it goes fail; one sent while it restarts is sent again once it's back.
+- **Stalls** (`core/platform/stalls.ts`): whatever runs tool code (`Invocation.execute`, a build's loading of its candidate) is a row in `running_code` while it runs. Before the watchdog restarts the tools, it tells `HewnDO` (`/_admin/tools-stalled`), which hands the time to `recoverStall` while what was running is still running: each live tool in `running_code` gets an `ERROR stalled` line in its call log and a `stalled` lifecycle event; 3 within an hour suspend it (`stalls:<id>` in `platform_kv`, `Readiness.suspended`, so its calls, widgets and schedules are refused) until the owner resumes it (`POST /api/capabilities/:id/resume`, `hewn resume`). A build whose scratch state was in it fails as it is, not retried (its run is stopped, as a cancel would). The calls that then fail with the tools' process aren't logged again. Every tool running at the stall is named: which one looped can't be told apart. A restart of the platform names no tool: tool code doesn't run there.
 - **Versions** are content-addressed blobs (`versions/<sha256>.json`: files and bundle), verified by hash when loaded.
 
 A capability is ready when every grant its manifest asks for is approved and every secret and config value is set, and it isn't suspended. Until then calls fail with `not_ready`. The owner may say no to a host, capability or model grant (Deny, `grant_declines`, per version): it stays unapproved and nothing asks for it again until a new version. When that's all a capability lacks, `Readiness.onlySaidNo` is set: Home and the Inbox leave it alone, and agents' access requests are refused. Only a [connection](../../spec/capability-model.md#connection) may hold secrets; other capabilities reach a service through its operations.

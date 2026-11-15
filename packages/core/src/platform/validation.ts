@@ -180,6 +180,10 @@ export class Validation extends Domain {
     try {
       // One for all its loops of calls, so the time between them counts too.
       const breathe = breather();
+      // Its code kept Hewn's tools from responding (stalls.ts failed the build): the rest isn't run.
+      const stalled = () => {
+        if (this.registry.getBuild(build.id)?.status === "failed") throw new Error("stopped: its code kept Hewn from responding");
+      };
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
       let cases: TestCase[];
@@ -198,6 +202,7 @@ export class Validation extends Domain {
       onTests(0, cases.length);
       for (const [i, c] of cases.entries()) {
         await breathe();
+        stalled();
         try {
           const op = caseOperation(manifest, c);
           const before = await this.runtime.countState(testState, code);
@@ -231,6 +236,7 @@ export class Validation extends Domain {
         let replayed = true;
         for (const [i, c] of sample.entries()) {
           await breathe();
+          stalled();
           const before = await this.runtime.countState(sampleState, code);
           let inserted: string[];
           try {

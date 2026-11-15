@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The workerd host. One Worker:
+// The platform's workerd. Hewn runs the platform and the tools in separate processes; this is the
+// platform's Worker (the tools' is tools-worker.ts):
 //   - default fetch: every request goes to the owner's HewnDO
 //   - Public: the tunnel's way in (its own socket): only MCP and OAuth, rate limited
+//   - ToolCalls: a running tool call's callbacks (`call`, `model`), on a socket only the tools process reaches
 //   - HewnDO: the core Platform on Durable Object SQL, the HTTP surface, the admin channel
-//   - CapabilityHost: one DO per capability; runs versions as facets (private SQLite each)
-//   - Egress: the Dynamic Workers' globalOutbound, allowing only declared, granted hosts
 // Machine-bound work (builders, bundling, intake, connecting local agents, blob deletes) goes to
 // the supervisor over an authenticated HTTP channel.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
@@ -19,8 +19,7 @@ import { checkToJson } from "@hewntools/core/checks.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
 import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, Sql, StateRef, Workbench } from "@hewntools/core/ports.ts";
-import { sameDigest } from "@hewntools/core/sha256.ts";
-import { gatedFetch } from "./egress.ts";
+import { randomToken, sameDigest } from "@hewntools/core/sha256.ts";
 import { handle, McpSessions } from "./surface/index.ts";
 import { defaultPasses } from "@hewntools/core/passes.ts";
 import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost, TOOL_DATA_LIMIT_MB, toolDataLimitMB } from "./surface/host.ts";
@@ -29,15 +28,14 @@ import { fetchLink } from "./surface/fetch-link.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
-// @ts-expect-error text module
-import RUNTIME from "./capability-runtime.js";
-// @ts-expect-error text module
-import GUARD from "./capability-guard.js";
+import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
 
 interface Env {
   HEWN: DurableObjectNamespace;
-  CAPS: DurableObjectNamespace;
-  LOADER: WorkerLoader;
+  /** The tools process (tools-worker.ts), on its socket. */
+  TOOLS: Fetcher;
+  /** Authenticates the platform's calls to the tools process. */
+  TOOLS_TOKEN: string;
   BLOBS: Fetcher;
   ASSETS_WEB: Fetcher;
   ASSETS_UI: Fetcher;
@@ -66,11 +64,8 @@ interface Env {
   VERSION?: string;
   /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
   HOST_SIGNIN_URL?: string;
-  /** When the supervisor's watchdog last restarted workerd for not responding (ISO time; "" = never, in this supervisor's run). */
-  STALLED?: string;
 }
 
-const COMPAT_DATE = "2026-09-01";
 const CALL_TIMEOUT_MS = 30_000;
 
 // ---------- the edge: everything goes to the owner's HewnDO ----------
@@ -321,15 +316,75 @@ interface DataLimits {
 /** SQLite's error for a write past a state's limit (or a full disk). */
 const isFull = (message: string | undefined) => /SQLITE_FULL/.test(message ?? "");
 
-/** The runtime port: capability code runs in its CapabilityHost, isolated, with its own state. */
-function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
-  // RPC stub of a CapabilityHost (typed loosely: the generated stub types are too deep for tsc).
-  const host = (capabilityId: string) => env.CAPS.get(env.CAPS.idFromName(capabilityId)) as unknown as CapabilityHostApi;
+/** A tool call running in the tools process: what its callbacks reach, by the token they carry. */
+export interface ToolCall {
+  call: (c: Callbacks["call"]) => Promise<unknown>;
+  model: ((req: GenerateRequest) => Promise<GenerateResult>) | null;
+}
+
+/** What the runtime needs from the platform's DO besides the data limits. */
+interface ToolsSide {
+  /** The calls running in the tools process, by token (the DO answers their callbacks from it). */
+  calls: Map<string, ToolCall>;
+  /** When the supervisor said the tools stopped responding (ms): what was running then failed for it. */
+  stalledAt(): number | undefined;
+  /** The tools process won't stop a call (code that never yields): have the supervisor restart it. */
+  stuck(reason: string): Promise<void>;
+}
+
+/** How long a stop may take before the tools process counts as stuck. */
+const STOP_TIMEOUT_MS = 1000;
+/** How long a call waits for the tools to be back after a restart. */
+const RESTART_WAIT_MS = 10_000;
+
+/**
+ * The runtime port: capability code runs in its CapabilityHost, isolated, with its own state, in the tools
+ * process (tools-worker.ts). The tools process going away (stopped, or restarted for not responding) fails
+ * what was running there; what was running when it stopped responding fails saying so (`stalled`: the
+ * stall was already told, with whoever was running then).
+ */
+function workerdRuntime(env: Env, data: DataLimits, tools: ToolsSide): CapabilityRuntime {
+  const host = toolsChannel(env.TOOLS, env.TOOLS_TOKEN);
+  /** The tools process went away while `what` ran (started at `started`). */
+  const lost = (what: string, started: number, e: ToolsUnreachable) => {
+    const at = tools.stalledAt();
+    return at !== undefined && started <= at
+      ? Object.assign(new PlatformError("operation_failed", `${what} failed: stalled: Hewn's tools stopped responding while this ran and were restarted`), { stalled: true })
+      : new PlatformError("operation_failed", `${what} failed: ${e.message}`);
+  };
+  /**
+   * Started after the supervisor said the tools stopped responding: it can't have run there (a stuck process runs
+   * nothing more), so once they're back it's sent again.
+   */
+  const unsent = (started: number, e: unknown) => {
+    const at = tools.stalledAt();
+    return e instanceof ToolsUnreachable && !e.timeout && at !== undefined && started > at && Date.now() - at < RESTART_WAIT_MS;
+  };
+  /** Wait for the tools process to answer again (after a restart). */
+  const back = async () => {
+    for (const end = Date.now() + RESTART_WAIT_MS; Date.now() < end; await scheduler.wait(100)) {
+      const ok = await env.TOOLS.fetch("http://tools/health").then((r) => r.ok, () => false);
+      if (ok) return;
+    }
+  };
+  /** A call to the tools process, sent again if it went while they restarted, failing as `lost` says if it was running there. */
+  const via = async <T>(what: string, run: () => Promise<T>): Promise<T> => {
+    const started = Date.now();
+    try {
+      return await run().catch(async (e) => {
+        if (!unsent(started, e)) throw e;
+        await back();
+        return run();
+      });
+    } catch (e) {
+      throw e instanceof ToolsUnreachable ? lost(what, started, e) : e;
+    }
+  };
   /** Run against a state with its limit; a write past it fails saying so. */
-  const limited = async <T>(capabilityId: string, run: (limit: number) => Promise<T>): Promise<T> => {
+  const limited = async <T>(capabilityId: string, what: string, run: (limit: number) => Promise<T>): Promise<T> => {
     const limit = data.limit(capabilityId);
     try {
-      return await run(limit);
+      return await via(what, () => run(limit));
     } catch (e) {
       if (isFull((e as Error).message)) throw new PlatformError("operation_failed", data.full(capabilityId, limit));
       throw e;
@@ -337,24 +392,42 @@ function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
   };
   return {
     async invoke(target, key, input, onCall, onModel) {
-      const call = async (capabilityId: string, operation: string, callInput: unknown) => {
-        if (!onCall) throw new Error("capability calls are not available here");
-        return onCall({ capabilityId, operation, input: callInput });
-      };
+      // Its callbacks come back with this token, good while the call runs.
+      const token = randomToken(24);
+      tools.calls.set(token, {
+        call: async (c) => {
+          if (!onCall) throw new Error("capability calls are not available here");
+          return onCall({ capabilityId: c.capabilityId, operation: c.operation, input: c.input });
+        },
+        model: onModel ?? null,
+      });
+      const started = Date.now();
       const timer = deadlineTimer(deadlineOf(target.deadline, CALL_TIMEOUT_MS), () => new PlatformError("operation_failed", `${key} timed out (call chain deadline)`));
       // Past the deadline the call is stopped, not only no longer waited for: its code, and anything
-      // else running on that state with it, ends there. (Code that never yields can't be stopped from
-      // here: it holds the thread this runs on too, until the supervisor's watchdog restarts workerd.)
+      // else running on that state with it, ends there. Code that never yields doesn't answer the stop:
+      // the tools process is restarted (what was running there is told so, this call with it).
       let late: Error | undefined;
       const expired = timer.expired.catch(async (e: Error) => {
         late = e;
-        await host(target.capabilityId).stop(target.state.scratch ?? null, `stopped: ${target.capabilityId}/${key} ran past its deadline`).catch(() => {});
+        const reason = `stopped: ${target.capabilityId}/${key} ran past its deadline`;
+        await host(target.capabilityId)
+          .stop({ scratch: target.state.scratch ?? null, reason }, { timeoutMs: STOP_TIMEOUT_MS })
+          .catch(async (x) => {
+            if (!(x instanceof ToolsUnreachable && x.timeout)) return;
+            Object.assign(e, { stalled: true });
+            await tools.stuck(`${reason} and didn't stop`).catch(() => {});
+          });
         throw e;
       });
       const limit = data.limit(target.capabilityId);
+      const send = () => host(target.capabilityId).invoke({ code: target.code, scratch: target.state.scratch ?? null, key, input, secrets: target.secrets ?? {}, hosts: target.hosts ?? [], caller: target.caller, config: target.config ?? {}, readOnly: !!target.readOnly, limit, call: token, model: !!onModel });
       try {
         const r = await Promise.race([
-          host(target.capabilityId).invoke(target.code, target.state.scratch ?? null, key, input, target.secrets ?? {}, target.hosts ?? [], target.caller, call, target.config ?? {}, onModel ?? null, !!target.readOnly, limit),
+          send().catch(async (e) => {
+            if (!unsent(started, e)) throw e;
+            await back();
+            return send();
+          }),
           expired,
         ]);
         if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
@@ -363,28 +436,43 @@ function workerdRuntime(env: Env, data: DataLimits): CapabilityRuntime {
         // Out of time: whatever came back once it was stopped, it timed out.
         if (late) throw late;
         if (e instanceof PlatformError) throw e;
+        if (e instanceof ToolsUnreachable) throw lost(key, started, e);
         throw new PlatformError("operation_failed", isFull((e as Error).message) ? data.full(target.capabilityId, limit) : `${key} failed: ${(e as Error).message}`);
       } finally {
         timer.clear();
+        tools.calls.delete(token);
       }
     },
     // Describing only loads code; any capability id's host can do it. With the limit tools have unless the owner
     // gave one its own: the isolate it loads is the one the build's tests and the tool's data then use, not one more.
-    describe: (code) => host("_describe").describe(code, data.limit("")),
-    migrate: (state, migrations, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).migrate(state.scratch ?? null, migrations, code, limit)),
-    hasState: (state) => host(state.capabilityId).hasState(state.scratch ?? null),
-    copyState: (from, to) => host(from.capabilityId).copyState(from.scratch ?? null, to.scratch ?? null),
-    dropState: (state) => host(state.capabilityId).dropState(state.scratch ?? null),
-    listStates: (capabilityId, prefix) => host(capabilityId).listStates(prefix),
-    dumpState: (state, code) => host(state.capabilityId).dump(state.scratch ?? null, code, data.limit(state.capabilityId)),
-    countState: (state, code) => host(state.capabilityId).count(state.scratch ?? null, code, data.limit(state.capabilityId)),
-    loadState: (state, tables, code) => limited(state.capabilityId, (limit) => host(state.capabilityId).load(state.scratch ?? null, tables, code, limit)),
+    describe: (code) => via("loading it", () => host("_describe").describe({ code, limit: data.limit("") })),
+    migrate: (state, migrations, code) => limited(state.capabilityId, "migrating", (limit) => host(state.capabilityId).migrate({ scratch: state.scratch ?? null, migrations, code, limit })),
+    hasState: (state) => via("reading its data", () => host(state.capabilityId).hasState({ scratch: state.scratch ?? null })),
+    copyState: (from, to) => via("copying its data", () => host(from.capabilityId).copyState({ from: from.scratch ?? null, to: to.scratch ?? null })),
+    dropState: (state) => via("dropping its data", () => host(state.capabilityId).dropState({ scratch: state.scratch ?? null })),
+    listStates: (capabilityId, prefix) => via("reading its data", () => host(capabilityId).listStates({ prefix })),
+    dumpState: (state, code) => via("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId) })),
+    countState: (state, code) => via("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId) })),
+    loadState: (state, tables, code) => limited(state.capabilityId, "loading its data", (limit) => host(state.capabilityId).load({ scratch: state.scratch ?? null, tables, code, limit })),
   };
 }
 
-type CapabilityHostApi = {
-  [K in "invoke" | "stop" | "describe" | "migrate" | "dump" | "count" | "load" | "hasState" | "copyState" | "dropState" | "listStates"]: (...args: any[]) => Promise<any>;
-};
+// ---------- ToolCalls: a running call's callbacks, from the tools process ----------
+
+/**
+ * Its own socket in the data dir, which only the tools process is given. A callback carries its call's token:
+ * a call that ended (or never ran) is refused. The owner's DO answers, as for a call made in this process.
+ */
+export class ToolCalls extends WorkerEntrypoint<Env> {
+  async fetch(request: Request): Promise<Response> {
+    const kind = new URL(request.url).pathname.slice(1) as CallbackKind;
+    if (request.method !== "POST" || (kind !== "call" && kind !== "model")) return Response.json({ error: "not_found" }, { status: 404 });
+    const token = request.headers.get(CALL_TOKEN_HEADER) ?? "";
+    const owner = this.env.HEWN.get(this.env.HEWN.idFromName("owner")) as unknown as { toolCallback(token: string, kind: CallbackKind, body: unknown): Promise<{ result?: unknown; error?: string; code?: string; refused?: boolean }> };
+    const out = await owner.toolCallback(token, kind, await request.json());
+    return Response.json(out, { status: out.refused ? 403 : 200 });
+  }
+}
 
 // ---------- HewnDO: the owner's platform ----------
 
@@ -402,6 +490,10 @@ export class HewnDO extends DurableObject<Env> {
   private sql: Sql;
   /** The supervisor's word that the disk with Hewn's data is nearly full: tools' data doesn't grow while it is. */
   private diskLow: { floor: number } | null = null;
+  /** Tool calls running in the tools process, by the token their callbacks carry. */
+  private toolCalls = new Map<string, ToolCall>();
+  /** When the supervisor last said the tools stopped responding (ms). */
+  private toolsStalledAt: number | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -413,7 +505,16 @@ export class HewnDO extends DurableObject<Env> {
       this.platform = new Platform({
         sql: this.sql,
         blobs: diskBlobs(env),
-        runtime: workerdRuntime(env, { limit: (id) => this.dataLimit(id), full: (id, limit) => this.dataFull(id, limit) }),
+        runtime: workerdRuntime(
+          env,
+          { limit: (id) => this.dataLimit(id), full: (id, limit) => this.dataFull(id, limit) },
+          {
+            calls: this.toolCalls,
+            stalledAt: () => this.toolsStalledAt,
+            // The supervisor tells this DO what's stalled (/_admin/tools-stalled), then restarts the tools process.
+            stuck: async (reason) => void (await supervisor(env).json("/tools/stalled", { reason })),
+          },
+        ),
         workbench: remoteWorkbench(env, this.visualInvokers),
         secrets: this.secrets,
         brief: BRIEF,
@@ -448,15 +549,30 @@ export class HewnDO extends DurableObject<Env> {
       });
       this.sessions = new McpSessions(this.platform, (m) => console.log(`[${new Date().toISOString()}] ${m}`), (p) => this.surfaceHost().asset(p));
       await this.armAlarm();
-      // What was running when workerd stopped responding is told so first: a build whose own code did it fails rather than being retried.
+      // What was written down as running when this process ended goes: tool code runs in the tools process, so
+      // none of it made this one stop (a stall there is told as it happens, /_admin/tools-stalled).
       try {
-        this.platform.recoverStall(env.STALLED || undefined);
+        this.platform.recoverStall();
       } catch (e) {
-        console.log(`[${new Date().toISOString()}] couldn't tell what was running when Hewn stopped responding: ${(e as Error).message}`);
+        console.log(`[${new Date().toISOString()}] couldn't clear what was running when Hewn stopped: ${(e as Error).message}`);
       }
       // Not awaited: retried builds run in the background.
       void this.platform.recoverInterruptedBuilds().then(() => this.platform.cleanup());
     });
+  }
+
+  /** A tool call's callback, from the tools process (ToolCalls): answered while that call runs, refused after. */
+  async toolCallback(token: string, kind: CallbackKind, body: unknown): Promise<{ result?: unknown; error?: string; code?: string; refused?: boolean }> {
+    const running = this.toolCalls.get(token);
+    if (!running) return { error: "this call isn't running", refused: true };
+    try {
+      if (kind === "call") return { result: await running.call(body as Callbacks["call"]) };
+      if (!running.model) throw new PlatformError("forbidden", "this call has no model");
+      return { result: await running.model(body as GenerateRequest) };
+    } catch (e) {
+      const code = (e as PlatformError).code;
+      return { error: (e as Error).message, ...(typeof code === "string" ? { code } : {}) };
+    }
   }
 
   /** How big a capability's states may grow, in bytes: its limit, or 0 while the disk is nearly full. */
@@ -625,6 +741,11 @@ export class HewnDO extends DurableObject<Env> {
           // The supervisor checks the disk with Hewn's data: while it's nearly full, tools' data doesn't grow.
           this.diskLow = body.low === true ? { floor: Number.isFinite(body.floor) ? body.floor : 1024 * MB } : null;
           return Response.json({ ok: true });
+        case "/_admin/tools-stalled":
+          // The supervisor's watchdog: the tools process stopped responding, and is restarted once this answers.
+          // What was running there is told so now; it fails as the process goes.
+          this.toolsStalledAt = Date.parse(String(body.at));
+          return Response.json({ ok: true, ...this.platform.recoverStall(String(body.at)) });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.
           const invoke = this.visualInvokers.get(body.buildId);
@@ -757,150 +878,3 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   models: { owner: true }, setModelSettings: { owner: true, changes: true }, setModelKey: { owner: true, changes: true }, checkModelProvider: { owner: true }, replacePinnedModel: { owner: true }, setCapabilityModel: { owner: true }, modelSpend: { owner: true }, refreshModelCatalog: { owner: false },
   metrics: { owner: true }, idleActivity: { owner: false },
 };
-
-// ---------- CapabilityHost: one per capability ----------
-
-/** A capability's states are facets of its host: "live", or "s:<scratch name>". */
-const facetName = (scratch: string | null) => (scratch ? `s:${scratch}` : "live");
-
-export class CapabilityHost extends DurableObject<Env> {
-  /** Which loaded code each running facet was started with. */
-  private running = new Map<string, string>();
-  /** Calls (and other work) in progress on each facet. */
-  private busy = new Map<string, number>();
-
-  constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env);
-    ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS states (name TEXT PRIMARY KEY)");
-  }
-
-  /**
-   * Stop a state's code: whatever it has running (awaits, timers, writes) ends, and calls in progress
-   * on it fail with `reason`. Its data stays; the next call starts it afresh. How a tool's code is
-   * stopped is this host's business: code in a process of its own would be stopped by ending that.
-   */
-  stop(scratch: string | null, reason: string) {
-    this.halt(facetName(scratch), reason);
-  }
-
-  private halt(name: string, reason: string) {
-    if (this.running.has(name)) this.ctx.facets.abort(name, new Error(reason));
-    this.running.delete(name);
-  }
-
-  /**
-   * Work on a facet. When the last piece of work on it ends, the facet is stopped, so nothing a call
-   * leaves behind (a timer, a promise it didn't await) runs on after it.
-   */
-  private async on<T>(scratch: string | null, code: CodeRef, hosts: string[], limit: number, work: (facet: any) => Promise<T>): Promise<T> {
-    const name = facetName(scratch);
-    const facet = this.facet(scratch, code, hosts, limit);
-    this.busy.set(name, (this.busy.get(name) ?? 0) + 1);
-    try {
-      return await work(facet);
-    } finally {
-      const left = this.busy.get(name)! - 1;
-      if (left > 0) this.busy.set(name, left);
-      else {
-        this.busy.delete(name);
-        this.halt(name, "finished");
-      }
-    }
-  }
-
-  /**
-   * The isolate for `code` with these hosts and this size limit (bytes) for each state it runs.
-   * "experimental" is for the limit's setter, sql.setMaxPageCountForTest: hewn-guard.js
-   * (capability-guard.ts) takes it, with what else the flag adds to storage, out of the
-   * capability's reach before its code can use any.
-   */
-  private worker(code: CodeRef, hosts: string[], limit: number) {
-    const bytes = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
-    const key = `${code.hash}|${hosts.join(",")}|${bytes}`;
-    return {
-      key,
-      stub: this.env.LOADER.get(key, () => ({
-        compatibilityDate: COMPAT_DATE,
-        compatibilityFlags: ["nodejs_compat", "experimental"],
-        allowExperimental: true,
-        mainModule: "hewn-runtime.js",
-        modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
-        env: {},
-        globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts } }),
-      })),
-    };
-  }
-
-  /** The facet for a state, running `code` with `limit` (restarted if it was running other code or another limit). */
-  private facet(scratch: string | null, code: CodeRef, hosts: string[], limit: number) {
-    const name = facetName(scratch);
-    const w = this.worker(code, hosts, limit);
-    if (this.running.has(name) && this.running.get(name) !== w.key) this.ctx.facets.abort(name, new Error("new version"));
-    this.running.set(name, w.key);
-    this.ctx.storage.sql.exec("INSERT OR IGNORE INTO states (name) VALUES (?)", name);
-    return this.ctx.facets.get(name, () => ({ class: w.stub.getDurableObjectClass("Capability") })) as any;
-  }
-
-  // `limit`: how big the state may grow, in bytes (0: not at all; workerdRuntime passes the owner's).
-  async invoke(code: CodeRef, scratch: string | null, key: string, input: unknown, secrets: Record<string, string>, hosts: string[], caller: { kind: string; id: string } | undefined, call: (capabilityId: string, operation: string, input: unknown) => Promise<unknown>, config: Record<string, string> = {}, model: ((req: GenerateRequest) => Promise<GenerateResult>) | null = null, readOnly = false, limit = 0) {
-    return this.on(scratch, code, hosts, limit, (f) => f.invoke(key, input, secrets, caller, call, config, model, readOnly));
-  }
-
-  async describe(code: CodeRef, limit = 0): Promise<string[]> {
-    return (this.worker(code, [], limit).stub.getEntrypoint() as any).describe();
-  }
-
-  async migrate(scratch: string | null, migrations: Migration[], code: CodeRef, limit = 0): Promise<string[]> {
-    return this.on(scratch, code, [], limit, (f) => f.migrate(migrations));
-  }
-
-  async dump(scratch: string | null, code: CodeRef, limit = 0) {
-    return this.on(scratch, code, [], limit, (f) => f.dump());
-  }
-
-  async count(scratch: string | null, code: CodeRef, limit = 0): Promise<Record<string, number>> {
-    return this.on(scratch, code, [], limit, (f) => f.count());
-  }
-
-  async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0): Promise<number> {
-    return this.on(scratch, code, [], limit, (f) => f.load(tables));
-  }
-
-  hasState(scratch: string | null): boolean {
-    return this.ctx.storage.sql.exec("SELECT 1 FROM states WHERE name = ?", facetName(scratch)).toArray().length > 0;
-  }
-
-  copyState(from: string | null, to: string | null) {
-    const src = facetName(from);
-    const dst = facetName(to);
-    this.drop(dst);
-    this.ctx.facets.clone(src, dst);
-    this.ctx.storage.sql.exec("INSERT OR IGNORE INTO states (name) VALUES (?)", dst);
-  }
-
-  dropState(scratch: string | null) {
-    this.drop(facetName(scratch));
-  }
-
-  private drop(name: string) {
-    this.halt(name, "dropped");
-    this.ctx.facets.delete(name);
-    this.ctx.storage.sql.exec("DELETE FROM states WHERE name = ?", name);
-  }
-
-  listStates(prefix: string): string[] {
-    return this.ctx.storage.sql
-      .exec("SELECT name FROM states WHERE name LIKE 's:%'")
-      .toArray()
-      .map((r) => String(r.name).slice(2))
-      .filter((n) => n.startsWith(prefix));
-  }
-}
-
-// ---------- Egress: the only way out of a capability ----------
-
-export class Egress extends WorkerEntrypoint<Env, { hosts: string[] }> {
-  async fetch(request: Request): Promise<Response> {
-    return gatedFetch(request, this.ctx.props.hosts ?? []);
-  }
-}

@@ -21,14 +21,22 @@ const common = {
   logLevel: "silent" as const,
 };
 
-/** The host's files, built from the sources: { "worker.js", "capability-runtime.js", "capability-guard.js", "builder-brief.md" }. */
+/**
+ * The host's files, built from the sources: the platform's worker ("worker.js", with "builder-brief.md"), and the
+ * tools' ("tools-worker.js", with "capability-runtime.js" and "capability-guard.js"): two workerd processes.
+ */
 export async function buildHostFiles(root = APP_DIR): Promise<Record<string, string>> {
   const { build } = await import("esbuild");
   const host = packageDir("@hewntools/host-workerd");
   const worker = await build({
     ...common,
     entryPoints: [join(host, "src", "worker.ts")],
-    external: ["cloudflare:*", "node:*", "./builder-brief.md", "./capability-runtime.js", "./capability-guard.js"],
+    external: ["cloudflare:*", "node:*", "./builder-brief.md"],
+  });
+  const tools = await build({
+    ...common,
+    entryPoints: [join(host, "src", "tools-worker.ts")],
+    external: ["cloudflare:*", "node:*", "./capability-runtime.js", "./capability-guard.js"],
   });
   const runtime = await build({
     ...common,
@@ -43,15 +51,16 @@ export async function buildHostFiles(root = APP_DIR): Promise<Record<string, str
   const { readFileSync } = await import("node:fs");
   return {
     "worker.js": worker.outputFiles![0].text,
+    "tools-worker.js": tools.outputFiles![0].text,
     "capability-runtime.js": runtime.outputFiles![0].text,
     "capability-guard.js": guard.outputFiles![0].text,
     "builder-brief.md": readFileSync(join(root, "spec", "builder-brief.md"), "utf8"),
   };
 }
 
-const HOST_FILES = ["worker.js", "capability-runtime.js", "capability-guard.js", "builder-brief.md"];
+const HOST_FILES = ["worker.js", "tools-worker.js", "capability-runtime.js", "capability-guard.js", "builder-brief.md"];
 
-/** Write worker.js, capability-runtime.js, capability-guard.js and builder-brief.md into `dir`. */
+/** Write the host's files (HOST_FILES) into `dir`. */
 export async function buildHost(dir: string): Promise<void> {
   mkdirSync(dir, { recursive: true });
   if (BUNDLED) {

@@ -351,7 +351,7 @@ async function main() {
         console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
         if (st) {
-          console.log(`up ${st.upSeconds}s · workerd restarts ${st.restarts} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
+          console.log(`up ${st.upSeconds}s · workerd restarts ${st.restarts} (tools ${st.toolsRestarts ?? 0}) · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
           if (st.idle) console.log(idleLine(st.idle));
         }
       });

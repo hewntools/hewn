@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The supervisor: runs workerd (the Hewn host) and does what an isolate can't: builders,
-// bundling, intake, connecting local agents, deleting blobs. It also keeps workerd alive: a
-// capability stuck in a CPU loop blocks the whole (single-threaded) workerd, so a stalled
-// /health is answered by a restart.
+// bundling, intake, connecting local agents, deleting blobs. Hewn runs the platform and the tools
+// in separate workerd processes, which talk over Unix sockets in the data dir. It also keeps both
+// alive: a tool stuck in a CPU loop blocks the tools' (single-threaded) workerd, so a stalled
+// /health there restarts the tools; the platform keeps answering meanwhile.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statfsSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { hostname, platform as osPlatform } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -134,10 +135,13 @@ export interface Supervisor {
   /** The public listener on the network too (`publicListen`), for a reverse proxy on another machine. */
   publicNetwork?: string;
   tunnel: Tunnel;
+  /** Restarts of the platform's workerd. */
   restarts: () => number;
+  /** Restarts of the tools' workerd (a tool stuck in a loop, a crash). */
+  toolsRestarts: () => number;
   /** The idle report: whether Hewn is idle, and when it next needs to be awake (`afterSeconds`: the host's quiet time). */
   status(afterSeconds?: number): Promise<IdleStatus>;
-  /** Restart workerd (state is on disk; in-memory caches go). */
+  /** Restart both workerd processes (state is on disk; in-memory caches go). */
   restart(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -151,8 +155,16 @@ const workerd = () => {
   }
 };
 
-/** workerd's config (capnp) for this home. Exported for tests. */
-export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string; docs: string; spec: string } }) {
+/** Where the two processes reach each other: Unix sockets in the data dir, or loopback ports where a socket's path is too long. */
+export interface Channel {
+  /** The tools process's socket (the platform's calls). */
+  tools: string;
+  /** The platform's socket for a running call's callbacks (only the tools process is given it). */
+  calls: string;
+}
+
+/** The platform's workerd config (capnp) for this home. Exported for tests. */
+export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string; docs: string; spec: string }; channel: Channel }) {
   return `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
@@ -164,10 +176,12 @@ const config :Workerd.Config = (
     (name = "assets-docs", disk = (path = "${o.assets.docs}")),
     (name = "assets-spec", disk = (path = "${o.assets.spec}")),
     (name = "supervisor", external = (address = "127.0.0.1:${o.supervisorPort}", http = ())),
+    (name = "tools", external = (address = "${o.channel.tools}", http = ())),
     (name = "internet", network = (allow = ["public"], tlsOptions = (trustBrowserCas = true))),
   ],
   sockets = [
     (name = "http", address = "127.0.0.1:${o.port}", http = (), service = "main"),
+    (name = "tool-calls", address = "${o.channel.calls}", http = (), service = (name = "main", entrypoint = "ToolCalls")),
     (name = "public", address = "${o.publicListen === "0.0.0.0" ? "0.0.0.0" : "127.0.0.1"}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),${
       // Another address too (a LAN address for a proxy on another machine). 0.0.0.0 already
       // covers loopback, and a second socket on the same port would fail to bind.
@@ -179,16 +193,14 @@ const hewn :Workerd.Worker = (
   modules = [
     (name = "worker.js", esModule = embed "worker.js"),
     (name = "builder-brief.md", text = embed "builder-brief.md"),
-    (name = "capability-runtime.js", text = embed "capability-runtime.js"),
-    (name = "capability-guard.js", text = embed "capability-guard.js"),
   ],
   compatibilityDate = "2026-09-01",
   # enable_request_signal: a request's signal aborts when its client goes (Stop in the chat stops the intake's CLI).
   compatibilityFlags = ["experimental", "enable_request_signal"],
   bindings = [
     (name = "HEWN", durableObjectNamespace = "HewnDO"),
-    (name = "CAPS", durableObjectNamespace = "CapabilityHost"),
-    (name = "LOADER", workerLoader = (id = "capabilities")),
+    (name = "TOOLS", service = "tools"),
+    (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),
     (name = "BLOBS", service = "blobs"),
     (name = "ASSETS_WEB", service = "assets-web"),
     (name = "ASSETS_UI", service = "assets-ui"),
@@ -204,12 +216,49 @@ const hewn :Workerd.Worker = (
     (name = "REMOTE_JOBS", fromEnvironment = "HEWN_REMOTE_JOBS"),
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
-    (name = "STALLED", fromEnvironment = "HEWN_STALLED"),
     (name = "PORT", text = "${o.port}"),
     (name = "VERSION", text = "${VERSION}"),
   ],
   durableObjectNamespaces = [
     (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),
+  ],
+  durableObjectStorage = (localDisk = "do-storage"),
+);
+`;
+}
+
+/**
+ * The tools' workerd config: every tool's CapabilityHost (the same do/ directory, its own namespace in it), the
+ * loader and Egress. No secrets key, no blobs, no assets, no owner DO. Exported for tests.
+ */
+export function toolsConfig(o: { keys: typeof STORAGE_KEYS; data: string; channel: Channel }) {
+  return `using Workerd = import "/workerd/workerd.capnp";
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .tools),
+    (name = "do-storage", disk = (path = "${o.data}/do", writable = true)),
+    (name = "platform", external = (address = "${o.channel.calls}", http = ())),
+    (name = "internet", network = (allow = ["public"], tlsOptions = (trustBrowserCas = true))),
+  ],
+  sockets = [
+    (name = "tools", address = "${o.channel.tools}", http = (), service = "main"),
+  ],
+);
+const tools :Workerd.Worker = (
+  modules = [
+    (name = "tools-worker.js", esModule = embed "tools-worker.js"),
+    (name = "capability-runtime.js", text = embed "capability-runtime.js"),
+    (name = "capability-guard.js", text = embed "capability-guard.js"),
+  ],
+  compatibilityDate = "2026-09-01",
+  compatibilityFlags = ["experimental"],
+  bindings = [
+    (name = "CAPS", durableObjectNamespace = "CapabilityHost"),
+    (name = "LOADER", workerLoader = (id = "capabilities")),
+    (name = "PLATFORM", service = "platform"),
+    (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),
+  ],
+  durableObjectNamespaces = [
     (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
@@ -217,28 +266,54 @@ const hewn :Workerd.Worker = (
 `;
 }
 
-/** The OS sandbox around workerd: it may read its own files and write only its data dir. */
-function sandboxed(cmd: string[], o: { data: string; readable: string[] }): string[] {
+/**
+ * The OS sandbox around a workerd: it may read `readable` (directories, or files) and `writable`, write only
+ * `writable`, and nothing in `hidden` past those (the tools' process: the data dir is hidden but for its own
+ * storage and the sockets). `profile`: where macOS's profile is written.
+ */
+export function sandboxed(cmd: string[], o: { readable: string[]; writable: string[]; hidden?: string[]; listable?: string[]; profile: string }): string[] {
   if (osPlatform() === "darwin") {
     const home = process.env.HOME!;
+    const path = (p: string) => (existsSync(p) && !statSyncSafe(p) ? `(literal "${p}")` : `(subpath "${p}")`);
+    // `listable`: a directory itself (to open it), not what's in it.
     const profile = `(version 1)
 (allow default)
-(deny file-read* (subpath "${home}"))
-(allow file-read* ${o.readable.map((p) => `(subpath "${p}")`).join(" ")} (subpath "${o.data}"))
+(deny file-read* (subpath "${home}")${(o.hidden ?? []).map((p) => ` (subpath "${p}")`).join("")})
+(allow file-read* ${[...o.readable, ...o.writable].map(path).join(" ")}${(o.listable ?? []).map((p) => ` (literal "${p}")`).join("")})
 (deny file-write* (subpath "/"))
-(allow file-write* (subpath "${o.data}") (subpath "/private/var/folders") (subpath "/private/tmp") (literal "/dev/null"))
+(allow file-write* ${o.writable.map(path).join(" ")} (subpath "/private/var/folders") (subpath "/private/tmp") (literal "/dev/null"))
 `;
-    const file = join(o.data, "workerd.sb");
-    writeFileSync(file, profile);
-    return ["sandbox-exec", "-f", file, ...cmd];
+    writeFileSync(o.profile, profile);
+    return ["sandbox-exec", "-f", o.profile, ...cmd];
   }
   return [
     "bwrap", "--ro-bind", "/usr", "/usr", "--ro-bind-try", "/lib", "/lib", "--ro-bind-try", "/lib64", "/lib64", "--ro-bind-try", "/bin", "/bin",
     "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind-try", "/etc/ssl", "/etc/ssl", "--ro-bind-try", "/etc/ca-certificates", "/etc/ca-certificates",
     "--ro-bind-try", "/etc/hosts", "/etc/hosts", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-    ...o.readable.flatMap((p) => ["--ro-bind", p, p]), "--bind", o.data, o.data,
+    ...o.readable.flatMap((p) => ["--ro-bind", p, p]), ...o.writable.flatMap((p) => ["--bind", p, p]),
     "--unshare-all", "--share-net", "--die-with-parent", ...cmd,
   ];
+}
+
+/**
+ * The tools' sandbox: their files, their storage and the sockets; nothing else of the data dir (not the owner's DO, the
+ * blobs, the platform's files). Exported for tests.
+ */
+export const toolsSandbox = (data: string, binDir: string) => ({
+  readable: [binDir, ...["tools.capnp", "tools-worker.js", "capability-runtime.js", "capability-guard.js"].map((f) => join(data, f))],
+  listable: [join(data, "do")],
+  writable: [join(data, "do", STORAGE_KEYS.capability), join(data, "run")],
+  hidden: [data],
+  profile: join(data, "workerd-tools.sb"),
+});
+
+/** Whether `p` is a directory (false for a file, or anything unreadable). */
+function statSyncSafe(p: string): boolean {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<any> {
@@ -371,6 +446,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         ...(r.defects ? { defects: r.defects } : {}),
       };
     },
+    // The platform's stop of a call past its deadline went unanswered: the tools are stuck.
+    "/tools/stalled": async (b) => toolsStalled(`didn't stop a call (${String(b.reason ?? "")})`),
     "/blobs/delete": async (b) => {
       const p = resolve(blobRoot, String(b.key));
       if (p.startsWith(blobRoot + "/")) rmSync(p, { force: true });
@@ -435,8 +512,10 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     },
     "/control/status": async (b) => ({
       pid: process.pid,
-      workerdPid: child?.pid ?? null,
-      restarts,
+      workerdPid: platform.child?.pid ?? null,
+      toolsPid: tools.child?.pid ?? null,
+      restarts: platform.restarts,
+      toolsRestarts: tools.restarts,
       upSeconds: Math.round((Date.now() - startedAt) / 1000),
       keySource: secretsKey.source,
       sandbox: !!o.sandbox,
@@ -447,12 +526,12 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     "/control/backup": async () => backupNow(o.home, backupDir()),
     "/control/backups": async () => ({ dir: backupDir(), backups: listBackups(backupDir()) }),
     "/control/restore": async (b) => {
-      // Stop workerd, swap the data in, start it again.
+      // Stop both workerd processes, swap the data in, start them again.
       await stopWorkerd();
       try {
         return restoreBackup(o.home, String(b.file));
       } finally {
-        start();
+        startBoth();
         await waitHealthy();
         // What's live now may not be the newest backup: the idle report asks for one today.
         await admin("changed", {}).catch(() => {});
@@ -480,23 +559,93 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   await new Promise<void>((r) => supervisorServer.listen(0, "127.0.0.1", () => r()));
   const supervisorPort = (supervisorServer.address() as AddressInfo).port;
 
-  // ---------- workerd ----------
-  writeFileSync(join(data, "config.capnp"), config({ dir: data, keys: STORAGE_KEYS, port: o.port, publicPort, publicListen: o.publicListen, supervisorPort, data, assets: assetDirs() }));
+  // ---------- workerd: the platform's process and the tools' ----------
   const bin = workerd();
   if (!bin) throw new Error("the workerd runtime is missing: reinstall Hewn");
-  const base = [bin, "serve", "--experimental", join(data, "config.capnp")];
-  const command = o.sandbox ? sandboxed(base, { data, readable: [realpathSync(resolve(bin, "..", "..")), ...Object.values(assetDirs()).map((d) => realpathSync(d))] }) : base;
+  const binDir = realpathSync(resolve(bin, "..", ".."));
+  // The sockets between the two: in a directory only this user can enter. A socket's path has a length
+  // limit (103 bytes on macOS, 107 on Linux); a data dir too deep for one gets loopback ports instead (each
+  // call still carries its token).
+  const run = join(data, "run");
+  mkdirSync(run, { recursive: true, mode: 0o700 });
+  chmodSync(run, 0o700);
+  const socketPath = (name: "tools" | "calls") => join(run, `${name}.sock`);
+  const unix = Buffer.byteLength(socketPath("tools")) <= (osPlatform() === "darwin" ? 103 : 107);
+  const channel: Channel = unix ? { tools: `unix:${socketPath("tools")}`, calls: `unix:${socketPath("calls")}` } : { tools: `127.0.0.1:${await freePort()}`, calls: `127.0.0.1:${await freePort()}` };
+  if (!unix) log(`the data dir's path is too long for a socket: the platform and the tools talk over loopback ports`);
+  const toolsToken = randomBytes(24).toString("hex");
+  writeFileSync(join(data, "config.capnp"), config({ dir: data, keys: STORAGE_KEYS, port: o.port, publicPort, publicListen: o.publicListen, supervisorPort, data, assets: assetDirs(), channel }));
+  writeFileSync(join(data, "tools.capnp"), toolsConfig({ keys: STORAGE_KEYS, data, channel }));
+  // The tools' own storage (made before each start): the tools process can write nowhere else in the data dir.
+  const toolsStorage = join(data, "do", STORAGE_KEYS.capability);
+  const platformBase = [bin, "serve", "--experimental", join(data, "config.capnp")];
+  const toolsBase = [bin, "serve", "--experimental", join(data, "tools.capnp")];
+  const platformCommand = o.sandbox ? sandboxed(platformBase, { readable: [binDir, ...Object.values(assetDirs()).map((d) => realpathSync(d))], writable: [data], profile: join(data, "workerd.sb") }) : platformBase;
+  const toolsCommand = o.sandbox ? sandboxed(toolsBase, toolsSandbox(data, binDir)) : toolsBase;
   const url = `http://127.0.0.1:${o.port}`;
-  let child: ChildProcess | undefined;
   let stopping = false;
-  let restarts = 0;
-  let quickExits = 0;
-  /** When the watchdog last restarted workerd for not responding: the next workerd says what was running then. */
-  let stalledAt = "";
-  let restartTimer: ReturnType<typeof setTimeout> | undefined;
+  /** One workerd: started, restarted when it exits (backing off from a crash loop), its pid on disk. */
+  const workerdProcess = (name: string, command: string[], env: () => NodeJS.ProcessEnv, pidFile: string, socket: string | undefined, cwd: string) => {
+    const p = {
+      name,
+      child: undefined as ChildProcess | undefined,
+      restarts: 0,
+      quickExits: 0,
+      restartTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+      /** Set while it's stopped on purpose (a restore): no restart on exit. */
+      held: false,
+      /** Set when it's killed to be restarted (it stopped responding): started again at once. */
+      now: false,
+      start() {
+        const startedAt = Date.now();
+        // The sockets' directory and the tools' storage, again (a restore swaps do/ for the backup's).
+        mkdirSync(run, { recursive: true, mode: 0o700 });
+        mkdirSync(toolsStorage, { recursive: true });
+        // workerd doesn't remove its socket when it ends, and won't bind over one that's there.
+        if (socket) rmSync(socket, { force: true });
+        const child = spawn(command[0], command.slice(1), {
+          // workerd opens its working directory: one its sandbox allows (the data dir; the tools', their sockets' dir).
+          cwd,
+          env: { ...env(), PWD: cwd },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        p.child = child;
+        if (child.pid) writeFileSync(pidFile, String(child.pid));
+        const forward = (b: Buffer) => b.toString().split("\n").filter(Boolean).forEach((l) => log(`${name === "tools" ? "tools: " : ""}${l.replace(/^\[\S+\] /, "")}`));
+        child.stdout!.on("data", forward);
+        child.stderr!.on("data", forward);
+        child.on("exit", (code, signal) => {
+          if (stopping || p.held) return;
+          // A crash loop (e.g. a bad config) backs off instead of spinning.
+          p.quickExits = Date.now() - startedAt < 3000 ? p.quickExits + 1 : 0;
+          const delay = p.now ? 0 : p.quickExits > 3 ? Math.min(30_000, 1000 * 2 ** (p.quickExits - 3)) : 200;
+          p.now = false;
+          log(`${name === "tools" ? "the tools' workerd" : "workerd"} exited (${signal ?? code}); restarting${delay > 200 ? ` in ${Math.round(delay / 1000)}s` : ""}`);
+          p.restarts++;
+          p.restartTimer = setTimeout(() => p.start(), delay);
+        });
+      },
+      /** Stop it, without the restart on exit (`hold`) or with it. */
+      stop(signal: NodeJS.Signals = "SIGTERM", hold = true) {
+        return new Promise<void>((done) => {
+          const c = p.child;
+          if (!c || c.exitCode !== null || c.signalCode !== null) return done();
+          if (hold) p.held = true;
+          c.once("exit", () => done());
+          c.kill(signal);
+        });
+      },
+      resume() {
+        p.held = false;
+        p.start();
+      },
+    };
+    return p;
+  };
   // A workerd left behind by a supervisor that died (macOS has no die-with-parent) would hold the port.
-  const pidFile = join(data, "workerd.pid");
-  if (existsSync(pidFile)) {
+  const pidFiles = { platform: join(data, "workerd.pid"), tools: join(data, "workerd-tools.pid") };
+  for (const pidFile of Object.values(pidFiles)) {
+    if (!existsSync(pidFile)) continue;
     const old = Number(readFileSync(pidFile, "utf8"));
     try {
       if (old && spawnSync("ps", ["-p", String(old), "-o", "command="], { encoding: "utf8" }).stdout.includes("workerd")) {
@@ -507,28 +656,14 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       // already gone
     }
   }
-  const start = () => {
-    const startedAt = Date.now();
-    child = spawn(command[0], command.slice(1), {
-      // Run in its own data dir: workerd opens its working directory, and the sandbox only allows that.
-      cwd: data,
-      env: { ...process.env, PWD: data, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TIMEZONE: Intl.DateTimeFormat().resolvedOptions().timeZone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "", HEWN_STALLED: stalledAt },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (child.pid) writeFileSync(pidFile, String(child.pid));
-    const forward = (b: Buffer) => b.toString().split("\n").filter(Boolean).forEach((l) => log(l.replace(/^\[\S+\] /, "")));
-    child.stdout!.on("data", forward);
-    child.stderr!.on("data", forward);
-    child.on("exit", (code, signal) => {
-      if (stopping) return;
-      // A crash loop (e.g. a bad config) backs off instead of spinning.
-      quickExits = Date.now() - startedAt < 3000 ? quickExits + 1 : 0;
-      const delay = quickExits > 3 ? Math.min(30_000, 1000 * 2 ** (quickExits - 3)) : 200;
-      log(`workerd exited (${signal ?? code}); restarting${delay > 200 ? ` in ${Math.round(delay / 1000)}s` : ""}`);
-      restarts++;
-      restartTimer = setTimeout(start, delay);
-    });
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const platform = workerdProcess("platform", platformCommand, () => ({ ...process.env, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TOOLS_TOKEN: toolsToken, HEWN_TIMEZONE: timezone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" }), pidFiles.platform, unix ? socketPath("calls") : undefined, data);
+  // The tools' environment holds only what workerd needs and their token: none of the supervisor's own (its secrets among it).
+  const toolsEnv = (): NodeJS.ProcessEnv => {
+    const keep = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
+    return { ...Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), TZ: process.env.TZ ?? timezone, HEWN_TOOLS_TOKEN: toolsToken };
   };
+  const tools = workerdProcess("tools", toolsCommand, toolsEnv, pidFiles.tools, unix ? socketPath("tools") : undefined, run);
   const healthy = async (timeoutMs: number) => {
     try {
       return (await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) })).ok;
@@ -536,36 +671,57 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       return false;
     }
   };
-  const waitHealthy = async () => {
-    for (let i = 0; !(await healthy(500)); i++) {
-      if (i > 150) throw new Error("workerd did not start");
+  /** The tools process's /health, on its socket. */
+  const toolsHealthy = (timeoutMs: number) =>
+    new Promise<boolean>((done) => {
+      const where = channel.tools.startsWith("unix:") ? { socketPath: channel.tools.slice(5) } : { host: "127.0.0.1", port: Number(channel.tools.split(":")[1]) };
+      const req = httpRequest({ ...where, path: "/health", timeout: timeoutMs }, (res) => {
+        res.resume();
+        done(res.statusCode === 200);
+      });
+      req.on("timeout", () => (req.destroy(), done(false)));
+      req.on("error", () => done(false));
+      req.end();
+    });
+  const waitFor = async (check: (ms: number) => Promise<boolean>, what: string) => {
+    for (let i = 0; !(await check(500)); i++) {
+      if (i > 150) throw new Error(`${what} did not start`);
       await new Promise((r) => setTimeout(r, 100));
     }
   };
-  /** Stop workerd without the restart-on-exit (for a restore). */
-  const stopWorkerd = () =>
-    new Promise<void>((resolve) => {
-      if (!child || child.exitCode !== null) return resolve();
-      stopping = true;
-      child.once("exit", () => {
-        stopping = false;
-        resolve();
-      });
-      child.kill("SIGTERM");
-    });
-  // This process exiting (a crash, a forced exit) takes workerd with it; after a kill -9, the pid file above.
-  const killOnExit = () => child?.kill("SIGKILL");
-  /** Stop workerd for good (and a restart it had coming) and close the supervisor's channel. */
+  /** The tools first (the platform calls them), then the platform. */
+  const startBoth = () => {
+    tools.resume();
+    platform.resume();
+  };
+  const waitHealthy = async () => {
+    await waitFor(toolsHealthy, "the tools' workerd");
+    await waitFor(healthy, "workerd");
+  };
+  /** Stop both without the restart-on-exit (for a restore): the platform first, so nothing calls the tools meanwhile. */
+  const stopWorkerd = async () => {
+    await platform.stop();
+    await tools.stop();
+  };
+  // This process exiting (a crash, a forced exit) takes workerd with it; after a kill -9, the pid files above.
+  const killOnExit = () => {
+    platform.child?.kill("SIGKILL");
+    tools.child?.kill("SIGKILL");
+  };
+  /** Stop both for good (and a restart they had coming) and close the supervisor's channel. */
   const shutdown = async () => {
     stopping = true;
-    clearTimeout(restartTimer);
+    clearTimeout(platform.restartTimer);
+    clearTimeout(tools.restartTimer);
     process.off("exit", killOnExit);
     tunnel.halt();
-    child?.kill("SIGTERM");
+    platform.child?.kill("SIGTERM");
+    tools.child?.kill("SIGTERM");
     await new Promise((r) => supervisorServer.close(r));
   };
   process.on("exit", killOnExit);
-  start();
+  tools.start();
+  platform.start();
   try {
     await waitHealthy();
   } catch (e) {
@@ -573,6 +729,24 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     await shutdown();
     throw e;
   }
+  /** Set while the tools are being restarted for not responding (one restart at a time). */
+  let toolsRestarting = false;
+  /**
+   * The tools stopped responding (code that never yields): the platform is told first, while what was running there
+   * is still running (it says which tools did, and fails the builds whose code did), then the tools are restarted.
+   */
+  const toolsStalled = async (why: string) => {
+    if (toolsRestarting) return;
+    toolsRestarting = true;
+    try {
+      log(`Hewn's tools ${why} (a tool may be stuck in a loop); restarting them`);
+      await admin("tools-stalled", { at: new Date().toISOString() }, 3000).catch((e) => log(`couldn't tell Hewn what was running: ${(e as Error).message}`));
+      tools.now = true;
+      await tools.stop("SIGKILL", false);
+    } finally {
+      toolsRestarting = false;
+    }
+  };
   tunnel.resume();
 
   // Nightly backup: one per day, checked hourly (and a minute after start, for machines that sleep at night).
@@ -590,26 +764,36 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   for (const t of backupTimers) t.unref();
 
   // ---------- watchdog ----------
-  let timer: ReturnType<typeof setInterval> | undefined;
+  // Each process answers /health; one that stops answering for `stallMs` is restarted. The tools stop
+  // answering when a tool's code never yields (the platform is told what was running, then they're restarted);
+  // the platform is restarted alone.
+  const timers: ReturnType<typeof setInterval>[] = [];
   if (o.watchdog !== false) {
     const { intervalMs, stallMs } = o.watchdog ?? { intervalMs: 1000, stallMs: 5000 };
-    let lastOk = Date.now();
-    let checking = false;
-    timer = setInterval(async () => {
-      if (checking) return;
-      checking = true;
-      // A ping that timed out may have been this process's own pause (a long synchronous step, a laptop
-      // waking), not workerd's: one more, with a fresh timeout, before it counts.
-      if ((await healthy(intervalMs)) || (await healthy(intervalMs))) lastOk = Date.now();
-      else if (Date.now() - lastOk > stallMs) {
-        log(`workerd unresponsive for ${Math.round((Date.now() - lastOk) / 1000)}s (a capability may be stuck in a loop); restarting it`);
-        lastOk = Date.now() + 5000;
-        stalledAt = new Date().toISOString();
-        child?.kill("SIGKILL");
-      }
-      checking = false;
-    }, intervalMs);
-    timer.unref();
+    const watch = (check: (ms: number) => Promise<boolean>, onStall: (seconds: number) => Promise<void> | void) => {
+      let lastOk = Date.now();
+      let checking = false;
+      const t = setInterval(async () => {
+        if (checking) return;
+        checking = true;
+        // A ping that timed out may have been this process's own pause (a long synchronous step, a laptop
+        // waking), not workerd's: one more, with a fresh timeout, before it counts.
+        if ((await check(intervalMs)) || (await check(intervalMs))) lastOk = Date.now();
+        else if (Date.now() - lastOk > stallMs) {
+          const seconds = Math.round((Date.now() - lastOk) / 1000);
+          lastOk = Date.now() + 5000;
+          await onStall(seconds);
+        }
+        checking = false;
+      }, intervalMs);
+      t.unref();
+      timers.push(t);
+    };
+    watch(toolsHealthy, (seconds) => toolsStalled(`unresponsive for ${seconds}s`));
+    watch(healthy, (seconds) => {
+      log(`workerd unresponsive for ${seconds}s; restarting it`);
+      platform.child?.kill("SIGKILL");
+    });
   }
 
   // The resume check: the wall clock ran ahead of this process (the machine was suspended, or asleep). Due schedules run
@@ -653,11 +837,12 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, { afterSeconds, resumedAt });
   };
 
-  const admin = async (path: string, body?: unknown) => {
+  const admin = async (path: string, body?: unknown, timeoutMs?: number) => {
     const res = await fetch(`${url}/_admin/${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { "x-hewn-admin": adminToken, "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     });
     const out = await res.json();
     if (!res.ok) throw Object.assign(new Error((out as any).message ?? (out as any).error), out);
@@ -698,19 +883,20 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     ...(o.publicListen ? { publicNetwork: `http://${o.publicListen}:${publicPort}` } : {}),
     tunnel,
     admin,
-    restarts: () => restarts,
+    restarts: () => platform.restarts,
+    toolsRestarts: () => tools.restarts,
     status,
     async restart() {
-      const before = restarts;
-      child?.kill("SIGTERM");
-      while (restarts === before) await new Promise((r) => setTimeout(r, 50));
-      for (let i = 0; !(await healthy(500)); i++) {
-        if (i > 100) throw new Error("workerd did not come back");
-        await new Promise((r) => setTimeout(r, 100));
-      }
+      const before = { platform: platform.restarts, tools: tools.restarts };
+      platform.child?.kill("SIGTERM");
+      tools.child?.kill("SIGTERM");
+      while (platform.restarts === before.platform || tools.restarts === before.tools) await new Promise((r) => setTimeout(r, 50));
+      await waitHealthy().catch(() => {
+        throw new Error("workerd did not come back");
+      });
     },
     async stop() {
-      if (timer) clearInterval(timer);
+      for (const t of timers) clearInterval(t);
       clearInterval(diskTimer);
       if (resumeTimer) clearInterval(resumeTimer);
       for (const t of recheckTimers) clearTimeout(t);
@@ -724,3 +910,14 @@ const STREAMED = Symbol("streamed");
 
 export const supervisorFile = (home: Home) => join(home.root, "supervisor.json");
 export const hasWorkerd = () => { const b = workerd(); return !!b && existsSync(b); };
+
+/** A free loopback port (for the processes' channel when a socket's path is too long). */
+const freePort = () =>
+  new Promise<number>((done, fail) => {
+    const srv = createNetServer();
+    srv.on("error", fail);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address() as AddressInfo;
+      srv.close(() => done(port));
+    });
+  });

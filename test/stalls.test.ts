@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Stalls: what was running when Hewn stopped responding, told so after the restart, and a tool that
+// Stalls: what was running when Hewn's tools stopped responding, told so before their restart, and a tool that
 // does it 3 times within an hour suspended until the owner resumes it. (On workerd, with a real
 // stall and the watchdog: workerd-runaway.test.ts.)
 import assert from "node:assert/strict";
@@ -61,7 +61,7 @@ describe("stalls", () => {
     const { p, out } = restart(min(0));
     assert.deepEqual(out, { tools: ["runaway", "running-log"], suspended: [], builds: [] });
     assert.equal(stalled(p, "runaway").length, 2);
-    assert.match(stalled(p, "runaway").join("\n"), /^\S+ codex spin@1 ERROR stalled: Hewn stopped responding while this ran and was restarted \d+ms$/m);
+    assert.match(stalled(p, "runaway").join("\n"), /^\S+ codex spin@1 ERROR stalled: Hewn's tools stopped responding while this ran and were restarted \d+ms$/m);
     assert.match(stalled(p, "running-log")[0], / claude-code → run-feeder list_runs@1 ERROR stalled: /);
     assert.deepEqual(p.registry.lifecycleEvents().filter((e) => e.action === "stalled").map((e) => [e.capabilityId, e.detail, e.actor]).sort(), [["runaway", "count@1", "hewn"], ["runaway", "spin@1", "hewn"], ["running-log", "list_runs@1", "hewn"]]);
     assert.equal(p.readiness("runaway").ready, true, "once isn't enough to suspend it");
@@ -150,7 +150,7 @@ describe("stalls", () => {
     assert.deepEqual(await p.recoverInterruptedBuilds(), [], "not retried");
     const b = p.getBuild(t.claude, opened.buildId);
     assert.equal(b.status, "failed");
-    assert.deepEqual([b.failure?.title, b.failure?.detail], ["Its code kept Hewn from responding", "Running tick@1 never let go (an endless loop?), so Hewn was restarted. It wasn't tried again: it would do the same."]);
+    assert.deepEqual([b.failure?.title, b.failure?.detail], ["Its code kept Hewn from responding", "Running tick@1 never let go (an endless loop?), so Hewn's tools were restarted. It wasn't tried again: it would do the same."]);
     assert.deepEqual(stalled(p, "runaway"), []);
     release();
   });

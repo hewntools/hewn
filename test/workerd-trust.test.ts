@@ -20,8 +20,10 @@ function allBytes(dir: string): Buffer {
   const walk = (d: string) => {
     for (const e of readdirSync(d)) {
       const p = join(d, e);
-      if (statSync(p).isDirectory()) walk(p);
-      else parts.push(readFileSync(p));
+      const st = statSync(p);
+      if (st.isDirectory()) walk(p);
+      // Files only: the processes' sockets (run/) have no bytes to read.
+      else if (st.isFile()) parts.push(readFileSync(p));
     }
   };
   walk(dir);

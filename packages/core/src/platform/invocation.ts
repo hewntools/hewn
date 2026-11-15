@@ -121,8 +121,9 @@ export class Invocation extends Domain {
       const err = e as PlatformError;
       if (err instanceof Error && leaks(err.message)) err.message = redact(err.message);
       const logs = ((err.details as { logs?: string[] } | undefined)?.logs ?? []).map(redact);
-      // The sign-in step handles credentials: neither its message nor its console lines are kept.
-      if (!record) {
+      // The sign-in step handles credentials: neither its message nor its console lines are kept. A call that
+      // failed because the tools stopped responding was told already, as a stall (stalls.ts).
+      if (!record || (err as { stalled?: boolean }).stalled) {
         // nothing kept
       } else if (isSignIn) this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: (sign-in failed; details aren't kept)`, []);
       else {
