@@ -192,6 +192,8 @@ void main() {
   else { float al = uInk == 1 ? min(1., TONE + (1. - TONE) * top) : 1.; o = vec4(uColor * al, al); }
 }`;
 
+  const INKS = { colour: 0, tone: 1, mono: 2 }; // as the second pass's uInk counts them
+
   // ───────────────────────── GL: each mark its own context, on its own canvas ─────────────────────────
   /** The mark's GL: a context on a canvas of its own, both passes' programs, and a texture for the samples. null when
    *  the browser has no WebGL 2, or draws it in software (a 64×40 mark costs 11 ms a frame there, where a GPU takes 1:
@@ -215,6 +217,12 @@ void main() {
     cv.addEventListener("webglcontextlost", () => { g.lost = true; });
     return g;
   }
+  /** Gives the mark's GL context back to the browser, which allows only a few at a time. */
+  function drop(g) {
+    if (!g || g.lost) return;
+    const x = g.gl.getExtension("WEBGL_lose_context");
+    if (x) x.loseContext();
+  }
   /** 1 once both programs are ready, 0 while they still compile, -1 if they can't be used. */
   function linked(g) {
     if (g.lost) return -1;
@@ -234,7 +242,7 @@ void main() {
   }
   /** The loop at u, drawn: the scene into the samples (2×4 a character), then the dots onto the canvas. */
   function render(g, m, u) {
-    const gl = g.gl, S = g.scene.u, D = g.dots.u, z = sizing(m), fw = m.cols * 2, fh = m.rows * 4;
+    const gl = g.gl, S = g.scene.u, D = g.dots.u, size = sizing(m), fw = m.cols * 2, fh = m.rows * 4; // S, D: a uniform's location in each pass
     if (fw !== g.fw || fh !== g.fh) {
       g.fw = fw; g.fh = fh;
       gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -242,17 +250,17 @@ void main() {
     }
     pose(u);
     gl.bindFramebuffer(gl.FRAMEBUFFER, g.fbo); gl.viewport(0, 0, fw, fh); gl.useProgram(g.scene.p);
-    gl.uniform1f(S("uPh"), TAU * u); gl.uniform1f(S("uFocal"), m.focal); gl.uniform1f(S("uShade"), m.shade * z.sh);
+    gl.uniform1f(S("uPh"), TAU * u); gl.uniform1f(S("uFocal"), m.focal); gl.uniform1f(S("uShade"), m.shade * size.sh);
     gl.uniform1f(S("uHalf"), P.half); gl.uniform1f(S("uK"), P.k); gl.uniform1f(S("uOne"), P.one); gl.uniform1f(S("uOneHalf"), P.oneHalf); gl.uniform1f(S("uWob"), P.wob);
     gl.uniform1f(S("uPix"), P.pix); gl.uniform1f(S("uOneW"), P.oneW); gl.uniform4fv(S("uBlob[0]"), P.blob); gl.uniform3f(S("uCam"), P.yaw, P.pitch, CAM);
     gl.uniform3fv(S("uBMin"), P.bmin); gl.uniform3fv(S("uBMax"), P.bmax); gl.uniform2f(S("uOneCS"), Math.cos(P.yaw + P.oneTurn), Math.sin(P.yaw + P.oneTurn));
-    gl.uniform2f(S("uView"), m.cols, m.rows * 2); gl.uniform2f(S("uTexel"), 0.5, 0.5); gl.uniform2f(S("uFbo"), fw, fh); gl.uniform1i(S("uAA"), z.aa);
+    gl.uniform2f(S("uView"), m.cols, m.rows * 2); gl.uniform2f(S("uTexel"), 0.5, 0.5); gl.uniform2f(S("uFbo"), fw, fh); gl.uniform1i(S("uAA"), size.aa);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    const ink = m.ink === "auto" ? (light(m.color) ? 0 : 1) : { colour: 0, tone: 1, mono: 2 }[m.ink] ?? 1, c = rgb(m.color);
+    const ink = m.ink === "auto" ? (light(m.color) ? INKS.colour : INKS.tone) : Object.hasOwn(INKS, m.ink) ? INKS[m.ink] : INKS.tone, c = rgb(m.color);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, m.W, m.H); gl.useProgram(g.dots.p);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.uniform1i(D("uS"), 0);
     gl.uniform2i(D("uGrid"), m.cols, m.rows); gl.uniform1i(D("uP"), m.p); gl.uniform1i(D("uSide"), m.side); gl.uniform1i(D("uInk"), ink);
-    gl.uniform1f(D("uH"), m.H); gl.uniform1f(D("uGain"), z.gain * m.fill); gl.uniform1f(D("uShade"), m.shade * z.sh * 1.25); gl.uniform1f(D("uHalo"), z.halo);
+    gl.uniform1f(D("uH"), m.H); gl.uniform1f(D("uGain"), size.gain * m.fill); gl.uniform1f(D("uShade"), m.shade * size.sh * 1.25); gl.uniform1f(D("uHalo"), size.halo);
     gl.uniform3f(D("uColor"), c[0] / 255, c[1] / 255, c[2] / 255);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
@@ -264,12 +272,12 @@ void main() {
   function standStill(m) {
     const { cols, rows } = m, vw = cols, vh = rows * 2, s = (CAM - 0.4) / m.focal / Math.min(vw, vh); // picture units to the pixels' faces
     const onPixel = (x, y) => HOME.some(([hx, hy]) => { const dx = Math.abs(x - hx) - 0.32, dy = Math.abs(y - hy) - 0.32; return dx <= 0.08 && dy <= 0.08 && (dx <= 0 || dy <= 0 || Math.hypot(dx, dy) <= 0.08); });
-    const g = m.cv.getContext("2d"), { p, side } = m, inset = (p - side) >> 1;
-    g.clearRect(0, 0, m.W, m.H); g.fillStyle = m.color;
+    const ctx = m.cv.getContext("2d"), { p, side } = m, inset = (p - side) >> 1;
+    ctx.clearRect(0, 0, m.W, m.H); ctx.fillStyle = m.color;
     for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) for (let q = 0; q < 8; q++) {
       let n = 0;
       for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (onPixel((cx + ((q & 1) + (a + 0.5) / 3) / 2 - vw / 2) * s, (vh / 2 - (cy + ((q >> 1) + (b + 0.5) / 3) / 4) * 2) * s)) n++;
-      if (n >= 5) g.fillRect((cx * 2 + (q & 1)) * p + inset, (cy * 4 + (q >> 1)) * p + inset, side, side);
+      if (n >= 5) ctx.fillRect((cx * 2 + (q & 1)) * p + inset, (cy * 4 + (q >> 1)) * p + inset, side, side);
     }
   }
 
@@ -292,17 +300,19 @@ void main() {
     if (!el.isConnected) return null;
     const probe = document.createElement("span");
     probe.style.cssText = "position:absolute;left:0;top:0;display:inline-block;visibility:hidden;white-space:pre";
-    probe.textContent = Array(10).fill("⣿".repeat(10)).join("\n");
+    probe.textContent = Array(10).fill("\u28ff".repeat(10)).join("\n");
     el.append(probe);
     const r = probe.getBoundingClientRect();
     probe.remove();
     return r.width > 0 && r.height > 0 ? { cw: r.width / 10, ch: r.height / 10 } : null;
   }
+  /** Device pixels to a CSS pixel: all of them, so the squares stay whole on a 3× phone. */
+  const deviceRatio = () => Math.min(4, window.devicePixelRatio || 1);
   /** The dots' grid: a square pitch of whole device pixels, about two dots to a character's width; as many characters
    *  as fill the box the <pre>'s characters make, but no wider than tall (the mark is framed by the narrower side, so
    *  past that there's only haze), centred in it. */
   function regrid(m) {
-    const dpr = Math.min(2, window.devicePixelRatio || 1), BW = m.tcols * m.cw * dpr, BH = m.trows * m.ch * dpr;
+    const dpr = deviceRatio(), BW = m.tcols * m.cw * dpr, BH = m.trows * m.ch * dpr;
     const p = Math.max(2, Math.round((m.cw * dpr) / 2)), fitC = Math.max(1, Math.floor(BW / (2 * p))), fitR = Math.max(1, Math.floor(BH / (4 * p)));
     const cols = Math.min(fitC, fitR * 2), rows = Math.min(fitR, Math.ceil(fitC / 2)), W = cols * 2 * p, H = rows * 4 * p;
     Object.assign(m, { dpr, p, side: Math.max(1, Math.round(m.dot * p)), cols, rows, W, H, gridded: true });
@@ -318,8 +328,9 @@ void main() {
     const q = new URLSearchParams(location.search);
     for (const k of ["fps", "fill", "dot", "focal", "shade", "speed", "opacity", "at"]) { const v = q.get("mark-" + k); if (v && isFinite(+v)) KNOBS[k] = +v; }
     const ink = q.get("mark-ink");
-    if (ink === "auto" || ink === "colour" || ink === "tone" || ink === "mono") KNOBS.ink = ink;
-    for (const k of ["still", "reduced"]) if (q.has("mark-" + k)) KNOBS[k] = q.get("mark-" + k) !== "0";
+    if (ink === "auto" || Object.hasOwn(INKS, ink)) KNOBS.ink = ink;
+    // these only turn on: a link can't take away the reduced motion someone asked for
+    for (const k of ["still", "reduced"]) if (q.has("mark-" + k) && q.get("mark-" + k) !== "0") KNOBS[k] = true;
   } catch {}
 
   window.hewnAscii = function (el, opts = {}) {
@@ -327,16 +338,16 @@ void main() {
     // the text's characters (tcols × trows) give the box; the dots' grid (cols × rows of 2×4 square dots) is set once it's measured
     const m = { el, tcols: cols, trows: rows, cols: 0, rows: 0, ink: o.ink || "auto", fill: o.fill || 1, dot: o.dot || 0.6, focal: o.focal || 2.05, shade: o.shade ?? 0.75,
       cw: 0, ch: 0, measured: false, gridded: false, dpr: 1, p: 0, side: 0, W: 0, H: 0, color: "", cv: null };
-    const reduced = o.reduced ?? matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let mode = o.still ? "still" : "live", g = null, u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false;
+    const calm = matchMedia("(prefers-reduced-motion: reduce)");
+    let reduced = o.reduced ?? calm.matches, mode = o.still ? "still" : "live", g = null, u = o.at != null ? frac(o.at) : REST, last = 0, raf = 0, want = true, seen = true, stopped = false;
     el.setAttribute("aria-hidden", "true"); // braille would be read out dot by dot
     if (o.opacity != null) el.style.opacity = String(o.opacity);
     // blank braille: the <pre> keeps the size its characters give it, and the canvas lies over them
-    el.textContent = Array(rows).fill("⠀".repeat(cols)).join("\n");
+    el.textContent = Array(rows).fill("\u2800".repeat(cols)).join("\n");
     /** The canvas to draw on: the GL one while it moves, a 2D one for the H standing still. */
     const useCanvas = (cv) => {
       if (m.cv) m.cv.remove();
-      m.cv = cv; cv.style.cssText = "position:absolute;pointer-events:none"; el.append(cv); m.gridded = false;
+      m.cv = cv; cv.style.cssText = "position:absolute;pointer-events:none;image-rendering:pixelated"; el.append(cv); m.gridded = false;
     };
     if (mode === "live" && !(g = makeGL())) mode = "still";
     useCanvas(g ? g.cv : document.createElement("canvas"));
@@ -347,15 +358,17 @@ void main() {
         const c = measure(el);
         if (c) { if (getComputedStyle(el).position === "static") el.style.position = "relative"; m.cw = c.cw; m.ch = c.ch; m.measured = true; m.gridded = false; }
       }
-      if (m.measured && (!m.gridded || Math.min(2, window.devicePixelRatio || 1) !== m.dpr)) regrid(m);
+      if (m.measured && (!m.gridded || deviceRatio() !== m.dpr)) regrid(m);
       if (!m.gridded || !want) return true; // not laid out yet, or nothing new to draw
       if (mode === "live") {
         const s = linked(g);
         if (s === 0) return false;
-        if (s > 0) { const t = performance.now(); m.color = getComputedStyle(el).color; render(g, m, u); want = false; cost(performance.now() - t); return true; }
-        mode = "still"; g = null; useCanvas(document.createElement("canvas")); regrid(m);
+        if (s < 0) { mode = "still"; drop(g); g = null; useCanvas(document.createElement("canvas")); regrid(m); }
       }
-      const t = performance.now(); m.color = getComputedStyle(el).color; standStill(m); want = false; cost(performance.now() - t);
+      const t = performance.now();
+      m.color = getComputedStyle(el).color;
+      if (mode === "live") render(g, m, u); else standStill(m);
+      want = false; cost(performance.now() - t);
       return true;
     }
     /** What a frame took on the page's thread, kept as a running mean. */
@@ -387,6 +400,11 @@ void main() {
       box = [r.width, r.height]; m.measured = false; want = true; kick();
     }) : null;
     if (ro) ro.observe(el);
+    // a lost GL context: the H standing still, even when nothing else would ask for a frame
+    if (g) g.cv.addEventListener("webglcontextlost", () => { want = true; kick(); });
+    // reduce motion switched on: rest on the logo; off: move again
+    const onCalm = () => { if (o.reduced != null) return; reduced = calm.matches; if (reduced) u = REST; want = true; kick(); };
+    calm.addEventListener("change", onCalm);
     // the colours follow a theme switch, from the system or from the page's own data-theme
     const dark = matchMedia("(prefers-color-scheme: dark)"), retheme = () => { want = true; kick(); };
     const mo = typeof MutationObserver === "function" ? new MutationObserver(retheme) : null;
@@ -399,8 +417,9 @@ void main() {
       if (ro) ro.disconnect();
       if (mo) mo.disconnect();
       dark.removeEventListener("change", retheme);
+      calm.removeEventListener("change", onCalm);
       document.removeEventListener("visibilitychange", onVisibility);
-      if (g && !g.lost) { const x = g.gl.getExtension("WEBGL_lose_context"); if (x) x.loseContext(); }
+      drop(g);
       if (m.cv) m.cv.remove();
     }
     stop.ms = 0;

@@ -11,7 +11,7 @@
 <script src="../../packages/ui/src/ascii.js"></script>
 <style>
   body { margin: 0; min-height: 100vh; }
-  header { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; padding: 14px 20px; background: var(--bg); border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); font-size: 13px; }
+  header { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; padding: 14px 20px; background: var(--bg); border-bottom: 1px solid var(--border); font-size: 13px; }
   header label { display: inline-flex; gap: 6px; align-items: center; }
   header input[type=text] { width: 9em; }
   header input[type=number] { width: 4.5em; }
@@ -62,7 +62,10 @@
       for (const op of ops) {
         const box = document.createElement("div"), field = document.createElement("div"), pre = document.createElement("pre"), cap = document.createElement("span");
         box.className = "box"; field.className = "ascii-field"; cap.className = "cap";
-        box.innerHTML = '<div class="wallpaper dim" aria-hidden="true"><i style="--h:125;--x:-20%;--y:-10%;--w:420px"></i></div>';
+        const wall = document.createElement("div"), spot = document.createElement("i");
+        wall.className = "wallpaper dim"; wall.setAttribute("aria-hidden", "true");
+        for (const [k, v] of [["--h", "125"], ["--x", "-20%"], ["--y", "-10%"], ["--w", "420px"]]) spot.style.setProperty(k, v);
+        wall.append(spot); box.append(wall);
         pre.style.font = `${S.font}px/${S.font}px var(--mono)`;
         field.append(pre); box.append(field, cap); row.append(box);
         const stop = window.hewnAscii(pre, { cols: +S.cols, rows: +S.rows, ink, opacity: op, fps: +S.fps, fill: +S.fill, dot: +S.dot, focal: +S.focal, shade: +S.shade, still: !!S.still, reduced: !!S.reduced });
@@ -79,7 +82,7 @@
   setInterval(() => {
     let sum = 0;
     for (const m of marks) { m.cap.textContent = `${Math.round(m.op * 100)}% · ${m.stop.ms.toFixed(1)} ms a frame`; sum += m.stop.ms; }
-    $("cost").textContent = `${marks.length} marks, ${sum.toFixed(1)} ms of the main thread a frame together (15 frames a second each)`;
+    $("cost").textContent = `${marks.length} marks, ${sum.toFixed(1)} ms of the page's thread a frame together (${S.fps} frames a second each)`;
   }, 1000);
   build();
 })();
