@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { ABI, type AbiFeature, abiErrors, abiUnsupported, type CapabilityManifest, validateManifest } from "@hewntools/core/manifest.ts";
+import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { installFrom, SEED, setup } from "./helpers.ts";
 
 const manifest = (extra: Partial<CapabilityManifest> & Record<string, unknown> = {}): CapabilityManifest => ({
@@ -95,6 +96,9 @@ describe("ABI on install and run", () => {
     const row = db.prepare("SELECT manifest FROM capability_versions WHERE capability_id = 'running-log'").get() as { manifest: string };
     db.prepare("UPDATE capability_versions SET manifest = ? WHERE capability_id = 'running-log'").run(JSON.stringify({ ...JSON.parse(row.manifest), abi: "2.9" }));
     db.close();
+    // As the older Hewn starts on that data (a running one keeps the versions it has read).
+    t.platform.close();
+    t.platform = nodePlatform(t.home);
     const st = t.platform.readiness("running-log");
     assert.equal(st.ready, false);
     assert.equal(st.unsupportedAbi, "needs Hewn ABI 2.9; this Hewn has 2.6");
