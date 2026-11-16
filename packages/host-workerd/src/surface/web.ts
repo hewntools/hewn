@@ -342,7 +342,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST restore":
         platform.restore(owner, id);
         return { ok: true };
-      // A tool Hewn suspended (it kept Hewn from responding) runs again.
+      // A tool Hewn suspended (it kept Hewn's tools from responding) runs again.
       case "POST resume":
         platform.resume(owner, id);
         return { ok: true };

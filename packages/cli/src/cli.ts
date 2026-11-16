@@ -80,7 +80,7 @@ Use it (as the owner; talks to the running Hewn)
   review [approve|reject <buildId>]
                       agents' changes waiting for you (to a connection, or adding operations)
   restore <id>        bring back a deleted tool, with its data
-  resume <id>         let a tool Hewn suspended run again (it kept Hewn from responding, 3 times in an hour)
+  resume <id>         let a tool Hewn suspended run again (it kept Hewn's tools from responding, 3 times in an hour)
   rollback <id> [version]
   export <id> [--out file.json]
   data reset <id> [--sample]
@@ -351,7 +351,7 @@ async function main() {
         console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
         if (st) {
-          console.log(`up ${st.upSeconds}s · workerd restarts ${st.restarts} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
+          console.log(`up ${st.upSeconds}s · restarts: Hewn ${st.restarts}, tools ${st.toolsRestarts ?? 0} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
           if (st.idle) console.log(idleLine(st.idle));
         }
       });

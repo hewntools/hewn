@@ -215,15 +215,25 @@ describe("workerd host (integration)", () => {
     assert.equal((await invoke("running-log", "list_runs")).result.runs.length, 3, "others unaffected; state survived the restart");
   });
 
-  test("a capability stuck in a CPU loop: the watchdog restarts workerd and Hewn recovers", async () => {
-    const before = sv.restarts();
+  test("a capability stuck in a CPU loop: Hewn answers meanwhile, and the watchdog restarts the tools alone", async () => {
+    const before = { platform: sv.restarts(), tools: sv.toolsRestarts() };
     const started = Date.now();
-    const err = await invoke("probe", "spin").catch((e) => e);
+    const spin = invoke("probe", "spin").catch((e) => e);
+    await new Promise((r) => setTimeout(r, 300));
+    // The platform runs in a process of its own: it answers while a tool spins.
+    const asked = Date.now();
+    assert.ok((await fetch(`${sv.url}/health`)).ok);
+    assert.ok((await sv.admin("status")).capabilities.length > 0);
+    assert.ok(Date.now() - asked < 1000, `Hewn answered while a tool spun (${Date.now() - asked}ms)`);
+    const err = await spin;
     assert.ok(err instanceof Error, "the stuck call fails instead of hanging");
-    while (sv.restarts() === before && Date.now() - started < 10_000) await new Promise((r) => setTimeout(r, 50));
-    assert.ok(sv.restarts() > before, "workerd was restarted");
-    while (!(await fetch(`${sv.url}/health`).then((r) => r.ok, () => false))) await new Promise((r) => setTimeout(r, 50));
+    assert.match(err.message, /spin@1 failed: stalled: Hewn's tools stopped responding/);
+    while (sv.toolsRestarts() === before.tools && Date.now() - started < 10_000) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(sv.toolsRestarts(), before.tools + 1, "the tools were restarted, once");
+    assert.equal(sv.restarts(), before.platform, "the platform wasn't");
+    const back = Date.now();
     assert.equal((await invoke("running-log", "list_runs")).result.runs.length, 3, "back to normal, data intact");
+    assert.ok(Date.now() - back < 2000, `the other tools answer again at once (${Date.now() - back}ms)`);
   });
 
   test("the admin channel needs its token", async () => {
