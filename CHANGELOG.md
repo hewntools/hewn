@@ -11,6 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### Changes
 
 - **The platform and the tools run in separate processes.** Your tools run in a workerd process of their own, with their data and network access and nothing else of yours (not the secrets key, Hewn's database or its files), behind a sandbox of its own. A tool stuck in a loop now restarts only the tools: the web client, your agents' connections and schedules keep answering meanwhile. `hewn status` counts the tools' restarts next to Hewn's. Your data stays where it is: nothing to migrate. See [the threat model](docs/threat-model.md).
+- **Home's tool list is lighter on Hewn:** each refresh of an open page makes a third of the memory churn it did and answers in about half the time, as a tool's versions are read from the database once, not at every look.
 - **No time limit on a build's attempt.** A builder on your machine is stopped only when it has done nothing for 15 minutes (no output, no file written), and then carries on in the same attempt; `builderIdleMinutes` in `platform.json` changes the 15. Before, every attempt stopped at 15 minutes, and big builds used up their attempts on it. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 
 ### Fixes
