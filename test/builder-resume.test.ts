@@ -285,8 +285,9 @@ test("a retry carries on from the failed build's workspace, the new request over
   assert.equal(readFileSync(join(root, "b-new", "BUILDER.md"), "utf8"), "new request");
   assert.ok(!existsSync(claudeBuildHome(home, "b-new")), "no builder home carried");
   assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 2 })), undefined, "nor its session");
-  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: true })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);
-  assert.doesNotMatch(builderPrompt(job({ buildId: "b-new", attempt: 2, carriesOn: true })), /carries on from an earlier build/, "its first attempt only");
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "stopped" })), /an earlier build of the same request that the owner stopped before it finished: the workspace holds its work/);
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "failed" })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);
+  assert.doesNotMatch(builderPrompt(job({ buildId: "b-new", attempt: 2, carriesOn: "failed" })), /carries on from an earlier build/, "its first attempt only");
   // Nothing kept (the workspace cleaned up after a day): the retry opens afresh.
   assert.equal(await wb.carryOver("b-gone", "b-other", {}), false);
   for (const b of ["b-old", "b-new"]) await wb.remove(b);

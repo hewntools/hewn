@@ -26,7 +26,7 @@ export function builderPrompt(job: BuildJob): string {
   // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
   if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and BRIEF.md for the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
   // A retry carrying on from a failed build: its work is here (BUILDER.md says why it failed, if asked to fix that).
-  if (job.carriesOn && job.attempt === 1) lines.push(`\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work. Look at what's there before you write anything, and carry on from it rather than starting over.`);
+  if (job.carriesOn && job.attempt === 1) lines.push(`\nThis build carries on from an earlier build of the same request that ${job.carriesOn === "stopped" ? "the owner stopped before it finished" : "didn't finish"}: the workspace holds its work. Look at what's there before you write anything, and carry on from it rather than starting over.`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }

@@ -39,8 +39,8 @@ export interface BuildJob {
   idleMs?: number;
   /** This run resumes one Hewn stopped for no activity, in the same attempt. */
   resumedAfterIdle?: boolean;
-  /** It carries on from the failed build it retries: the workspace holds that one's work (its first attempt is told so). */
-  carriesOn?: boolean;
+  /** It carries on from the build it retries, which failed or which the owner stopped: the workspace holds that one's work (its first attempt is told so). */
+  carriesOn?: "failed" | "stopped";
 }
 
 /**
