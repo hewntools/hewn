@@ -8,7 +8,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
 import { CLI_AGENTS } from "./builders/cli-agents.ts";
-import { carrySession, forgetSession } from "./builders/cli.ts";
+import { forgetSession } from "./builders/cli.ts";
 import { CHECK_DIR, writeInside } from "./builders/check.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { dependencyProblems } from "@hewntools/core/bundle.ts";
@@ -239,6 +239,18 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
   const transcript = (buildId: string) => join(opts.root, `${buildId}.log`);
   const builders = () => (typeof opts.builders === "function" ? opts.builders() : opts.builders);
   mkdirSync(opts.root, { recursive: true });
+  /**
+   * Copy a build's workspace into a new one (`to`), with `overlay` written over it: read with the builder's own
+   * eyes when it's confined (a link it left can't reach out), into a fresh folder only Hewn writes (writeTree keeps
+   * every path inside it).
+   */
+  const copyWorkspace = async (from: string, to: string, overlay: Files = {}) => {
+    const root = opts.confineTo?.();
+    const files = root ? await readConfined(ws(from), root) : readTree(ws(from), notChecked);
+    rmSync(ws(to), { recursive: true, force: true });
+    mkdirSync(ws(to), { recursive: true });
+    writeTree(ws(to), { ...files, ...overlay });
+  };
 
   return {
     async open(buildId, files) {
@@ -249,28 +261,10 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     async read(buildId) {
       return readTree(ws(buildId));
     },
-    async snapshot(buildId, to) {
-      const root = opts.confineTo?.();
-      const files = root ? await readConfined(ws(buildId), root) : readTree(ws(buildId), notChecked);
-      rmSync(ws(to), { recursive: true, force: true });
-      mkdirSync(ws(to), { recursive: true });
-      // A fresh folder only Hewn writes; writeTree keeps every path inside it.
-      writeTree(ws(to), files);
-    },
+    snapshot: (buildId, to) => copyWorkspace(buildId, to),
     async carryOver(from, to, overlay) {
       if (!existsSync(ws(from))) return false;
-      // Read as a snapshot is (a link the builder left can't reach out), into a folder only Hewn writes.
-      const root = opts.confineTo?.();
-      const files = root ? await readConfined(ws(from), root) : readTree(ws(from), notChecked);
-      rmSync(ws(to), { recursive: true, force: true });
-      mkdirSync(ws(to), { recursive: true });
-      writeTree(ws(to), { ...files, ...overlay });
-      // The builder's own state (its home per build: the session), for its first attempt to resume.
-      for (const a of Object.values(CLI_AGENTS)) {
-        const home = a.buildHome(dirname(opts.root), from);
-        if (existsSync(home)) cpSync(home, a.buildHome(dirname(opts.root), to), { recursive: true });
-      }
-      carrySession(from, to);
+      await copyWorkspace(from, to, overlay);
       return true;
     },
     async writeFolder(buildId, folder, files) {
@@ -319,7 +313,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         ...(hooks.onCheck ? { check: hooks.onCheck } : {}),
         ...(job.pass ? { pass: job.pass } : {}),
         ...(opts.builderIdleMs ? { idleMs: opts.builderIdleMs() } : {}),
-        ...(job.continues ? { continues: true } : {}),
+        ...(job.carriesOn ? { carriesOn: true } : {}),
       });
     },
     async bundle(buildId) {

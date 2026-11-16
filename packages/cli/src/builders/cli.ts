@@ -24,6 +24,8 @@ export function builderPrompt(job: BuildJob): string {
   if (job.kind === "create" && job.attempt === 1 && !job.retryOf && !job.pass) lines.push(`After reading BUILDER.md, BRIEF.md, and any OWNERS_WORDS.md and OTHER_TOOLS.md, write ui/icon.svg and set "hue" in capability.json as your first implementation changes (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
   // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
   if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and BRIEF.md for the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
+  // A retry carrying on from a failed build: its work is here (BUILDER.md says why it failed, if asked to fix that).
+  if (job.carriesOn && job.attempt === 1) lines.push(`\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work. Look at what's there before you write anything, and carry on from it rather than starting over.`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }
@@ -40,8 +42,6 @@ const BRIEF_IF_NOT_READ = "If you haven't read all of BRIEF.md, read it before y
 export function resumePrompt(job: BuildJob): string {
   // Stopped for no activity within this attempt: carry on, whatever it had been asked.
   if (job.resumedAfterIdle) return `Hewn stopped your previous run after ${minutesText(job.idleMs ?? BUILDER_IDLE_MS)} with no activity, before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
-  // The first attempt of a retry that carries on from a failed build: BUILDER.md may say why it failed.
-  if (job.continues && job.attempt === 1 && !job.pass) return `This build carries on from an earlier build of the same request that didn't finish: the workspace is as it left it. Read BUILDER.md again (it says why the earlier build failed, if you're asked to fix that), then carry on in place, with the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
   if (job.pass && !job.feedback) return `${job.pass.request}\n\n${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
   // The previous run stopped (crashed, timed out) before the platform could validate anything.
   if (!job.feedback) return `Attempt ${job.attempt}. Your previous run stopped before it finished. Carry on in place: the workspace is as you left it, with the request in BUILDER.md and the contract in BRIEF.md. ${BRIEF_IF_NOT_READ} Only change files inside this directory. When it's complete, stop.`;
@@ -55,10 +55,8 @@ export function resumePrompt(job: BuildJob): string {
  */
 const sessions = { claude: new Map<string, string>(), codex: new Map<string, string>(), opencode: new Map<string, string>() };
 export const noteSession = (builder: keyof typeof sessions, buildId: string, id: string) => void sessions[builder].set(buildId, id);
-/** The session a later attempt (or a retry that carries on) can resume, when this process ran an earlier one. */
-export const sessionOf = (builder: keyof typeof sessions, job: Pick<BuildJob, "buildId" | "attempt" | "continues">): string | undefined => (job.attempt > 1 || job.continues ? sessions[builder].get(job.buildId) : undefined);
-/** A retry carrying on from a failed build takes its sessions over (its builder homes are copied with them). */
-export const carrySession = (from: string, to: string) => Object.values(sessions).forEach((m) => m.has(from) && m.set(to, m.get(from)!));
+/** The session a later attempt can resume, when this process ran an earlier one. */
+export const sessionOf = (builder: keyof typeof sessions, job: Pick<BuildJob, "buildId" | "attempt">): string | undefined => (job.attempt > 1 ? sessions[builder].get(job.buildId) : undefined);
 export const forgetSession = (buildId: string) => Object.values(sessions).forEach((m) => m.delete(buildId));
 
 type Formatter = (event: any, cwd: string) => string | null;

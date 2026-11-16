@@ -30,7 +30,7 @@ describe("a retry carries on from the failed build's workspace", () => {
     const failed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
     assert.equal(failed.status, "failed");
     const seen: { half: boolean; continues?: boolean; builder: string }[] = [];
-    const look = (ws: string, job: { continues?: boolean }) => void seen.push({ half: existsSync(join(ws, "src", "half.ts")), continues: job.continues, builder: readFileSync(join(ws, "BUILDER.md"), "utf8") });
+    const look = (ws: string, job: { carriesOn?: boolean }) => void seen.push({ half: existsSync(join(ws, "src", "half.ts")), continues: job.carriesOn, builder: readFileSync(join(ws, "BUILDER.md"), "utf8") });
     const again = await t.build(() => t.platform.retryBuild(USER, failed.buildId), (ws, job) => (look(ws, job), halfDone(ws)));
     assert.equal(again.status, "failed");
     assert.match(await opened(again.buildId), new RegExp(`^opened from v1 \\(retry of ${failed.buildId}\\), carrying on from its workspace, builder: script$`));
@@ -47,7 +47,7 @@ describe("a retry carries on from the failed build's workspace", () => {
     const failed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
     await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "another" }), (ws) => writeFileSync(join(ws, "src", "other.ts"), "export const other = 1;\n"));
     let seen: { half: boolean; other: boolean; continues?: boolean } | undefined;
-    const fresh = await t.build(() => t.platform.retryBuild(USER, failed.buildId), (ws, job) => void (seen = { half: existsSync(join(ws, "src", "half.ts")), other: existsSync(join(ws, "src", "other.ts")), continues: job.continues }));
+    const fresh = await t.build(() => t.platform.retryBuild(USER, failed.buildId), (ws, job) => void (seen = { half: existsSync(join(ws, "src", "half.ts")), other: existsSync(join(ws, "src", "other.ts")), continues: job.carriesOn }));
     assert.equal(fresh.status, "promoted", fresh.log.join("\n"));
     assert.deepEqual(seen, { half: false, other: true, continues: undefined });
     assert.match(await opened(fresh.buildId), new RegExp(`^opened from v2 \\(retry of ${failed.buildId}\\), builder: script$`));
@@ -65,7 +65,7 @@ describe("a retry carries on from the failed build's workspace", () => {
     const done = await t.build(
       () => t.platform.retryBuild(USER, failed.buildId),
       (ws, job) => {
-        carried = !!job.continues && readFileSync(join(ws, "src", "index.ts"), "utf8").includes("pong");
+        carried = !!job.carriesOn && readFileSync(join(ws, "src", "index.ts"), "utf8").includes("pong");
         writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "ping", operation: "ping", input: {}, expect: { pong: true } }]));
       },
     );
