@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { claudeActivity, codexActivity, USED_TOOL } from "@hewntools/cli/builders/activity.ts";
-import { claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
+import { builderPrompt, claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
 import type { BuildJob } from "@hewntools/cli/builders/types.ts";
 import { readConfig } from "@hewntools/cli/config.ts";
 import { openHome } from "@hewntools/cli/home.ts";
@@ -193,7 +193,8 @@ describe("a builder is stopped only when it does nothing (no time limit)", () =>
     const j = job({ buildId: "b-idle", workspace: ws, logPath: join(dir, "b-idle.log") });
     writeFileSync(j.logPath, "");
     const [cmd, args] = node(code);
-    return { j, run: () => runCli(cmd, [...args], j, () => null, idleMs, { ownState: [], denyKeychain: false }, process.env) };
+    j.idleMs = idleMs;
+    return { j, run: () => runCli(cmd, [...args], j, (e) => (e && typeof e === "object" ? "worked" : null), { ownState: [], denyKeychain: false }, process.env) };
   };
   const failure = (p: Promise<unknown>) => p.then(() => ({}) as any, (e) => e);
 
@@ -213,6 +214,16 @@ describe("a builder is stopped only when it does nothing (no time limit)", () =>
     const dead = await failure(quiet("setTimeout(() => {}, 60_000);", 300).run());
     assert.equal(dead.idle, true);
     assert.equal(dead.active, false);
+    // Start-up events alone (a line its formatter shows nothing for) aren't work done: hung all the same.
+    const started = await failure(quiet(`console.log('"init"'); setTimeout(() => {}, 60_000);`, 300).run());
+    assert.equal(started.idle, true);
+    assert.equal(started.active, false);
+    // Stopped by the owner before a run (between an idle stop and its resume): it doesn't start.
+    const stopped = quiet("console.log('{}')", 300);
+    const abort = new AbortController();
+    abort.abort();
+    stopped.j.signal = abort.signal;
+    assert.equal((await failure(stopped.run())).cancelled, true);
   });
 
   test("a run stopped for no activity resumes its session in the same attempt, as many times as it works on; a hung one is a failed attempt", async () => {
@@ -262,22 +273,22 @@ test("the idle time is platform.json's builderIdleMinutes when it's a whole numb
   rmSync(home.root, { recursive: true, force: true });
 });
 
-test("a retry carries on: the failed build's workspace with the new request over it, its builder's home and session; its first attempt resumes", async () => {
+test("a retry carries on from the failed build's workspace, the new request over it; not its builder's session, which names the old workspace's paths", async () => {
   const home = mkdtempSync(join(tmpdir(), "hewn-carry-"));
   const root = join(home, "builds");
   const wb = localWorkbench({ root, builders: {} });
   await wb.open("b-old", { "src/half.ts": new TextEncoder().encode("half"), "BUILDER.md": new TextEncoder().encode("old request") });
-  mkdirSync(join(claudeBuildHome(home, "b-old"), "projects"), { recursive: true });
-  writeFileSync(join(claudeBuildHome(home, "b-old"), "projects", "s-old.jsonl"), "{}");
+  mkdirSync(claudeBuildHome(home, "b-old"), { recursive: true });
   noteSession("claude", "b-old", "s-old");
   assert.equal(await wb.carryOver("b-old", "b-new", { "BUILDER.md": new TextEncoder().encode("new request") }), true);
   assert.equal(readFileSync(join(root, "b-new", "src", "half.ts"), "utf8"), "half");
   assert.equal(readFileSync(join(root, "b-new", "BUILDER.md"), "utf8"), "new request");
-  assert.ok(existsSync(join(claudeBuildHome(home, "b-new"), "projects", "s-old.jsonl")), "the session's files, in the new build's own home");
-  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 1 })), undefined, "a plain first attempt starts fresh");
-  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 1, continues: true })), "s-old");
-  assert.match(resumePrompt(job({ buildId: "b-new", attempt: 1, continues: true })), /^This build carries on from an earlier build of the same request that didn't finish: the workspace is as it left it\. Read BUILDER\.md again/);
+  assert.ok(!existsSync(claudeBuildHome(home, "b-new")), "no builder home carried");
+  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 2 })), undefined, "nor its session");
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: true })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);
+  assert.doesNotMatch(builderPrompt(job({ buildId: "b-new", attempt: 2, carriesOn: true })), /carries on from an earlier build/, "its first attempt only");
   // Nothing kept (the workspace cleaned up after a day): the retry opens afresh.
   assert.equal(await wb.carryOver("b-gone", "b-other", {}), false);
   for (const b of ["b-old", "b-new"]) await wb.remove(b);
 });
+
