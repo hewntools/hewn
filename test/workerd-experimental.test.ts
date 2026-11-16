@@ -105,8 +105,8 @@ const surfaces: { before?: string[]; now?: string[] } = {};
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), "hewn-experimental-"));
   mkdirSync(join(dir, "do"));
-  // The tool isolates' compatibility date and flags, as worker.ts starts them.
-  const worker = readFileSync(join(import.meta.dirname, "..", "packages", "host-workerd", "src", "worker.ts"), "utf8");
+  // The tool isolates' compatibility date and flags, as the tools process (tools-worker.ts) starts them.
+  const worker = readFileSync(join(import.meta.dirname, "..", "packages", "host-workerd", "src", "tools-worker.ts"), "utf8");
   const date = /const COMPAT_DATE = "([^"]+)"/.exec(worker)![1];
   const flags = JSON.parse(/compatibilityFlags: (\["nodejs_compat"[^\]]*\]),\s*allowExperimental: true/.exec(worker)![1]) as string[];
   assert.ok(flags.includes("experimental"), flags.join(", "));
