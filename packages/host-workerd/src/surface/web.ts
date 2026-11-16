@@ -12,6 +12,7 @@ import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { failureOf } from "@hewntools/core/platform/builds.ts";
+import type { CapabilityRow } from "@hewntools/core/registry.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
 import type { IntakeProgress, IntakeReply, IntakeRequest } from "./intake-types.ts";
 import { agentModels, intakeJob, jobModel, type Hosted, type SurfaceHost, type TunnelStatus } from "./host.ts";
@@ -115,6 +116,9 @@ export const WEB_CODE = [
   ...["accounts", "activity", "add-passkey", "agents", "appearance", "brief", "build", "connect", "files", "frame", "glyphs", "grants", "highlight", "home", "hub", "inbox", "info", "install", "intake", "models", "palette", "review", "router", "schedules", "settings", "share", "tool", "tool-actions", "tool-model", "versions", "widgets"].map((m) => `app/${m}.js`),
 ];
 let webBuild: Promise<string> | undefined;
+/** The first `bytes` bytes of data's SHA-256, in hex. */
+const hexDigest = async (data: Uint8Array, bytes: number) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", data as BufferSource)).slice(0, bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
 function webBuildOf(host: SurfaceHost): Promise<string> {
   return (webBuild ??= (async () => {
     const parts = await Promise.all(WEB_CODE.map((f) => host.asset(`web/${f}`)));
@@ -125,8 +129,7 @@ function webBuildOf(host: SurfaceHost): Promise<string> {
       all.set(p, at);
       at += p.length;
     }
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
-    return [...digest.slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return hexDigest(all, 8);
   })());
 }
 
@@ -249,7 +252,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "capabilities" && !id) {
     if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
-    return await withEtag(req, await capabilityList(platform, owner));
+    return withEtag(req, await capabilityList(platform, owner));
   }
 
   if (resource === "capabilities" && id) {
@@ -871,11 +874,11 @@ async function capabilityList(platform: Platform, owner: Agent) {
   const held = new Map(platform.registry.buildsInReview().map((b) => [b.capabilityId, b.id]));
   // Each tool's row, read once (the sort below would read it at every comparison).
   const listed = platform.list(owner).map((c) => ({ c, row: platform.registry.getCapability(c.id) }));
-  const order = (x: (typeof listed)[number]) => x.row?.homeOrder ?? Number.MAX_SAFE_INTEGER;
+  const order = (row: CapabilityRow | undefined) => row?.homeOrder ?? Number.MAX_SAFE_INTEGER;
   const caps: Record<string, any>[] = [];
   // Unplaced tiles follow in creation order, so a new capability lands last (next to "New").
-  const created = (x: (typeof listed)[number]) => x.row?.createdAt ?? "";
-  for (const { c, row } of listed.sort((a, b) => order(a) - order(b) || created(a).localeCompare(created(b)))) {
+  const created = (row: CapabilityRow | undefined) => row?.createdAt ?? "";
+  for (const { c, row } of listed.sort((a, b) => order(a.row) - order(b.row) || created(a.row).localeCompare(created(b.row)))) {
     const m = platform.get(owner, c.id);
     // Its kind only: the icon itself is fetched by the page, and Home asks for this list again and again.
     const iconKind = await platform.iconKind(c.id).catch(() => null);
@@ -940,8 +943,7 @@ async function capabilityList(platform: Platform, owner: Agent) {
 async function withEtag(req: Request, value: unknown): Promise<Response> {
   const text = JSON.stringify(value);
   // WebCrypto's digest: the core's sync sha256 makes several times the body in garbage, at every poll.
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
-  const etag = `"${[...digest.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("")}"`;
+  const etag = `"${await hexDigest(new TextEncoder().encode(text), 16)}"`;
   const headers = { "content-security-policy": WEB_CSP, "cache-control": "private, no-cache", etag };
   // Weak comparison (RFC 9110): a proxy that compresses the answer may hand the browser W/"…".
   if (req.headers.get("if-none-match")?.split(",").some((t) => t.trim().replace(/^W\//, "") === etag)) return new Response(null, { status: 304, headers });

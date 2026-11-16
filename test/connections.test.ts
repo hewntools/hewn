@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import { type CapabilityManifest, validateManifest } from "@hewntools/core/manifest.ts";
 import { hostOf, hostWords, resolveHosts } from "@hewntools/core/platform.ts";
+import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { FIXTURES, installFrom, installSeed, setup } from "./helpers.ts";
 
 const op = (name: string, extra: Record<string, unknown> = {}) => ({ name, description: "d", version: 1, inputSchema: { type: "object" }, outputSchema: { type: "object" }, sideEffect: "read", ...extra });
@@ -128,6 +129,9 @@ describe("connections installed", () => {
     const { kind: _k, ...legacy } = JSON.parse(row.manifest);
     db.prepare("UPDATE capability_versions SET manifest = ? WHERE capability_id = 'secret-echo'").run(JSON.stringify({ ...legacy, abi: undefined }));
     db.close();
+    // As a Hewn started on that data sees it (a running one keeps the versions it has read).
+    t.platform.close();
+    t.platform = nodePlatform(t.home);
     t.platform.setSecret(USER, "secret-echo", "API_TOKEN", "real-token");
     t.platform.approveGrants(USER, "secret-echo");
     const { result } = await t.platform.invoke(t.claude, { capabilityId: "secret-echo", operation: "whoami" });

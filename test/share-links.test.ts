@@ -13,9 +13,9 @@ import { sha256 } from "@hewntools/core/sha256.ts";
 import { fetchLink, privateHost } from "@hewntools/host-workerd/surface/fetch-link.ts";
 import type { TunnelStatus } from "@hewntools/host-workerd/surface/host.ts";
 import { RateLimiter, RULES } from "@hewntools/host-workerd/surface/public.ts";
+import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { startPublicServer, startServer } from "@hewntools/test-host/server.ts";
 import { nodeSurfaceHost } from "@hewntools/test-host/surface.ts";
-import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { installFrom, installSeed, SEED, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([{ operation: "record_run", input: { distanceKm: 5.2, durationSeconds: 1700, date: "2026-10-01" } }]);

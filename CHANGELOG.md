@@ -10,7 +10,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Changes
 
-- **Home's tool list costs Hewn a third of what it did** each time an open page refreshes it, and answers in about half the time: a tool's versions are read from the database once, not at every look.
+- **Home's tool list is lighter on Hewn:** each refresh of an open page makes a third of the memory churn it did and answers in about half the time, as a tool's versions are read from the database once, not at every look.
 
 ### Fixes
 
