@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Stalls: tool code that kept Hewn from responding. Code that never yields can't be stopped from
-// inside the host (one thread runs every tool and Hewn itself): the host's watchdog restarts it. To
-// say which tool did it, whatever runs tool code (a call, a build's tests) is written down while it
-// runs; after a restart for a stall, what's still written down was running then. A tool that was is
-// told so in its log and in Activity, and one that does it 3 times within an hour is suspended until
-// the owner resumes it. A build whose own code did it fails, and isn't retried.
+// Stalls: tool code that kept Hewn's tools from responding. Code that never yields can't be stopped
+// from inside the host (one thread runs every tool): the host's watchdog restarts the tools. To say
+// which tool did it, whatever runs tool code (a call, a build's tests) is written down while it runs;
+// when the tools stop responding, what's written down is running then. A tool that was is told so in
+// its log and in Activity, and one that does it 3 times within an hour is suspended until the owner
+// resumes it. A build whose own code did it fails, and isn't retried.
 import { type Agent, requireOwner } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { Domain } from "./context.ts";
@@ -50,9 +50,9 @@ export class Stalls extends Domain {
   }
 
   /**
-   * Once at start, before interrupted builds are retried. `stalledAt`: when the host's watchdog
-   * restarted Hewn because it had stopped responding (unset: Hewn ended some other way). What was
-   * running then is told so; the rest of what was written down only goes.
+   * `stalledAt`: when the host's watchdog found the tools not responding, before it restarts them; what is
+   * running is told so. Unset: once at start, before interrupted builds are retried; what was written
+   * down only goes.
    */
   recover(stalledAt?: string): { tools: string[]; suspended: string[]; builds: string[] } {
     const left = this.registry.takeRunningCode();
@@ -60,7 +60,7 @@ export class Stalls extends Domain {
     // A restart of a restart (or the platform started again in the same process) says the same stall again.
     if (!stalledAt || this.registry.getKv<string>(LAST_STALL) === stalledAt) return out;
     this.registry.setKv(LAST_STALL, stalledAt);
-    if (!left.length) this.logger(`Hewn stopped responding and was restarted (${stalledAt}); no tool code was running`);
+    if (!left.length) this.logger(`Hewn's tools stopped responding and were restarted (${stalledAt}); no tool code was running`);
     for (const r of left) {
       const build = BUILD_STATE.exec(r.state)?.[1];
       if (build) {
@@ -69,9 +69,9 @@ export class Stalls extends Domain {
       } else if (!r.state && this.registry.getCapability(r.capabilityId)) {
         // Its call's entry in the tool's log, as an ended call's would be.
         const ms = Math.max(0, Date.parse(stalledAt) - Date.parse(r.startedAt));
-        this.registry.addCapabilityLog(r.capabilityId, r.startedAt, `${r.startedAt} ${r.caller} ${r.what} ERROR stalled: Hewn stopped responding while this ran and was restarted ${ms}ms`, []);
+        this.registry.addCapabilityLog(r.capabilityId, r.startedAt, `${r.startedAt} ${r.caller} ${r.what} ERROR stalled: Hewn's tools stopped responding while this ran and were restarted ${ms}ms`, []);
         this.registry.addLifecycleEvent(r.capabilityId, "stalled", r.what, "hewn");
-        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was running when Hewn stopped responding`);
+        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was running when Hewn's tools stopped responding`);
         if (!out.tools.includes(r.capabilityId)) out.tools.push(r.capabilityId);
       }
     }
@@ -87,7 +87,7 @@ export class Stalls extends Domain {
     rec.at = [...rec.at.filter((t) => Date.parse(t) > since), at];
     const suspend = !rec.suspended && rec.at.length >= STALLS_TO_SUSPEND;
     if (suspend) {
-      rec.suspended = { at, reason: `it kept Hewn from responding ${rec.at.length} times within an hour` };
+      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${rec.at.length} times within an hour` };
       this.registry.addLifecycleEvent(capabilityId, "suspend", rec.suspended.reason, "hewn");
       this.logger(`${capabilityId} suspended: ${rec.suspended.reason}; its calls, schedules and widgets are refused until the owner resumes it`);
     }
@@ -99,8 +99,10 @@ export class Stalls extends Domain {
   private stalledBuild(buildId: string, what: string) {
     const b = this.registry.getBuild(buildId);
     if (!b || !["building", "validating"].includes(b.status)) return;
-    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: its code kept Hewn from responding (${what === "load" ? "loading it" : `running ${what}`}), so Hewn was restarted; not retried`] });
-    this.logger(`build ${buildId} failed: its code kept Hewn from responding (${what})`);
+    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: its code kept Hewn's tools from responding (${what === "load" ? "loading it" : `running ${what}`}), so Hewn's tools were restarted; not retried`] });
+    this.logger(`build ${buildId} failed: its code kept Hewn's tools from responding (${what})`);
+    // What's left of its run (the rest of its tests, another attempt) stops here.
+    this.d.builds.stopStalled(buildId);
   }
 
   /** Set while the tool is suspended. */
