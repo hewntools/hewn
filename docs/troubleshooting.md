@@ -92,6 +92,9 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 **"opencode said nothing for 3 minutes, so Hewn stopped it (it never started)"**
 OpenCode sometimes never gets going (seen with 1.18.18, mostly when a model it can't resolve is involved). Hewn stops it after three silent minutes instead of waiting the whole build out. Retry the build; if it keeps happening, check that the model in Settings › AI is one `opencode models` lists.
 
+**"no activity for 15 minutes"** in a build's log
+The builder did nothing (no output, no file written) for 15 minutes. If it had been working, Hewn resumed it where it was (the log says "; resuming") and the attempt goes on. If it never did anything, it hung from the start, and the attempt failed: retry it, and if it keeps happening, check the builder's sign-in and the model in Settings › AI. To give a slow builder longer, set `builderIdleMinutes` in `platform.json`.
+
 **"intake took longer than 15 minutes, so Hewn stopped it"**
 The talk before a build had no answer after 15 minutes, which usually means it hung (a dropped connection, a stuck sign-in). Send your message again. If it keeps happening with a long brief, pick a faster model or a lower effort in the chat box's model menu.
 
