@@ -346,7 +346,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
   const models = o.models ?? modelCatalogs({ catalogs: cliCatalogs(), ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
-  const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined) });
+  const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined), builderIdleMs: () => {
+      const minutes = readConfig(o.home).builderIdleMinutes;
+      return minutes === undefined ? undefined : minutes * 60_000;
+    },
+  });
   const blobRoot = join(data, "blobs");
 
   // ---------- the supervisor's own HTTP channel (workerd → supervisor) ----------
