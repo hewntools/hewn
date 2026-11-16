@@ -225,8 +225,8 @@ export class Builds extends Domain {
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
   private aborts = new Map<string, AbortController>();
-  /** Retries that carry on from the failed build they retry (its workspace): their builder's first attempt is told so. */
-  private carriedOn = new Set<string>();
+  /** Retries that carry on from the build they retry (its workspace), by why that one ended: their builder's first attempt is told so. */
+  private carriedOn = new Map<string, "failed" | "stopped">();
   private progress = new Map<
     string,
     { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number }
@@ -1066,8 +1066,8 @@ export class Builds extends Domain {
   }
 
   /**
-   * The failed build a retry carries on from (Retry, Ask builder to fix, or Hewn's own after a restart): its workspace
-   * as it was left, as a later attempt does. Not its builder's session: that names the old workspace's paths, so the
+   * The failed or stopped build a retry carries on from (Retry, Ask builder to fix, Start again after a Stop, or Hewn's
+   * own after a restart): its workspace as it was left, as a later attempt does (to start over, the owner asks again). Not its builder's session: that names the old workspace's paths, so the
    * builder starts afresh, told the work is there and what failed. Only builders on this machine (a host's builder
    * keeps its own work and carries on from it by `retryOf`), not a paused build (that's the host's Continue), and for a
    * change only from the version it started from (a newer one would be undone). A Polish too: its builder fixes what
@@ -1077,7 +1077,7 @@ export class Builds extends Domain {
     const from = (b.request as RetryMarks).retryOf;
     const old = from ? this.registry.getBuild(from) : undefined;
     const local = (builder?: string | null) => !!builder && builder !== "remote" && !noBuilderRuns(builder);
-    if (!old || old.status !== "failed" || isPaused(old) || !local(old.builder) || !local(b.builder)) return undefined;
+    if (!old || (old.status !== "failed" && old.status !== "cancelled") || isPaused(old) || !local(old.builder) || !local(b.builder)) return undefined;
     if (b.kind !== "create" && (old.baseVersion ?? undefined) !== activeVersion) return undefined;
     return old.id;
   }
@@ -1089,7 +1089,7 @@ export class Builds extends Domain {
   private async openWorkspace(b: BuildRow, readFiles: Files, files: Files, activeVersion?: number): Promise<boolean> {
     const from = this.carriedFrom(b, activeVersion);
     if (from && (await this.workbench.carryOver(from, b.id, readFiles).catch(() => false))) {
-      this.carriedOn.add(b.id);
+      this.carriedOn.set(b.id, this.mustBuild(from).status === "cancelled" ? "stopped" : "failed");
       return true;
     }
     await this.workbench.open(b.id, { ...files, ...readFiles });
@@ -1467,10 +1467,10 @@ export class Builds extends Domain {
     const passes = this.passesFor(build, builder);
     this.planPasses(buildId, passes);
     const submitter = `builder ${builder}`;
-    // Carrying on from a failed build: its builder works first, told what failed (as Ask builder to fix is), then
-    // the checks run as on any attempt; a Polish's passes after them.
+    // Carrying on from a failed or stopped build: its builder works first, told what failed (as Ask builder to fix
+    // is; a stopped one, that the owner stopped it), then the checks run as on any attempt; a Polish's passes after them.
     const carried = this.carriedOn.has(buildId) ? this.registry.getBuild(String(build.request.retryOf)) : undefined;
-    let feedback = carried ? failedChecks(carried.log) : undefined;
+    let feedback = carried?.status === "failed" ? failedChecks(carried.log) : undefined;
     // A Polish of a tool with sample data has nothing to build first: the live version, checked as it
     // is today, goes straight to the passes (one that fails the checks goes to the builder to fix).
     if (!carried && isPolish(build.request) && (await this.workbench.file(buildId, SAMPLE_FILE))) {
@@ -1576,9 +1576,10 @@ export class Builds extends Domain {
     try {
       const asked = this.registry.buildModel(buildId);
       // Told once, on its first attempt: later ones carry on from their own.
-      const carriesOn = this.carriedOn.delete(buildId);
+      const carriesOn = this.carriedOn.get(buildId);
+      this.carriedOn.delete(buildId);
       await this.workbench.build(
-        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}), ...(carriesOn ? { carriesOn: true } : {}) },
+        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}), ...(carriesOn ? { carriesOn } : {}) },
         {
           signal,
           onActivity: (line) => {

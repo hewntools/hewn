@@ -313,7 +313,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         ...(hooks.onCheck ? { check: hooks.onCheck } : {}),
         ...(job.pass ? { pass: job.pass } : {}),
         ...(opts.builderIdleMs?.() ? { idleMs: opts.builderIdleMs()! } : {}),
-        ...(job.carriesOn ? { carriesOn: true } : {}),
+        ...(job.carriesOn ? { carriesOn: job.carriesOn } : {}),
       });
     },
     async bundle(buildId) {

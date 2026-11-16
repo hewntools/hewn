@@ -29,16 +29,16 @@ describe("a retry carries on from the failed build's workspace", () => {
   test("a change: Retry carries on (its first attempt resumes), and Ask builder to fix too; the log says it's a retry", async () => {
     const failed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
     assert.equal(failed.status, "failed");
-    const seen: { half: boolean; continues?: boolean; builder: string }[] = [];
-    const look = (ws: string, job: { carriesOn?: boolean }) => void seen.push({ half: existsSync(join(ws, "src", "half.ts")), continues: job.carriesOn, builder: readFileSync(join(ws, "BUILDER.md"), "utf8") });
+    const seen: { half: boolean; continues?: string; builder: string }[] = [];
+    const look = (ws: string, job: { carriesOn?: string }) => void seen.push({ half: existsSync(join(ws, "src", "half.ts")), continues: job.carriesOn, builder: readFileSync(join(ws, "BUILDER.md"), "utf8") });
     const again = await t.build(() => t.platform.retryBuild(USER, failed.buildId), (ws, job) => (look(ws, job), halfDone(ws)));
     assert.equal(again.status, "failed");
     assert.match(await opened(again.buildId), new RegExp(`^opened from v1 \\(retry of ${failed.buildId}\\), carrying on from its workspace, builder: script$`));
     const fixed = await t.build(() => t.platform.retryBuild(USER, again.buildId, { fix: true }), (ws, job) => (look(ws, job), finish(ws)));
     assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
     assert.deepEqual(seen.map(({ half, continues }) => ({ half, continues })), [
-      { half: true, continues: true },
-      { half: true, continues: true },
+      { half: true, continues: "failed" },
+      { half: true, continues: "failed" },
     ]);
     assert.match(seen[1].builder, /The previous build failed/, "BUILDER.md is the retry's: with why it failed");
   });
@@ -46,11 +46,33 @@ describe("a retry carries on from the failed build's workspace", () => {
   test("a change retried after another change went live starts from the new version (carrying on would undo it)", async () => {
     const failed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
     await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "another" }), (ws) => writeFileSync(join(ws, "src", "other.ts"), "export const other = 1;\n"));
-    let seen: { half: boolean; other: boolean; continues?: boolean } | undefined;
+    let seen: { half: boolean; other: boolean; continues?: string } | undefined;
     const fresh = await t.build(() => t.platform.retryBuild(USER, failed.buildId), (ws, job) => void (seen = { half: existsSync(join(ws, "src", "half.ts")), other: existsSync(join(ws, "src", "other.ts")), continues: job.carriesOn }));
     assert.equal(fresh.status, "promoted", fresh.log.join("\n"));
     assert.deepEqual(seen, { half: false, other: true, continues: undefined });
     assert.match(await opened(fresh.buildId), new RegExp(`^opened from v2 \\(retry of ${failed.buildId}\\), builder: script$`));
+  });
+
+  test("Stop, then Retry: it carries on from the stopped build's workspace, told the owner stopped it (no failure to fix)", async () => {
+    // The builder writes half its work, then waits until the owner stops the build.
+    let wrote!: () => void;
+    const halfway = new Promise<void>((r) => (wrote = r));
+    t.queue(async (ws, job) => {
+      writeFileSync(join(ws, "src", "half.ts"), "export const half = 1;\n");
+      wrote();
+      await new Promise((r) => job.signal?.addEventListener("abort", r, { once: true }));
+      throw Object.assign(new Error("cancelled"), { cancelled: true });
+    });
+    const started = await t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" });
+    await halfway;
+    t.platform.cancelBuild(USER, started.buildId);
+    const stopped = await t.platform.settle(started.buildId);
+    assert.equal(stopped.status, "cancelled");
+    let seen: { half: boolean; carriesOn?: string; feedback?: string } | undefined;
+    const done = await t.build(() => t.platform.retryBuild(USER, stopped.buildId), (ws, job) => void (seen = { half: existsSync(join(ws, "src", "half.ts")), carriesOn: job.carriesOn, feedback: job.feedback }));
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.deepEqual(seen, { half: true, carriesOn: "stopped", feedback: undefined });
+    assert.match(await opened(done.buildId), new RegExp(`^opened from v1 \\(retry of ${stopped.buildId}\\), carrying on from its workspace, builder: script$`));
   });
 
   test("a new tool: Retry carries on from the failed create's workspace", async () => {
