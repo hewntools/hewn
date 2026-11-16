@@ -132,15 +132,24 @@ export interface CallInFlight {
   waiting: number;
 }
 
+/** What a call was doing when the tools stopped responding, as far as the platform can see. */
+export type CallState = "running" | "waiting on a fetch" | "waiting on Hewn" | "queued";
+
 /**
- * When the tools stop responding, the calls whose code may be what held them: started, and not waiting on Hewn (a
- * callback) or the network (a fetch out of their isolate). What a tool waits on inside its isolate (a timer) can't be
- * seen, so such a call counts as running. Undefined when it can't be told: another kind of work was running tool code
- * (loading, migrating: `otherWork`), or every call was waiting.
+ * Queued: its answer's headers never came (it was waiting behind whatever held the process). Waiting on Hewn: a
+ * callback in progress. Waiting on a fetch: one out of its isolate. Else running, waits inside its isolate (a timer)
+ * included: those can't be seen.
+ */
+export const callState = (c: CallInFlight, fetchesOut: ReadonlyMap<string, number>): CallState =>
+  !c.started ? "queued" : c.waiting > 0 ? "waiting on Hewn" : c.isolate && (fetchesOut.get(c.isolate) ?? 0) > 0 ? "waiting on a fetch" : "running";
+
+/**
+ * When the tools stop responding, the calls whose code may be what held them: the running ones. Undefined when it
+ * can't be told: another kind of work was running tool code (loading, migrating: `otherWork`), or none was running.
  */
 export function stallSuspects<T extends CallInFlight>(calls: T[], fetchesOut: ReadonlyMap<string, number>, otherWork: number): T[] | undefined {
   if (otherWork > 0) return undefined;
-  const suspects = calls.filter((c) => c.started && c.waiting === 0 && !(c.isolate && (fetchesOut.get(c.isolate) ?? 0) > 0));
+  const suspects = calls.filter((c) => callState(c, fetchesOut) === "running");
   return suspects.length ? suspects : undefined;
 }
 

@@ -94,7 +94,10 @@ function activityRow(g, all, showCap) {
     // Schedule details read "created <id>: op@1 daily 07:00" / "paused <id> after 3 failures": drop the id.
     const sm = /^(\w+) [\w-]+:? ?(.*)$/.exec(g.detail ?? "");
     const schedule = sm ? `Schedule ${sm[1]}${sm[2] ? `: ${sm[2].replace(/@\d+/, "")}` : ""}` : "Schedule";
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [h("span", { class: "mono" }, (g.detail ?? "").split("@")[0]), "kept Hewn's tools from responding: restarted"] };
+    // A stall's details read "spin@1", or "list_runs@1 — waiting on a fetch": what of the tool was there, and what it was doing.
+    const [stallOp, stallState] = (g.detail ?? "").split(" — ");
+    const op = h("span", { class: "mono" }, stallOp.split("@")[0]);
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`] };
     dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : g.outcome === "stalled" || g.outcome === "suspend" ? "danger" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {

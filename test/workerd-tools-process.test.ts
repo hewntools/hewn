@@ -281,7 +281,34 @@ describe("which code held up the tools, on the real host", () => {
     const lines = async (id: string) => (await h.sv.admin("logs", { capabilityId: id, n: 20 })).lines as string[];
     assert.equal((await lines("runaway")).filter((l) => / waiter spin@1 ERROR stalled: /.test(l) || / spin@1 ERROR stalled: /.test(l)).length, 1, (await lines("runaway")).join("\n"));
     for (const id of ["waiter", "running-log"]) assert.deepEqual((await lines(id)).filter((l) => / ERROR stalled: /.test(l)), [], id);
+    // Activity names every tool that was there, and what it was doing.
+    const web = await signedIn(h);
+    const there = async (id: string) => (await web(`/api/activity?capability=${id}`)).items.filter((i: any) => i.kind === "lifecycle" && (i.outcome === "stalled" || i.outcome === "held-up")).map((i: any) => `${i.outcome} ${i.detail}`);
+    assert.deepEqual(await there("runaway"), ["stalled spin@1"]);
+    assert.deepEqual(await there("waiter"), ["held-up wait@1 — waiting on Hewn"]);
+    assert.deepEqual(await there("running-log"), ["held-up list_runs@1 — queued"]);
     assert.deepEqual((await h.invoke("running-log", "list_runs")).result, { runs: [] }, "and it runs again");
   });
 });
+
+/** The web API as the signed-in owner (on Hewn's own host name, which fetch can't send). */
+async function signedIn(h: TestHost): Promise<(path: string) => Promise<any>> {
+  const get = (path: string, cookie = "") =>
+    new Promise<{ status: number; headers: Record<string, any>; body: string }>((ok, fail) => {
+      const r = request({ host: "127.0.0.1", port: h.port, path, headers: { host: `hewn.localhost:${h.port}`, ...(cookie ? { cookie } : {}), "x-hewn-ui": "1" } }, (m) => {
+        let body = "";
+        m.on("data", (d) => (body += d));
+        m.on("end", () => ok({ status: m.statusCode!, headers: m.headers, body }));
+      });
+      r.on("error", fail);
+      r.end();
+    });
+  const { ticket } = await h.sv.admin("web-ticket");
+  const cookie = String((await get(`/auth?ticket=${ticket}`)).headers["set-cookie"]).split(";")[0];
+  return async (path) => {
+    const r = await get(path, cookie);
+    if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status} ${r.body}`);
+    return JSON.parse(r.body);
+  };
+}
 

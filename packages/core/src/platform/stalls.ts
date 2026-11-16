@@ -20,8 +20,14 @@ export interface Suspension {
   reason: string;
 }
 
-/** The stalls a tool was running in (within the window), and its suspension. */
-type StallRecord = { at: string[]; suspended?: Suspension };
+/** The stalls a tool was running in (within the window), what of it was running in each, and its suspension. */
+type StallRecord = { at: string[]; what?: (string | undefined)[]; suspended?: Suspension };
+
+/**
+ * What a running piece of tool code was doing when the tools stopped responding ("running", "waiting on a fetch",
+ * "waiting on Hewn", "queued"), and whether it may have held them: the host's word, when it can tell.
+ */
+export type StallPart = (running: { capabilityId: string; state: string }) => { caused: boolean; state: string };
 
 /** The last stall told (not under `stalls:`, where a tool's id could be "last"). */
 const LAST_STALL = "stall:last";
@@ -55,16 +61,22 @@ export class Stalls extends Domain {
    * running is told so, or only what `caused` says may have held them (the rest was waiting, and fails as it
    * goes). Unset: once at start, before interrupted builds are retried; what was written down only goes.
    */
-  recover(stalledAt?: string, caused?: (running: { capabilityId: string; state: string }) => boolean): { tools: string[]; suspended: string[]; builds: string[] } {
+  recover(stalledAt?: string, part?: StallPart): { tools: string[]; suspended: string[]; builds: string[] } {
     const left = this.registry.takeRunningCode();
     const out = { tools: [] as string[], suspended: [] as string[], builds: [] as string[] };
     // A restart of a restart (or the platform started again in the same process) says the same stall again.
     if (!stalledAt || this.registry.getKv<string>(LAST_STALL) === stalledAt) return out;
     this.registry.setKv(LAST_STALL, stalledAt);
     if (!left.length) this.logger(`Hewn's tools stopped responding and were restarted (${stalledAt}); no tool code was running`);
+    // Each tool counts the stall once, however many of its calls were running: what of it is named.
+    const struck = new Map<string, string>();
     for (const r of left) {
-      if (caused && !caused(r)) {
-        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was running too, waiting: not the cause`);
+      const p = part?.(r);
+      // Activity names every tool there, with what it was doing ("spin@1 — waiting on a fetch"), so a pattern can be seen.
+      const detail = p && p.state !== "running" ? `${r.what} — ${p.state}` : r.what;
+      if (p && !p.caused) {
+        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was ${p.state} when Hewn's tools stopped responding: not the cause`);
+        if (!r.state && this.registry.getCapability(r.capabilityId)) this.registry.addLifecycleEvent(r.capabilityId, "held-up", detail, "hewn");
         continue;
       }
       const build = BUILD_STATE.exec(r.state)?.[1];
@@ -75,29 +87,43 @@ export class Stalls extends Domain {
         // Its call's entry in the tool's log, as an ended call's would be.
         const ms = Math.max(0, Date.parse(stalledAt) - Date.parse(r.startedAt));
         this.registry.addCapabilityLog(r.capabilityId, r.startedAt, `${r.startedAt} ${r.caller} ${r.what} ERROR stalled: Hewn's tools stopped responding while this ran and were restarted ${ms}ms`, []);
-        this.registry.addLifecycleEvent(r.capabilityId, "stalled", r.what, "hewn");
+        this.registry.addLifecycleEvent(r.capabilityId, "stalled", detail, "hewn");
         this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was running when Hewn's tools stopped responding`);
         if (!out.tools.includes(r.capabilityId)) out.tools.push(r.capabilityId);
+        if (!struck.has(r.capabilityId)) struck.set(r.capabilityId, r.what);
       }
     }
-    // Each tool counts the stall once, however many of its calls were running.
-    for (const id of out.tools) if (this.strike(id, stalledAt)) out.suspended.push(id);
+    for (const [id, what] of struck) if (this.strike(id, stalledAt, what)) out.suspended.push(id);
     return out;
   }
 
-  /** One more stall for a tool: true when that suspends it. */
-  private strike(capabilityId: string, at: string): boolean {
+  /** One more stall for a tool (`what` of it was running): true when that suspends it. */
+  private strike(capabilityId: string, at: string, what: string): boolean {
     const rec = this.registry.getKv<StallRecord>(key(capabilityId)) ?? { at: [] };
     const since = Date.parse(at) - STALL_WINDOW_MS;
-    rec.at = [...rec.at.filter((t) => Date.parse(t) > since), at];
+    const kept = rec.at.map((t, i) => ({ t, what: rec.what?.[i] })).filter((s) => Date.parse(s.t) > since);
+    const stalls = [...kept, { t: at, what }];
+    rec.at = stalls.map((s) => s.t);
+    rec.what = stalls.map((s) => s.what);
     const suspend = !rec.suspended && rec.at.length >= STALLS_TO_SUSPEND;
     if (suspend) {
-      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${rec.at.length} times within an hour` };
+      // Which stalls: the owner can see whether it was the same code each time.
+      const which = stalls.map((s) => `${s.what ? `${s.what} at ` : ""}${this.clock(s.t)}`).join(", ");
+      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${rec.at.length} times within an hour (${which})` };
       this.registry.addLifecycleEvent(capabilityId, "suspend", rec.suspended.reason, "hewn");
       this.logger(`${capabilityId} suspended: ${rec.suspended.reason}; its calls, schedules and widgets are refused until the owner resumes it`);
     }
     this.registry.setKv(key(capabilityId), rec);
     return suspend;
+  }
+
+  /** "14:05", in the owner's time zone. */
+  private clock(iso: string): string {
+    try {
+      return new Intl.DateTimeFormat("en-GB", { timeZone: this.platform.timezone(), hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+    } catch {
+      return iso.slice(11, 16);
+    }
   }
 
   /** A build's own code was running when Hewn stalled: it fails as it is (no retry, which would only do it again). */

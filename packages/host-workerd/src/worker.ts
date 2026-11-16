@@ -28,7 +28,7 @@ import { fetchLink } from "./surface/fetch-link.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
-import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, type CallInFlight, stallSuspects, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
+import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, type CallInFlight, callState, stallSuspects, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
 
 interface Env {
   HEWN: DurableObjectNamespace;
@@ -810,8 +810,13 @@ export class HewnDO extends DurableObject<Env> {
             const calls = [...this.toolCalls].map(([token, c]) => ({ ...c, token }));
             const suspects = stallSuspects(calls, fetchesOut, this.toolsOtherWork.running);
             this.toolsStall = { at: Date.parse(String(body.at)), why: String(body.why ?? "they stopped responding"), ...(suspects ? { suspects: new Set(suspects.map((c) => c.token)) } : {}) };
-            const caused = suspects && ((r: { capabilityId: string; state: string }) => suspects.some((c) => c.capabilityId === r.capabilityId && c.state === r.state));
-            return Response.json({ ok: true, ...this.platform.recoverStall(String(body.at), caused || undefined) });
+            // Each running row's part: whether its code may have held them (all, when that can't be told), and what it was doing.
+            const part = (r: { capabilityId: string; state: string }) => {
+              const mine = calls.filter((c) => c.capabilityId === r.capabilityId && c.state === r.state);
+              const states = mine.map((c) => callState(c, fetchesOut));
+              return { caused: !suspects || mine.some((c) => suspects.includes(c)), state: states.includes("running") ? "running" : (states[0] ?? "running") };
+            };
+            return Response.json({ ok: true, ...this.platform.recoverStall(String(body.at), part) });
           }
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.

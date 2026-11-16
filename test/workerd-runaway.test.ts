@@ -109,7 +109,9 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     const inbox = await web("/api/inbox");
     assert.deepEqual(inbox.needs.filter((n: any) => n.kind === "suspended").map((n: any) => [n.capabilityId, n.action]), [["runaway", "Resume…"]]);
     const activity = (await web("/api/activity?capability=runaway")).items.filter((i: any) => i.kind === "lifecycle" && i.outcome !== "schedule");
-    assert.deepEqual(activity.map((i: any) => `${i.outcome} ${i.detail}`).sort(), ["stalled spin@1", "stalled spin@1", "stalled spin@1", "suspend it kept Hewn's tools from responding 3 times within an hour"]);
+    const lines = activity.map((i: any) => `${i.outcome} ${i.detail}`).sort();
+    assert.deepEqual(lines.slice(0, 3), ["stalled spin@1", "stalled spin@1", "stalled spin@1"]);
+    assert.match(lines[3], /^suspend it kept Hewn's tools from responding 3 times within an hour \(spin@1 at \d\d:\d\d, spin@1 at \d\d:\d\d, spin@1 at \d\d:\d\d\)$/);
     // Resumed (hewn resume), it runs again.
     writeFileSync(join(h.root, "supervisor.json"), JSON.stringify({ url: h.sv.url, adminToken: h.sv.adminToken, control: h.sv.control, pid: process.pid }));
     assert.match(await hewn(h.root, "resume", "runaway"), /runaway resumed/);
