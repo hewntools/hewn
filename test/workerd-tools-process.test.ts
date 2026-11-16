@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { config as platformConfig, sandboxed, toolsConfig, toolsSandbox } from "@hewntools/cli/supervisor/index.ts";
 import { workerdBinary } from "@hewntools/cli/app-dir.ts";
+import { restoreBackup } from "@hewntools/cli/backup.ts";
+import { openHome } from "@hewntools/cli/home.ts";
 import { STORAGE_KEYS } from "@hewntools/cli/supervisor/format.ts";
 import { toolsChannel, type ToolsSocket, ToolsUnreachable } from "@hewntools/host-workerd/tools-channel.ts";
 import { CALL_DEADLINE_MS } from "@hewntools/core/platform.ts";
@@ -145,6 +147,17 @@ describe("two processes on the real host", () => {
     assert.match(env, /HEWN_TOOLS_TOKEN=/);
     for (const secret of ["HEWN_SECRETS_KEY", "HEWN_ADMIN_TOKEN", "HEWN_SUPERVISOR_TOKEN", "HEWN_PROXY_SECRET"]) assert.ok(!env.includes(`${secret}=`), secret);
   });
+
+  test("the platform going takes the tools with it: what ran there went with the platform that called it", async () => {
+    const status = async () => (await fetch(`${h.sv.control.url}/control/status`, { method: "POST", headers: { "x-hewn-control": h.sv.control.token } })).json();
+    const before = { platform: h.sv.restarts(), tools: h.sv.toolsRestarts() };
+    process.kill((await status()).workerdPid, "SIGKILL");
+    for (const end = Date.now() + 10_000; (h.sv.restarts() === before.platform || h.sv.toolsRestarts() === before.tools) && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual({ platform: h.sv.restarts(), tools: h.sv.toolsRestarts() }, { platform: before.platform + 1, tools: before.tools + 1 });
+    for (const end = Date.now() + 10_000; !(await fetch(`${h.sv.url}/health`).then((r) => r.ok, () => false)) && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
+    await h.invoke("runaway", "tick", { tag: "after-platform" });
+    assert.equal((await h.invoke("runaway", "count")).result.rows["after-platform"], 1);
+  });
 });
 
 describe("a tool that won't stop when its call's deadline comes", () => {
@@ -190,16 +203,35 @@ describe("both processes in their sandboxes", { skip: !canSandbox && "no OS sand
     assert.equal((await h.invoke("runaway", "count")).result.rows.boxed, 1);
   });
 
-  test("in the tools' sandbox the owner's data, the blobs and the platform's files can't be read; the tools' own can", () => {
+  test("in the tools' sandbox the secrets key, the owner's data, the blobs and the platform's files can't be read; the tools' own can", () => {
     const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]));
-    const rules = { ...toolsSandbox(data, realpathSync(join(workerdBinary(), "..", ".."))), profile: join(data, "workerd-tools-test.sb") };
+    const rules = { ...toolsSandbox(h.root, data, realpathSync(join(workerdBinary(), "..", ".."))), profile: join(data, "workerd-tools-test.sb") };
     const readable = (file: string) => spawnSync(sandboxed(["/bin/cat", file], rules)[0], sandboxed(["/bin/cat", file], rules).slice(1)).status === 0;
     const own = files(join(data, "do", STORAGE_KEYS.capability)).find((f) => f.endsWith(".sqlite"))!;
     assert.ok(readable(own), own);
-    for (const theirs of [files(join(data, "do", STORAGE_KEYS.owner)).find((f) => f.endsWith(".sqlite"))!, files(join(data, "blobs"))[0], join(data, "config.capnp"), join(data, "worker.js")]) {
+    // The secrets key (a file in the home here, keySource "file"), the owner's DO, the blobs, the platform's own files.
+    for (const theirs of [join(h.root, "master.key"), files(join(data, "do", STORAGE_KEYS.owner)).find((f) => f.endsWith(".sqlite"))!, files(join(data, "blobs"))[0], join(data, "config.capnp"), join(data, "worker.js")]) {
       assert.ok(theirs && existsSync(theirs), theirs);
       assert.ok(!readable(theirs), theirs);
     }
+  });
+});
+
+describe("a home written by Hewn 0.4.11, when the platform and the tools ran in one process", () => {
+  // fixtures/home-0.4.11.zip: a backup Hewn 0.4.11 made of a home with Runaway installed, three ticks and a setting.
+  let h: TestHost;
+  before(async () => {
+    h = await startTestHost({ prepare: (root) => void restoreBackup(openHome(root), join(FIXTURES, "home-0.4.11.zip")) });
+  });
+  after(() => h?.stop());
+
+  test("starts with every tool's data and the owner's as they were, and runs on", async () => {
+    assert.deepEqual((await h.invoke("runaway", "count")).result.rows, { a: 1, b: 2 });
+    assert.equal((await h.sv.admin("settings")).logRetentionDays, 21);
+    assert.equal((await h.sv.admin("readiness", { capabilityId: "runaway" })).ready, true);
+    await h.invoke("runaway", "tick", { tag: "c" });
+    assert.deepEqual((await h.invoke("runaway", "count")).result.rows, { a: 1, b: 2, c: 1 });
+    assert.deepEqual(readdirSync(join(h.root, "workerd", "do")).sort(), [STORAGE_KEYS.capability, STORAGE_KEYS.owner].sort());
   });
 });
 

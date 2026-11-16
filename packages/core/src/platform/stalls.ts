@@ -87,7 +87,7 @@ export class Stalls extends Domain {
     rec.at = [...rec.at.filter((t) => Date.parse(t) > since), at];
     const suspend = !rec.suspended && rec.at.length >= STALLS_TO_SUSPEND;
     if (suspend) {
-      rec.suspended = { at, reason: `it kept Hewn from responding ${rec.at.length} times within an hour` };
+      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${rec.at.length} times within an hour` };
       this.registry.addLifecycleEvent(capabilityId, "suspend", rec.suspended.reason, "hewn");
       this.logger(`${capabilityId} suspended: ${rec.suspended.reason}; its calls, schedules and widgets are refused until the owner resumes it`);
     }
@@ -99,8 +99,8 @@ export class Stalls extends Domain {
   private stalledBuild(buildId: string, what: string) {
     const b = this.registry.getBuild(buildId);
     if (!b || !["building", "validating"].includes(b.status)) return;
-    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: its code kept Hewn from responding (${what === "load" ? "loading it" : `running ${what}`}), so Hewn's tools were restarted; not retried`] });
-    this.logger(`build ${buildId} failed: its code kept Hewn from responding (${what})`);
+    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: its code kept Hewn's tools from responding (${what === "load" ? "loading it" : `running ${what}`}), so Hewn's tools were restarted; not retried`] });
+    this.logger(`build ${buildId} failed: its code kept Hewn's tools from responding (${what})`);
     // What's left of its run (the rest of its tests, another attempt) stops here.
     this.d.builds.stopStalled(buildId);
   }

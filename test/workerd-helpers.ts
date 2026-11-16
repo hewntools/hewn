@@ -94,8 +94,10 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; proxyClientIp?: boolean; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[]; resume?: SupervisorOptions["resume"]; watchdog?: SupervisorOptions["watchdog"]; disk?: SupervisorOptions["disk"]; sandbox?: boolean } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; proxyClientIp?: boolean; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[]; resume?: SupervisorOptions["resume"]; watchdog?: SupervisorOptions["watchdog"]; disk?: SupervisorOptions["disk"]; sandbox?: boolean; prepare?: (root: string) => void } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
+  // A home as an earlier Hewn left it, say.
+  opts.prepare?.(root);
   const scripts: Script[] = [];
   const scripted: CapabilityBuilder = {
     name: "claude",

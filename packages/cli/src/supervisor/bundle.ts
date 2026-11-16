@@ -58,7 +58,9 @@ export async function buildHostFiles(root = APP_DIR): Promise<Record<string, str
   };
 }
 
-const HOST_FILES = ["worker.js", "tools-worker.js", "capability-runtime.js", "capability-guard.js", "builder-brief.md"];
+/** The tools process's files (its sandbox may read only these of the host's). */
+export const TOOLS_FILES = ["tools-worker.js", "capability-runtime.js", "capability-guard.js"];
+const HOST_FILES = ["worker.js", "builder-brief.md", ...TOOLS_FILES];
 
 /** Write the host's files (HOST_FILES) into `dir`. */
 export async function buildHost(dir: string): Promise<void> {

@@ -16,7 +16,6 @@ import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewnt
 import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import { checkToJson } from "@hewntools/core/checks.ts";
-import type { Migration } from "@hewntools/core/migrations.ts";
 import { Platform } from "@hewntools/core/platform.ts";
 import { resolveHosts } from "@hewntools/core/platform/grants.ts";
 import type { Blobs, BuildJob, CapabilityRuntime, CodeRef, Files, SecretStore, Sql, StateRef, Workbench } from "@hewntools/core/ports.ts";
@@ -333,22 +332,23 @@ export interface ToolCall {
 interface ToolsSide {
   /** The calls running in the tools process, by token (the DO answers their callbacks from it). */
   calls: Map<string, ToolCall>;
-  /** When the supervisor said the tools stopped responding (ms): what was running then failed for it. */
-  stalledAt(): number | undefined;
+  /** When the supervisor last said the tools stopped responding (ms), and why: what was running then failed for it. */
+  stall(): { at: number; why: string } | undefined;
   /** The tools process won't stop a call (code that never yields): have the supervisor restart it. */
   stuck(reason: string): Promise<void>;
 }
 
 /** How long a stop may take before the tools process counts as stuck. */
 const STOP_TIMEOUT_MS = 1000;
-/** How long a call waits for the tools to be back after a restart. */
+/** How long a call waits for the tools to answer again after they stopped responding. */
 const RESTART_WAIT_MS = 10_000;
 
 /**
  * The runtime port: capability code runs in its CapabilityHost, isolated, with its own state, in the tools
  * process (tools-worker.ts). The tools process going away (stopped, or restarted for not responding) fails
- * what was running there; what was running when it stopped responding fails saying so (`stalled`: the
- * stall was already told, with whoever was running then).
+ * what was running there; what was running when it stopped responding fails saying so (`details.stalled`:
+ * the stall was already told, with whoever was running then). Once it stopped responding, nothing more is
+ * sent until a new one answers.
  */
 function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools: ToolsSide): CapabilityRuntime {
   const host = toolsChannel(env.TOOLS, env.TOOLS_TOKEN);
@@ -361,46 +361,44 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
     const live = liveOf(state, code);
     return { hosts: live ?? [], named: live !== null };
   };
-  /** The tools process went away while `what` ran (started at `started`). */
-  const lost = (what: string, started: number, e: ToolsUnreachable) => {
-    const at = tools.stalledAt();
-    return at !== undefined && started <= at
-      ? Object.assign(new PlatformError("operation_failed", `${what} failed: stalled: Hewn's tools stopped responding while this ran and were restarted`), { stalled: true })
+  /** The tools process went away while `what` ran (sent at `sentAt`). */
+  const lost = (what: string, sentAt: number, e: ToolsUnreachable) => {
+    const stall = tools.stall();
+    return stall && sentAt <= stall.at
+      ? new PlatformError("operation_failed", `${what} failed: stalled: Hewn's tools stopped responding while this ran and were restarted (${stall.why})`, { stalled: true })
       : new PlatformError("operation_failed", `${what} failed: ${e.message}`);
   };
+  /** When the tools last answered after a stall (ms). */
+  let answeredAt = 0;
   /**
-   * Started after the supervisor said the tools stopped responding: it can't have run there (a stuck process runs
-   * nothing more), so once they're back it's sent again.
+   * Since the supervisor said the tools stopped responding, wait until a tools process answers before sending:
+   * a call sent to the stuck one would run there if it were only slow, then fail with it.
    */
-  const unsent = (started: number, e: unknown) => {
-    const at = tools.stalledAt();
-    return e instanceof ToolsUnreachable && !e.timeout && at !== undefined && started > at && Date.now() - at < RESTART_WAIT_MS;
-  };
-  /** Wait for the tools process to answer again (after a restart). */
-  const back = async () => {
+  const toolsAnswer = async () => {
+    const stall = tools.stall();
+    if (!stall || answeredAt >= stall.at) return;
     for (const end = Date.now() + RESTART_WAIT_MS; Date.now() < end; await scheduler.wait(100)) {
-      const ok = await env.TOOLS.fetch("http://tools/health").then((r) => r.ok, () => false);
-      if (ok) return;
+      if (await env.TOOLS.fetch("http://tools/health", { signal: AbortSignal.timeout(500) }).then((r) => r.ok, () => false)) {
+        answeredAt = Date.now();
+        return;
+      }
     }
   };
-  /** A call to the tools process, sent again if it went while they restarted, failing as `lost` says if it was running there. */
-  const via = async <T>(what: string, run: () => Promise<T>): Promise<T> => {
-    const started = Date.now();
+  /** A call to the tools process, once it answers; failing as `lost` says if it goes. */
+  const toTools = async <T>(what: string, run: () => Promise<T>): Promise<T> => {
+    await toolsAnswer();
+    const sentAt = Date.now();
     try {
-      return await run().catch(async (e) => {
-        if (!unsent(started, e)) throw e;
-        await back();
-        return run();
-      });
+      return await run();
     } catch (e) {
-      throw e instanceof ToolsUnreachable ? lost(what, started, e) : e;
+      throw e instanceof ToolsUnreachable ? lost(what, sentAt, e) : e;
     }
   };
   /** Run against a state with its limit; a write past it fails saying so. */
   const limited = async <T>(capabilityId: string, what: string, run: (limit: number) => Promise<T>): Promise<T> => {
     const limit = data.limit(capabilityId);
     try {
-      return await via(what, () => run(limit));
+      return await toTools(what, () => run(limit));
     } catch (e) {
       if (isFull((e as Error).message)) throw new PlatformError("operation_failed", data.full(capabilityId, limit));
       throw e;
@@ -417,20 +415,21 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
         },
         model: onModel ?? null,
       });
-      const started = Date.now();
       const timer = deadlineTimer(deadlineOf(target.deadline, CALL_TIMEOUT_MS), () => new PlatformError("operation_failed", `${key} timed out (call chain deadline)`));
       // Past the deadline the call is stopped, not only no longer waited for: its code, and anything
       // else running on that state with it, ends there. Code that never yields doesn't answer the stop:
       // the tools process is restarted (what was running there is told so, this call with it).
       let late: Error | undefined;
-      const expired = timer.expired.catch(async (e: Error) => {
+      const expired = timer.expired.catch(async (e: PlatformError) => {
         late = e;
+        // Its callbacks go with it.
+        tools.calls.delete(token);
         const reason = `stopped: ${target.capabilityId}/${key} ran past its deadline`;
         await host(target.capabilityId)
           .stop({ scratch: target.state.scratch ?? null, reason }, { timeoutMs: STOP_TIMEOUT_MS })
           .catch(async (x) => {
             if (!(x instanceof ToolsUnreachable && x.timeout)) return;
-            Object.assign(e, { stalled: true });
+            e.details = { stalled: true };
             await tools.stuck(`${reason} and didn't stop`).catch((err) => console.log(`[${new Date().toISOString()}] couldn't have the tools restarted: ${(err as Error).message}`));
           });
         throw e;
@@ -440,23 +439,17 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
       // A call on the live state with other hosts (sample data replayed, nothing granted yet) gets an isolate of its own.
       const live = liveOf(target.state, target.code);
       const named = live !== null && live.join(",") === hosts.join(",");
+      let sentAt = Number.POSITIVE_INFINITY;
       const send = () => host(target.capabilityId).invoke({ code: target.code, scratch: target.state.scratch ?? null, key, input, secrets: target.secrets ?? {}, hosts, caller: target.caller, config: target.config ?? {}, readOnly: !!target.readOnly, limit, named, call: token, model: !!onModel });
       try {
-        const r = await Promise.race([
-          send().catch(async (e) => {
-            if (!unsent(started, e)) throw e;
-            await back();
-            return send();
-          }),
-          expired,
-        ]);
+        const r = await Promise.race([toolsAnswer().then(() => ((sentAt = Date.now()), send())), expired]);
         if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
         return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs, inserted: r.inserted };
       } catch (e) {
         // Out of time: whatever came back once it was stopped, it timed out.
         if (late) throw late;
         if (e instanceof PlatformError) throw e;
-        if (e instanceof ToolsUnreachable) throw lost(key, started, e);
+        if (e instanceof ToolsUnreachable) throw lost(key, sentAt, e);
         throw new PlatformError("operation_failed", isFull((e as Error).message) ? data.full(target.capabilityId, limit) : `${key} failed: ${(e as Error).message}`);
       } finally {
         timer.clear();
@@ -464,14 +457,14 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
       }
     },
     // Describing only loads code (in an isolate of its own, gone once described); any capability id's host can do it.
-    describe: (code) => via("loading it", () => host("_describe").describe({ code })),
+    describe: (code) => toTools("loading it", () => host("_describe").describe({ code })),
     migrate: (state, migrations, code) => limited(state.capabilityId, "migrating", (limit) => host(state.capabilityId).migrate({ scratch: state.scratch ?? null, migrations, code, limit, ...dataIsolate(state, code) })),
-    hasState: (state) => via("reading its data", () => host(state.capabilityId).hasState({ scratch: state.scratch ?? null })),
-    copyState: (from, to) => via("copying its data", () => host(from.capabilityId).copyState({ from: from.scratch ?? null, to: to.scratch ?? null })),
-    dropState: (state) => via("dropping its data", () => host(state.capabilityId).dropState({ scratch: state.scratch ?? null })),
-    listStates: (capabilityId, prefix) => via("reading its data", () => host(capabilityId).listStates({ prefix })),
-    dumpState: (state, code) => via("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) })),
-    countState: (state, code) => via("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) })),
+    hasState: (state) => toTools("reading its data", () => host(state.capabilityId).hasState({ scratch: state.scratch ?? null })),
+    copyState: (from, to) => toTools("copying its data", () => host(from.capabilityId).copyState({ from: from.scratch ?? null, to: to.scratch ?? null })),
+    dropState: (state) => toTools("dropping its data", () => host(state.capabilityId).dropState({ scratch: state.scratch ?? null })),
+    listStates: (capabilityId, prefix) => toTools("reading its data", () => host(capabilityId).listStates({ prefix })),
+    dumpState: (state, code) => toTools("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) })),
+    countState: (state, code) => toTools("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) })),
     loadState: (state, tables, code) => limited(state.capabilityId, "loading its data", (limit) => host(state.capabilityId).load({ scratch: state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code) })),
   };
 }
@@ -511,8 +504,8 @@ export class HewnDO extends DurableObject<Env> {
   private diskLow: { floor: number } | null = null;
   /** Tool calls running in the tools process, by the token their callbacks carry. */
   private toolCalls = new Map<string, ToolCall>();
-  /** When the supervisor last said the tools stopped responding (ms). */
-  private toolsStalledAt: number | undefined;
+  /** When the supervisor last said the tools stopped responding (ms), and why. */
+  private toolsStall: { at: number; why: string } | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -530,7 +523,7 @@ export class HewnDO extends DurableObject<Env> {
           (id, code) => this.liveHosts(id, code),
           {
             calls: this.toolCalls,
-            stalledAt: () => this.toolsStalledAt,
+            stall: () => this.toolsStall,
             // The supervisor tells this DO what's stalled (/_admin/tools-stalled), then restarts the tools process.
             stuck: async (reason) => void (await supervisor(env).json("/tools/stalled", { reason })),
           },
@@ -772,7 +765,7 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/tools-stalled":
           // The supervisor's watchdog: the tools process stopped responding, and is restarted once this answers.
           // What was running there is told so now; it fails as the process goes.
-          this.toolsStalledAt = Date.parse(String(body.at));
+          this.toolsStall = { at: Date.parse(String(body.at)), why: String(body.why ?? "they stopped responding") };
           return Response.json({ ok: true, ...this.platform.recoverStall(String(body.at)) });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.

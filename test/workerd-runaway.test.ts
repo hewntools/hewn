@@ -87,10 +87,10 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     }
     const st = await h.sv.admin("readiness", { capabilityId: "runaway" });
     assert.equal(st.ready, false);
-    assert.match(st.suspended.reason, /kept Hewn from responding 3 times within an hour/);
+    assert.match(st.suspended.reason, /kept Hewn's tools from responding 3 times within an hour/);
     assert.match(st.userAction, /resumes it/);
     // Calls, widgets and schedules are refused, each saying why.
-    await assert.rejects(h.invoke("runaway", "tick"), /runaway is suspended: it kept Hewn from responding 3 times within an hour/);
+    await assert.rejects(h.invoke("runaway", "tick"), /runaway is suspended: it kept Hewn's tools from responding 3 times within an hour/);
     const agent = await h.agent("codex", ["discover", "invoke"]);
     const w: any = await agent.callTool({ name: "widgets_show", arguments: { capabilityId: "runaway", widget: "rows" } });
     assert.equal(w.isError, true);
@@ -109,7 +109,7 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     const inbox = await web("/api/inbox");
     assert.deepEqual(inbox.needs.filter((n: any) => n.kind === "suspended").map((n: any) => [n.capabilityId, n.action]), [["runaway", "Resume…"]]);
     const activity = (await web("/api/activity?capability=runaway")).items.filter((i: any) => i.kind === "lifecycle" && i.outcome !== "schedule");
-    assert.deepEqual(activity.map((i: any) => `${i.outcome} ${i.detail}`).sort(), ["stalled spin@1", "stalled spin@1", "stalled spin@1", "suspend it kept Hewn from responding 3 times within an hour"]);
+    assert.deepEqual(activity.map((i: any) => `${i.outcome} ${i.detail}`).sort(), ["stalled spin@1", "stalled spin@1", "stalled spin@1", "suspend it kept Hewn's tools from responding 3 times within an hour"]);
     // Resumed (hewn resume), it runs again.
     writeFileSync(join(h.root, "supervisor.json"), JSON.stringify({ url: h.sv.url, adminToken: h.sv.adminToken, control: h.sv.control, pid: process.pid }));
     assert.match(await hewn(h.root, "resume", "runaway"), /runaway resumed/);
@@ -128,7 +128,7 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     await until(() => fetch(`${h.sv.url}/health`).then((r) => r.ok, () => false));
     const build = (await h.sv.admin("call", { method: "getBuild", args: [started.buildId] })).result;
     assert.equal(build.status, "failed");
-    assert.equal(build.failure.title, "Its code kept Hewn from responding");
+    assert.equal(build.failure.title, "Its code kept Hewn's tools from responding");
     assert.match(build.failure.detail, /^Running tick@1 never let go .*It wasn't tried again/);
     await sleep(1000);
     const builds = (await h.sv.admin("status")).builds;

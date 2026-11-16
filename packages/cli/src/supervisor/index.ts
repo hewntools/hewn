@@ -22,7 +22,7 @@ import type { Intake } from "../intake.ts";
 import type { SetupHooks } from "../setup/hooks.ts";
 import { connectHarness } from "../setup/connect.ts";
 import { harnessStatuses } from "../setup/harnesses.ts";
-import { assetDirs, buildHost } from "./bundle.ts";
+import { assetDirs, buildHost, TOOLS_FILES } from "./bundle.ts";
 import { chromiumCheck, findBrowser } from "../visual.ts";
 import { backedUpToday, backupLocation, backupNow, listBackups, restoreBackup, sameDisk } from "../backup.ts";
 import { readConfig } from "../config.ts";
@@ -274,7 +274,8 @@ const tools :Workerd.Worker = (
 export function sandboxed(cmd: string[], o: { readable: string[]; writable: string[]; hidden?: string[]; listable?: string[]; profile: string }): string[] {
   if (osPlatform() === "darwin") {
     const home = process.env.HOME!;
-    const path = (p: string) => (existsSync(p) && !statSyncSafe(p) ? `(literal "${p}")` : `(subpath "${p}")`);
+    // A file as itself; a directory, or one made later, with what's in it.
+    const path = (p: string) => (isFile(p) ? `(literal "${p}")` : `(subpath "${p}")`);
     // `listable`: a directory itself (to open it), not what's in it.
     const profile = `(version 1)
 (allow default)
@@ -299,18 +300,18 @@ export function sandboxed(cmd: string[], o: { readable: string[]; writable: stri
  * The tools' sandbox: their files, their storage and the sockets; nothing else of the data dir (not the owner's DO, the
  * blobs, the platform's files). Exported for tests.
  */
-export const toolsSandbox = (data: string, binDir: string) => ({
-  readable: [binDir, ...["tools.capnp", "tools-worker.js", "capability-runtime.js", "capability-guard.js"].map((f) => join(data, f))],
+export const toolsSandbox = (home: string, data: string, binDir: string) => ({
+  readable: [binDir, ...["tools.capnp", ...TOOLS_FILES].map((f) => join(data, f))],
   listable: [join(data, "do")],
   writable: [join(data, "do", STORAGE_KEYS.capability), join(data, "run")],
-  hidden: [data],
+  hidden: [realpathSync(home), data],
   profile: join(data, "workerd-tools.sb"),
 });
 
-/** Whether `p` is a directory (false for a file, or anything unreadable). */
-function statSyncSafe(p: string): boolean {
+/** Whether `p` is a file (false for a directory, or anything missing or unreadable). */
+function isFile(p: string): boolean {
   try {
-    return statSync(p).isDirectory();
+    return statSync(p).isFile();
   } catch {
     return false;
   }
@@ -447,7 +448,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       };
     },
     // The platform's stop of a call past its deadline went unanswered: the tools are stuck.
-    "/tools/stalled": async (b) => toolsStalled(`didn't stop a call (${String(b.reason ?? "")})`),
+    "/tools/stalled": async (b) => toolsStalled(String(b.reason ?? "a call didn't stop")),
     "/blobs/delete": async (b) => {
       const p = resolve(blobRoot, String(b.key));
       if (p.startsWith(blobRoot + "/")) rmSync(p, { force: true });
@@ -531,8 +532,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       try {
         return restoreBackup(o.home, String(b.file));
       } finally {
-        startBoth();
-        await waitHealthy();
+        await startBoth((p) => p.resume());
         // What's live now may not be the newest backup: the idle report asks for one today.
         await admin("changed", {}).catch(() => {});
       }
@@ -571,7 +571,10 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   chmodSync(run, 0o700);
   const socketPath = (name: "tools" | "calls") => join(run, `${name}.sock`);
   const unix = Buffer.byteLength(socketPath("tools")) <= (osPlatform() === "darwin" ? 103 : 107);
-  const channel: Channel = unix ? { tools: `unix:${socketPath("tools")}`, calls: `unix:${socketPath("calls")}` } : { tools: `127.0.0.1:${await freePort()}`, calls: `127.0.0.1:${await freePort()}` };
+  const ports = unix ? undefined : { tools: await freePort(), calls: await freePort() };
+  const channel: Channel = ports ? { tools: `127.0.0.1:${ports.tools}`, calls: `127.0.0.1:${ports.calls}` } : { tools: `unix:${socketPath("tools")}`, calls: `unix:${socketPath("calls")}` };
+  /** Where the supervisor reaches the tools process (its health check). */
+  const toolsAt = ports ? { host: "127.0.0.1", port: ports.tools } : { socketPath: socketPath("tools") };
   if (!unix) log(`the data dir's path is too long for a socket: the platform and the tools talk over loopback ports`);
   const toolsToken = randomBytes(24).toString("hex");
   writeFileSync(join(data, "config.capnp"), config({ dir: data, keys: STORAGE_KEYS, port: o.port, publicPort, publicListen: o.publicListen, supervisorPort, data, assets: assetDirs(), channel }));
@@ -581,56 +584,60 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const platformBase = [bin, "serve", "--experimental", join(data, "config.capnp")];
   const toolsBase = [bin, "serve", "--experimental", join(data, "tools.capnp")];
   const platformCommand = o.sandbox ? sandboxed(platformBase, { readable: [binDir, ...Object.values(assetDirs()).map((d) => realpathSync(d))], writable: [data], profile: join(data, "workerd.sb") }) : platformBase;
-  const toolsCommand = o.sandbox ? sandboxed(toolsBase, toolsSandbox(data, binDir)) : toolsBase;
+  const toolsCommand = o.sandbox ? sandboxed(toolsBase, toolsSandbox(o.home.root, data, binDir)) : toolsBase;
   const url = `http://127.0.0.1:${o.port}`;
   let stopping = false;
-  /** One workerd: started, restarted when it exits (backing off from a crash loop), its pid on disk. */
-  const workerdProcess = (name: string, command: string[], env: () => NodeJS.ProcessEnv, pidFile: string, socket: string | undefined, cwd: string) => {
+  /**
+   * One workerd: started, restarted when it exits (backing off from a crash loop), its pid on disk. `label` starts
+   * its lines in the log; `onExit`, when it exits by itself (not stopped on purpose).
+   */
+  const workerdProcess = (o: { label: string; command: string[]; env: () => NodeJS.ProcessEnv; pidFile: string; socket?: string; cwd: string; onExit?: () => void }) => {
     const p = {
-      name,
       child: undefined as ChildProcess | undefined,
       restarts: 0,
       quickExits: 0,
       restartTimer: undefined as ReturnType<typeof setTimeout> | undefined,
       /** Set while it's stopped on purpose (a restore): no restart on exit. */
       held: false,
-      /** Set when it's killed to be restarted (it stopped responding): started again at once. */
-      now: false,
+      /** Set when it's killed to be restarted at once (it stopped responding), not after the usual pause. */
+      restartNow: false,
       start() {
         const startedAt = Date.now();
         // The sockets' directory and the tools' storage, again (a restore swaps do/ for the backup's).
         mkdirSync(run, { recursive: true, mode: 0o700 });
         mkdirSync(toolsStorage, { recursive: true });
         // workerd doesn't remove its socket when it ends, and won't bind over one that's there.
-        if (socket) rmSync(socket, { force: true });
-        const child = spawn(command[0], command.slice(1), {
+        if (o.socket) rmSync(o.socket, { force: true });
+        const child = spawn(o.command[0], o.command.slice(1), {
           // workerd opens its working directory: one its sandbox allows (the data dir; the tools', their sockets' dir).
-          cwd,
-          env: { ...env(), PWD: cwd },
+          cwd: o.cwd,
+          env: { ...o.env(), PWD: o.cwd },
           stdio: ["ignore", "pipe", "pipe"],
         });
         p.child = child;
-        if (child.pid) writeFileSync(pidFile, String(child.pid));
-        const forward = (b: Buffer) => b.toString().split("\n").filter(Boolean).forEach((l) => log(`${name === "tools" ? "tools: " : ""}${l.replace(/^\[\S+\] /, "")}`));
+        if (child.pid) writeFileSync(o.pidFile, String(child.pid));
+        const forward = (b: Buffer) => b.toString().split("\n").filter(Boolean).forEach((l) => log(`${o.label}${l.replace(/^\[\S+\] /, "")}`));
         child.stdout!.on("data", forward);
         child.stderr!.on("data", forward);
         child.on("exit", (code, signal) => {
           if (stopping || p.held) return;
           // A crash loop (e.g. a bad config) backs off instead of spinning.
           p.quickExits = Date.now() - startedAt < 3000 ? p.quickExits + 1 : 0;
-          const delay = p.now ? 0 : p.quickExits > 3 ? Math.min(30_000, 1000 * 2 ** (p.quickExits - 3)) : 200;
-          p.now = false;
-          log(`${name === "tools" ? "the tools' workerd" : "workerd"} exited (${signal ?? code}); restarting${delay > 200 ? ` in ${Math.round(delay / 1000)}s` : ""}`);
+          const delay = p.restartNow ? 0 : p.quickExits > 3 ? Math.min(30_000, 1000 * 2 ** (p.quickExits - 3)) : 200;
+          p.restartNow = false;
+          log(`${o.label}workerd exited (${signal ?? code}); restarting${delay > 200 ? ` in ${Math.round(delay / 1000)}s` : ""}`);
           p.restarts++;
           p.restartTimer = setTimeout(() => p.start(), delay);
+          o.onExit?.();
         });
       },
-      /** Stop it, without the restart on exit (`hold`) or with it. */
-      stop(signal: NodeJS.Signals = "SIGTERM", hold = true) {
+      /** Stop it, held (no restart on exit, for a restore) or restarted at once. */
+      stop(signal: NodeJS.Signals = "SIGTERM", then: "hold" | "restart now" = "hold") {
         return new Promise<void>((done) => {
           const c = p.child;
           if (!c || c.exitCode !== null || c.signalCode !== null) return done();
-          if (hold) p.held = true;
+          if (then === "hold") p.held = true;
+          else p.restartNow = true;
           c.once("exit", () => done());
           c.kill(signal);
         });
@@ -657,13 +664,23 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     }
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const platform = workerdProcess("platform", platformCommand, () => ({ ...process.env, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TOOLS_TOKEN: toolsToken, HEWN_TIMEZONE: timezone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" }), pidFiles.platform, unix ? socketPath("calls") : undefined, data);
-  // The tools' environment holds only what workerd needs and their token: none of the supervisor's own (its secrets among it).
+  const platform = workerdProcess({
+    label: "",
+    command: platformCommand,
+    env: () => ({ ...process.env, HEWN_ADMIN_TOKEN: adminToken, HEWN_SUPERVISOR_TOKEN: supervisorToken, HEWN_SECRETS_KEY: secretsKey.key, HEWN_TOOLS_TOKEN: toolsToken, HEWN_TIMEZONE: timezone, HEWN_PROXY_SECRET: proxySecret, HEWN_PROXY_CLIENT_IP: proxyClientIp ? "1" : "", HEWN_REMOTE_JOBS: o.remote ? "1" : "", HEWN_HOSTED: o.hosted ? "1" : "", HEWN_HOST_SIGNIN_URL: o.hosted?.signInUrl ?? "" }),
+    pidFile: pidFiles.platform,
+    socket: unix ? socketPath("calls") : undefined,
+    cwd: data,
+    // The calls running in the tools process went with the platform that made them (their callbacks, their deadlines): the tools restart too.
+    onExit: () => void tools.stop("SIGTERM", "restart now"),
+  });
+  // The tools' environment: their token, and what workerd needs from the system (PATH, HOME, TMPDIR, the locale, the
+  // time zone); none of the supervisor's own variables (its secrets among them).
   const toolsEnv = (): NodeJS.ProcessEnv => {
     const keep = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
     return { ...Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), TZ: process.env.TZ ?? timezone, HEWN_TOOLS_TOKEN: toolsToken };
   };
-  const tools = workerdProcess("tools", toolsCommand, toolsEnv, pidFiles.tools, unix ? socketPath("tools") : undefined, run);
+  const tools = workerdProcess({ label: "tools: ", command: toolsCommand, env: toolsEnv, pidFile: pidFiles.tools, socket: unix ? socketPath("tools") : undefined, cwd: run });
   const healthy = async (timeoutMs: number) => {
     try {
       return (await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) })).ok;
@@ -674,8 +691,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   /** The tools process's /health, on its socket. */
   const toolsHealthy = (timeoutMs: number) =>
     new Promise<boolean>((done) => {
-      const where = channel.tools.startsWith("unix:") ? { socketPath: channel.tools.slice(5) } : { host: "127.0.0.1", port: Number(channel.tools.split(":")[1]) };
-      const req = httpRequest({ ...where, path: "/health", timeout: timeoutMs }, (res) => {
+      const req = httpRequest({ ...toolsAt, path: "/health", timeout: timeoutMs }, (res) => {
         res.resume();
         done(res.statusCode === 200);
       });
@@ -689,10 +705,12 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       await new Promise((r) => setTimeout(r, 100));
     }
   };
-  /** The tools first (the platform calls them), then the platform. */
-  const startBoth = () => {
-    tools.resume();
-    platform.resume();
+  /** The tools first, answering, then the platform (it calls them as it starts: interrupted builds, schedules). */
+  const startBoth = async (start: (p: typeof tools) => void) => {
+    start(tools);
+    await waitFor(toolsHealthy, "the tools' workerd");
+    start(platform);
+    await waitFor(healthy, "workerd");
   };
   const waitHealthy = async () => {
     await waitFor(toolsHealthy, "the tools' workerd");
@@ -715,15 +733,19 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     clearTimeout(tools.restartTimer);
     process.off("exit", killOnExit);
     tunnel.halt();
-    platform.child?.kill("SIGTERM");
-    tools.child?.kill("SIGTERM");
+    // The platform first, so nothing calls the tools meanwhile; the tools when it has gone (or after a moment).
+    const toolsChild = tools.child;
+    if (platform.child && platform.child.exitCode === null && platform.child.signalCode === null) {
+      const gone = new Promise((r) => platform.child!.once("exit", r));
+      platform.child.kill("SIGTERM");
+      await Promise.race([gone, new Promise((r) => setTimeout(r, 2000))]);
+    }
+    toolsChild?.kill("SIGTERM");
     await new Promise((r) => supervisorServer.close(r));
   };
   process.on("exit", killOnExit);
-  tools.start();
-  platform.start();
   try {
-    await waitHealthy();
+    await startBoth((p) => p.start());
   } catch (e) {
     // Leave nothing running: workerd restarting forever would keep this process (hewn serve, a test) alive.
     await shutdown();
@@ -739,10 +761,9 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     if (toolsRestarting) return;
     toolsRestarting = true;
     try {
-      log(`Hewn's tools ${why} (a tool may be stuck in a loop); restarting them`);
-      await admin("tools-stalled", { at: new Date().toISOString() }, 3000).catch((e) => log(`couldn't tell Hewn what was running: ${(e as Error).message}`));
-      tools.now = true;
-      await tools.stop("SIGKILL", false);
+      log(`Hewn's tools stopped responding (${why}; a tool may be stuck in a loop); restarting them`);
+      await admin("tools-stalled", { at: new Date().toISOString(), why }, 3000).catch((e) => log(`couldn't tell Hewn what was running: ${(e as Error).message}`));
+      await tools.stop("SIGKILL", "restart now");
     } finally {
       toolsRestarting = false;
     }
@@ -789,7 +810,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       t.unref();
       timers.push(t);
     };
-    watch(toolsHealthy, (seconds) => toolsStalled(`unresponsive for ${seconds}s`));
+    watch(toolsHealthy, (seconds) => toolsStalled(`no answer for ${seconds} s`));
     watch(healthy, (seconds) => {
       log(`workerd unresponsive for ${seconds}s; restarting it`);
       platform.child?.kill("SIGKILL");

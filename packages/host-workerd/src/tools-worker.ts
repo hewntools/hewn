@@ -12,7 +12,7 @@ import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
-import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, HOST_METHODS, type HostCalls, type HostMethod, type SentCode, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
+import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, HOST_METHODS, type HostCalls, type HostMethod, type SentCode, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import RUNTIME from "./capability-runtime.js";
@@ -32,10 +32,8 @@ const COMPAT_DATE = "2026-09-01";
 
 // ---------- the channel: the platform's calls ----------
 
-/** Bundles by hash: the platform sends a bundle's text once, then its hash. */
+/** Bundles by hash: the platform sends a bundle's text once, then its hash (the oldest go first past CODES_KEPT). */
 const codes = new Map<string, string>();
-/** Bundles kept by hash (the oldest go first; the platform sends one again when asked). */
-const CODES_KEPT = 200;
 
 function codeOf(sent: SentCode): CodeRef | undefined {
   if (typeof sent.js === "string") {

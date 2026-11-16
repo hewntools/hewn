@@ -32,7 +32,7 @@ export interface Readiness {
   missingModel?: string;
   /** Set when a pinned model was retired: the platform's suggested successor, if it knows one. */
   retiredModel?: { model: string; successor?: string };
-  /** Set while Hewn has it suspended (it kept Hewn from responding): nothing runs it until the owner resumes it. */
+  /** Set while Hewn has it suspended (it kept Hewn's tools from responding): nothing runs it until the owner resumes it. */
   suspended?: { at: string; reason: string };
   /** For agents: what to ask the user to do. */
   userAction?: string;
