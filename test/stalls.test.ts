@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Stalls: what was running when Hewn stopped responding, told so after the restart, and a tool that
+// Stalls: what was running when Hewn's tools stopped responding, told so before their restart, and a tool that
 // does it 3 times within an hour suspended until the owner resumes it. (On workerd, with a real
 // stall and the watchdog: workerd-runaway.test.ts.)
 import assert from "node:assert/strict";
@@ -61,7 +61,7 @@ describe("stalls", () => {
     const { p, out } = restart(min(0));
     assert.deepEqual(out, { tools: ["runaway", "running-log"], suspended: [], builds: [] });
     assert.equal(stalled(p, "runaway").length, 2);
-    assert.match(stalled(p, "runaway").join("\n"), /^\S+ codex spin@1 ERROR stalled: Hewn stopped responding while this ran and was restarted \d+ms$/m);
+    assert.match(stalled(p, "runaway").join("\n"), /^\S+ codex spin@1 ERROR stalled: Hewn's tools stopped responding while this ran and were restarted \d+ms$/m);
     assert.match(stalled(p, "running-log")[0], / claude-code → run-feeder list_runs@1 ERROR stalled: /);
     assert.deepEqual(p.registry.lifecycleEvents().filter((e) => e.action === "stalled").map((e) => [e.capabilityId, e.detail, e.actor]).sort(), [["runaway", "count@1", "hewn"], ["runaway", "spin@1", "hewn"], ["running-log", "list_runs@1", "hewn"]]);
     assert.equal(p.readiness("runaway").ready, true, "once isn't enough to suspend it");
@@ -83,7 +83,7 @@ describe("stalls", () => {
     assert.deepEqual(stall(70).suspended, [], "the first was more than an hour before the third");
     assert.equal(p.suspension("runaway"), undefined);
     assert.deepEqual(stall(80).suspended, ["runaway"]);
-    assert.deepEqual(p.suspension("runaway"), { at: min(80), reason: "it kept Hewn from responding 3 times within an hour" });
+    assert.deepEqual(p.suspension("runaway"), { at: min(80), reason: "it kept Hewn's tools from responding 3 times within an hour" });
     assert.deepEqual(stall(81).suspended, [], "suspended once");
     assert.equal(p.suspension("running-log"), undefined, "only the tool that was running");
   });
@@ -97,10 +97,10 @@ describe("stalls", () => {
     }
     const st = p.readiness("runaway");
     assert.equal(st.ready, false);
-    assert.deepEqual(st.suspended, { at: min(2), reason: "it kept Hewn from responding 3 times within an hour" });
-    assert.match(st.userAction!, /^Hewn suspended it: it kept Hewn from responding 3 times within an hour\. It runs again once the owner resumes it .*hewn resume runaway/);
+    assert.deepEqual(st.suspended, { at: min(2), reason: "it kept Hewn's tools from responding 3 times within an hour" });
+    assert.match(st.userAction!, /^Hewn suspended it: it kept Hewn's tools from responding 3 times within an hour\. It runs again once the owner resumes it .*hewn resume runaway/);
     assert.equal(p.list(t.codex).find((c) => c.id === "runaway")?.ready, false);
-    await assert.rejects(p.invoke(t.codex, { capabilityId: "runaway", operation: "tick", input: { tag: "x" } }), (e: any) => e.code === "not_ready" && /^runaway is suspended: it kept Hewn from responding 3 times within an hour\. It runs again once the owner resumes it$/.test(e.message) && !!e.details.suspended);
+    await assert.rejects(p.invoke(t.codex, { capabilityId: "runaway", operation: "tick", input: { tag: "x" } }), (e: any) => e.code === "not_ready" && /^runaway is suspended: it kept Hewn's tools from responding 3 times within an hour\. It runs again once the owner resumes it$/.test(e.message) && !!e.details.suspended);
     await assert.rejects(p.widget(USER, "runaway", "rows"), /runaway is suspended/);
     p.schedules.update(s.id, { nextRunAt: Date.now() - 1000 });
     await p.runDueSchedules();
@@ -136,7 +136,7 @@ describe("stalls", () => {
       p = restart(min(at)).p;
     }
     const health = await p.connectionHealth(USER, "site-connection");
-    assert.deepEqual([health.status, health.detail], ["needs_setup", "suspended: it kept Hewn from responding 3 times within an hour"]);
+    assert.deepEqual([health.status, health.detail], ["needs_setup", "suspended: it kept Hewn's tools from responding 3 times within an hour"]);
   });
 
   test("a build whose own code was running fails for that reason and isn't retried; the live tool isn't blamed", async () => {
@@ -150,7 +150,7 @@ describe("stalls", () => {
     assert.deepEqual(await p.recoverInterruptedBuilds(), [], "not retried");
     const b = p.getBuild(t.claude, opened.buildId);
     assert.equal(b.status, "failed");
-    assert.deepEqual([b.failure?.title, b.failure?.detail], ["Its code kept Hewn from responding", "Running tick@1 never let go (an endless loop?), so Hewn was restarted. It wasn't tried again: it would do the same."]);
+    assert.deepEqual([b.failure?.title, b.failure?.detail], ["Its code kept Hewn's tools from responding", "Running tick@1 never let go (an endless loop?), so Hewn's tools were restarted. It wasn't tried again: it would do the same."]);
     assert.deepEqual(stalled(p, "runaway"), []);
     release();
   });

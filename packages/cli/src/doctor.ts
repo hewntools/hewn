@@ -50,7 +50,7 @@ export interface DoctorDeps {
   /** Hewn answering on its port. */
   health?: () => Promise<boolean>;
   /** The running supervisor's status (hewn serve), if any. */
-  control?: () => Promise<{ restarts: number; keySource: KeySource; sandbox: boolean } | undefined>;
+  control?: () => Promise<{ restarts: number; toolsRestarts?: number; keySource: KeySource; sandbox: boolean } | undefined>;
   /** The owner's builder and intake settings (from the running Hewn, else platform.json). */
   settings?: () => Promise<{ builder: string; jobModels?: { builder?: Record<string, { model?: string; effort?: string }> } }>;
   service?: () => { installed: boolean; running: boolean; busLost?: boolean };
@@ -90,7 +90,7 @@ export async function runDoctor(d: DoctorDeps): Promise<Check[]> {
   const status = up ? await (d.control ?? (async () => undefined))().catch(() => undefined) : undefined;
   add(
     up
-      ? { name: "Hewn", state: "ok", detail: `running on port ${d.port}${status?.restarts ? ` · workerd restarted ${status.restarts}× (watchdog/crash)` : ""}` }
+      ? { name: "Hewn", state: "ok", detail: `running on port ${d.port}${status?.restarts ? ` · workerd restarted ${status.restarts}× (watchdog/crash)` : ""}${status?.toolsRestarts ? ` · the tools restarted ${status.toolsRestarts}× (a tool stuck in a loop, or a crash)` : ""}` }
       : { name: "Hewn", state: "fail", detail: "not running", fix: "hewn service install (or hewn serve in a terminal)" },
   );
   if (d.service) {

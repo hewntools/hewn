@@ -183,9 +183,9 @@ export class Domain {
 
 /**
  * In a loop of calls into a tool (validation, a sample replay, due schedules), a turn of the event loop every 100 ms
- * or so. On the workerd host a call that settles without I/O never lets the event loop turn, so a long run of them
- * leaves every request waiting, the supervisor's health check among them, and the supervisor restarts workerd after
- * its stall time (5 s by default). By time, not per call: a turn per call adds seconds to hundreds of cases.
+ * or so. A call that settles without I/O never lets the event loop turn, so a long run of them would leave every
+ * other request waiting. (On the workerd host each call crosses to the tools' process, so it yields anyway.) By
+ * time, not per call: a turn per call adds seconds to hundreds of cases.
  */
 export function breather() {
   let last = Date.now();
