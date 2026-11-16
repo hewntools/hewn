@@ -352,8 +352,11 @@ export class Platform {
 
   // ---------- stalls: what was running when Hewn stopped responding, suspended tools (platform/stalls.ts) ----------
 
-  /** Once at start, before `recoverInterruptedBuilds`. `stalledAt`: when the host restarted Hewn for not responding, if it did. */
-  recoverStall(stalledAt?: string): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt); }
+  /**
+   * What was running when the host found the tools not responding (`stalledAt`, before it restarts them), or once at start
+   * (unset). `caused`: which of it may have held them, when the host can tell (else all of it).
+   */
+  recoverStall(stalledAt?: string, caused?: (running: { capabilityId: string; state: string }) => boolean): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt, caused); }
   suspension(capabilityId: string): Suspension | undefined { return this.d.stalls.suspension(capabilityId); }
   resume(owner: Agent, capabilityId: string) { return this.d.stalls.resume(owner, capabilityId); }
 

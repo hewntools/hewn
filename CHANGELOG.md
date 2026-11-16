@@ -14,6 +14,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- When a tool's code never lets go, Hewn now blames only that tool: a tool that was waiting on it, on a model or on the network at that moment isn't told it was its doing, and gets no strike toward being suspended. See [the threat model](docs/threat-model.md).
 - A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.
 - A build's code stayed in memory until Hewn restarted, failed builds too, and a tool that reaches the internet took twice the memory.
 

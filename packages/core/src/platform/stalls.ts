@@ -2,9 +2,10 @@
 // Stalls: tool code that kept Hewn's tools from responding. Code that never yields can't be stopped
 // from inside the host (one thread runs every tool): the host's watchdog restarts the tools. To say
 // which tool did it, whatever runs tool code (a call, a build's tests) is written down while it runs;
-// when the tools stop responding, what's written down is running then. A tool that was is told so in
-// its log and in Activity, and one that does it 3 times within an hour is suspended until the owner
-// resumes it. A build whose own code did it fails, and isn't retried.
+// when the tools stop responding, what's written down is running then. A tool whose code may have held
+// them (the host rules out what was waiting, when it can) is told so in its log and in Activity, and one
+// that does it 3 times within an hour is suspended until the owner resumes it. A build whose own code
+// did it fails, and isn't retried.
 import { type Agent, requireOwner } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { Domain } from "./context.ts";
@@ -51,10 +52,10 @@ export class Stalls extends Domain {
 
   /**
    * `stalledAt`: when the host's watchdog found the tools not responding, before it restarts them; what is
-   * running is told so. Unset: once at start, before interrupted builds are retried; what was written
-   * down only goes.
+   * running is told so, or only what `caused` says may have held them (the rest was waiting, and fails as it
+   * goes). Unset: once at start, before interrupted builds are retried; what was written down only goes.
    */
-  recover(stalledAt?: string): { tools: string[]; suspended: string[]; builds: string[] } {
+  recover(stalledAt?: string, caused?: (running: { capabilityId: string; state: string }) => boolean): { tools: string[]; suspended: string[]; builds: string[] } {
     const left = this.registry.takeRunningCode();
     const out = { tools: [] as string[], suspended: [] as string[], builds: [] as string[] };
     // A restart of a restart (or the platform started again in the same process) says the same stall again.
@@ -62,6 +63,10 @@ export class Stalls extends Domain {
     this.registry.setKv(LAST_STALL, stalledAt);
     if (!left.length) this.logger(`Hewn's tools stopped responding and were restarted (${stalledAt}); no tool code was running`);
     for (const r of left) {
+      if (caused && !caused(r)) {
+        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was running too, waiting: not the cause`);
+        continue;
+      }
       const build = BUILD_STATE.exec(r.state)?.[1];
       if (build) {
         this.stalledBuild(build, r.what);

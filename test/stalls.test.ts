@@ -70,6 +70,18 @@ describe("stalls", () => {
     assert.deepEqual(restart(min(0)).out.tools, []);
   });
 
+  test("when the host can tell which code held the tools, only that tool is told and struck; the rest was waiting", () => {
+    code(t.platform, "runaway", "spin@1");
+    code(t.platform, "running-log", "list_runs@1", "", "claude-code → run-feeder");
+    code(t.platform, "runaway", "tick@1", "test:b-1");
+    const out = t.platform.recoverStall(min(0), (r) => r.capabilityId === "runaway" && r.state === "");
+    assert.deepEqual(out, { tools: ["runaway"], suspended: [], builds: [] });
+    assert.equal(stalled(t.platform, "runaway").length, 1);
+    assert.deepEqual(stalled(t.platform, "running-log"), [], "the one waiting isn't told it was its doing");
+    assert.deepEqual(t.platform.registry.lifecycleEvents().filter((e) => e.action === "stalled").map((e) => e.capabilityId), ["runaway"]);
+    assert.deepEqual(running(t.platform), [], "what was written down goes, all of it");
+  });
+
   test("3 stalls within an hour suspend a tool; spread wider, they don't", () => {
     let p = t.platform;
     const stall = (at: number) => {

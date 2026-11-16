@@ -3,9 +3,9 @@
 // them (its tokens, code by hash), and a tool that won't stop when its call's deadline comes.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { platform as osPlatform } from "node:os";
+import { platform as osPlatform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { config as platformConfig, sandboxed, toolsConfig, toolsSandbox } from "@hewntools/cli/supervisor/index.ts";
@@ -13,7 +13,7 @@ import { workerdBinary } from "@hewntools/cli/app-dir.ts";
 import { restoreBackup } from "@hewntools/cli/backup.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { STORAGE_KEYS } from "@hewntools/cli/supervisor/format.ts";
-import { toolsChannel, type ToolsSocket, ToolsUnreachable } from "@hewntools/host-workerd/tools-channel.ts";
+import { stallSuspects, toolsChannel, type ToolsSocket, ToolsUnreachable } from "@hewntools/host-workerd/tools-channel.ts";
 import { CALL_DEADLINE_MS } from "@hewntools/core/platform.ts";
 import { FIXTURES } from "./helpers.ts";
 import { startTestHost, type TestHost } from "./workerd-helpers.ts";
@@ -232,6 +232,56 @@ describe("a home written by Hewn 0.4.11, when the platform and the tools ran in 
     await h.invoke("runaway", "tick", { tag: "c" });
     assert.deepEqual((await h.invoke("runaway", "count")).result.rows, { a: 1, b: 2, c: 1 });
     assert.deepEqual(readdirSync(join(h.root, "workerd", "do")).sort(), [STORAGE_KEYS.capability, STORAGE_KEYS.owner].sort());
+  });
+});
+
+describe("which code held up the tools", () => {
+  const call = (o: Partial<{ started: boolean; waiting: number; isolate: string }> & { id: string }) => ({ capabilityId: o.id, state: "", started: o.started ?? true, waiting: o.waiting ?? 0, isolate: o.isolate ?? `iso-${o.id}` });
+
+  test("a call that started and isn't waiting on Hewn or the network; not one queued behind it, or waiting", () => {
+    const calls = [call({ id: "loops" }), call({ id: "queued", started: false }), call({ id: "on-a-callback", waiting: 1 }), call({ id: "on-a-fetch" })];
+    assert.deepEqual(stallSuspects(calls, new Map([["iso-on-a-fetch", 1]]), 0)?.map((c) => c.capabilityId), ["loops"]);
+  });
+
+  test("can't be told: a tool's code loading or migrating meanwhile, or every call waiting", () => {
+    assert.equal(stallSuspects([call({ id: "loops" })], new Map(), 1), undefined);
+    assert.equal(stallSuspects([call({ id: "on-a-callback", waiting: 1 }), call({ id: "queued", started: false })], new Map(), 0), undefined);
+  });
+});
+
+describe("which code held up the tools, on the real host", () => {
+  let h: TestHost;
+  before(async () => {
+    h = await startTestHost();
+    for (const dir of [join(FIXTURES, "runaway"), join(FIXTURES, "running-log")]) {
+      const r = await h.sv.admin("install", { name: dir.split("/").at(-1), purpose: "runs", dir, wait: true });
+      assert.equal(r.status, "promoted", r.log.join("\n"));
+    }
+    // Waiter: calls Runaway's spin@1, and waits on it.
+    const dir = mkdtempSync(join(tmpdir(), "hewn-waiter-"));
+    for (const d of ["src", "tests"]) mkdirSync(join(dir, d));
+    writeFileSync(join(dir, "capability.json"), JSON.stringify({ id: "waiter", name: "Waiter", purpose: "Waits on Runaway.", abi: "2.0", requires: { capabilities: [{ id: "runaway", operations: ["spin@1"] }] }, operations: [{ name: "wait", description: "wait", version: 1, sideEffect: "read", inputSchema: { type: "object" }, outputSchema: { type: "object" } }] }));
+    writeFileSync(join(dir, "src", "index.ts"), `export const operations = { async "wait@1"(_: unknown, ctx: { call: (id: string, op: string, input?: unknown) => Promise<unknown> }) { await ctx.call("runaway", "spin@1", {}); return {}; } };\n`);
+    writeFileSync(join(dir, "tests", "cases.json"), JSON.stringify([{ name: "waits", operation: "wait", input: {}, calls: { "runaway/spin@1": {} }, expect: {} }]));
+    const w = await h.sv.admin("install", { name: "Waiter", purpose: "waits", dir, wait: true });
+    assert.equal(w.status, "promoted", w.log.join("\n"));
+    await h.sv.admin("approve", { capabilityId: "waiter" });
+  });
+  after(() => h?.stop());
+
+  test("only the tool whose code never yields is told and struck; one waiting on it through a call, and one sent after, aren't", async () => {
+    const before = h.sv.toolsRestarts();
+    const waiting = h.invoke("waiter", "wait").then(() => assert.fail("wait returned"), (e: Error) => e);
+    await new Promise((r) => setTimeout(r, 300));
+    const queued = h.invoke("running-log", "list_runs").then(() => assert.fail("list_runs returned"), (e: Error) => e);
+    const [w, q] = await Promise.all([waiting, queued]);
+    for (const end = Date.now() + 5000; h.sv.toolsRestarts() === before && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(h.sv.toolsRestarts(), before + 1);
+    for (const e of [w, q]) assert.match(e.message, /another tool's code held up Hewn's tools while this ran, and they were restarted/);
+    const lines = async (id: string) => (await h.sv.admin("logs", { capabilityId: id, n: 20 })).lines as string[];
+    assert.equal((await lines("runaway")).filter((l) => / waiter spin@1 ERROR stalled: /.test(l) || / spin@1 ERROR stalled: /.test(l)).length, 1, (await lines("runaway")).join("\n"));
+    for (const id of ["waiter", "running-log"]) assert.deepEqual((await lines(id)).filter((l) => / ERROR stalled: /.test(l)), [], id);
+    assert.deepEqual((await h.invoke("running-log", "list_runs")).result, { runs: [] }, "and it runs again");
   });
 });
 
