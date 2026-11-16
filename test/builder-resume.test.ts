@@ -193,7 +193,8 @@ describe("a builder is stopped only when it does nothing (no time limit)", () =>
     const j = job({ buildId: "b-idle", workspace: ws, logPath: join(dir, "b-idle.log") });
     writeFileSync(j.logPath, "");
     const [cmd, args] = node(code);
-    return { j, run: () => runCli(cmd, [...args], j, () => null, idleMs, { ownState: [], denyKeychain: false }, process.env) };
+    j.idleMs = idleMs;
+    return { j, run: () => runCli(cmd, [...args], j, (e) => (e && typeof e === "object" ? "worked" : null), { ownState: [], denyKeychain: false }, process.env) };
   };
   const failure = (p: Promise<unknown>) => p.then(() => ({}) as any, (e) => e);
 
@@ -213,6 +214,16 @@ describe("a builder is stopped only when it does nothing (no time limit)", () =>
     const dead = await failure(quiet("setTimeout(() => {}, 60_000);", 300).run());
     assert.equal(dead.idle, true);
     assert.equal(dead.active, false);
+    // Start-up events alone (a line its formatter shows nothing for) aren't work done: hung all the same.
+    const started = await failure(quiet(`console.log('"init"'); setTimeout(() => {}, 60_000);`, 300).run());
+    assert.equal(started.idle, true);
+    assert.equal(started.active, false);
+    // Stopped by the owner before a run (between an idle stop and its resume): it doesn't start.
+    const stopped = quiet("console.log('{}')", 300);
+    const abort = new AbortController();
+    abort.abort();
+    stopped.j.signal = abort.signal;
+    assert.equal((await failure(stopped.run())).cancelled, true);
   });
 
   test("a run stopped for no activity resumes its session in the same attempt, as many times as it works on; a hung one is a failed attempt", async () => {

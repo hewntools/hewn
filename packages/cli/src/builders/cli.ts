@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, constants, copyFileSync, createWriteStream, existsSync, type FSWatcher, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, constants, copyFileSync, createWriteStream, existsSync, type FSWatcher, mkdirSync, readdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { cp } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EFFORT } from "@hewntools/core/build-models.ts";
+import { isArtefact } from "@hewntools/core/files.ts";
 import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./activity.ts";
 import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./models.ts";
 import { OPENCODE_NO_UPDATE, opencodeUserDirs } from "./opencode-dirs.ts";
@@ -27,6 +28,8 @@ export function builderPrompt(job: BuildJob): string {
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }
+  // Stopped for no activity with no session to resume: its work is in the workspace.
+  if (job.resumedAfterIdle) lines.push(`\nHewn stopped an earlier run of this attempt after ${minutesText(job.idleMs ?? BUILDER_IDLE_MS)} with no activity. The workspace holds what it did: carry on from there rather than starting over.`);
   return lines.join("\n");
 }
 
@@ -92,11 +95,47 @@ const minutesText = (ms: number) => {
 };
 
 /**
- * Run the CLI until it ends. It is stopped only after `idleMs` with no activity: nothing on its output and no
+ * Watch a workspace for files written, calling `changed` with a path inside it. macOS watches the whole tree
+ * cheaply; elsewhere a recursive watch walks the tree (a node_modules too) and holds a watch per file, so only
+ * the workspace's own folders are watched, as they are when the run starts. No watching at all: output alone counts.
+ */
+function watchWorkspace(workspace: string, changed: (file: string | null) => void): FSWatcher[] {
+  const out: FSWatcher[] = [];
+  const add = (dir: string, recursive: boolean) => {
+    try {
+      const w = watch(join(workspace, dir), { recursive }, (_event, file) => changed(file ? join(dir, file) : null));
+      w.on("error", () => w.close());
+      out.push(w);
+    } catch {
+      // Not watchable: its output still counts.
+    }
+  };
+  if (platform() === "darwin") add("", true);
+  else {
+    const walk = (dir: string, depth: number) => {
+      add(dir, false);
+      if (depth >= 3 || out.length >= 200) return;
+      for (const e of readdirSync(join(workspace, dir), { withFileTypes: true })) {
+        const rel = join(dir, e.name);
+        if (e.isDirectory() && !e.name.startsWith(".") && !isArtefact(rel)) walk(rel, depth + 1);
+      }
+    };
+    try {
+      walk("", 0);
+    } catch {
+      // A folder gone meanwhile: what's watched so far will do.
+    }
+  }
+  return out;
+}
+
+/**
+ * Run the CLI until it ends. It is stopped only after the job's `idleMs` with no activity: nothing on its output and no
  * file changed in the workspace (a hung run: a prompt it can't answer, a dead network call). That rejects with
  * `idle`, and `active` says whether the run did anything at all before it went quiet.
  */
-export function runCli(command: string, args: string[], job: BuildJob, format: Formatter, idleMs: number, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
+export function runCli(command: string, args: string[], job: BuildJob, format: Formatter, confine: Confine, env: NodeJS.ProcessEnv = builderEnv(), onEvent?: (event: any) => void, quietStartMs?: number): Promise<void> {
+  const idleMs = job.idleMs ?? BUILDER_IDLE_MS;
   const write = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
   write(`===== attempt ${job.attempt}${job.pass ? `, the ${job.pass.name} pass` : ""}: ${command}${job.platformRoot ? " (sandboxed)" : ""} =====`);
   if (job.platformRoot) {
@@ -110,6 +149,8 @@ export function runCli(command: string, args: string[], job: BuildJob, format: F
   let usedTools = false;
   const checkModel = (text: string) => job.model && !usedTools && !modelRejected && MODEL_REJECTED.test(text) && (modelRejected = text.trim().slice(0, 300));
   return new Promise((resolve, reject) => {
+    // Stopped before this run started (between an idle stop and its resume): don't start it.
+    if (job.signal?.aborted) return reject(Object.assign(new Error("cancelled"), { cancelled: true }));
     const raw = createWriteStream(job.logPath.replace(/\.log$/, ".jsonl"), { flags: "a" });
     const child = spawn(command, args, { cwd: job.workspace, env, stdio: ["ignore", "pipe", "pipe"] });
     // A CLI that never says anything (OpenCode has been seen stuck before its first event): stop it early, with a reason.
@@ -117,11 +158,14 @@ export function runCli(command: string, args: string[], job: BuildJob, format: F
     let quiet = quietStartMs ? setTimeout(() => ((stalled = true), child.kill("SIGTERM")), quietStartMs) : undefined;
     const spoke = () => (clearTimeout(quiet), (quiet = undefined));
     let idle = false;
+    // Whether it did any work: a line of activity (its words, a tool) or a file written; not its start-up events.
     let active = false;
     const stopIdle = () => ((idle = true), child.kill("SIGTERM"));
-    let idleTimer = setTimeout(stopIdle, idleMs);
-    const busy = () => {
-      active = true;
+    // Never before the quiet start's own stop, which says better what happened.
+    let idleTimer = setTimeout(stopIdle, Math.max(idleMs, quietStartMs ?? 0));
+    /** Any sign of life puts the idle stop off; `work` also counts as having done something. */
+    const busy = (work = false) => {
+      if (work) active = true;
       clearTimeout(idleTimer);
       idleTimer = setTimeout(stopIdle, idleMs);
     };
@@ -130,18 +174,12 @@ export function runCli(command: string, args: string[], job: BuildJob, format: F
     const started = Date.now();
     const changed = (file: string | null) => {
       try {
-        if (file && statSync(join(job.workspace, file)).mtimeMs >= started) busy();
+        if (file && statSync(join(job.workspace, file)).mtimeMs >= started) busy(true);
       } catch {
         // Gone, or not a path in the workspace: nothing to tell.
       }
     };
-    let watcher: FSWatcher | undefined;
-    try {
-      watcher = watch(job.workspace, { recursive: true }, (_event, file) => changed(file));
-      watcher.on("error", () => watcher?.close());
-    } catch {
-      // No watching here: its output alone counts.
-    }
+    const watchers = watchWorkspace(job.workspace, changed);
     createInterface({ input: child.stdout }).on("line", (line) => {
       spoke();
       busy();
@@ -158,6 +196,7 @@ export function runCli(command: string, args: string[], job: BuildJob, format: F
         activity = line.trim() || null;
       }
       if (!activity) return;
+      busy(true);
       if (USED_TOOL.test(activity)) usedTools = true;
       if (!unavailable && UNAVAILABLE.test(activity)) unavailable = activity.replace(/^\S+\s/, "");
       for (const l of activity.split("\n")) write(l);
@@ -172,7 +211,7 @@ export function runCli(command: string, args: string[], job: BuildJob, format: F
       write(`! ${line}`);
     });
     const cancel = () => child.kill("SIGTERM");
-    const done = () => (clearTimeout(idleTimer), watcher?.close(), spoke());
+    const done = () => (clearTimeout(idleTimer), watchers.forEach((w) => w.close()), spoke());
     job.signal?.addEventListener("abort", cancel, { once: true });
     child.once("error", (e) => (done(), reject(e)));
     child.once("close", (code, signal) => {
@@ -182,7 +221,7 @@ export function runCli(command: string, args: string[], job: BuildJob, format: F
       raw.end();
       if (code === 0) resolve();
       else if (idle && !stalled) reject(Object.assign(new Error(`no activity for ${minutesText(idleMs)}`), { idle: true, active, usedTools }));
-      else if (stalled) reject(Object.assign(new Error(`${command} said nothing for ${Math.round(quietStartMs! / 60_000)} minutes, so Hewn stopped it (it never started); try again`), { usedTools }));
+      else if (stalled) reject(Object.assign(new Error(`${command} said nothing for ${minutesText(quietStartMs!)}, so Hewn stopped it (it never started); try again`), { usedTools }));
       else if (modelRejected) reject(Object.assign(new Error(modelRejected), { modelRejected: true }));
       else if (unavailable) reject(Object.assign(new Error(`${unavailable} (log in to ${job.builderName ?? "the builder CLI"}, or switch "builder" in platform.json)`), { unavailable: true }));
       else reject(Object.assign(new Error(`${command} exited with ${signal ?? code} (see ${job.logPath})`), { usedTools }));
@@ -517,32 +556,33 @@ export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): 
  * A run stopped for no activity resumes its session in the same attempt: that isn't a failure, unless it
  * did nothing at all before it went quiet (then it's hung, and resuming would hang again).
  */
-export async function withResume(builder: keyof typeof sessions, job: BuildJob, run: (resume: string | undefined, job: BuildJob) => Promise<void>) {
+export async function withResume(builder: keyof typeof sessions, job: BuildJob, run: (resume: string | undefined, current: BuildJob) => Promise<void>) {
   const note = (line: string) => (appendFileSync(job.logPath, `${stamp()} ${line}\n`), job.onActivity?.(line));
-  const once = async (resume: string | undefined, attempt: BuildJob) => {
-    if (!resume) return run(undefined, attempt);
+  const once = async (resume: string | undefined, current: BuildJob) => {
+    if (!resume) return run(undefined, current);
     try {
-      await run(resume, attempt);
+      await run(resume, current);
     } catch (e) {
       const err = e as { usedTools?: boolean; cancelled?: boolean; unavailable?: boolean; modelRejected?: boolean; idle?: boolean };
       if (err.usedTools !== false || err.cancelled || err.unavailable || err.modelRejected || err.idle) throw e;
       forgetSession(job.buildId);
       note("couldn't resume the earlier session; starting over");
-      await run(undefined, attempt);
+      await run(undefined, current);
     }
   };
   let resume = sessionOf(builder, job);
-  let attempt = job;
+  let current = job;
   for (;;) {
     try {
-      return await once(resume, attempt);
+      return await once(resume, current);
     } catch (e) {
       const err = e as { idle?: boolean; active?: boolean; message: string };
       if (!err.idle || !err.active) throw e;
-      note(`${err.message}; resuming`);
+      if (job.signal?.aborted) throw Object.assign(new Error("cancelled"), { cancelled: true });
       // Its own session, where it stopped: the prompt says so, not the failure it had already been given.
       resume = sessions[builder].get(job.buildId);
-      attempt = { ...job, resumedAfterIdle: true };
+      note(`${err.message}; ${resume ? "resuming" : "starting again in place"}`);
+      current = { ...job, resumedAfterIdle: true };
     }
   }
 }
@@ -550,16 +590,15 @@ export async function withResume(builder: keyof typeof sessions, job: BuildJob, 
 async function codexRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the thread; the login only for a run.
   const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("codex", job, async (resume, attempt) => {
+  await withResume("codex", job, async (resume, current) => {
     const isolated = codexHome(home);
     const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "codex",
-        codexArgs(attempt, resume, check?.server),
-        attempt,
+        codexArgs(current, resume, check?.server),
+        current,
         codexActivity,
-        job.idleMs ?? BUILDER_IDLE_MS,
         // Codex has a shell: no Keychain. Its auth lives in its own home.
         { ownState: [isolated.dir], denyKeychain: true },
         isolated.env,
@@ -591,7 +630,7 @@ export function opencodeArgs(job: BuildJob, resume?: string): string[] {
 async function opencodeRun(job: BuildJob) {
   // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("opencode", job, async (resume, attempt) => {
+  await withResume("opencode", job, async (resume, current) => {
     const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     const isolated = await opencodeHome(home, check ? opencodeCheck(check.server) : { rules: OPENCODE_BUILDER_RULES });
     try {
@@ -599,10 +638,9 @@ async function opencodeRun(job: BuildJob) {
       if (job.model && !(await opencodeHasModel(job.model, isolated.env, isolated.dir))) throw opencodeModelRejected(job.model);
       await runCli(
         "opencode",
-        opencodeArgs(attempt, resume),
-        attempt,
+        opencodeArgs(current, resume),
+        current,
         opencodeActivity,
-        job.idleMs ?? BUILDER_IDLE_MS,
         // Its logins come as a file in its own home: no Keychain, none of your ~/.config/opencode. A local model server's port stays open.
         { ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback },
         isolated.env,
@@ -654,17 +692,18 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
 async function claudeRun(job: BuildJob) {
   // Its own dir per build (builds run side by side), kept between attempts for the session; the login only for a run.
   const home = claudeBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("claude", job, async (resume, attempt) => {
+  await withResume("claude", job, async (resume, current) => {
     const session = { id: resume ?? randomUUID(), resume: !!resume };
+    // Known before it starts: a run stopped for no activity resumes it even if it never said so.
+    noteSession("claude", job.buildId, session.id);
     const isolated = claudeHome(home, undefined, { keepSessions: true });
     const check = job.check ? openCheck(job.workspace, job.check) : undefined;
     try {
       await runCli(
         "claude",
-        claudeArgs(attempt, session, check?.server),
-        attempt,
+        claudeArgs(current, session, check?.server),
+        current,
         claudeActivity,
-        job.idleMs ?? BUILDER_IDLE_MS,
         // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
         { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
         // A check takes longer than an MCP call usually does.
