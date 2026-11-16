@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The egress gate's rules, runtime-neutral (the Egress entrypoint in worker.ts applies them).
+// The egress gate's rules, runtime-neutral (the Egress entrypoint in tools-worker.ts applies them).
 
 export const hostAllowed = (host: string, allowed: string[]) =>
   allowed.some((h) => (h.startsWith("*.") ? host.endsWith(h.slice(1)) && host.length > h.length - 1 : host === h));

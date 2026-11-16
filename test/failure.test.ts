@@ -27,6 +27,12 @@ describe("plain-language build failures", () => {
     assert.equal(breaking.detail, "record_run@1 input $.date: type changed");
   });
 
+  test("code that never let go: today's log line and one from before the tools ran in a process of their own", () => {
+    for (const line of ["FAILED: its code kept Hewn's tools from responding (running tick@1), so Hewn's tools were restarted; not retried", "FAILED: its code kept Hewn from responding (running tick@1), so Hewn was restarted; not retried"]) {
+      assert.equal(explainFailure([line]).title, "Its code kept Hewn's tools from responding", line);
+    }
+  });
+
   test("a builder that kept crashing, with no validation run", () => {
     const f = explainFailure(["attempt 1: builder claude failed: exit 1", "attempt 2: builder claude failed: exit 1", "FAILED: no valid candidate after 2 attempts"]);
     assert.deepEqual(f, { title: "The builder stopped", detail: "exit 1", attempt: 2, maxAttempts: 2 });

@@ -1333,6 +1333,11 @@ export class Builds extends Domain {
     };
   }
 
+  /** A build whose own code kept Hewn's tools from responding (stalls.ts failed it): what's left of its run stops. */
+  stopStalled(buildId: string) {
+    this.aborts.get(buildId)?.abort();
+  }
+
   /**
    * Check the workspace's candidate as validation does, without promoting it (`promoteCandidate`
    * does). `measure`: also measure what a craft pass should fix; `pass`: the pass it comes from (its
