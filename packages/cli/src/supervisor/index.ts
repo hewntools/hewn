@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import type { CapabilityBuilder } from "../builders/types.ts";
 import { toBase64, fromBase64 } from "@hewntools/core/files.ts";
 import { checkFromJson } from "@hewntools/core/checks.ts";
-import type { CheckResult } from "@hewntools/core/ports.ts";
+import type { CheckResult, Files } from "@hewntools/core/ports.ts";
 import type { Home } from "../home.ts";
 import { localWorkbench } from "../workbench.ts";
 import type { Intake } from "../intake.ts";
@@ -106,6 +106,8 @@ export const DISK_FLOOR = 1024 ** 3;
 export const diskFloor = (total: number) => Math.floor(Math.min(DISK_FLOOR, total / 10));
 
 /** "1.4 GB", "80 MB". */
+/** Files the workerd host sent (base64 by path). */
+const decodeFiles = (files: unknown): Files => Object.fromEntries(Object.entries(files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]));
 const sized = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`);
 
 export type { Hosted };
@@ -346,7 +348,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
   const models = o.models ?? modelCatalogs({ catalogs: cliCatalogs(), ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
-  const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined) });
+  const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined), builderIdleMs: () => {
+      const minutes = readConfig(o.home).builderIdleMinutes;
+      return minutes === undefined ? undefined : minutes * 60_000;
+    },
+  });
   const blobRoot = join(data, "blobs");
 
   // ---------- the supervisor's own HTTP channel (workerd → supervisor) ----------
@@ -357,7 +363,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   /** Builders' checks waiting for the core's answer (`${buildId}/${id}`). */
   const checks = new Map<string, { resolve: (r: CheckResult) => void; reject: (e: Error) => void }>();
   const routes: Record<string, (body: any, req: IncomingMessage, res: ServerResponse) => Promise<unknown>> = {
-    "/workbench/open": async (b) => workbench.open(b.buildId, Object.fromEntries(Object.entries(b.files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]))),
+    "/workbench/open": async (b) => workbench.open(b.buildId, decodeFiles(b.files)),
     "/workbench/read": async (b) => ({ files: Object.fromEntries(Object.entries(await workbench.read(b.buildId)).map(([p, x]) => [p, toBase64(x)])) }),
     "/workbench/file": async (b) => {
       const f = await workbench.file(b.buildId, b.path);
@@ -365,7 +371,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     },
     "/workbench/remove": async (b) => workbench.remove(b.buildId),
     "/workbench/snapshot": async (b) => workbench.snapshot(String(b.buildId), String(b.to)),
-    "/workbench/write-folder": async (b) => workbench.writeFolder(String(b.buildId), String(b.folder), Object.fromEntries(Object.entries(b.files as Record<string, string>).map(([p, x]) => [p, fromBase64(x)]))),
+    "/workbench/carry-over": async (b) => ({ carried: await workbench.carryOver(String(b.from), String(b.to), decodeFiles(b.overlay)) }),
+    "/workbench/write-folder": async (b) => workbench.writeFolder(String(b.buildId), String(b.folder), decodeFiles(b.files)),
     "/workbench/bundle": async (b) => workbench.bundle(b.buildId),
     "/workbench/note": async (b) => workbench.note(b.buildId, b.line),
     "/workbench/transcript": async (b) => ({ text: (await workbench.transcript(b.buildId)) ?? null }),

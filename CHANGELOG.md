@@ -11,10 +11,15 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### Changes
 
 - **The platform and the tools run in separate processes.** Your tools run in a workerd process of their own, with their data and network access and nothing else of yours (not the secrets key, Hewn's database or its files), behind a sandbox of its own. A tool stuck in a loop now restarts only the tools: the web client, your agents' connections and schedules keep answering meanwhile. `hewn status` counts the tools' restarts next to Hewn's. Your data stays where it is: nothing to migrate. See [the threat model](docs/threat-model.md).
+- **Home's tool list is lighter on Hewn:** each refresh of an open page makes a third of the memory churn it did and answers in about half the time, as a tool's versions are read from the database once, not at every look.
+- **No time limit on a build's attempt.** A builder on your machine is stopped only when it has done nothing for 15 minutes (no output, no file written), and then carries on in the same attempt; `builderIdleMinutes` in `platform.json` changes the 15. Before, every attempt stopped at 15 minutes, and big builds used up their attempts on it. See [When a build fails](docs/building-tools.md#when-a-build-fails).
+- **Retry** and **Ask builder to fix** carry on from the files the failed build left, a Polish's too, instead of starting over: the builder fixes what failed there, and a build too big for its attempts doesn't do its work twice. Starting a build you stopped again carries on from where it stopped too. A change's retry now says in its log that it is one. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 
 ### Fixes
 
 - When a tool's code never lets go, Hewn now blames only that tool: a tool that was waiting on it, on a model or on the network at that moment isn't told it was its doing, and gets no strike toward being suspended. Activity lists every tool that was there and what it was doing, and a suspension says which stalls it came from. See [the threat model](docs/threat-model.md).
+- A failed build that was retried still offered Retry and Ask builder to fix, which were then refused; its card now says "Retried as …" and how that build went.
+- The tool's version at the top of its page stayed old after a change went live from the Change panel, until a reload.
 - A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.
 - A build's code stayed in memory until Hewn restarted, failed builds too, and a tool that reaches the internet took twice the memory.
 

@@ -13,6 +13,7 @@ import { sha256 } from "@hewntools/core/sha256.ts";
 import { fetchLink, privateHost } from "@hewntools/host-workerd/surface/fetch-link.ts";
 import type { TunnelStatus } from "@hewntools/host-workerd/surface/host.ts";
 import { RateLimiter, RULES } from "@hewntools/host-workerd/surface/public.ts";
+import { nodePlatform } from "@hewntools/test-host/index.ts";
 import { startPublicServer, startServer } from "@hewntools/test-host/server.ts";
 import { nodeSurfaceHost } from "@hewntools/test-host/surface.ts";
 import { installFrom, installSeed, SEED, setup } from "./helpers.ts";
@@ -57,6 +58,9 @@ describe("share links: one version, until it expires or is revoked", () => {
     const { token, link } = await t.platform.createShareLink(USER, "running-log", {});
     // Its version gone from under a working link (no path in Hewn does this; a broken store might).
     t.platform.registry.db.prepare("DELETE FROM capability_versions WHERE capability_id = ? AND version = ?").run("running-log", 1);
+    // Seen once Hewn starts again (a running one keeps the versions it has read).
+    t.platform.close();
+    t.platform = nodePlatform(t.home);
     await assert.rejects(t.platform.sharedBundle(token), (e: any) => e.code === "not_found");
     assert.equal((t.platform.registry.db.prepare("SELECT downloads FROM share_links WHERE id = ?").get(link.id) as { downloads: number }).downloads, 0);
   });

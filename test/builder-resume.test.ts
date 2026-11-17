@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { claudeActivity, codexActivity, USED_TOOL } from "@hewntools/cli/builders/activity.ts";
-import { claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
+import { builderPrompt, claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
 import type { BuildJob } from "@hewntools/cli/builders/types.ts";
+import { readConfig } from "@hewntools/cli/config.ts";
+import { openHome } from "@hewntools/cli/home.ts";
 import { localWorkbench } from "@hewntools/cli/workbench.ts";
 
 const job = (extra: Partial<BuildJob> = {}): BuildJob => ({ buildId: "b-9", capabilityId: "notes", kind: "create", workspace: "/tmp/ws", attempt: 1, logPath: "/tmp/b-9.log", platformRoot: "/tmp/home", ...extra });
@@ -181,3 +183,113 @@ echo '${lines.done}'
     calls: () => (existsSync(join(bin, "calls")) ? readFileSync(join(bin, "calls"), "utf8").trim().split("\n") : []),
   };
 }
+
+describe("a builder is stopped only when it does nothing (no time limit)", () => {
+  const node = (code: string) => [process.execPath, ["-e", code]] as const;
+  const quiet = (code: string, idleMs: number) => {
+    const dir = mkdtempSync(join(tmpdir(), "hewn-idle-"));
+    const ws = join(dir, "ws");
+    mkdirSync(ws);
+    const j = job({ buildId: "b-idle", workspace: ws, logPath: join(dir, "b-idle.log") });
+    writeFileSync(j.logPath, "");
+    const [cmd, args] = node(code);
+    j.idleMs = idleMs;
+    return { j, run: () => runCli(cmd, [...args], j, (e) => (e && typeof e === "object" ? "worked" : null), { ownState: [], denyKeychain: false }, process.env) };
+  };
+  const failure = (p: Promise<unknown>) => p.then(() => ({}) as any, (e) => e);
+
+  test("a run that talks, or changes files, goes on past the idle time; one that falls silent is stopped, saying so", async () => {
+    // 1.2 s of work against a 400 ms idle time: a line every 150 ms, then files every 150 ms.
+    const talks = quiet("let n = 0; const t = setInterval(() => { console.log(JSON.stringify({ n })); if (++n === 8) clearInterval(t); }, 150);", 400);
+    await talks.run();
+    const writes = quiet("const fs = require('fs'); let n = 0; const t = setInterval(() => { fs.writeFileSync('f' + n + '.txt', 'x'); if (++n === 8) clearInterval(t); }, 150);", 400);
+    await writes.run();
+    // Talks, then hangs: stopped, and it had done something (so it resumes).
+    const hangs = quiet("console.log('{}'); setTimeout(() => {}, 60_000);", 400);
+    const e = await failure(hangs.run());
+    assert.equal(e.message, "no activity for 1 minute");
+    assert.equal(e.idle, true);
+    assert.equal(e.active, true);
+    // Never did anything: hung from the start.
+    const dead = await failure(quiet("setTimeout(() => {}, 60_000);", 300).run());
+    assert.equal(dead.idle, true);
+    assert.equal(dead.active, false);
+    // Start-up events alone (a line its formatter shows nothing for) aren't work done: hung all the same.
+    const started = await failure(quiet(`console.log('"init"'); setTimeout(() => {}, 60_000);`, 300).run());
+    assert.equal(started.idle, true);
+    assert.equal(started.active, false);
+    // Stopped by the owner before a run (between an idle stop and its resume): it doesn't start.
+    const stopped = quiet("console.log('{}')", 300);
+    const abort = new AbortController();
+    abort.abort();
+    stopped.j.signal = abort.signal;
+    assert.equal((await failure(stopped.run())).cancelled, true);
+  });
+
+  test("a run stopped for no activity resumes its session in the same attempt, as many times as it works on; a hung one is a failed attempt", async () => {
+    const log = join(mkdtempSync(join(tmpdir(), "hewn-wr-")), "b-7.log");
+    writeFileSync(log, "");
+    const j = job({ buildId: "b-7", attempt: 1, logPath: log, idleMs: 15 * 60_000 });
+    const runs: { resume?: string; resumed?: boolean; feedback?: string }[] = [];
+    const lines: string[] = [];
+    let n = 0;
+    await withResume("claude", { ...j, onActivity: (l) => lines.push(l) }, async (resume, attempt) => {
+      runs.push({ resume, resumed: attempt.resumedAfterIdle, feedback: attempt.feedback });
+      noteSession("claude", "b-7", "s-7");
+      if (++n < 3) throw Object.assign(new Error("no activity for 15 minutes"), { idle: true, active: true, usedTools: true });
+    });
+    assert.deepEqual(runs, [
+      { resume: undefined, resumed: undefined, feedback: undefined },
+      { resume: "s-7", resumed: true, feedback: undefined },
+      { resume: "s-7", resumed: true, feedback: undefined },
+    ]);
+    assert.deepEqual(lines, ["no activity for 15 minutes; resuming", "no activity for 15 minutes; resuming"]);
+    assert.equal(readFileSync(log, "utf8").match(/no activity for 15 minutes; resuming/g)?.length, 2);
+    assert.match(resumePrompt({ ...j, attempt: 2, feedback: "test 'x' failed", resumedAfterIdle: true }), /^Hewn stopped your previous run after 15 minutes with no activity, before it finished\. Carry on in place/, "not the failure it was already given");
+    // Quiet from the start: no resume, the attempt fails.
+    await assert.rejects(
+      withResume("claude", j, async () => {
+        throw Object.assign(new Error("no activity for 15 minutes"), { idle: true, active: false, usedTools: false });
+      }),
+      /^Error: no activity for 15 minutes$/,
+    );
+    forgetSession("b-7");
+  });
+});
+
+test("the idle time is platform.json's builderIdleMinutes when it's a whole number of minutes from 1 (else unset: 15); the workbench passes it to each build", async () => {
+  const home = openHome(mkdtempSync(join(tmpdir(), "hewn-idle-cfg-")));
+  const write = (v: unknown) => writeFileSync(join(home.root, "platform.json"), JSON.stringify({ builderIdleMinutes: v }));
+  assert.equal(readConfig(home).builderIdleMinutes, undefined);
+  for (const [v, want] of [[30, 30], [1, 1], [0, undefined], [2.5, undefined], ["30", undefined], [-5, undefined]] as const) {
+    write(v);
+    assert.equal(readConfig(home).builderIdleMinutes, want, JSON.stringify(v));
+  }
+  const seen: (number | undefined)[] = [];
+  const wb = localWorkbench({ root: join(home.root, "builds"), builders: { probe: { name: "probe", build: async (j) => void seen.push(j.idleMs) } }, builderIdleMs: () => 7 * 60_000 });
+  await wb.open("b-1", {});
+  await wb.build({ buildId: "b-1", capabilityId: "x", kind: "create", builder: "probe", attempt: 1 } as any, { signal: new AbortController().signal, onActivity: () => {} });
+  assert.deepEqual(seen, [7 * 60_000]);
+  rmSync(home.root, { recursive: true, force: true });
+});
+
+test("a retry carries on from the failed build's workspace, the new request over it; not its builder's session, which names the old workspace's paths", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hewn-carry-"));
+  const root = join(home, "builds");
+  const wb = localWorkbench({ root, builders: {} });
+  await wb.open("b-old", { "src/half.ts": new TextEncoder().encode("half"), "BUILDER.md": new TextEncoder().encode("old request") });
+  mkdirSync(claudeBuildHome(home, "b-old"), { recursive: true });
+  noteSession("claude", "b-old", "s-old");
+  assert.equal(await wb.carryOver("b-old", "b-new", { "BUILDER.md": new TextEncoder().encode("new request") }), true);
+  assert.equal(readFileSync(join(root, "b-new", "src", "half.ts"), "utf8"), "half");
+  assert.equal(readFileSync(join(root, "b-new", "BUILDER.md"), "utf8"), "new request");
+  assert.ok(!existsSync(claudeBuildHome(home, "b-new")), "no builder home carried");
+  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 2 })), undefined, "nor its session");
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "stopped" })), /an earlier build of the same request that the owner stopped before it finished: the workspace holds its work/);
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "failed" })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);
+  assert.doesNotMatch(builderPrompt(job({ buildId: "b-new", attempt: 2, carriesOn: "failed" })), /carries on from an earlier build/, "its first attempt only");
+  // Nothing kept (the workspace cleaned up after a day): the retry opens afresh.
+  assert.equal(await wb.carryOver("b-gone", "b-other", {}), false);
+  for (const b of ["b-old", "b-new"]) await wb.remove(b);
+});
+
