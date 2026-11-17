@@ -134,6 +134,8 @@ export interface BuildJob {
    * with `request` when it can, else starts afresh with it after the usual prompt. Unset: an attempt.
    */
   pass?: BuildPass;
+  /** It carries on from the build it retries, which failed or which the owner stopped: the workspace holds that one's work (`Workbench.carryOver`). */
+  carriesOn?: "failed" | "stopped";
 }
 
 /** A pass's attempt: which pass, and what it asks. */
@@ -189,6 +191,12 @@ export interface Workbench {
    * in progress runs on (bundling with npm included) while the builder goes on writing its own.
    */
   snapshot(buildId: string, to: string): Promise<void>;
+  /**
+   * Open a retry's workspace (`to`) from the failed build's (`from`) as it was left, with `overlay` (the
+   * request and the rest a builder reads) written over it. False when nothing of `from` is kept (its
+   * workspace is gone): open it afresh instead.
+   */
+  carryOver(from: string, to: string, overlay: Files): Promise<boolean>;
   /** One workspace file, if present (e.g. the icon a builder writes first). */
   file(buildId: string, path: string): Promise<Uint8Array | undefined>;
   remove(buildId: string): Promise<void>;

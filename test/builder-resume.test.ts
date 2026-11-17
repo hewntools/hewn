@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { claudeActivity, codexActivity, USED_TOOL } from "@hewntools/cli/builders/activity.ts";
-import { claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
+import { builderPrompt, claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
 import type { BuildJob } from "@hewntools/cli/builders/types.ts";
 import { readConfig } from "@hewntools/cli/config.ts";
 import { openHome } from "@hewntools/cli/home.ts";
@@ -272,3 +272,24 @@ test("the idle time is platform.json's builderIdleMinutes when it's a whole numb
   assert.deepEqual(seen, [7 * 60_000]);
   rmSync(home.root, { recursive: true, force: true });
 });
+
+test("a retry carries on from the failed build's workspace, the new request over it; not its builder's session, which names the old workspace's paths", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hewn-carry-"));
+  const root = join(home, "builds");
+  const wb = localWorkbench({ root, builders: {} });
+  await wb.open("b-old", { "src/half.ts": new TextEncoder().encode("half"), "BUILDER.md": new TextEncoder().encode("old request") });
+  mkdirSync(claudeBuildHome(home, "b-old"), { recursive: true });
+  noteSession("claude", "b-old", "s-old");
+  assert.equal(await wb.carryOver("b-old", "b-new", { "BUILDER.md": new TextEncoder().encode("new request") }), true);
+  assert.equal(readFileSync(join(root, "b-new", "src", "half.ts"), "utf8"), "half");
+  assert.equal(readFileSync(join(root, "b-new", "BUILDER.md"), "utf8"), "new request");
+  assert.ok(!existsSync(claudeBuildHome(home, "b-new")), "no builder home carried");
+  assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 2 })), undefined, "nor its session");
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "stopped" })), /an earlier build of the same request that the owner stopped before it finished: the workspace holds its work/);
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "failed" })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);
+  assert.doesNotMatch(builderPrompt(job({ buildId: "b-new", attempt: 2, carriesOn: "failed" })), /carries on from an earlier build/, "its first attempt only");
+  // Nothing kept (the workspace cleaned up after a day): the retry opens afresh.
+  assert.equal(await wb.carryOver("b-gone", "b-other", {}), false);
+  for (const b of ["b-old", "b-new"]) await wb.remove(b);
+});
+
