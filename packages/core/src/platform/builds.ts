@@ -63,6 +63,8 @@ export interface BuildView {
   queued?: boolean;
   /** Paused, and continued since: the build that carries it on (Continue and Stop are done with). */
   continuedAs?: string;
+  /** Failed or stopped, and retried since: the newest build of its retries, how it stands, and the version it made (Retry and Ask builder to fix are done with). */
+  retriedAs?: { id: string; status: BuildRow["status"]; version?: number; paused?: true };
   /** Status "review": what the change would add; it goes live once the owner approves it. */
   review?: BuildReview;
   /** What it runs on: the model and effort (as asked for or set), and the model it ran on. */
@@ -1989,6 +1991,12 @@ export class Builds extends Domain {
       view.instructions = next
         ? `The owner continued this build as build ${next}. Call builds_wait on that one to follow it.`
         : "The builder's host paused this build part-way, its work kept (failure.detail says why). Tell the owner; they Continue or Stop it in Hewn.";
+    } else if ((b.status === "failed" || b.status === "cancelled") && this.registry.retryOf(b.id)) {
+      const now = this.currentBuild(b.id);
+      // Paused by the builder's host (a failed row, its work kept for the owner's Continue): not a failure.
+      const paused = now.status === "failed" && !!failureOf(now.id, () => now.log).paused;
+      view.retriedAs = { id: now.id, status: now.status, ...(now.resultVersion ? { version: now.resultVersion } : {}), ...(paused ? { paused: true as const } : {}) };
+      view.instructions = `Retried as build ${now.id} (${paused ? "paused" : now.status}). Call builds_get or builds_wait on that one.`;
     }
     const model = this.registry.buildModel(b.id);
     if (model && Object.keys(model).length) view.model = model;

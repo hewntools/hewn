@@ -23,12 +23,14 @@ function appBar(c, { onChange } = {}) {
   const name = h("span", {}, c.name);
   const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
   const change = h("button", { "aria-pressed": "false", onclick: () => onChange?.() }, "Change…");
+  const version = h("span", { class: "pill", hidden: !c.version }, c.version ? `v${c.version}` : "");
   const el = bar({
     left: c.kind === "connection" ? glassBack(c.name, `#/c/${enc(c.id)}`) : glassBack("Home", "#/"),
-    center: h("div", { class: "app-title" }, appIcon(c, { size: 28 }), name, c.version && h("span", { class: "pill" }, `v${c.version}`)),
+    center: h("div", { class: "app-title" }, appIcon(c, { size: 28 }), name, version),
     right: h("div", { class: "glass-bar" }, change, shareButton(c), more),
   });
-  return { el, change };
+  const setVersion = (v) => ((version.textContent = `v${v}`), (version.hidden = false));
+  return { el, change, setVersion };
 }
 
 const DRAWER_WIDTH = "hewn.drawer.width";
@@ -70,7 +72,7 @@ function resizable(el, grip) {
  * then "vN is ready" with Reload and Undo (P4). The tool stays live on the left. Closing it while
  * a build runs is fine: the tile and the Inbox take over.
  */
-function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
+function changeDrawer(c, q, { onReload, onClose, onPromoted, noUi = false }) {
   const body = h("div", { class: "drawer-body" });
   const close = h("button", { class: "ghost sm icon-only", "aria-label": "Close", onclick: () => onClose() }, "×");
   // Its left edge drags to make it wider or narrower; the width is kept (in this browser).
@@ -85,6 +87,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
     const panel = buildPanel(buildId, {
       compact: true,
       onPromoted: (b) => {
+        onPromoted?.();
         const v = `v${b.resultVersion ?? ""}`;
         const notice = h("div", { class: "notice ok drawer-ready" });
         const more = () => h("button", { class: "sm", onclick: showIntake }, "Change more");
@@ -119,7 +122,13 @@ async function undoChange(c, b) {
 
 /** Opened tool or Run view with the drawer when ?change=1. Toggling it keeps the tool where it is. */
 function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
-  const { el: barEl, change } = appBar(c, { onChange: () => toggle() });
+  const { el: barEl, change, setVersion } = appBar(c, { onChange: () => toggle() });
+  // A build of this tool went live: the bar's version follows at once (the tool's own screen waits for Reload).
+  const refreshVersion = async () => {
+    invalidateCaps();
+    const now = (await caps(true).catch(() => new Map())).get(c.id);
+    if (now?.version) setVersion(now.version);
+  };
   const layout = h("div", { class: "with-drawer" }, h("div", { class: "drawer-main" }, main));
   let drawer = null;
   const setUrl = (open) => {
@@ -132,7 +141,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const shown = () => !!drawer && drawer.el.style.display !== "none";
   const open = () => {
     if (!drawer) {
-      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
+      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), onPromoted: () => void refreshVersion(), noUi });
       layout.append(drawer.el);
     } else drawer.el.style.display = "";
     change.setAttribute("aria-pressed", "true");
@@ -150,7 +159,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   if (q.get("change") === "1") open();
   /** Open the drawer (if it isn't), with `text` in the composer when given; without, what's typed stays. */
   drawerApi.open = (text) => (toggle(true), text === undefined ? drawer?.focus() : drawer?.setText(text));
-  return [barEl, layout];
+  return [barEl, layout, refreshVersion];
 }
 
 async function appPage(id, q) {
@@ -172,12 +181,10 @@ async function appPage(id, q) {
     frame.classList.add("loading");
     frame.src = withTheme(await openUrl());
     // The bar's version follows (v1 → v2).
-    const now = (await caps(true).catch(() => new Map())).get(c.id);
-    const pill = barEl.querySelector(".app-title .pill");
-    if (now?.version && pill) pill.textContent = `v${now.version}`;
+    await refreshVersion();
   };
   const drawerApi = {};
-  const [barEl, layout] = withDrawer(c, q, frame, { reload, api: drawerApi });
+  const [barEl, layout, refreshVersion] = withDrawer(c, q, frame, { reload, api: drawerApi });
   barEl.querySelector(".app-title")?.append(subtitle);
   const feedbackSlot = h("div", { class: "feedback-slot" });
   askFeedbackOnOpen(c, drawerApi, feedbackSlot);
