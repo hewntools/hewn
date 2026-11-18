@@ -76,14 +76,18 @@ function activityRow(g, all, showCap) {
     expand = h(
       "ul",
       { class: "list nested", hidden: true },
-      g.items.map((c, k) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, "")), printed[k]), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
+      g.items.map((c, k) => h("li", { class: printed[k] ? "call-printed" : "" }, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, ""))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)), printed[k])),
     );
     onOpen = () =>
       g.items.forEach((c, k) => {
         const pre = printed[k];
         if (!pre) return;
-        const show = (text) => ((pre.textContent = text), (pre.hidden = false));
-        api(`/capabilities/${enc(c.capabilityId)}/calls/${c.logId}`).then((e) => show(e.lines.join("\n")), () => show("This call is no longer in the log."));
+        const show = (...lines) => (put(pre, ...lines), (pre.hidden = false));
+        // A warning or an error ("! ") in the log's warning colour.
+        api(`/capabilities/${enc(c.capabilityId)}/calls/${c.logId}`).then(
+          (e) => show(...e.lines.map((l) => h("span", { class: l.startsWith("! ") ? "warn" : "" }, `${l}\n`))),
+          () => show("This call is no longer in the log."),
+        );
       });
   } else if (g.kind === "models") {
     const failed = g.items.filter((x) => x.outcome === "failed");

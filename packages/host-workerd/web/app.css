@@ -225,6 +225,9 @@ dialog.wide-sheet .code-body { max-height: 56vh; }
 .timeline > .eyebrow:first-child { padding-top: var(--s3); }
 .list.nested { margin-top: var(--s2); }
 .list.nested > li { min-height: 36px; padding: 4px 0; }
+/* A call opened to what its code printed: the lines under the row, its full width. */
+.list.nested > li.call-printed { flex-wrap: wrap; }
+.list.nested > li.call-printed > .log { flex: 1 0 100%; }
 
 .settings-list { margin-top: 6px; }
 .setting.compact { min-height: 52px; cursor: pointer; }
