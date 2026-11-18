@@ -75,6 +75,56 @@ describe("a retry carries on from the failed build's workspace", () => {
     assert.match(await opened(done.buildId), new RegExp(`^opened from v1 \\(retry of ${stopped.buildId}\\), carrying on from its workspace, builder: script$`));
   });
 
+  test("Stop, then Retry at once: the retry waits for the stopped builder to exit before it copies the workspace", async () => {
+    // A builder slow to stop: told to, it still writes for a while, then exits.
+    let wrote!: () => void;
+    const halfway = new Promise<void>((r) => (wrote = r));
+    t.queue(async (ws, job) => {
+      writeFileSync(join(ws, "src", "half.ts"), "export const half = 1;\n");
+      wrote();
+      await new Promise((r) => job.signal?.addEventListener("abort", r, { once: true }));
+      await new Promise((r) => setTimeout(r, 600));
+      writeFileSync(join(ws, "src", "late.ts"), "export const late = 1;\n");
+      throw Object.assign(new Error("cancelled"), { cancelled: true });
+    });
+    const started = await t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" });
+    await halfway;
+    // Stop and Retry back to back, as the owner's two clicks can be (no settle in between).
+    t.platform.cancelBuild(USER, started.buildId);
+    let seen: { half: boolean; late: boolean; carriesOn?: string } | undefined;
+    const done = await t.build(() => t.platform.retryBuild(USER, started.buildId), (ws, job) => void (seen = { half: existsSync(join(ws, "src", "half.ts")), late: existsSync(join(ws, "src", "late.ts")), carriesOn: job.carriesOn }));
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.deepEqual(seen, { half: true, late: true, carriesOn: "stopped" });
+  });
+
+  test("a stopped builder that never exits holds a retry only so long (the workbench's stopWaitMs); it carries on from the workspace as it is", async () => {
+    t.cleanup();
+    t = setup({ stopWaitMs: 300 });
+    await installSeed(t.platform);
+    let wrote!: () => void;
+    const halfway = new Promise<void>((r) => (wrote = r));
+    let exit!: () => void;
+    t.queue(async (ws) => {
+      writeFileSync(join(ws, "src", "half.ts"), "export const half = 1;\n");
+      wrote();
+      // Deaf to the Stop until the test lets it go.
+      await new Promise<void>((r) => (exit = r));
+      throw Object.assign(new Error("cancelled"), { cancelled: true });
+    });
+    const started = await t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" });
+    await halfway;
+    t.platform.cancelBuild(USER, started.buildId);
+    const t0 = Date.now();
+    let waited = 0;
+    let seen: { half: boolean; carriesOn?: string } | undefined;
+    const done = await t.build(() => t.platform.retryBuild(USER, started.buildId), (ws, job) => void ((waited = Date.now() - t0), (seen = { half: existsSync(join(ws, "src", "half.ts")), carriesOn: job.carriesOn })));
+    exit();
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.deepEqual(seen, { half: true, carriesOn: "stopped" });
+    assert.ok(waited >= 300 && waited < 5000, `the retry started ${waited} ms after the Stop`);
+    await t.platform.settle(started.buildId);
+  });
+
   test("a new tool: Retry carries on from the failed create's workspace", async () => {
     const draft = (ws: string) => {
       editJson(join(ws, "capability.json"), (m) => (m.operations = [{ name: "ping", description: "ping", version: 1, sideEffect: "read", inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: { type: "object" } }]));

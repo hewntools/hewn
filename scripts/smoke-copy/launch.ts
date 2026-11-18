@@ -49,10 +49,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * The stub builder. It reads the request in BUILDER.md:
  * - `[smoke:slow]`: notes its progress in src/index.ts, then waits (up to 2 minutes) for a Stop. A retry that carries
  *   on finds that note and finishes at once: that's how a check sees the work was carried on.
+ * - `[smoke:slow-exit]`: as `[smoke:slow]`, but slow to stop, as a real builder can be: after the Stop it writes for
+ *   1.5 s more (a second note) before it ends. A retry that waited for it finds that note too (`foundLate`).
  * - `[smoke:fail]`: fails the attempt.
  * - anything else: a trivial edit (a comment at the end of src/index.ts).
  */
 const PROGRESS = "// smoke-progress: started by ";
+const LATE = "// smoke-progress: written after the Stop by ";
 const stub = (name: string) => ({
   name,
   async build(job: { buildId: string; kind: string; workspace: string; attempt: number; carriesOn?: string; retryOf?: string; signal?: AbortSignal; onActivity?: (l: string) => void }) {
@@ -60,11 +63,11 @@ const stub = (name: string) => ({
     const index = join(job.workspace, "src", "index.ts");
     const code = existsSync(index) ? readFileSync(index, "utf8") : undefined;
     const found = !!code?.includes(PROGRESS);
-    note({ buildId: job.buildId, event: "start", builder: name, kind: job.kind, attempt: job.attempt, carriesOn: job.carriesOn ?? null, retryOf: job.retryOf ?? null, foundProgress: found });
+    note({ buildId: job.buildId, event: "start", builder: name, kind: job.kind, attempt: job.attempt, carriesOn: job.carriesOn ?? null, retryOf: job.retryOf ?? null, foundProgress: found, foundLate: !!code?.includes(LATE) });
     job.onActivity?.(`smoke stub (${name}): attempt ${job.attempt}${job.carriesOn ? `, carrying on from a ${job.carriesOn} build` : ""}`);
     if (job.kind === "create" || code === undefined) throw new Error("the smoke stub builder only changes tools that have src/index.ts");
     if (request.includes("[smoke:fail]")) throw new Error("smoke stub: asked to fail");
-    if (request.includes("[smoke:slow]") && !(job.carriesOn && found)) {
+    if (/\[smoke:slow(-exit)?\]/.test(request) && !(job.carriesOn && found)) {
       appendFileSync(index, `\n${PROGRESS}${job.buildId}\n`);
       note({ buildId: job.buildId, event: "waiting" });
       // Two minutes at most; a Stop ends it at once, as a builder that's killed would.
@@ -72,6 +75,10 @@ const stub = (name: string) => ({
       for (let i = 0; i < 60; i++) {
         job.onActivity?.("smoke stub: working slowly (waiting for a Stop)");
         if (await Promise.race([stopped.then(() => true), sleep(2000).then(() => false)])) {
+          if (request.includes("[smoke:slow-exit]")) {
+            await sleep(1500);
+            appendFileSync(index, `\n${LATE}${job.buildId}\n`);
+          }
           note({ buildId: job.buildId, event: "stopped" });
           throw new Error("stopped");
         }

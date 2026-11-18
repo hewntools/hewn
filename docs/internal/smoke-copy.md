@@ -89,7 +89,7 @@ export default {
 } satisfies Scenario;
 ```
 
-What a scenario gets: `s.copy` (`admin`, `call` for the CLI's allow-listed core methods, `api` for the web API, `agent` for MCP), `s.page(hash)` (Playwright), `s.shot`, `s.tool`, `s.waitBuild(id)`, and `s.stub` (the stub builder's notes). The request's text steers the stub builder: `[smoke:slow]` notes its progress in `src/index.ts`, then waits for a Stop (a retry that carries on finds the note and finishes at once); `[smoke:fail]` fails the attempt; anything else is a trivial edit. It builds changes only. The example, [`scenarios/stop-then-retry.ts`](../../scripts/smoke-copy/scenarios/stop-then-retry.ts), does Stop and Start again in the web client.
+What a scenario gets: `s.copy` (`admin`, `call` for the CLI's allow-listed core methods, `api` for the web API, `agent` for MCP), `s.page(hash)` (Playwright), `s.shot`, `s.tool`, `s.waitBuild(id)`, and `s.stub` (the stub builder's notes). The request's text steers the stub builder: `[smoke:slow]` notes its progress in `src/index.ts`, then waits for a Stop (a retry that carries on finds the note and finishes at once); `[smoke:slow-exit]` does the same but is slow to stop, writing a second note 1.5 s after the Stop (a retry's start notes `foundLate`); `[smoke:fail]` fails the attempt; anything else is a trivial edit. It builds changes only. The example, [`scenarios/stop-then-retry.ts`](../../scripts/smoke-copy/scenarios/stop-then-retry.ts), does Stop and Start again in the web client.
 
 ## The browser
 
