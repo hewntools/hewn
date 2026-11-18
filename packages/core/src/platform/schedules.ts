@@ -12,10 +12,13 @@ import type { PlatformOptions } from "../platform.ts";
 
 export class Schedules extends Domain {
   private onSchedulesChanged: () => void;
+  /** HEWN_SCHEDULES=off (PlatformOptions.schedulesOff): nothing runs, whatever a schedule's status. */
+  private off: boolean;
 
-  constructor(s: Shared, opts: Pick<PlatformOptions, "onSchedulesChanged">) {
+  constructor(s: Shared, opts: Pick<PlatformOptions, "onSchedulesChanged" | "schedulesOff">) {
     super(s);
     this.onSchedulesChanged = opts.onSchedulesChanged ?? (() => {});
+    this.off = opts.schedulesOff === true;
   }
 
   /** Schedules of the capabilities this principal can see (all of them for the owner). */
@@ -110,7 +113,7 @@ export class Schedules extends Domain {
 
   /** When the next active schedule is due (epoch ms), for the host's timer. */
   nextScheduleAt(): number | null {
-    return this.schedules.nextAt();
+    return this.off ? null : this.schedules.nextAt();
   }
 
   /**
@@ -120,6 +123,7 @@ export class Schedules extends Domain {
    */
   async runDueSchedules(now = Date.now()): Promise<{ id: string; ok: boolean }[]> {
     const ran: { id: string; ok: boolean }[] = [];
+    if (this.off) return ran;
     const breathe = breather();
     for (const listed of this.schedules.due(now)) {
       await breathe();
@@ -180,6 +184,7 @@ export class Schedules extends Domain {
     const s = this.schedules.get(id);
     if (!s) throw new PlatformError("not_found", `no schedule '${id}'`);
     if (s.status === "proposed") throw new PlatformError("invalid_request", "enable the schedule before running it");
+    if (this.off) throw new PlatformError("invalid_request", "schedules are off in this Hewn (HEWN_SCHEDULES=off): none runs, not even by hand");
     const outcome = await this.runOnce(s);
     const ok = outcome === "ok";
     this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: outcome, ...(ok ? { failures: 0, pausedReason: null } : {}) });
