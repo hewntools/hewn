@@ -1004,7 +1004,7 @@ async function allowanceNotices(platform: Platform, host: SurfaceHost): Promise<
   const a = host.allowance && platform.hostModels ? await host.allowance().catch(() => null) : null;
   if (!a || !a.of || a.used < 0.8 * a.of) return [];
   const on = a.resetsAt && new Intl.DateTimeFormat("en-GB", { timeZone: platform.timezone(), day: "numeric", month: "short" }).format(new Date(a.resetsAt));
-  if (a.used >= a.of) return [{ kind: "spend", id: "allowance", title: a.unit, detail: on ? `all ${a.of} used: builds and tools that think wait until they renew on ${on}` : `all ${a.of} used`, severity: "danger", action: "Open" }];
+  if (a.used >= a.of) return [{ kind: "spend", id: "allowance", title: a.unit, detail: on ? `all ${a.of} used · they renew on ${on}` : `all ${a.of} used`, severity: "danger", action: "Open" }];
   return [{ kind: "spend", id: "allowance", title: a.unit, detail: `${Math.floor((a.used / a.of) * 100)}% of ${a.of} used · ${on ? `they renew on ${on}` : "they don't renew"}`, severity: "warn", action: "Open" }];
 }
 

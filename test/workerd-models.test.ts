@@ -8,7 +8,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, test } from "node:test";
 import { FIXTURES } from "./helpers.ts";
-import { startTestHost, type TestHost } from "./workerd-helpers.ts";
+import { signedIn, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 describe("model port on the workerd host", () => {
   let h: TestHost;
@@ -48,11 +48,18 @@ describe("hosted: tools' model calls go to the host, through the supervisor", ()
   let h: TestHost;
   let service: Server;
   const asked: any[] = [];
+  /** What the service answers on /v1/allowance (its status and body), and who asked. */
+  let allowance: { status: number; body: unknown } = { status: 404, body: {} };
+  const allowanceAsked: (string | undefined)[] = [];
   before(async () => {
     // The host's build service: its model list (with what each tier runs on) and /v1/generate.
     service = createServer(async (req, res) => {
       let raw = "";
       for await (const c of req) raw += c;
+      if (req.url === "/v1/allowance") {
+        allowanceAsked.push(req.headers.authorization);
+        return void res.writeHead(allowance.status, { "content-type": "application/json" }).end(JSON.stringify(allowance.body));
+      }
       if (req.url === "/v1/models") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [], tiers: { light: "Haiku 5.5" } }));
       if (req.url === "/v1/generate") {
         const body = JSON.parse(raw);
@@ -85,5 +92,26 @@ describe("hosted: tools' model calls go to the host, through the supervisor", ()
     assert.equal(asked.at(-1).body.tier, "light");
     assert.deepEqual((await h.sv.admin("call", { method: "models", args: [] })).result.host.charges.totals, [{ unit: "Credits", amount: 0.37 }]);
     await assert.rejects(h.invoke("word-explainer", "explain", { word: "spent" }), /800 Credits/);
+  });
+
+  test("the allowance: from the service to the web client and the Inbox, a 404 is today's view, a failure keeps the last answer", async () => {
+    const web = await signedIn(h);
+    const stated = { unit: "Credits", used: 1700, of: 2000, resetsAt: "2026-12-01T00:00:00Z", perBuild: 250, more: "https://example.com/more" };
+    allowance = { status: 200, body: { allowance: stated, extra: true } };
+    const m = await web("/api/models?fresh=1");
+    assert.deepEqual(m.host.allowance, { ...stated, resetsAt: "2026-12-01T00:00:00.000Z" });
+    assert.equal(allowanceAsked.at(-1), "Bearer host-token", "with the builder's token, from the supervisor");
+    const notice = (await web("/api/inbox")).needs.find((n: { id: string }) => n.id === "allowance");
+    assert.equal(notice?.severity, "warn");
+    assert.match(notice.detail, /^85% of 2000 used · they renew on (30 Nov|1 Dec)$/);
+    // The service fails after a good answer: the last one is kept.
+    allowance = { status: 500, body: { error: "down" } };
+    assert.equal((await web("/api/models?fresh=1")).host.allowance.used, 1700);
+    // It offers none: today's view, the charges as before.
+    allowance = { status: 404, body: {} };
+    const none = await web("/api/models?fresh=1");
+    assert.equal(none.host.allowance, null);
+    assert.ok(Array.isArray(none.host.charges.totals));
+    assert.equal((await web("/api/inbox")).needs.some((n: { id: string }) => n.id === "allowance"), false);
   });
 });

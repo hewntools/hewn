@@ -176,7 +176,7 @@ async function aiSection() {
           "div",
           { class: "grow" },
           // Hosted: one allowance covers building, the talks before it and tools that think.
-          h("span", { class: "strong" }, m?.host ? "Credits" : "Thinks inside tools"),
+          h("span", { class: "strong" }, m?.host ? (m.host.allowance?.unit ?? m.host.charges.totals[0]?.unit ?? "Credits") : "Thinks inside tools"),
           h(
             "span",
             { class: "sub row tight" },

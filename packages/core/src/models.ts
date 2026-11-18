@@ -48,9 +48,12 @@ export interface HostGenerateResult {
  */
 export type HostModels = (req: HostGenerateRequest, signal: AbortSignal) => Promise<HostGenerateResult>;
 
+/** The host's unit, shown as given: a short word or two ("Credits"). */
+export const saneUnit = (u: unknown): u is string => typeof u === "string" && /^[A-Za-z][A-Za-z ]{0,19}$/.test(u);
+
 /** A charge from the host is shown as given: only a sane amount and a short unit are kept. */
 export const saneCharge = (c: unknown): c is HostCharge =>
-  !!c && typeof c === "object" && Number.isFinite((c as HostCharge).amount) && (c as HostCharge).amount >= 0 && (c as HostCharge).amount <= 1e6 && typeof (c as HostCharge).unit === "string" && /^[A-Za-z][A-Za-z ]{0,19}$/.test((c as HostCharge).unit);
+  !!c && typeof c === "object" && Number.isFinite((c as HostCharge).amount) && (c as HostCharge).amount >= 0 && (c as HostCharge).amount <= 1e6 && saneUnit((c as HostCharge).unit);
 
 /**
  * What the host says of the owner's allowance (`GET /v1/allowance`, docs/internal/remote-builder.md), shown as given:
@@ -72,10 +75,11 @@ export function saneAllowance(x: unknown): HostAllowance | undefined {
   if (!a || typeof a !== "object") return undefined;
   const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1e9 ? v : undefined);
   const used = count(a.used);
-  if (used === undefined || !saneCharge({ amount: 0, unit: a.unit })) return undefined;
+  if (used === undefined || !saneUnit(a.unit)) return undefined;
   const at = typeof a.resetsAt === "string" && !Number.isNaN(Date.parse(a.resetsAt)) ? new Date(a.resetsAt).toISOString() : null;
   const more = typeof a.more === "string" && URL.canParse(a.more) && new URL(a.more).protocol === "https:" ? a.more : null;
-  return { unit: a.unit as string, used, of: count(a.of) ?? null, resetsAt: at, perBuild: count(a.perBuild) ?? null, more };
+  // An allowance of 0 says nothing to count against: as none.
+  return { unit: a.unit, used, of: count(a.of) || null, resetsAt: at, perBuild: count(a.perBuild) || null, more };
 }
 
 // ---------- limits ----------

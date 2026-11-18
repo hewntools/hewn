@@ -36,6 +36,7 @@ describe("the allowance, as the host states it", () => {
     assert.equal(saneAllowance({ allowance: { ...ANSWER.allowance, more: "https://example.com/more" } })!.more, "https://example.com/more");
     assert.deepEqual(saneAllowance({ allowance: { unit: "Credits", used: 12, of: null, resetsAt: null, perBuild: null, more: null } }), { unit: "Credits", used: 12, of: null, resetsAt: null, perBuild: null, more: null });
     assert.equal(saneAllowance({ allowance: { ...ANSWER.allowance, resetsAt: "soon" } })!.resetsAt, null);
+    assert.equal(saneAllowance({ allowance: { ...ANSWER.allowance, of: 0, perBuild: 0 } })!.of, null, "an allowance of 0 is none");
     for (const bad of [{}, { allowance: { ...ANSWER.allowance, used: -1 } }, { allowance: { ...ANSWER.allowance, unit: "<b>x</b>" } }, { allowance: { ...ANSWER.allowance, used: "2000" } }, null]) assert.equal(saneAllowance(bad), undefined, JSON.stringify(bad));
   });
 
@@ -67,6 +68,32 @@ describe("the allowance, as the host states it", () => {
     assert.equal((await read(true))!.used, 10, "so does an answer that doesn't make sense");
     status = 404;
     assert.equal(await read(true), null, "a 404 is none: today's view");
+  });
+
+  test("a slow service never holds the Inbox: a stale answer comes at once and is read again behind it, one read at a time", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-11-20T12:00:00Z") });
+    let answer = 1;
+    let calls = 0;
+    let release!: () => void;
+    let gate: Promise<void> = Promise.resolve();
+    const fake = (async () => {
+      calls++;
+      await gate;
+      return Response.json({ allowance: { ...ANSWER.allowance, used: answer } });
+    }) as unknown as typeof fetch;
+    const read = hostAllowance({ url: "https://builds.example", token: "tok" }, fake);
+    assert.equal((await read())!.used, 1, "the first read waits: nothing to show before it");
+    t.mock.timers.tick(11 * 60_000);
+    answer = 2;
+    gate = new Promise<void>((r) => (release = r));
+    assert.equal((await read())!.used, 1, "stale: the last answer at once");
+    assert.equal((await read())!.used, 1);
+    assert.equal(calls, 2, "one read behind it, not one per poll");
+    const fresh = read(true);
+    assert.equal(calls, 2, "a fresh read joins the one under way");
+    release();
+    assert.equal((await fresh)!.used, 2);
+    assert.equal((await read())!.used, 2);
   });
 });
 
@@ -110,7 +137,7 @@ describe("the allowance on the web client and in the Inbox (hosted)", () => {
     assert.deepEqual([warn.title, warn.detail, warn.severity, warn.kind], ["Credits", "85% of 2000 used · they renew on 30 Nov", "warn", "spend"]);
     allowance = { ...allowance, used: 2003 };
     const done = await notice();
-    assert.deepEqual([done.detail, done.severity], ["all 2000 used: builds and tools that think wait until they renew on 30 Nov", "danger"]);
+    assert.deepEqual([done.detail, done.severity], ["all 2000 used · they renew on 30 Nov", "danger"]);
     allowance = { ...allowance, resetsAt: null };
     assert.equal((await notice()).detail, "all 2000 used");
     allowance = { ...allowance, of: null };
