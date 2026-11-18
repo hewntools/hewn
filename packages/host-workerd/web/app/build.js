@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A build: its page, or the panel in the change drawer.
-import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
+import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, isOutdated, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
 import { AGENT_CATALOG, agentTile, catalogOf } from "./agents.js";
 import { shotUrl } from "./appearance.js";
 import { go, hues, moment, onLeave, put, sandboxNotice, topBar, view } from "./frame.js";
@@ -541,12 +541,12 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     open();
     onLeave(() => es?.close());
     // A hidden tab makes no requests: the stream closes (else the browser reconnects it, hidden or not), and the page
-    // draws itself again once the tab is shown.
+    // draws itself again once the tab is shown (unless Hewn was updated under it: then the owner reloads).
     const hidden = () => {
       if (!document.hidden) return;
       es?.close();
       document.removeEventListener("visibilitychange", hidden);
-      shown().then(() => document.body.contains(card) && route());
+      shown().then(() => document.body.contains(card) && !isOutdated() && route());
     };
     document.addEventListener("visibilitychange", hidden);
     onLeave(() => document.removeEventListener("visibilitychange", hidden));

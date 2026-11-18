@@ -594,6 +594,91 @@ export const operations = {
     page.off("request", watch);
   });
 
+  await step("a page from before an update stops its own refreshes: it says Hewn was updated, with Reload; the owner's own requests still go, and Reload brings the refreshes back", async () => {
+    // A page of its own, signed in, for its fake clock.
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await ctx.addCookies(await page.context().cookies());
+    const p = await ctx.newPage();
+    try {
+      // Hewn updated under the page: the same server, answering with another web build.
+      let updated = false;
+      await p.route("**/api/**", async (r: any) => {
+        const res = await r.fetch();
+        await r.fulfill({ response: res, headers: { ...res.headers(), ...(updated ? { "x-hewn-web": "0123456789abcdef" } : {}) } });
+      });
+      const refreshes: string[] = [];
+      const owners: string[] = [];
+      p.on("request", (r: { url(): string; headers(): Record<string, string> }) => r.url().includes("/api/") && (r.headers()["x-hewn-refresh"] === "1" ? refreshes : owners).push(r.url()));
+      await p.clock.install();
+      await p.goto(`${web}/#/`);
+      await p.locator(".home-grid").waitFor();
+      const run = async (ms: number) => {
+        for (let t = 0; t < ms; t += 5000) await p.clock.runFor(5000), await p.waitForTimeout(100);
+      };
+      await run(60_000);
+      if (!refreshes.length) throw new Error("no refreshes on Home before the update");
+      // The update lands while the tab is hidden and a poll waits for it to be shown: that poll never goes, and
+      // the owner's own look at the tools doesn't wait on it.
+      await p.evaluate(async () => {
+        let hidden = true;
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+        (window as any).__show = () => ((hidden = false), document.dispatchEvent(new Event("visibilitychange")));
+        document.dispatchEvent(new Event("visibilitychange"));
+        const kit = "/kit.js";
+        const k = await import(kit);
+        k.invalidateCaps();
+        void k.caps(true, { poll: true });
+      });
+      updated = true;
+      await p.evaluate(async () => {
+        const kit = "/kit.js";
+        const k = await import(kit);
+        await k.api("/settings");
+        (window as any).__show();
+      });
+      refreshes.length = 0;
+      // (The page's clock is fake: the wait is real, outside it.)
+      await p.evaluate(async () => {
+        const kit = "/kit.js";
+        const k = await import(kit);
+        void k.caps().then((m: Map<string, unknown>) => ((window as any).__looked = m.size));
+      });
+      await p.waitForTimeout(2000);
+      if (typeof (await p.evaluate(() => (window as any).__looked)) !== "number") throw new Error("the owner's own look at the tools waited on a poll that never goes");
+      await run(30_000);
+      const toast = p.locator(".toast", { hasText: "Hewn was updated" });
+      await toast.waitFor({ timeout: 5000 });
+      if ((await toast.getByRole("button").allInnerTexts()).join() !== "Reload") throw new Error("the toast's only action isn't Reload");
+      refreshes.length = 0;
+      await run(180_000);
+      if (refreshes.length) throw new Error(`an outdated page refreshed itself: ${refreshes.join(", ")}`);
+      if ((await toast.count()) !== 1) throw new Error("the toast went away, or came again");
+      // The owner's own requests still go: open Activity.
+      owners.length = 0;
+      await p.goto(`${web}/#/activity`);
+      await p.getByText("Activity").first().waitFor();
+      if (!owners.length) throw new Error("the owner's own request didn't go");
+      await run(60_000);
+      if (refreshes.length) throw new Error(`Activity, outdated, refreshed itself: ${refreshes.join(", ")}`);
+      // Opening the Inbox is the owner's: it goes.
+      owners.length = 0;
+      await p.getByRole("button", { name: /^Inbox/ }).click();
+      await p.waitForTimeout(500);
+      if (!owners.some((u) => u.includes("/api/inbox"))) throw new Error("opening the Inbox didn't ask for it");
+      await p.keyboard.press("Escape");
+      await p.screenshot({ path: "/tmp/e2e-fr-stale-tab.png" });
+      updated = false;
+      await toast.getByRole("button", { name: "Reload" }).click();
+      await p.waitForLoadState();
+      for (let i = 0; i < 12 && !refreshes.length; i++) await run(5000);
+      if (!refreshes.length) throw new Error("no refreshes after Reload");
+      if (await p.locator(".toast", { hasText: "Hewn was updated" }).count()) throw new Error("the toast is still there after Reload");
+    } finally {
+      await ctx.close();
+    }
+  });
+
   if (!real)
     await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick opens it again after a minute and carries it to the end", async () => {
       let release!: () => void;
