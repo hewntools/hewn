@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The grants sheet (what a tool may do, to authorize or revoke), and signing in to a connection.
-import { actorLabel, api, appIcon, capRef, caps, enc, fail, h, invalidateCaps, kindTag, modal, requestRows, sheetActions, sheetHead, sheetSteps, toast } from "../kit.js";
+import { actorLabel, andList, api, appIcon, capRef, caps, enc, fail, h, invalidateCaps, kindTag, modal, requestRows, sheetActions, sheetHead, sheetSteps, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
 import { put } from "./frame.js";
 import { PROVIDERS, titleCase, usd } from "./models.js";
@@ -94,14 +94,20 @@ async function grantsSheet(capId) {
   // A connection with a sign-in step gets its secrets by signing in (after authorizing), not by pasting.
   const signIn = cap.kind === "connection" && cap.operations.some((o) => o.name === "connect");
   const missingSecrets = new Set(signIn ? [] : cap.status.missingSecrets);
-  const missingConfig = (cap.authorization?.config ?? []).filter((x) => x.value === null);
+  // What readiness counts as missing: unset, or a host setting whose value isn't a host.
+  const missingConfig = (cap.authorization?.config ?? []).filter((x) => cap.status.missingConfig.includes(x.name));
   const modelReq = cap.requires?.model;
   const m = modelReq ? await api("/models").catch(() => null) : null;
   // No usable provider: the key block, even when the grant itself is approved.
   // Hosted: the host runs tools' model calls; no key to give.
   const needsKey = !!modelReq && !!m && !m.host && (!m.provider || !m.providers.find((p) => p.id === m.provider)?.keySet);
   const pending = items.filter((i) => !i.approved || (i.kind === "secret" && missingSecrets.has(i.grant.slice(7))) || (i.kind === "model" && needsKey));
-  const thenSignIn = async (ready) => (signIn && !ready && (await api(`/capabilities/${id}`)).status.missingSecrets.length ? signInDialog(capId) : ready);
+  // Its sign-in runs its connect operation, which needs its settings: until they're set, the toast names them instead.
+  const thenSignIn = async (ready) => {
+    if (!signIn || ready) return ready;
+    const { status } = await api(`/capabilities/${id}`);
+    return status.missingSecrets.length && !status.missingConfig.length ? signInDialog(capId) : ready;
+  };
 
   if (!pending.length && !missingConfig.length && signIn && cap.status.missingSecrets.length) return signInDialog(capId);
   const requests = cap.authorization?.requests ?? [];
@@ -125,18 +131,27 @@ async function grantsSheet(capId) {
   return modal(
     (close) => {
       const authorize = h("button", { class: "primary", disabled: true }, "Authorize");
+      // Settings don't hold the grants back: Authorize approves them whatever is set, and this line names what's still
+      // unset (the tool isn't ready until it is).
+      const unsetNote = h("div", { class: "small muted" });
+      const unset = () => [...config].filter(([, input]) => !input.value.trim()).map(([name]) => name);
       check = () => {
-        authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || [...config.values()].some((input) => !input.value.trim());
-        // Every switch off and nothing else to give: the button says what it does.
-        const saysNo = picks.size > 0 && ![...picks.values()].some((sw) => sw.checked) && !pending.some((i) => !picks.has(i.grant)) && !config.size;
-        authorize.textContent = saysNo ? "Deny" : "Authorize";
+        const settingsOnly = !pending.length;
+        const left = unset();
+        authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || (settingsOnly && left.length === config.size);
+        // Every switch off and nothing else to give: the button says what it does (a setting typed in is still saved).
+        const saysNo = picks.size > 0 && ![...picks.values()].some((sw) => sw.checked) && !pending.some((i) => !picks.has(i.grant));
+        authorize.textContent = saysNo ? "Deny" : settingsOnly ? "Save" : "Authorize";
         authorize.classList.toggle("primary", !saysNo);
+        // Said no to everything: setting the rest wouldn't make it run, so nothing asks for them.
+        unsetNote.textContent = !saysNo && left.length ? `Set ${andList(left)} before it runs.` : "";
       };
       authorize.addEventListener("click", async () => {
         authorize.disabled = true;
         try {
           await keyBlock?.saveBudget();
-          for (const [name, input] of config) await api(`/capabilities/${id}/config/${enc(name)}`, { method: "PUT", body: { value: input.value.trim() } });
+          const stillUnset = unset();
+          for (const [name, input] of config) if (input.value.trim()) await api(`/capabilities/${id}/config/${enc(name)}`, { method: "PUT", body: { value: input.value.trim() } });
           for (const [name, input] of secrets) if (input.value) await api(`/capabilities/${id}/secrets/${enc(name)}`, { method: "PUT", body: { value: input.value } });
           const left = [...picks].filter(([, sw]) => !sw.checked).map(([grant]) => grant);
           // A different tier than asked for: a quick change (manifest only) that carries its own grant.
@@ -144,18 +159,18 @@ async function grantsSheet(capId) {
           const modelGrant = items.find((i) => i.kind === "model")?.grant;
           if (!left.length && !otherTier) await api(`/capabilities/${id}/grants/approve`, { method: "POST" });
           else for (const i of pending) if (!i.approved && !left.includes(i.grant) && !(otherTier && i.grant === modelGrant)) await api(`/capabilities/${id}/grants/approve`, { method: "POST", body: { grant: i.grant } });
-          if (otherTier && (await quickModelChange(c, { tier }))) toast(`${c.name} will use the ${tier} tier`);
+          if (otherTier && (await quickModelChange(c, { tier }))) toast(`${c.name} will use the ${tier} tier${stillUnset.length ? `. Set ${andList(stillUnset)} before it runs.` : ""}`);
           // After the quick change, so each no is said to the version that's live by then.
           for (const g of left) if (!declined.has(g)) await api(`/capabilities/${id}/grants/decline`, { method: "POST", body: { grant: g } });
           invalidateCaps();
           const now = await api(`/capabilities/${id}`);
           // What was said: a switch left off is a no, so "Authorized" only when something was.
           const yes = pending.filter((i) => !i.approved && !left.includes(i.grant)).length;
-          if (!otherTier)
-            toast(
-              now.status.ready ? `${c.name} is ready` : !yes && left.length ? `Said no to ${left.length === 1 ? "it" : `${left.length} things`}. ${c.name} won't run until you allow ${left.length === 1 ? "it" : "them"}.` : left.length ? `Authorized. Said no to ${left.length === 1 ? "one thing" : `${left.length} things`}.` : "Authorized",
-              { dot: yes ? "ok" : "" },
-            );
+          const saidNo = !yes && left.length > 0;
+          const said = saidNo ? `Said no to ${left.length === 1 ? "it" : `${left.length} things`}. ${c.name} won't run until you allow ${left.length === 1 ? "it" : "them"}.` : left.length ? `Authorized. Said no to ${left.length === 1 ? "one thing" : `${left.length} things`}.` : pending.length ? "Authorized" : "Saved";
+          // The settings still to set, unless it was a no to everything (they wouldn't make it run).
+          const rest = stillUnset.length && !saidNo ? `${said.endsWith(".") ? "" : "."} Set ${andList(stillUnset)} before it runs.` : "";
+          if (!otherTier) toast(now.status.ready ? `${c.name} is ready` : `${said}${rest}`, { dot: yes ? "ok" : "" });
           close(now.status.ready);
         } catch (e) {
           fail(e);
@@ -214,6 +229,7 @@ async function grantsSheet(capId) {
           signIn ? "Next, you sign in to the service here in Hewn. Agents never see your password or tokens." : pending.some((i) => i.kind === "secret") ? "Secrets go to your Keychain only." : null,
         ),
         sheetActions(h("button", { onclick: () => close(false) }, "Not now"), authorize),
+        unsetNote,
       ];
     },
     { width: 480 },
