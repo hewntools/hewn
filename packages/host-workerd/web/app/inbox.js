@@ -158,6 +158,8 @@ async function pollInbox(withRecent = false) {
       inboxBtn.setAttribute("aria-label", n ? `Inbox, ${n} need${n === 1 ? "s" : ""} you` : "Inbox");
       showBanner(next.needs.filter((x) => x.kind === "confirmation"));
       renderInbox();
+      // For a page that follows builds (a tool's page: one of its builds ended).
+      dispatchEvent(new CustomEvent("hewn:inbox", { detail: next }));
     }
   }
   inboxTimer = setTimeout(pollInbox, inboxData.building?.length ? 4000 : 15000);
