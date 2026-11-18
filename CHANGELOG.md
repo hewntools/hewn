@@ -15,6 +15,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **No time limit on a build's attempt.** A builder on your machine is stopped only when it has done nothing for 15 minutes (no output, no file written), and then carries on in the same attempt; `builderIdleMinutes` in `platform.json` changes the 15. Before, every attempt stopped at 15 minutes, and big builds used up their attempts on it. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 - **Retry** and **Ask builder to fix** carry on from the files the failed build left, a Polish's too, instead of starting over: the builder fixes what failed there, and a build too big for its attempts doesn't do its work twice. Starting a build you stopped again carries on from where it stopped too. A change's retry now says in its log that it is one. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 
+### Safety and limits
+
+- **A copy of a Hewn can't act for you.** To try a backup on another machine or home, start it with `HEWN_SCHEDULES=off` (no schedule runs, not even by hand) and `HEWN_NETWORK=off` (nothing goes out; `get` lets tools read, never post). See [Trying a backup without it acting for you](docs/data.md#trying-a-backup-without-it-acting-for-you).
+
 ### Fixes
 
 - A schedule runs on time after the machine wakes from sleep. Before, the next schedule after a wake ran as late as the machine had slept: a laptop asleep from 23:00 to 07:00 ran a 12:00 schedule at about 20:00. The same for any machine that sleeps or suspends Hewn. See [Schedules](docs/using-hewn.md#schedules).

@@ -22,6 +22,17 @@ hewn backup restore <date|file>
 
 Restoring replaces the data and keeps Hewn running: it stops and starts its runtime itself. What was replaced is kept next to the data. Hewn also takes a backup itself before every upgrade, and before migrating a tool's data to a new version.
 
+### Trying a backup without it acting for you
+
+To look at a backup in a second Hewn (another home, another machine) while yours keeps running, restore it there and start that one with schedules and the network off, so it can't run a schedule twice or post anything in your name:
+
+```sh
+HEWN_HOME=~/hewn-try HEWN_PORT=7727 hewn backup restore ~/hewn-backups/hewn-backup-2026-11-18.zip
+HEWN_HOME=~/hewn-try HEWN_PORT=7727 HEWN_SCHEDULES=off HEWN_NETWORK=off hewn serve
+```
+
+`HEWN_NETWORK=get` lets your tools read from the sites they're allowed (GET and HEAD only). Its secrets were stored with your Hewn's key, so connections need signing in again there: skip that to keep it from touching your accounts.
+
 ## Export
 
 **Export data** in a tool's menu, or **Export** in Info › Data, downloads all its data as JSON. Or `hewn export <id> --out file.json`. Info › Data also shows how many rows the tool keeps, in how many tables, and when it last wrote. Neither stops a call the tool is making at the time.

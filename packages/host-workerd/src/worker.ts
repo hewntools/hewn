@@ -65,6 +65,8 @@ interface Env {
   VERSION?: string;
   /** Where the host signs the owner in (HEWN_HOST_SIGNIN_URL), for signed-out pages in hosted mode. */
   HOST_SIGNIN_URL?: string;
+  /** "off" when no schedule may run (HEWN_SCHEDULES=off: a copy of someone's Hewn, a restore drill). */
+  SCHEDULES?: string;
 }
 
 const CALL_TIMEOUT_MS = 30_000;
@@ -582,6 +584,7 @@ export class HewnDO extends DurableObject<Env> {
         logRetentionDays: () => this.settings().logRetentionDays,
         timezone: () => this.settings().timeZone || env.TIMEZONE || "UTC",
         onSchedulesChanged: () => void this.armAlarm(),
+        schedulesOff: env.SCHEDULES === "off",
         // Model providers are called from here (host-side), never from capability code.
         modelFetch: (url, init) => fetch(url, init),
         // Hosted: tools' model calls go to the host, through the supervisor (it holds the host's token).
