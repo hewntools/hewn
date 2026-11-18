@@ -66,6 +66,8 @@ hewn upgrade
 
 It installs the newest release in your minor line (e.g. 0.4.x) with npm, into the same place as before, checks that it starts (and goes back if it doesn't), backs up your data, and restarts Hewn. The new version migrates your data at start. If npm needs `sudo` there, it prints the command to run, then `hewn upgrade --restart-only` does the backup and restart. `hewn version` shows what you're on. A new minor release (e.g. 0.4 → 0.5) is a deliberate move: `hewn upgrade --to 0.5.0`.
 
+A page you had open from before the upgrade says **Hewn was updated**, with **Reload**, and stops refreshing itself until you reload it. It never reloads by itself, so nothing you typed in it is lost.
+
 ## Uninstall
 
 ```sh
