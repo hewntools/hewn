@@ -27,7 +27,7 @@ import { route } from "./router.js";
 import { shareSheet } from "./share.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
-export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, fixSuspended, resumeSuspended, rollbackTo, suspendedText, toolActions };
+export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, fixSuspended, resumeSuspended, rollbackTo, suspendedText, toolActions, wideOnly };
 
 // ---------- tool actions (menu, change, rename, delete, icon, versions) ----------
 
@@ -103,11 +103,14 @@ const askFix = (c, f) => {
 const askFixLatest = async (c, match, fallback) => askFix(c, (await api(`/capabilities/${enc(c.id)}/failures`).catch(() => [])).find(match) ?? fallback);
 const fixButton = (onclick, cls = "sm") => h("button", { class: cls, type: "button", onclick }, "Ask builder to fix this");
 
-/** A tool's actions in a top bar (Info, a version's page): Change…, then `extra` (Share…), and •••. */
+/** A tool's actions in a top bar (Info, a version's page): Change…, then `extra` (Share…), and •••. On a phone, ••• alone (it holds the others). */
 function toolActions(c, { rename, extra } = {}) {
   const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename })) }, "•••");
-  return h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), extra, more);
+  return h("div", { class: "glass-bar tool-actions" }, h("a", { class: "wide-only", href: changeHref(c) }, "Change…"), extra && wideOnly(extra), more);
 }
+
+/** `el`, shown only where a tool's bar has room for it (not on a phone, where ••• holds it). */
+const wideOnly = (el) => (el.classList.add("wide-only"), el);
 
 /** The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools. */
 function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {

@@ -683,6 +683,30 @@ export const operations = {
     if (notes !== 1) throw new Error(`${notes} Stopped. notes`);
     await page.unroute("**/api/intake");
   });
+  await step("on a phone, a tool's bar keeps ••• alone, which holds Change… and Share…, and the tool's name has the room (#116)", async () => {
+    // What each tool bar shows (its items not hidden by the phone rule).
+    const shown = () => page.locator(".tool-actions").first().locator(":scope > *").evaluateAll((els: Element[]) => els.filter((e) => getComputedStyle(e).display !== "none").map((e) => (e.textContent ?? "").trim()));
+    await page.goto(`${web}/#/run/reading-list`);
+    await page.locator(".tool-actions").waitFor();
+    if ((await shown()).join("|") !== "Change…|Share…|•••") throw new Error(`desktop: ${await shown()}`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      for (const hash of ["#/run/reading-list", "#/c/reading-list", "#/c/reading-list/versions"]) {
+        await page.goto(`${web}/${hash}`);
+        await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).waitFor();
+        if ((await shown()).join("|") !== "•••") throw new Error(`${hash}: the bar shows ${(await shown()).join(", ")}`);
+        await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).click();
+        for (const item of ["Change…", "Share…"]) await page.getByRole("menuitem", { name: item }).waitFor({ timeout: 3000 });
+        await page.keyboard.press("Escape");
+      }
+      await page.goto(`${web}/#/run/reading-list`);
+      const name = page.locator(".app-title > span").first();
+      await name.waitFor();
+      if (await name.evaluate((e: Element) => e.scrollWidth > e.clientWidth)) throw new Error(`the name is cut: ${await name.evaluate((e: Element) => e.clientWidth)} px for "${await name.textContent()}"`);
+    } finally {
+      await page.setViewportSize({ width: 1000, height: 900 });
+    }
+  });
 } finally {
   await browser.close();
   await sv.stop();

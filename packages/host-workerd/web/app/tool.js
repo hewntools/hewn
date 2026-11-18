@@ -9,7 +9,7 @@ import { askFeedbackOnOpen, intakeView } from "./intake.js";
 import { route } from "./router.js";
 import { runFailure } from "./schedules.js";
 import { shareButton } from "./share.js";
-import { askFix, capabilityMenu, fixButton, inlineRename, rollbackTo } from "./tool-actions.js";
+import { askFix, capabilityMenu, fixButton, inlineRename, rollbackTo, wideOnly } from "./tool-actions.js";
 
 export { appPage, field, runnableOps, runPage, sidePill };
 
@@ -17,17 +17,17 @@ export { appPage, field, runnableOps, runPage, sidePill };
 
 /**
  * Bar for an opened tool (its own UI, or the Run view): back, icon + name + version, Change… (pressed
- * while the drawer is open), Share… and •••, as Info has.
+ * while the drawer is open), Share… and •••, as Info has. On a phone, ••• alone (it holds the other two).
  */
 function appBar(c, { onChange } = {}) {
   const name = h("span", {}, c.name);
   const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
-  const change = h("button", { "aria-pressed": "false", onclick: () => onChange?.() }, "Change…");
+  const change = h("button", { class: "wide-only", "aria-pressed": "false", onclick: () => onChange?.() }, "Change…");
   const version = h("span", { class: "pill", hidden: !c.version }, c.version ? `v${c.version}` : "");
   const el = bar({
     left: c.kind === "connection" ? glassBack(c.name, `#/c/${enc(c.id)}`) : glassBack("Home", "#/"),
     center: h("div", { class: "app-title" }, appIcon(c, { size: 28 }), name, version),
-    right: h("div", { class: "glass-bar" }, change, shareButton(c), more),
+    right: h("div", { class: "glass-bar tool-actions" }, change, wideOnly(shareButton(c)), more),
   });
   const setVersion = (v) => ((version.textContent = `v${v}`), (version.hidden = false));
   return { el, change, setVersion };

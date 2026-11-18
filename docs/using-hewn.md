@@ -70,7 +70,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
 - **Versions:** the last two, and **All versions**; a version's **Details** has its conversation, spec, log and code ([Building tools](building-tools.md#versions))
 
-Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule, **Resume** for a suspended tool) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
+Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule, **Resume** for a suspended tool) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns. On a phone, a tool's top bar keeps **•••** alone, so its name has the room: **Change…** and **Share…** are in it.
 
 The **Change it** box asks for a change ([Building tools](building-tools.md#changing-a-tool)). **Polish…** in the tool's menu, under **Change…**, opens the change panel for a second look at its design: the intake proposes a Polish (say what you'd like it to lead with), and the builder reviews the tool on screenshots and fixes what it finds, keeping what the tool does and its character. Your own data is shown to the builder only if you tick it on the proposal ([Polishing a tool](building-tools.md#polishing-a-tool)).
 
