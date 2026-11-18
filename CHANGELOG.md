@@ -22,6 +22,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- An agent's `capabilities_submit` or `capabilities_check` of a tool near its 5 MB was refused before Hewn saw it once the request passed 4 MB (base64 files count a third more as they travel). Hewn now takes MCP requests up to 8 MB, and one over that is refused naming both limits. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
 - A page open from before an upgrade kept refreshing itself with its old code, and a page from an older version could keep a Hewn that suspends when idle awake. Now it stops refreshing once it says **Hewn was updated**, until you click **Reload**; it never reloads by itself. A page open from 0.4.11 or before still refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
 - **Authorize** on a tool's request stayed greyed out while one of its settings was empty, with no word why. It now grants what the tool asks for whatever its settings, and the line under the button and the Inbox name the settings still to set ("Set UPSTREAM_REPO and MAINTAINER before it runs"). See [Grants](docs/concepts.md#grants).
 - A schedule runs on time after the machine wakes from sleep. Before, the next schedule after a wake ran as late as the machine had slept: a laptop asleep from 23:00 to 07:00 ran a 12:00 schedule at about 20:00. The same for any machine that sleeps or suspends Hewn. See [Schedules](docs/using-hewn.md#schedules).
