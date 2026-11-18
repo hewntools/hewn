@@ -115,7 +115,7 @@ export class Models extends Domain {
       const keySet = this.secrets.get(MODEL_KEYS, p) !== undefined;
       const models = (list?.models ?? []).map((m) => ({ ...m, ...this.modelInfo(`${p}/${m.id}`) })).sort((a, b) => (a.price?.output ?? Infinity) - (b.price?.output ?? Infinity));
       const suggested = keySet && list?.ok ? suggestTiers(p, list.models, (id) => this.modelInfo(`${p}/${id}`)) : { tiers: {}, by: "family" as const };
-      return { id: p, label: PROVIDER_LABEL[p], keySet, check: list ? { ok: list.ok, at: list.checkedAt, error: list.error ?? null } : null, models, tiers: settings.tiers[p] ?? {}, suggested };
+      return { id: p, label: PROVIDER_LABEL[p], keySet, expiresOn: keySet ? this.keyExpiry(p) : null, check: list ? { ok: list.ok, at: list.checkedAt, error: list.error ?? null } : null, models, tiers: settings.tiers[p] ?? {}, suggested };
     });
     return {
       provider: settings.provider ?? null,
@@ -208,16 +208,19 @@ export class Models extends Domain {
 
   /**
    * Set a provider's API key (owner only; stored like secrets, never shown). The key is checked
-   * with the provider's free models list first; a refused key isn't stored. With no provider
-   * active yet, this one becomes active with its suggested tiers.
+   * with the provider's free models list first; a refused key isn't stored, and a key replacing
+   * one is stored only once its check passed (else the old one stays). With no provider active
+   * yet, this one becomes active with its suggested tiers. `expiresOn` (YYYY-MM-DD): when the
+   * owner says the key stops working (providers don't tell), for the Inbox's notice a week before;
+   * a new key's replaces the old key's.
    */
-  async setModelKey(owner: Agent, provider: string, key: string | null) {
+  async setModelKey(owner: Agent, provider: string, key: string | null, { expiresOn = null }: { expiresOn?: string | null } = {}) {
     requireOwner(owner);
-    if (!(MODEL_PROVIDERS as readonly string[]).includes(provider)) throw new PlatformError("invalid_request", `unknown provider ${provider} (anthropic, openai, openrouter)`);
-    const p = provider as ModelProvider;
+    const p = modelProvider(provider);
     if (key === null) {
       this.secrets.delete(MODEL_KEYS, p);
       this.registry.setKv(`models.provider.${p}`, null);
+      this.registry.setKv(`models.keyExpiry.${p}`, null);
       const s = this.modelSettings_();
       if (s.provider === p) {
         delete s.provider;
@@ -229,9 +232,14 @@ export class Models extends Domain {
     }
     const clean = key.trim();
     if (clean.length < 8 || clean.length > 500 || /\s/.test(clean)) throw new PlatformError("invalid_request", "that doesn't look like an API key");
+    const expiry = expiryDate(expiresOn);
+    const replacing = this.secrets.get(MODEL_KEYS, p) !== undefined;
     const checked = await this.listProviderModels(p, clean);
-    if (!checked.ok && checked.refused) throw new PlatformError("invalid_request", `${PROVIDER_LABEL[p]} refused that key: ${checked.error}`);
+    const kept = replacing ? `; the key you had stays` : "";
+    if (!checked.ok && checked.refused) throw new PlatformError("invalid_request", `${PROVIDER_LABEL[p]} refused that key: ${checked.error}${kept}`);
+    if (!checked.ok && replacing) throw new PlatformError("invalid_request", `couldn't check the new ${PROVIDER_LABEL[p]} key (${checked.error})${kept}`);
     this.secrets.set(MODEL_KEYS, p, clean);
+    this.registry.setKv(`models.keyExpiry.${p}`, expiry);
     this.registry.setKv(`models.provider.${p}`, { checkedAt: new Date().toISOString(), ok: checked.ok, ...(checked.ok ? {} : { error: checked.error }), models: checked.models });
     this.registry.addAuthorityEvent({ actor: owner.id, action: "model_key_set", subject: p });
     this.logger(`${p} model key set by ${owner.id}`);
@@ -243,6 +251,21 @@ export class Models extends Domain {
       this.saveModelSettings(owner, s);
     }
     return this.models(owner);
+  }
+
+  /** The date the owner gave for a provider's key to stop working, or clear it (owner only). */
+  setModelKeyExpiry(owner: Agent, provider: string, expiresOn: string | null) {
+    requireOwner(owner);
+    const p = modelProvider(provider);
+    if (this.secrets.get(MODEL_KEYS, p) === undefined) throw new PlatformError("invalid_request", `no ${PROVIDER_LABEL[p]} key is set`);
+    this.registry.setKv(`models.keyExpiry.${p}`, expiryDate(expiresOn));
+    this.logger(`${p} model key's expiry ${expiresOn ? `set to ${expiresOn}` : "cleared"} by ${owner.id}`);
+    return this.models(owner);
+  }
+
+  /** When the owner said a provider's key stops working (YYYY-MM-DD), if they did. */
+  keyExpiry(p: ModelProvider): string | null {
+    return this.registry.getKv<string>(`models.keyExpiry.${p}`) ?? null;
   }
 
   /**
@@ -541,4 +564,16 @@ export class Models extends Domain {
       }
     }
   }
+}
+
+function modelProvider(provider: string): ModelProvider {
+  if (!(MODEL_PROVIDERS as readonly string[]).includes(provider)) throw new PlatformError("invalid_request", `unknown provider ${provider} (anthropic, openai, openrouter)`);
+  return provider as ModelProvider;
+}
+
+/** An owner-given date a key stops working: YYYY-MM-DD (a real date), or null for none. */
+function expiryDate(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) throw new PlatformError("invalid_request", "expiresOn: a date, YYYY-MM-DD");
+  return value;
 }

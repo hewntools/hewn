@@ -65,7 +65,7 @@ Use it (as the owner; talks to the running Hewn)
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
   accounts            connections to external services: health and what uses them
   models              the model provider, tiers, budget and this month's spend
-                      models key <provider> [--from <path>|--remove] | use <provider> | list
+                      models key <provider> [--from <path>] [--expires <date>] | --remove | use <provider> | list
                       | tier <tier> <model-id>|--suggested | cap [<tool>] <usd>|none
                       | price <provider/model> <in> <out> (USD per M tokens) | check
                       | set <tool> <tier>|<provider/model> (what it uses; no builder)
@@ -868,12 +868,13 @@ async function models(c: PlatformClient, rl: ReturnType<typeof createInterface>)
   const [sub, a, b, x] = positional();
   const PROVIDERS = ["anthropic", "openai", "openrouter"];
   if (sub === "key") {
-    if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>|--remove]");
+    if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>] [--expires YYYY-MM-DD] | --remove");
     if (flag("remove")) return void (await c.call("setModelKey", a, null), console.log(`✔ ${a} key removed`));
     const from = option("from");
     const key = from ? readSecretSource(from) : await askHidden(rl, `${a} API key (input hidden): `);
     if (!key) throw new Error("empty key, nothing stored");
-    const m = await c.call("setModelKey", a, key);
+    // Checked before it's stored: a key that doesn't pass leaves the one you had.
+    const m = await c.call("setModelKey", a, key, { expiresOn: option("expires") ?? null });
     const p = m.providers.find((p: any) => p.id === a);
     console.log(p.check?.ok ? `✔ ${a} key works (${p.models.length} models)` : `✔ ${a} key stored, but it couldn't be checked: ${p.check?.error}`);
     if (m.provider === a) console.log(`  ${a} runs the tiers${Object.keys(p.tiers).length ? `: ${Object.entries(p.tiers).map(([t, id]) => `${t} ${id}`).join(", ")}` : ""}`);

@@ -3,7 +3,7 @@
 // agent blocked on a destructive call.
 import { api, appIcon, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
 import { activityRow, groupItems } from "./activity.js";
-import { agentRequestSheet, agentTile, confirmationSheet } from "./agents.js";
+import { agentRequestSheet, agentTile, confirmationSheet, providerTile } from "./agents.js";
 import { waitingPill } from "./build.js";
 import { go, put } from "./frame.js";
 import { BELL } from "./glyphs.js";
@@ -49,6 +49,7 @@ window.addEventListener("hashchange", () => closeInbox());
 function needIcon(n, all, size = 36) {
   if (n.capabilityId) return appIcon(all.get(n.capabilityId) ?? { id: n.capabilityId, name: n.title }, { size });
   if (n.kind === "agent") return agentTile(n.title, n.title, size);
+  if (n.kind === "model-key") return providerTile(n.id, size);
   return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 } }, n.kind === "spend" ? "$" : "·");
 }
 
@@ -78,6 +79,7 @@ async function openNeed(n) {
     } else if (n.kind === "builder-model") go("#/settings/ai");
     // Suspended: the tool's page says why, with Resume.
     else if (n.kind === "suspended") go(`#/c/${enc(n.capabilityId)}`);
+    else if (n.kind === "model-key") go("#/settings/ai/models");
     else if (n.kind === "spend") {
       const c = n.capabilityId && (await caps()).get(n.capabilityId);
       if (c) await toolModelSheet(c);
