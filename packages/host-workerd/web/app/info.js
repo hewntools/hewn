@@ -11,7 +11,7 @@ import { plural } from "./intake.js";
 import { modelPicker, titleCase } from "./models.js";
 import { route } from "./router.js";
 import { addScheduleSheet, scheduleRow } from "./schedules.js";
-import { changeHref, download, inlineRename, openCapability, openChange, toolActions } from "./tool-actions.js";
+import { changeHref, download, fixSuspended, inlineRename, openCapability, openChange, resumeSuspended, suspendedText, toolActions } from "./tool-actions.js";
 import { modelSpend, ownCap, quickModelChange, saveOwnCap, toolModelSheet } from "./tool-model.js";
 import { runnableOps, sidePill } from "./tool.js";
 import { shareButton } from "./share.js";
@@ -184,9 +184,9 @@ async function infoPage(id) {
   const notices = [];
   // Suspended by Hewn: first, as nothing runs it until the owner resumes it.
   if (cap.status.suspended) {
-    const resume = () => api(`/capabilities/${enc(id)}/resume`, { method: "POST" }).then(() => (invalidateCaps(), toast(`${cap.name} resumed`), route()), fail);
-    const fix = () => openChange(c, { m: "It kept Hewn's tools from responding while it ran (an endless loop?), so Hewn suspended it. Find what never lets go and fix it." });
-    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, `Suspended: ${cap.status.suspended.reason}. Its calls, schedules and widgets are refused until you resume it.`), h("button", { class: "sm", onclick: fix }, "Ask builder to fix"), h("button", { class: "sm primary", onclick: resume }, "Resume")));
+    const resume = () => resumeSuspended({ id, name: cap.name }).then((done) => done && route());
+    const fix = () => fixSuspended(c);
+    notices.push(h("div", { class: "notice danger info-notice" }, h("span", { class: "grow" }, suspendedText(cap.status.suspended.reason)), h("button", { class: "sm", onclick: fix }, "Ask builder to fix"), h("button", { class: "sm primary", onclick: resume }, "Resume")));
   }
   const shownPending = pending.filter((i) => !denied(i));
   if (shownPending.length === 1 && oneTap(shownPending[0]) && !missingConfig.length) {

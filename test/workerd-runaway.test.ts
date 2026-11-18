@@ -10,7 +10,7 @@ import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { CALL_DEADLINE_MS } from "@hewntools/core/platform.ts";
 import { editText, FIXTURES } from "./helpers.ts";
-import { startTestHost, type TestHost } from "./workerd-helpers.ts";
+import { signedIn, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -159,25 +159,4 @@ async function until(fn: () => boolean | Promise<boolean>) {
     if (Date.now() > end) throw new Error("timed out waiting");
     await sleep(50);
   }
-}
-
-/** The web API as the signed-in owner (on Hewn's own host name, which fetch can't send). */
-async function signedIn(h: TestHost): Promise<(path: string) => Promise<any>> {
-  const get = (path: string, cookie = "") =>
-    new Promise<{ status: number; headers: Record<string, any>; body: string }>((ok, fail) => {
-      const r = request({ host: "127.0.0.1", port: h.port, path, headers: { host: `hewn.localhost:${h.port}`, ...(cookie ? { cookie } : {}), "x-hewn-ui": "1" } }, (m) => {
-        let body = "";
-        m.on("data", (d) => (body += d));
-        m.on("end", () => ok({ status: m.statusCode!, headers: m.headers, body }));
-      });
-      r.on("error", fail);
-      r.end();
-    });
-  const { ticket } = await h.sv.admin("web-ticket");
-  const cookie = String((await get(`/auth?ticket=${ticket}`)).headers["set-cookie"]).split(";")[0];
-  return async (path) => {
-    const r = await get(path, cookie);
-    if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status} ${r.body}`);
-    return JSON.parse(r.body);
-  };
 }

@@ -76,13 +76,20 @@ describe("stalls", () => {
     code(t.platform, "runaway", "spin@1");
     code(t.platform, "running-log", "list_runs@1", "", "claude-code → run-feeder");
     code(t.platform, "runaway", "tick@1", "test:b-1");
-    const out = t.platform.recoverStall(min(0), (r) => ({ caused: r.capabilityId === "runaway" && r.state === "", state: r.capabilityId === "runaway" ? "running" : "waiting on a fetch" }));
+    const out = t.platform.recoverStall(min(0), (r) => ({ caused: r.capabilityId === "runaway" && r.state === "", doing: r.capabilityId === "runaway" ? "running" : "waiting on a fetch" }));
     assert.deepEqual(out, { tools: ["runaway"], suspended: [], builds: [] });
     assert.equal(stalled(t.platform, "runaway").length, 1);
     assert.deepEqual(stalled(t.platform, "running-log"), [], "the one waiting isn't told it was its doing");
     // Activity names every tool there, and what it was doing.
     assert.deepEqual(t.platform.registry.lifecycleEvents().filter((e) => e.action === "stalled" || e.action === "held-up").map((e) => [e.capabilityId, e.action, e.detail]).sort(), [["runaway", "stalled", "spin@1"], ["running-log", "held-up", "list_runs@1 — waiting on a fetch"]]);
     assert.deepEqual(running(t.platform), [], "what was written down goes, all of it");
+  });
+
+  test("a tool's stalls recorded before 0.4.12 (times only) still count, and its suspension lists them", () => {
+    t.platform.registry.setKv("stalls:runaway", { at: [min(0), min(10)] });
+    code(t.platform, "runaway", "spin@1");
+    assert.deepEqual(t.platform.recoverStall(min(20)).suspended, ["runaway"]);
+    assert.match(t.platform.suspension("runaway")!.reason, /3 times within an hour \(\d\d:\d\d, \d\d:\d\d, spin@1 at \d\d:\d\d\)$/);
   });
 
   test("3 stalls within an hour suspend a tool; spread wider, they don't", () => {

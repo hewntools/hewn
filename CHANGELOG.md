@@ -18,6 +18,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### Fixes
 
 - When a tool's code never lets go, Hewn now blames only that tool: a tool that was waiting on it, on a model or on the network at that moment isn't told it was its doing, and gets no strike toward being suspended. Activity lists every tool that was there and what it was doing, and a suspension says which stalls it came from. See [the threat model](docs/threat-model.md).
+- Opening a tool Hewn had suspended showed what it may do, not why it was suspended. It now says why, with Ask builder to fix and Resume, as its Info page does (since 0.4.11).
 - A failed build that was retried still offered Retry and Ask builder to fix, which were then refused; its card now says "Retried as …" and how that build went.
 - The tool's version at the top of its page stayed old after a change went live from the Change panel, until a reload.
 - A tool's call, from a schedule or an agent, could stop with "new version" when you opened the tool's data or exported it at that moment.

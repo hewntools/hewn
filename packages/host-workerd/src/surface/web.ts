@@ -899,6 +899,8 @@ async function capabilityList(platform: Platform, owner: Agent) {
       lastBuild: last && !last.discardedAt ? { buildId: last.id, status: last.status, builder: last.builder, ...(last.status === "failed" && failureOf(last.id, () => platform.registry.getBuild(last.id)?.log ?? []).paused ? { paused: true } : {}) } : null,
       building: building(c.id),
       held: held.get(c.id) ?? null,
+      // Suspended by Hewn (it kept Hewn's tools from responding): opening it says why, with Resume.
+      suspended: platform.suspension(c.id)?.reason ?? null,
     });
   }
   // Tools that aren't one yet: being built, or an agent's new tool held for the owner (its tile opens the review card).

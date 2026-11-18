@@ -2,13 +2,14 @@
 // The channel between the platform and the tools: they run in separate workerd processes, and talk
 // HTTP over Unix sockets in the data dir. The platform calls the tools process (one route per
 // CapabilityHost method, with the tools' token); the tools process calls back for a running call's
-// `call` and `model` (with that call's own token, good only while it runs). A tool's code sees
+// `call` and `model` (with that call's own token, good only while it runs), and tells the platform
+// when a tool's fetch goes out and comes back (`/egress`, with the tools' token). A tool's code sees
 // neither token.
 import type { GenerateRequest } from "@hewntools/core/models.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 
-/** The tools process's token, on every call the platform makes to it. */
+/** The tools' token: on every call the platform makes to the tools process, and on Egress's marks back. */
 export const TOOLS_TOKEN_HEADER = "x-hewn-tools";
 /** A running call's token, on its callbacks to the platform. */
 export const CALL_TOKEN_HEADER = "x-hewn-call";
@@ -49,6 +50,13 @@ export type CallbackKind = keyof Callbacks;
 /** Bundles the tools process keeps by hash. */
 export const CODES_KEPT = 200;
 
+/** Egress's mark to the platform (POST `/egress`): a fetch out of `isolate` went out (1) or is over (-1). */
+export const EGRESS_PATH = "/egress";
+export type EgressMark = { isolate: string; delta: 1 | -1 };
+
+/** How a call to the tools process is sent: a bound on its answer, and `started` (an invoke started there, in this isolate). */
+export type SendOptions = { timeoutMs?: number; started?: (isolate: string) => void };
+
 /** The tools process didn't answer: it stopped, was restarted, or is stuck (`timeout`). */
 export class ToolsUnreachable extends Error {
   readonly timeout: boolean;
@@ -63,8 +71,7 @@ export type ToolsSocket = { fetch(url: string, init?: RequestInit): Promise<Resp
 
 /** A call to one capability's host in the tools process. */
 export type ToolsHost = {
-  // `started`: an invoke started in the tools process, in this isolate.
-  [M in HostMethod]: (body: Omit<HostCalls[M], "code"> & ("code" extends keyof HostCalls[M] ? { code: CodeRef } : unknown), o?: { timeoutMs?: number; started?: (isolate: string) => void }) => Promise<any>;
+  [M in HostMethod]: (body: Omit<HostCalls[M], "code"> & ("code" extends keyof HostCalls[M] ? { code: CodeRef } : unknown), o?: SendOptions) => Promise<any>;
 };
 
 /**
@@ -74,7 +81,7 @@ export type ToolsHost = {
 export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: string) => ToolsHost {
   /** Hashes the tools process has the text of (as far as the platform knows: it says 409 when it hasn't). */
   const sent = new Set<string>();
-  const post = async (capabilityId: string, method: HostMethod, body: Record<string, unknown>, o: { timeoutMs?: number; started?: (isolate: string) => void } = {}): Promise<unknown> => {
+  const post = async (capabilityId: string, method: HostMethod, body: Record<string, unknown>, o: SendOptions = {}): Promise<unknown> => {
     const { timeoutMs } = o;
     const code = body.code as CodeRef | undefined;
     const send = async (withJs: boolean) => {
@@ -116,40 +123,5 @@ export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: 
     }
     return out.result;
   };
-  return (capabilityId) => Object.fromEntries(HOST_METHODS.map((m) => [m, (body: Record<string, unknown>, o?: { timeoutMs?: number; started?: (isolate: string) => void }) => post(capabilityId, m, body, o)])) as unknown as ToolsHost;
+  return (capabilityId) => Object.fromEntries(HOST_METHODS.map((m) => [m, (body: Record<string, unknown>, o?: SendOptions) => post(capabilityId, m, body, o)])) as unknown as ToolsHost;
 }
-
-/** A tool call running in the tools process, as the platform sees it (for `stallSuspects`). */
-export interface CallInFlight {
-  capabilityId: string;
-  /** "" for the tool's own data, else the scratch state's name (as in `running_code`). */
-  state: string;
-  /** Its answer's headers came: it started there (else it was waiting behind whatever held the process). */
-  started: boolean;
-  /** The isolate it runs in (from those headers). */
-  isolate?: string;
-  /** Callbacks (`call`, `model`) it's waiting on. */
-  waiting: number;
-}
-
-/** What a call was doing when the tools stopped responding, as far as the platform can see. */
-export type CallState = "running" | "waiting on a fetch" | "waiting on Hewn" | "queued";
-
-/**
- * Queued: its answer's headers never came (it was waiting behind whatever held the process). Waiting on Hewn: a
- * callback in progress. Waiting on a fetch: one out of its isolate. Else running, waits inside its isolate (a timer)
- * included: those can't be seen.
- */
-export const callState = (c: CallInFlight, fetchesOut: ReadonlyMap<string, number>): CallState =>
-  !c.started ? "queued" : c.waiting > 0 ? "waiting on Hewn" : c.isolate && (fetchesOut.get(c.isolate) ?? 0) > 0 ? "waiting on a fetch" : "running";
-
-/**
- * When the tools stop responding, the calls whose code may be what held them: the running ones. Undefined when it
- * can't be told: another kind of work was running tool code (loading, migrating: `otherWork`), or none was running.
- */
-export function stallSuspects<T extends CallInFlight>(calls: T[], fetchesOut: ReadonlyMap<string, number>, otherWork: number): T[] | undefined {
-  if (otherWork > 0) return undefined;
-  const suspects = calls.filter((c) => callState(c, fetchesOut) === "running");
-  return suspects.length ? suspects : undefined;
-}
-

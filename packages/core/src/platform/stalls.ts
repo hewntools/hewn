@@ -20,14 +20,23 @@ export interface Suspension {
   reason: string;
 }
 
-/** The stalls a tool was running in (within the window), what of it was running in each, and its suspension. */
-type StallRecord = { at: string[]; what?: (string | undefined)[]; suspended?: Suspension };
+/** A stall a tool was in: when, and which of its operations was running. */
+type Stall = { at: string; what?: string };
+/**
+ * The stalls a tool was in (within the window), and its suspension. Records written before 0.4.12 have `at` only
+ * (the times): read as stalls without `what`.
+ */
+type StallRecord = { stalls?: Stall[]; at?: string[]; suspended?: Suspension };
+const stallsOf = (rec: StallRecord): Stall[] => rec.stalls ?? (rec.at ?? []).map((at) => ({ at }));
+
+/** What a call was doing when the tools stopped responding, as far as the host can see. */
+export type Doing = "running" | "waiting on a fetch" | "waiting on Hewn" | "queued";
 
 /**
- * What a running piece of tool code was doing when the tools stopped responding ("running", "waiting on a fetch",
- * "waiting on Hewn", "queued"), and whether it may have held them: the host's word, when it can tell.
+ * The host's word on a piece of tool code that was running when the tools stopped responding: what it was doing, and
+ * whether it may be what held them (`caused`; every one is, when the host can't tell).
  */
-export type StallPart = (running: { capabilityId: string; state: string }) => { caused: boolean; state: string };
+export type StallRole = (running: { capabilityId: string; state: string }) => { caused: boolean; doing: Doing };
 
 /** The last stall told (not under `stalls:`, where a tool's id could be "last"). */
 const LAST_STALL = "stall:last";
@@ -61,7 +70,7 @@ export class Stalls extends Domain {
    * running is told so, or only what `caused` says may have held them (the rest was waiting, and fails as it
    * goes). Unset: once at start, before interrupted builds are retried; what was written down only goes.
    */
-  recover(stalledAt?: string, part?: StallPart): { tools: string[]; suspended: string[]; builds: string[] } {
+  recover(stalledAt?: string, role?: StallRole): { tools: string[]; suspended: string[]; builds: string[] } {
     const left = this.registry.takeRunningCode();
     const out = { tools: [] as string[], suspended: [] as string[], builds: [] as string[] };
     // A restart of a restart (or the platform started again in the same process) says the same stall again.
@@ -71,11 +80,11 @@ export class Stalls extends Domain {
     // Each tool counts the stall once, however many of its calls were running: what of it is named.
     const struck = new Map<string, string>();
     for (const r of left) {
-      const p = part?.(r);
+      const part = role?.(r);
       // Activity names every tool there, with what it was doing ("spin@1 — waiting on a fetch"), so a pattern can be seen.
-      const detail = p && p.state !== "running" ? `${r.what} — ${p.state}` : r.what;
-      if (p && !p.caused) {
-        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was ${p.state} when Hewn's tools stopped responding: not the cause`);
+      const detail = part && part.doing !== "running" ? `${r.what} — ${part.doing}` : r.what;
+      if (part && !part.caused) {
+        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was ${part.doing} when Hewn's tools stopped responding: not the cause`);
         if (!r.state && this.registry.getCapability(r.capabilityId)) this.registry.addLifecycleEvent(r.capabilityId, "held-up", detail, "hewn");
         continue;
       }
@@ -99,17 +108,15 @@ export class Stalls extends Domain {
 
   /** One more stall for a tool (`what` of it was running): true when that suspends it. */
   private strike(capabilityId: string, at: string, what: string): boolean {
-    const rec = this.registry.getKv<StallRecord>(key(capabilityId)) ?? { at: [] };
+    const old = this.registry.getKv<StallRecord>(key(capabilityId)) ?? {};
     const since = Date.parse(at) - STALL_WINDOW_MS;
-    const kept = rec.at.map((t, i) => ({ t, what: rec.what?.[i] })).filter((s) => Date.parse(s.t) > since);
-    const stalls = [...kept, { t: at, what }];
-    rec.at = stalls.map((s) => s.t);
-    rec.what = stalls.map((s) => s.what);
-    const suspend = !rec.suspended && rec.at.length >= STALLS_TO_SUSPEND;
+    const stalls = [...stallsOf(old).filter((s) => Date.parse(s.at) > since), { at, what }];
+    const rec: StallRecord = { stalls, ...(old.suspended ? { suspended: old.suspended } : {}) };
+    const suspend = !rec.suspended && stalls.length >= STALLS_TO_SUSPEND;
     if (suspend) {
       // Which stalls: the owner can see whether it was the same code each time.
-      const which = stalls.map((s) => `${s.what ? `${s.what} at ` : ""}${this.clock(s.t)}`).join(", ");
-      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${rec.at.length} times within an hour (${which})` };
+      const which = stalls.map((s) => `${s.what ? `${s.what} at ` : ""}${this.clock(s.at)}`).join(", ");
+      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${stalls.length} times within an hour (${which})` };
       this.registry.addLifecycleEvent(capabilityId, "suspend", rec.suspended.reason, "hewn");
       this.logger(`${capabilityId} suspended: ${rec.suspended.reason}; its calls, schedules and widgets are refused until the owner resumes it`);
     }
@@ -146,7 +153,7 @@ export class Stalls extends Domain {
     requireOwner(owner);
     this.visibleActive(owner, capabilityId);
     if (!this.suspension(capabilityId)) throw new PlatformError("conflict", `${capabilityId} isn't suspended`);
-    this.registry.setKv(key(capabilityId), { at: [] });
+    this.registry.setKv(key(capabilityId), { stalls: [] });
     this.registry.addLifecycleEvent(capabilityId, "resume", "", owner.id);
     this.logger(`${capabilityId} resumed by ${owner.id}`);
   }

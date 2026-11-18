@@ -593,12 +593,24 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const platformCommand = o.sandbox ? sandboxed(platformBase, { readable: [binDir, ...Object.values(assetDirs()).map((d) => realpathSync(d))], writable: [data], profile: join(data, "workerd.sb") }) : platformBase;
   const toolsCommand = o.sandbox ? sandboxed(toolsBase, toolsSandbox(o.home.root, data, binDir)) : toolsBase;
   const url = `http://127.0.0.1:${o.port}`;
+  /** The admin channel to the platform (as the owner). */
+  const admin = async (path: string, body?: unknown, timeoutMs?: number) => {
+    const res = await fetch(`${url}/_admin/${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { "x-hewn-admin": adminToken, "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    });
+    const out = await res.json();
+    if (!res.ok) throw Object.assign(new Error((out as any).message ?? (out as any).error), out);
+    return out;
+  };
   let stopping = false;
   /**
    * One workerd: started, restarted when it exits (backing off from a crash loop), its pid on disk. `label` starts
-   * its lines in the log; `onExit`, when it exits by itself (not stopped on purpose).
+   * its lines in the log; `onExit`, when it exits by itself (not stopped on purpose); `onStarted`, after each start.
    */
-  const workerdProcess = (o: { label: string; command: string[]; env: () => NodeJS.ProcessEnv; pidFile: string; socket?: string; cwd: string; onExit?: () => void }) => {
+  const workerdProcess = (o: { label: string; command: string[]; env: () => NodeJS.ProcessEnv; pidFile: string; socket?: string; cwd: string; onExit?: () => void; onStarted?: () => void }) => {
     const p = {
       child: undefined as ChildProcess | undefined,
       restarts: 0,
@@ -626,6 +638,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         const forward = (b: Buffer) => b.toString().split("\n").filter(Boolean).forEach((l) => log(`${o.label}${l.replace(/^\[\S+\] /, "")}`));
         child.stdout!.on("data", forward);
         child.stderr!.on("data", forward);
+        o.onStarted?.();
         child.on("exit", (code, signal) => {
           if (stopping || p.held) return;
           // A crash loop (e.g. a bad config) backs off instead of spinning.
@@ -687,7 +700,18 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const keep = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
     return { ...Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), TZ: process.env.TZ ?? timezone, HEWN_TOOLS_TOKEN: toolsToken };
   };
-  const tools = workerdProcess({ label: "tools: ", command: toolsCommand, env: toolsEnv, pidFile: pidFiles.tools, socket: unix ? socketPath("tools") : undefined, cwd: run });
+  const tools = workerdProcess({
+    label: "tools: ",
+    command: toolsCommand,
+    env: toolsEnv,
+    pidFile: pidFiles.tools,
+    socket: unix ? socketPath("tools") : undefined,
+    cwd: run,
+    // The platform holds its calls while the tools are away, and sends them once a new process answers: never to a
+    // socket nothing listens on yet.
+    onExit: () => void admin("tools-gone", {}, 2000).catch(() => {}),
+    onStarted: () => void waitFor(toolsHealthy, "the tools' workerd").then(() => admin("tools-back", {}, 2000)).catch(() => {}),
+  });
   const healthy = async (timeoutMs: number) => {
     try {
       return (await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) })).ok;
@@ -865,17 +889,6 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, { afterSeconds, resumedAt });
   };
 
-  const admin = async (path: string, body?: unknown, timeoutMs?: number) => {
-    const res = await fetch(`${url}/_admin/${path}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers: { "x-hewn-admin": adminToken, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-    });
-    const out = await res.json();
-    if (!res.ok) throw Object.assign(new Error((out as any).message ?? (out as any).error), out);
-    return out;
-  };
 
   // ---------- the disk ----------
   // A tool's data can't grow while the disk with Hewn's data is nearly full. workerd is told while it is

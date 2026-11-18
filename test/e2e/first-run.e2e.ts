@@ -367,6 +367,27 @@ try {
     if (!r.ready) throw new Error(`not ready after Save: ${JSON.stringify(r)}`);
   });
 
+  await step("a tool Hewn suspended: opening it from Home says why, with Ask builder to fix and Resume, as its Info page does; Resume opens it", async () => {
+    const installed = await sv.admin("install", { name: "Runaway", purpose: "Runs on", dir: join(FIX, "runaway"), wait: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    // Three times code that never yields (the watchdog restarts the tools each time): suspended.
+    for (let i = 0; i < 3; i++) await sv.admin("invoke", { capabilityId: "runaway", operation: "spin" }).catch(() => {});
+    for (let i = 0; !(await sv.admin("readiness", { capabilityId: "runaway" })).suspended; i++) {
+      if (i > 100) throw new Error("not suspended");
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await page.goto(`${web}/#/`);
+    await page.locator(".tile", { hasText: "Runaway" }).click();
+    const sheet = page.locator("dialog", { hasText: /Suspended: it kept Hewn's tools from responding 3 times within an hour \(spin@1 at .*\)\. Its calls, schedules and widgets are refused until you resume it\./ });
+    await sheet.waitFor();
+    if (await page.locator("dialog", { hasText: "is allowed to" }).count()) throw new Error("the grants sheet came up instead");
+    await sheet.getByRole("button", { name: "Ask builder to fix" }).waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-suspended.png" });
+    await sheet.getByRole("button", { name: "Resume" }).click();
+    await page.waitForURL(/#\/(app|run)\/runaway/);
+    if ((await sv.admin("readiness", { capabilityId: "runaway" })).suspended) throw new Error("still suspended");
+  });
+
   await step("Versions › Details › Restore… asks first, and Cancel keeps the live version", async () => {
     const v2 = await sv.admin("modify", { capabilityId: "reading-list", request: "a second version", wait: true });
     if (v2.status !== "promoted") throw new Error(v2.log?.join("\n"));

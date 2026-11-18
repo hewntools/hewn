@@ -31,7 +31,7 @@ import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 import { Activity, type ActivityView } from "./platform/activity.ts";
-import { type StallPart, Stalls, type Suspension } from "./platform/stalls.ts";
+import { type StallRole, Stalls, type Suspension } from "./platform/stalls.ts";
 import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
@@ -354,9 +354,9 @@ export class Platform {
 
   /**
    * What was running when the host found the tools not responding (`stalledAt`, before it restarts them), or once at start
-   * (unset). `part`: what each of it was doing, and whether it may have held them (unset: all of it may have).
+   * (unset). `role`: what each piece was doing, and whether it may have held them (unset: every one may have).
    */
-  recoverStall(stalledAt?: string, part?: StallPart): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt, part); }
+  recoverStall(stalledAt?: string, role?: StallRole): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt, role); }
   suspension(capabilityId: string): Suspension | undefined { return this.d.stalls.suspension(capabilityId); }
   resume(owner: Agent, capabilityId: string) { return this.d.stalls.resume(owner, capabilityId); }
 

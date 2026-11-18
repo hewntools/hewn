@@ -12,7 +12,7 @@ import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
-import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, HOST_METHODS, type HostCalls, type HostMethod, ISOLATE_HEADER, type SentCode, STARTED_HEADER, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
+import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, EGRESS_PATH, type EgressMark, HOST_METHODS, type HostCalls, type HostMethod, ISOLATE_HEADER, type SentCode, STARTED_HEADER, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import RUNTIME from "./capability-runtime.js";
@@ -80,7 +80,9 @@ export default {
         .then(async (out) => {
           await writer.write(new TextEncoder().encode(JSON.stringify(out)));
           await writer.close();
-        });
+        })
+        // The answer can't be written (it doesn't serialize, the platform went): it ends, failed, rather than hanging.
+        .catch((e: Error) => writer.abort(e).catch(() => {}));
       ctx.waitUntil(done);
       return new Response(reply.readable, { headers: { "content-type": "application/json", [STARTED_HEADER]: "1", [ISOLATE_HEADER]: isolateKey(code!.hash, c.hosts, c.limit, c.named) } });
     }
@@ -95,9 +97,9 @@ export default {
 /** The key of the isolate that runs `hash` with these hosts and limit (CapabilityHost.worker); `named`: the live tool's own. */
 const isolateKey = (hash: string, hosts: string[], limit: number, named: boolean) => `${hash}|${hosts.join(",")}|${limitBytes(limit)}${named ? "" : "|unnamed"}`;
 
-/** Tell the platform a fetch of the tools in `isolate` went out (1) or came back (-1): their code waits on the network meanwhile. */
-const egressMark = (env: Env, isolate: string, delta: 1 | -1) =>
-  env.PLATFORM.fetch("http://platform/egress", { method: "POST", headers: { [TOOLS_TOKEN_HEADER]: env.TOOLS_TOKEN, "content-type": "application/json" }, body: JSON.stringify({ isolate, delta }) }).then(
+/** Tell the platform a fetch out of `isolate` went out (1) or is over (-1): its code waits on the network meanwhile. */
+const egressMark = (env: Env, isolate: string, delta: EgressMark["delta"]) =>
+  env.PLATFORM.fetch(`http://platform${EGRESS_PATH}`, { method: "POST", headers: { [TOOLS_TOKEN_HEADER]: env.TOOLS_TOKEN, "content-type": "application/json" }, body: JSON.stringify({ isolate, delta } satisfies EgressMark) }).then(
     (r) => r.body?.cancel(),
     () => {},
   );
@@ -297,16 +299,31 @@ export class CapabilityHost extends DurableObject<Env> {
 
 // ---------- Egress: the only way out of a capability ----------
 
-export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate?: string }> {
+export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: string }> {
   async fetch(request: Request): Promise<Response> {
-    // While a tool's fetch is out, its code waits on the network: the platform is told (before it goes, and once it's
-    // back), so a tool waiting on a fetch isn't the one blamed when the tools stop responding.
-    const isolate = this.ctx.props.isolate;
-    if (isolate) await egressMark(this.env, isolate, 1);
+    // While a tool's fetch is out, its code waits on the network: the platform is told before it goes and once it's
+    // over (its body read, or dropped), so a tool waiting on a fetch isn't the one blamed when the tools stop
+    // responding. Each mark is awaited (a loop that follows can't lose it), and kept alive past a stopped call.
+    const { hosts, isolate } = this.ctx.props;
+    const over = () => {
+      const mark = egressMark(this.env, isolate, -1);
+      this.ctx.waitUntil(mark);
+      return mark;
+    };
+    await egressMark(this.env, isolate, 1);
+    let res: Response;
     try {
-      return await gatedFetch(request, this.ctx.props.hosts ?? []);
-    } finally {
-      if (isolate) await egressMark(this.env, isolate, -1);
+      res = await gatedFetch(request, hosts ?? []);
+    } catch (e) {
+      await over();
+      throw e;
     }
+    if (!res.body) {
+      await over();
+      return res;
+    }
+    const body = new TransformStream<Uint8Array, Uint8Array>({ flush: () => over() });
+    this.ctx.waitUntil(res.body.pipeTo(body.writable).catch(() => over()));
+    return new Response(body.readable, res);
   }
 }
