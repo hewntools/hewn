@@ -84,6 +84,8 @@ A schedule runs a read or write operation hourly, daily, weekly or on a custom c
 
 Agents can propose a schedule, but nothing runs until you enable it from the Inbox. A schedule that fails three times in a row pauses itself and says why. Resume it when it's fixed.
 
+While the machine Hewn runs on sleeps, nothing runs. When it wakes, what came due runs once, and later schedules run on time.
+
 ## Activity
 
 Everything that happened, newest first: builds, calls, and access changes (agents approved or disconnected, grants, secrets and settings, destructive calls, an agent's change you approved or declined, signing in to a connection). Filter by kind (All, Builds, Calls, Access), by tool or by agent. Press `a` to open it.

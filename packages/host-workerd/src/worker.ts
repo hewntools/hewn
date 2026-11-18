@@ -798,7 +798,8 @@ export class HewnDO extends DurableObject<Env> {
     try {
       switch (url.pathname) {
         case "/_admin/resumed":
-          // The supervisor saw the wall clock jump (a suspended machine woke): run what became due, re-arm the alarm.
+          // The supervisor saw the wall clock jump (a suspended machine woke), or a schedule's time come by it: run
+          // what became due, re-arm the alarm.
           await this.alarm();
           return Response.json({ ok: true, nextAlarmAt: this.platform.nextScheduleAt() });
         case "/_admin/changed":
@@ -957,5 +958,5 @@ const ADMIN_CALLS: Record<string, { owner: boolean; changes?: boolean }> = {
   capabilityAgents: { owner: true }, setCapabilityAgent: { owner: true, changes: true },
   confirmations: { owner: true }, decideConfirmation: { owner: true },
   models: { owner: true }, setModelSettings: { owner: true, changes: true }, setModelKey: { owner: true, changes: true }, checkModelProvider: { owner: true }, replacePinnedModel: { owner: true }, setCapabilityModel: { owner: true }, modelSpend: { owner: true }, refreshModelCatalog: { owner: false },
-  metrics: { owner: true }, idleActivity: { owner: false },
+  metrics: { owner: true }, idleActivity: { owner: false }, nextScheduleAt: { owner: false },
 };

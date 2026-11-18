@@ -68,8 +68,10 @@ export interface SupervisorOptions {
   /** Health check cadence and the stall that triggers a restart. */
   watchdog?: { intervalMs: number; stallMs: number } | false;
   /**
-   * The resume check: the wall clock jumping ahead of the time this process ran by more than `jumpMs` (a suspended
-   * machine woke, a laptop's lid opened) runs what became due, then once more `recheckMs` later. Tests move `wall`.
+   * The resume check, every `intervalMs`: the wall clock jumping ahead of the time this process ran by more than
+   * `jumpMs` (a suspended machine woke, a laptop's lid opened) runs what became due, then once more `recheckMs` later;
+   * and the next schedule's time coming by the wall clock runs what's due (workerd's alarm can be late after a sleep).
+   * Tests move `wall`.
    */
   resume?: { intervalMs?: number; jumpMs?: number; recheckMs?: number; wall?: () => number } | false;
   /** Where the secrets master key lives (default: Keychain on macOS, libsecret or a file on Linux). */
@@ -98,6 +100,9 @@ export interface SupervisorOptions {
    */
   disk?: { intervalMs?: number; space?: () => { free: number; total: number } };
 }
+
+/** How long after a schedule's time the resume check runs what's due itself (workerd's alarm, when it fires, comes first). */
+export const ALARM_GRACE_MS = 5000;
 
 /** The most free space Hewn keeps for itself and the system: below it, tools can't add data. */
 export const DISK_FLOOR = 1024 ** 3;
@@ -851,27 +856,73 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // The resume check: the wall clock ran ahead of this process (the machine was suspended, or asleep). Due schedules run
   // by the wall clock and the alarm is re-armed (whether workerd's own alarm fires after such a jump isn't assumed),
   // the backup check runs, and all of it once more a little later: after a wake the clock may lag until NTP catches up.
+  // And when the next schedule's time comes by the wall clock, what's due runs too: workerd's alarm waits on a clock
+  // that stops while the machine sleeps, and re-arming it for the same time changes nothing, so after a wake it can
+  // fire hours late.
   let resumeTimer: ReturnType<typeof setInterval> | undefined;
   /** When the last resume was noticed: the idle report's grace starts again from it. */
   let resumedAt: number | null = null;
   const recheckTimers = new Set<ReturnType<typeof setTimeout>>();
   if (o.resume !== false) {
     const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now } = o.resume ?? {};
-    const caughtUp = async () => {
+    /** When the next schedule is due (ms), as the platform last said: at start, and in every catch-up's reply. */
+    let nextAlarmAt: number | null = null;
+    /** Whether a catch-up has replied (the start's read then says nothing newer). */
+    let replied = false;
+    /** Catch-ups in flight: the schedule's-time check starts none meanwhile. */
+    let catchingUp = 0;
+    /** The schedule time a catch-up last ran for (once per time: a reply that says it again starts none), and one that failed (said once). */
+    let caughtUpFor: number | null = null;
+    let failedFor: number | null = null;
+    /** Run what's due by the wall clock and re-arm the alarm. The reply says the next schedule's time. */
+    const catchUp = async () => {
+      catchingUp++;
       try {
         const r = await admin("resumed", {});
+        nextAlarmAt = r.nextAlarmAt ?? null;
+        replied = true;
+        return r as { nextAlarmAt: number | null };
+      } finally {
+        catchingUp--;
+      }
+    };
+    /** After a resume: catch up, and the backup check. */
+    const caughtUp = async () => {
+      try {
+        const r = await catchUp();
         log(`caught up after a resume${r.nextAlarmAt ? `; next alarm ${new Date(r.nextAlarmAt).toISOString()}` : ""}`);
       } catch (e) {
         log(`catching up after a resume failed: ${(e as Error).message}`);
       }
       nightly();
     };
+    /** The next schedule's time came by the wall clock: catch up, once for that time (tried again if it fails). */
+    const scheduleTime = (at: number) => {
+      caughtUpFor = at;
+      void catchUp().catch((e) => {
+        caughtUpFor = null;
+        if (failedFor !== at) log(`running the schedule due ${new Date(at).toISOString()} failed: ${(e as Error).message}; trying again`);
+        failedFor = at;
+      });
+    };
+    // Its first value. If workerd doesn't answer this yet, it stays unset until the first catch-up: only a sleep makes
+    // the alarm late, and a resume's catch-up says the time.
+    void admin("call", { method: "nextScheduleAt" }).then(
+      (r) => {
+        if (!replied) nextAlarmAt = r.result ?? null;
+      },
+      (e) => log(`couldn't read the next schedule's time at start: ${(e as Error).message}`),
+    );
     let last = { wall: wall(), mono: performance.now() };
     resumeTimer = setInterval(() => {
       const now = { wall: wall(), mono: performance.now() };
       const jump = now.wall - last.wall - (now.mono - last.mono);
       last = now;
-      if (jump <= jumpMs) return;
+      if (jump <= jumpMs) {
+        // The next schedule's time came by the wall clock (and a little more: the alarm, when it fires, comes first).
+        if (!catchingUp && nextAlarmAt !== null && nextAlarmAt !== caughtUpFor && now.wall >= nextAlarmAt + ALARM_GRACE_MS) scheduleTime(nextAlarmAt);
+        return;
+      }
       log(`the clock jumped ${Math.round(jump / 1000)}s ahead (resumed); catching up`);
       resumedAt = Date.now();
       void caughtUp();
