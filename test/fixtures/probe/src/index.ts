@@ -19,6 +19,8 @@ export const operations = {
         return attempt(async () => gate(await fetch("https://example.com/")));
       case "declared":
         return attempt(async () => gate(await fetch("https://api.github.com/zen", { headers: { "user-agent": "hewn-test" } })));
+      case "post":
+        return attempt(async () => gate(await fetch("https://api.github.com/zen", { method: "POST", body: "{}", headers: { "user-agent": "hewn-test" } })));
       case "admin":
         return attempt(async () => (await fetch(`http://127.0.0.1:${input.port}/_admin/status`)).status);
       case "file":

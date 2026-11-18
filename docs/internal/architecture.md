@@ -44,7 +44,7 @@ A [capability](../../spec/capability-model.md#capability) is called a tool in ev
 | `packages/cli` | `hewn`: the CLI, the supervisor, setup, builders, the intake, backups, the visual check and its measures (`defects.ts`, which the bench uses too). The only package published to npm. | AGPL |
 | `packages/test-host` | The core on Node for fast tests: `node:sqlite`, a blob directory, capability code run in-process with no isolation. Never shipped. | AGPL |
 
-Integration tests are in `test/`. Example tools are in `seeds/`.
+Integration tests are in `test/`. Example tools are in `seeds/`. `scripts/smoke-copy/` runs a tree on a made-safe copy of a real home and reports ([smoke runs](smoke-copy.md)).
 
 ## The core
 
@@ -238,7 +238,7 @@ Each promoted version is one ESM bundle run in a V8 isolate against the ABI ([Ca
 
 - **State:** `ctx.db` is the CapabilityHost's private SQLite, synchronous. Migrations are tracked in `_hewn_migrations` in that database.
 - **Size:** each state (live or scratch) may grow to the owner's limit (`toolDataLimitMB`, 100 MB; `toolDataLimitsMB` per capability; 0 while the disk is nearly full), as SQLite's `max_page_count`. SQLite refuses a write that needs a page past it with `SQLITE_FULL`, which rolls back that turn's writes; the host turns it into "<name>'s data is at its N MB limit". Capability code can't run that pragma (workerd's SQL authorizer), and workerd offers it only as `sql.setMaxPageCountForTest` under its `experimental` flag, so capability isolates run with that flag and `capability-guard.ts` (`hewn-guard.js`, evaluated before the capability's bundle) sets the limit in the facet's constructor and takes that method, what else the flag adds to storage, and `ctx.facets`, out of reach. The limit is part of the isolate's Worker Loader key (`hewn-limit.js`), so a new limit restarts the facet. That method is workerd's own and may change, so `package.json` (and the published package) pins workerd exactly: a newer one comes with a Hewn release that the tests ran on.
-- **Network:** `fetch` goes through `Egress`.
+- **Network:** `fetch` goes through `Egress`. On a copy of someone's Hewn (`HEWN_NETWORK`, [smoke runs](smoke-copy.md#the-switches)) it lets nothing out (`off`), or only GET and HEAD (`get`), and the platform's own `internet` service allows nothing.
 - **Calls:** `ctx.call` goes back to `HewnDO`, which checks the [grant](../../spec/capability-model.md#grant), then runs the callee in its own isolate. A chain nests at most three deep, refuses cycles, and shares one deadline (30 s; time waiting on a model is added back, up to 120 s per chain; `core/deadline.ts`).
 - **Isolation:** no filesystem, processes or environment; workerd itself runs in the OS sandbox.
 - **Stopping:** a call past its deadline is stopped (`CapabilityHost.stop` aborts its facet: its awaits, timers and writes end, and other calls on that facet fail with it), and a facet is aborted whenever its last call (or migration, dump …) ends, so nothing a call leaves pending outlives it; the next call starts it afresh, in the same isolate when it's the live tool's (below). Code that never yields holds the one thread every tool's isolate runs on (standalone workerd doesn't enforce `limits.cpuMs`), so only a restart of the tools' process stops it: the supervisor's watchdog does it, and so does a `stop` that gets no answer within 1 s (the platform asks the supervisor, `/tools/stalled`). The platform keeps answering meanwhile: it's a process of its own. Calls running in the tools' process when it goes fail; once it stopped responding, nothing more is sent until a new one answers.
@@ -250,7 +250,7 @@ A capability is ready when every grant its manifest asks for is approved and eve
 
 ## Schedules
 
-`core/schedules.ts`. The owner adds schedules, or an agent proposes one (`schedules_propose`) for the owner to enable. They run as `schedule:<id>`, read and write operations only, on cadences like `daily 07:00` or cron in the owner's time zone, and pause after 3 failures in a row. The owner can run one now (Try again, `POST /api/schedules/:id/run`): it doesn't count toward pausing, and a success clears the failures and why a paused one paused (it stays paused). On workerd one DO alarm fires for the next due schedule, and the supervisor's resume check runs it by the wall clock if that alarm is late after a sleep.
+`core/schedules.ts`. The owner adds schedules, or an agent proposes one (`schedules_propose`) for the owner to enable. They run as `schedule:<id>`, read and write operations only, on cadences like `daily 07:00` or cron in the owner's time zone, and pause after 3 failures in a row. The owner can run one now (Try again, `POST /api/schedules/:id/run`): it doesn't count toward pausing, and a success clears the failures and why a paused one paused (it stays paused). On workerd one DO alarm fires for the next due schedule, and the supervisor's resume check runs it by the wall clock if that alarm is late after a sleep. With `HEWN_SCHEDULES=off` (`PlatformOptions.schedulesOff`, for a copy of someone's Hewn: a restore drill, a [smoke run](smoke-copy.md)) nothing is ever due and Run now is refused.
 
 ## Widgets
 

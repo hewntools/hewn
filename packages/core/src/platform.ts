@@ -89,6 +89,11 @@ export interface PlatformOptions {
   timezone?: () => string;
   /** Called when the next schedule time may have changed (the host re-arms its timer). */
   onSchedulesChanged?: () => void;
+  /**
+   * No schedule runs, however it's set (HEWN_SCHEDULES=off): a copy of someone's Hewn (a restore drill, a smoke run)
+   * must never act for them. Nothing is due, and Run now is refused. Default: schedules run.
+   */
+  schedulesOff?: boolean;
   /** Days to keep capability call logs (owner setting, read at each cleanup). 0 = forever. Default 14. */
   logRetentionDays?: () => number;
   /** How long an agent's destructive call waits for the owner's confirmation before it returns "awaiting_confirmation". */

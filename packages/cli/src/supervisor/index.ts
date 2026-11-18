@@ -33,6 +33,7 @@ import { cliCatalogs } from "../builders/cli-agents.ts";
 import { modelCatalogs } from "../builders/models.ts";
 import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
+import { networkMode, type NetworkMode } from "@hewntools/host-workerd/egress.ts";
 import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
@@ -91,6 +92,14 @@ export interface SupervisorOptions {
   remote?: RemoteJobs;
   /** A host runs this Hewn for its owner (HEWN_HOSTED): see `hostedFromEnv`. */
   hosted?: Hosted;
+  /**
+   * For a copy of someone's Hewn (a smoke run, a restore drill), never the owner's own (`copySwitchesFromEnv`):
+   * `schedulesOff`, no schedule runs (HEWN_SCHEDULES=off); `network`, what goes out (HEWN_NETWORK): `off`, nothing,
+   * `get`, tools' GET and HEAD only. With either network mode the platform's own fetches (model providers, a
+   * connection's sign-in, an install from a link) are off too: they post, or need keys a copy hasn't got.
+   */
+  schedulesOff?: boolean;
+  network?: NetworkMode;
   /** Each agent's model list (default: read from its CLI, or the remote service). Tests stub it. */
   models?: (agent: string) => Promise<ModelCatalog>;
   /**
@@ -105,6 +114,18 @@ export interface SupervisorOptions {
    * `backgroundEveryMs` (host-workerd idle-gc.ts). Tests shorten them.
    */
   idleGc?: { intervalMs?: number; quietMs?: number; backgroundEveryMs?: number } | false;
+}
+
+/**
+ * HEWN_SCHEDULES and HEWN_NETWORK, for a copy of someone's Hewn (see SupervisorOptions). Anything but the values
+ * below is refused: a typo must not leave a copy's schedules or network on.
+ */
+export function copySwitchesFromEnv(env: NodeJS.ProcessEnv = process.env): { schedulesOff?: true; network?: NetworkMode } {
+  const s = env.HEWN_SCHEDULES ?? "";
+  if (!["", "on", "off"].includes(s)) throw new Error("HEWN_SCHEDULES must be off (or on, or unset)");
+  const n = env.HEWN_NETWORK ?? "";
+  if (!["", "on", "off", "get"].includes(n)) throw new Error("HEWN_NETWORK must be off or get (or on, or unset)");
+  return { ...(s === "off" ? { schedulesOff: true as const } : {}), ...(networkMode(n) ? { network: networkMode(n) } : {}) };
 }
 
 /** How long after a schedule's time the resume check runs what's due itself (workerd's alarm, when it fires, comes first). */
@@ -177,7 +198,7 @@ export interface Channel {
 }
 
 /** The platform's workerd config (capnp) for this home. Exported for tests. */
-export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string; docs: string; spec: string }; channel: Channel }) {
+export function config(o: { dir: string; keys: typeof STORAGE_KEYS; port: number; publicPort: number; publicListen?: string; supervisorPort: number; data: string; assets: { web: string; ui: string; docs: string; spec: string }; channel: Channel; schedulesOff?: boolean; network?: NetworkMode }) {
   return `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
@@ -190,7 +211,7 @@ const config :Workerd.Config = (
     (name = "assets-spec", disk = (path = "${o.assets.spec}")),
     (name = "supervisor", external = (address = "127.0.0.1:${o.supervisorPort}", http = ())),
     (name = "tools", external = (address = "${o.channel.tools}", http = ())),
-    (name = "internet", network = (allow = ["public"], tlsOptions = (trustBrowserCas = true))),
+    (name = "internet", network = (allow = [${o.network ? "" : '"public"'}], tlsOptions = (trustBrowserCas = true))),
   ],
   sockets = [
     (name = "http", address = "127.0.0.1:${o.port}", http = (), service = "main"),
@@ -232,7 +253,7 @@ const hewn :Workerd.Worker = (
     (name = "HOSTED", fromEnvironment = "HEWN_HOSTED"),
     (name = "HOST_SIGNIN_URL", fromEnvironment = "HEWN_HOST_SIGNIN_URL"),
     (name = "PORT", text = "${o.port}"),
-    (name = "VERSION", text = "${VERSION}"),
+    (name = "VERSION", text = "${VERSION}"),${o.schedulesOff ? `\n    (name = "SCHEDULES", text = "off"),` : ""}
   ],
   durableObjectNamespaces = [
     (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),
@@ -246,14 +267,14 @@ const hewn :Workerd.Worker = (
  * The tools' workerd config: every tool's CapabilityHost (the same do/ directory, its own namespace in it), the
  * loader and Egress. No secrets key, no blobs, no assets, no owner DO. Exported for tests.
  */
-export function toolsConfig(o: { keys: typeof STORAGE_KEYS; data: string; channel: Channel }) {
+export function toolsConfig(o: { keys: typeof STORAGE_KEYS; data: string; channel: Channel; network?: NetworkMode }) {
   return `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "main", worker = .tools),
     (name = "do-storage", disk = (path = "${o.data}/do", writable = true)),
     (name = "platform", external = (address = "${o.channel.calls}", http = ())),
-    (name = "internet", network = (allow = ["public"], tlsOptions = (trustBrowserCas = true))),
+    (name = "internet", network = (allow = [${o.network === "off" ? "" : '"public"'}], tlsOptions = (trustBrowserCas = true))),
   ],
   sockets = [
     (name = "tools", address = "${o.channel.tools}", http = (), service = "main"),
@@ -271,7 +292,7 @@ const tools :Workerd.Worker = (
     (name = "CAPS", durableObjectNamespace = "CapabilityHost"),
     (name = "LOADER", workerLoader = (id = "capabilities")),
     (name = "PLATFORM", service = "platform"),
-    (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),
+    (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),${o.network ? `\n    (name = "NETWORK", text = "${o.network}"),` : ""}
   ],
   durableObjectNamespaces = [
     (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true),
@@ -357,6 +378,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   if (proxySecret) log("public listener: only requests from the trusted proxy (HEWN_PROXY_SECRET)");
   const proxyClientIp = !!proxySecret && (o.proxyClientIp ?? process.env.HEWN_PROXY_CLIENT_IP === "1");
   if (proxyClientIp) log("public listener: the visitor's address from the trusted proxy (HEWN_PROXY_CLIENT_IP)");
+  if (o.schedulesOff) log("schedules: off (HEWN_SCHEDULES=off): none runs");
+  if (o.network) log(`network: ${o.network === "off" ? "off (HEWN_NETWORK=off): nothing goes out" : "GET and HEAD only (HEWN_NETWORK=get)"}; the platform's own fetches are off`);
   const controlToken = randomBytes(24).toString("hex");
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
@@ -527,7 +550,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // The CLI (owner, same machine) → supervisor. Separate token from workerd's.
   const control: typeof routes = {
     "/control/tunnel": async (b) => {
-      if (b.action === "start") return tunnel.start(validTunnelConfig(b.tunnel));
+      if (b.action === "start") {
+        // A copy (HEWN_NETWORK) never goes on a public address.
+        if (o.network) throw new Error("no tunnel here: this Hewn's network is off (HEWN_NETWORK)");
+        return tunnel.start(validTunnelConfig(b.tunnel));
+      }
       if (b.action === "stop") return tunnel.stop();
       return tunnel.current();
     },
@@ -540,6 +567,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       upSeconds: Math.round((Date.now() - startedAt) / 1000),
       keySource: secretsKey.source,
       sandbox: !!o.sandbox,
+      schedules: o.schedulesOff ? "off" : "on",
+      network: o.network ?? "on",
       backups: { dir: backupDir(), last: listBackups(backupDir())[0] ?? null },
       // Wrapped: a call during startup, before `status` is defined, is a rejection here, not a thrown route.
       idle: await (async () => status(afterParam(b.after === undefined ? null : String(b.after))))().catch(() => null),
@@ -597,8 +626,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const toolsAt = ports ? { host: "127.0.0.1", port: ports.tools } : { socketPath: socketPath("tools") };
   if (!unix) log(`the data dir's path is too long for a socket: the platform and the tools talk over loopback ports`);
   const toolsToken = randomBytes(24).toString("hex");
-  writeFileSync(join(data, "config.capnp"), config({ dir: data, keys: STORAGE_KEYS, port: o.port, publicPort, publicListen: o.publicListen, supervisorPort, data, assets: assetDirs(), channel }));
-  writeFileSync(join(data, "tools.capnp"), toolsConfig({ keys: STORAGE_KEYS, data, channel }));
+  writeFileSync(join(data, "config.capnp"), config({ dir: data, keys: STORAGE_KEYS, port: o.port, publicPort, publicListen: o.publicListen, supervisorPort, data, assets: assetDirs(), channel, schedulesOff: o.schedulesOff, network: o.network }));
+  writeFileSync(join(data, "tools.capnp"), toolsConfig({ keys: STORAGE_KEYS, data, channel, network: o.network }));
   // The tools' own storage (made before each start): the tools process can write nowhere else in the data dir.
   const toolsStorage = join(data, "do", STORAGE_KEYS.capability);
   const platformBase = [bin, "serve", "--experimental", join(data, "config.capnp")];
@@ -812,7 +841,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       toolsRestarting = false;
     }
   };
-  tunnel.resume();
+  if (!o.network) tunnel.resume();
 
   // Nightly backup: one per day, checked hourly (and a minute after start, for machines that sleep at night).
   const nightly = () => {
