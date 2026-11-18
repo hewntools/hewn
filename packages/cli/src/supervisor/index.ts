@@ -108,6 +108,12 @@ export interface SupervisorOptions {
    * is free instead of asking it (tests).
    */
   disk?: { intervalMs?: number; space?: () => { free: number; total: number } };
+  /**
+   * The idle GC, asked every `intervalMs`: `quietMs` after the last work, one last-resort GC gives back the heap
+   * workerd never returns by itself; after only an open page's refreshes and the like, at most every
+   * `backgroundEveryMs` (host-workerd idle-gc.ts). Tests shorten them.
+   */
+  idleGc?: { intervalMs?: number; quietMs?: number; backgroundEveryMs?: number } | false;
 }
 
 /**
@@ -216,6 +222,8 @@ const config :Workerd.Config = (
       o.publicListen && o.publicListen !== "0.0.0.0" ? `\n    (name = "public-network", address = "${o.publicListen}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),` : ""
     }
   ],
+  # gc() for the idle GC (the supervisor's tick, /_admin/idle-gc). This process only: the tools' never has it.
+  v8Flags = ["--expose-gc"],
 );
 const hewn :Workerd.Worker = (
   modules = [
@@ -996,6 +1004,27 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const diskTimer = setInterval(checkDisk, diskMs);
   diskTimer.unref();
 
+  // ---------- the idle GC ----------
+  // workerd never runs V8's idle-time GC, so the platform's heap stays as big as its last burst of requests made it.
+  // Asked on a tick; the platform decides when (idle-gc.ts), and the tick itself counts as nothing.
+  let gcTimer: ReturnType<typeof setInterval> | undefined;
+  if (o.idleGc !== false) {
+    const { intervalMs = 5000, ...times } = o.idleGc ?? {};
+    let asking = false;
+    gcTimer = setInterval(async () => {
+      if (asking) return;
+      asking = true;
+      try {
+        await admin("idle-gc", times, 5000);
+      } catch {
+        // workerd restarting: the next tick
+      } finally {
+        asking = false;
+      }
+    }, intervalMs);
+    gcTimer.unref();
+  }
+
   return {
     url,
     adminToken,
@@ -1019,6 +1048,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     async stop() {
       for (const t of timers) clearInterval(t);
       clearInterval(diskTimer);
+      clearInterval(gcTimer);
       if (resumeTimer) clearInterval(resumeTimer);
       for (const t of recheckTimers) clearTimeout(t);
       for (const t of backupTimers) clearTimeout(t as ReturnType<typeof setTimeout>);
