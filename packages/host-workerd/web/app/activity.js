@@ -49,6 +49,37 @@ function byDay(items, all, showCap) {
   return [...days].flatMap(([d, gs]) => [h("div", { class: "eyebrow" }, d), h("ul", { class: "list" }, gs.map((g) => activityRow(g, all, showCap)))]);
 }
 
+/** What an opened row shows, under it. */
+const detail = (items) => h("div", { class: "row-detail", hidden: true }, items);
+
+/** A time inside an opened row, only where it isn't the row's own (another minute or day). */
+const whenElse = (at, rowAt) => (clock(at) === clock(rowAt) && dayLabel(at) === dayLabel(rowAt) ? null : h("span", { class: "mono faint small" }, clock(at)));
+
+/**
+ * One call in an opened row: how long it took on the right, as for every call in it; for one of several, its operation
+ * and whether it failed on that line (and its time, where it isn't the row's), its error under it; for the row's only
+ * call, its error on that line. Then what its code printed, which `load` reads ("! " lines, warnings and errors, in the
+ * log's warning colour).
+ */
+function callDetail(c, rowAt, alone) {
+  const failed = c.outcome !== "ok";
+  const pre = c.lineCount ? h("pre", { class: "log short", hidden: true }) : null;
+  const took = h("span", { class: "mono faint small" }, `${c.ms}ms`);
+  const via = c.via?.length ? h("span", { class: "faint small" }, `via ${c.via.join(" → ")}`) : null;
+  const error = h("span", { class: "sub row-detail-error" }, c.outcome.replace(/^ERROR /, ""));
+  const el = h(
+    "div",
+    { class: "row-detail-item" },
+    alone
+      ? h("div", { class: "row-detail-head" }, failed && error, via, h("span", { class: "grow" }), took)
+      : [h("div", { class: "row-detail-head" }, h("span", { class: "mono small" }, c.operation.split("@")[0]), failed && h("span", { class: "small call-failed" }, "failed"), via, h("span", { class: "grow" }), took, whenElse(c.at, rowAt)), failed && error],
+    pre,
+  );
+  const show = (...lines) => (put(pre, ...lines), (pre.hidden = false));
+  const load = pre && (() => api(`/capabilities/${enc(c.capabilityId)}/calls/${c.logId}`).then((e) => show(...e.lines.map((l) => h("span", { class: l.startsWith("! ") ? "warn" : "" }, `${l}\n`))), () => show("This call is no longer in the log.")));
+  return { el, load };
+}
+
 function activityRow(g, all, showCap) {
   const who = actorLabel(g.actor, all);
   const ref = showCap && g.capabilityId ? capRef(all.get(g.capabilityId), g.capabilityId) : null;
@@ -70,25 +101,11 @@ function activityRow(g, all, showCap) {
       dot = errors.length === g.items.length ? "danger" : errors.length ? "warn" : "ok";
       text = on(`${who} made ${g.items.length} calls`, ref && ["to", ref], errors.length ? h("span", { class: "faint" }, `${errors.length} failed`) : "", modelNote);
     }
-    // One call or several, the row opens the same way: each call's version, error, time taken, and what its code
-    // printed (read when the row first opens).
-    const printed = g.items.map((c) => (c.lineCount ? h("pre", { class: "log short", hidden: true }) : null));
-    expand = h(
-      "ul",
-      { class: "list nested", hidden: true },
-      g.items.map((c, k) => h("li", { class: printed[k] ? "call-printed" : "" }, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, ""))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)), printed[k])),
-    );
-    onOpen = () =>
-      g.items.forEach((c, k) => {
-        const pre = printed[k];
-        if (!pre) return;
-        const show = (...lines) => (put(pre, ...lines), (pre.hidden = false));
-        // A warning or an error ("! ") in the log's warning colour.
-        api(`/capabilities/${enc(c.capabilityId)}/calls/${c.logId}`).then(
-          (e) => show(...e.lines.map((l) => h("span", { class: l.startsWith("! ") ? "warn" : "" }, `${l}\n`))),
-          () => show("This call is no longer in the log."),
-        );
-      });
+    // The row opens to each call: its error, how long it took and what its code printed (read when the row first
+    // opens). One call's name and status are the row's own; several each get a line of their own.
+    const calls = g.items.map((c) => callDetail(c, g.at, g.items.length === 1));
+    expand = detail(calls.map((c) => c.el));
+    onOpen = () => calls.forEach((c) => c.load?.());
   } else if (g.kind === "models") {
     const failed = g.items.filter((x) => x.outcome === "failed");
     const cost = g.items.reduce((n, x) => n + x.costUsd, 0);
@@ -100,11 +117,7 @@ function activityRow(g, all, showCap) {
       text = on("Model", h("span", { class: "mono" }, model(x)), x.outcome === "failed" ? h("span", { class: "faint" }, `failed: ${x.error ?? ""}`) : h("span", { class: "faint" }, `${tokens(x)} · ${usd(x.costUsd)}`), ref && ["·", ref]);
     } else {
       text = on(`${g.items.length} model calls`, h("span", { class: "faint" }, usd(cost)), failed.length ? h("span", { class: "faint" }, `${failed.length} failed`) : "", ref && ["·", ref]);
-      expand = h(
-        "ul",
-        { class: "list nested", hidden: true },
-        g.items.map((x) => h("li", {}, h("span", { class: `dot ${x.outcome === "failed" ? "danger" : ""}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, model(x)), h("span", { class: "sub" }, x.outcome === "failed" ? x.error ?? "failed" : tokens(x))), h("span", { class: "mono faint small" }, usd(x.costUsd)), h("span", { class: "mono faint small time" }, clock(x.at)))),
-      );
+      expand = detail(g.items.map((x) => h("div", { class: "row-detail-item" }, h("div", { class: "row-detail-head" }, h("span", { class: "mono small" }, model(x)), x.outcome === "failed" && h("span", { class: "small call-failed" }, "failed"), h("span", { class: "grow" }), h("span", { class: "mono faint small" }, usd(x.costUsd)), whenElse(x.at, g.at)), h("span", { class: "sub" }, x.outcome === "failed" ? x.error ?? "" : tokens(x)))));
     }
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
@@ -162,20 +175,22 @@ function activityRow(g, all, showCap) {
     else (dot = "warn"), (text = on("Asked for access", ref && ["for", ref]));
   }
   const href = g.kind === "build" ? `#/b/${g.buildId}` : null;
+  // What it opens to goes under the row, across it from the text's edge: the dot, who and when stay on the row's line.
   const li = h(
     "li",
     { class: href || expand ? "link" : "", tabindex: href || expand ? 0 : undefined },
     h("span", { class: `dot ${dot}` }),
-    h("div", { class: "grow" }, text, expand),
+    h("div", { class: "grow" }, text),
     h("span", { class: "pill" }, who),
     h("span", { class: "mono faint small time" }, clock(g.at)),
+    expand,
   );
   const act = (e) => {
     if (expand && !expand.contains(e.target)) {
       expand.hidden = !expand.hidden;
+      li.classList.toggle("open", !expand.hidden);
       if (!expand.hidden && onOpen) onOpen(), (onOpen = null);
-    }
-    else if (href) go(href);
+    } else if (href) go(href);
   };
   if (href || expand) li.addEventListener("click", act), li.addEventListener("keydown", (e) => e.key === "Enter" && act(e));
   return li;

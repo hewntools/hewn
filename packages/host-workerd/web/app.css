@@ -223,11 +223,16 @@ dialog.wide-sheet .code-body { max-height: 56vh; }
 .timeline { padding: 6px 20px 10px; }
 .timeline > .eyebrow { padding: var(--s4) 0 2px; }
 .timeline > .eyebrow:first-child { padding-top: var(--s3); }
-.list.nested { margin-top: var(--s2); }
-.list.nested > li { min-height: 36px; padding: 4px 0; }
-/* A call opened to what its code printed: the lines under the row, its full width. */
-.list.nested > li.call-printed { flex-wrap: wrap; }
-.list.nested > li.call-printed > .log { flex: 1 0 100%; }
+/* An opened row (Activity, Info's Recent calls): what it opens to sits under its line, from the text's edge (past the
+   8px dot and the row's gap) to the row's end, so the dot, who, when and the chevron stay on the row's own line. */
+.list > li:has(> .row-detail) { flex-wrap: wrap; }
+.list > li > .row-detail { order: 1; flex: 1 0 100%; display: flex; flex-direction: column; gap: var(--s3); padding: 2px 0 var(--s2) calc(8px + var(--s3)); }
+.list > li.link.open::after { transform: rotate(90deg); }
+.row-detail-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.row-detail-item + .row-detail-item { padding-top: var(--s3); border-top: 1px solid var(--border); }
+.row-detail-head { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; }
+.call-failed { color: var(--danger); }
+.row-detail-error { min-width: 0; overflow-wrap: anywhere; }
 
 .settings-list { margin-top: 6px; }
 .setting.compact { min-height: 52px; cursor: pointer; }

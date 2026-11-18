@@ -49,7 +49,8 @@ export default {
       await page.getByText("read the call log").first().waitFor({ timeout: 15_000 });
       const row = page.locator("main li.link").filter({ hasText: op }).first();
       await row.click({ position: { x: 30, y: 12 } });
-      await row.locator(".list.nested").waitFor({ timeout: 5000 });
+      await row.locator(".row-detail").waitFor({ timeout: 5000 });
+      if (call.lineCount) await row.locator(".row-detail .log").waitFor({ timeout: 5000 });
       await s.shot("activity");
     });
 
