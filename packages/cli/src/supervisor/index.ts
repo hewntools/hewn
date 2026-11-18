@@ -851,27 +851,51 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // The resume check: the wall clock ran ahead of this process (the machine was suspended, or asleep). Due schedules run
   // by the wall clock and the alarm is re-armed (whether workerd's own alarm fires after such a jump isn't assumed),
   // the backup check runs, and all of it once more a little later: after a wake the clock may lag until NTP catches up.
+  // And when the next schedule's time comes by the wall clock, what's due runs too: workerd's alarm waits on a clock
+  // that stops while the machine sleeps, and re-arming it for the same time changes nothing, so after a wake it can
+  // fire hours late.
   let resumeTimer: ReturnType<typeof setInterval> | undefined;
   /** When the last resume was noticed: the idle report's grace starts again from it. */
   let resumedAt: number | null = null;
   const recheckTimers = new Set<ReturnType<typeof setTimeout>>();
   if (o.resume !== false) {
     const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now } = o.resume ?? {};
-    const caughtUp = async () => {
+    /** When the next schedule is due (ms), as the platform last said: at start, and in every catch-up's reply. */
+    let nextAlarmAt: number | null = null;
+    /** The time the last catch-up on a schedule's time was for (once per time: a reply that says it again starts none). */
+    let caughtUpFor: number | null = null;
+    let catchingUp = false;
+    /** Run what's due by the wall clock and re-arm the alarm; after a resume, the backup check too. */
+    const caughtUp = async (resumed = true) => {
       try {
         const r = await admin("resumed", {});
-        log(`caught up after a resume${r.nextAlarmAt ? `; next alarm ${new Date(r.nextAlarmAt).toISOString()}` : ""}`);
+        nextAlarmAt = r.nextAlarmAt ?? null;
+        if (resumed) log(`caught up after a resume${r.nextAlarmAt ? `; next alarm ${new Date(r.nextAlarmAt).toISOString()}` : ""}`);
       } catch (e) {
-        log(`catching up after a resume failed: ${(e as Error).message}`);
+        log(`catching up ${resumed ? "after a resume" : "at a schedule's time"} failed: ${(e as Error).message}`);
+        // The next look tries again.
+        if (!resumed) caughtUpFor = null;
       }
-      nightly();
+      if (resumed) nightly();
     };
+    void admin("call", { method: "nextScheduleAt" }).then(
+      (r) => (nextAlarmAt ??= r.result ?? null),
+      () => {},
+    );
     let last = { wall: wall(), mono: performance.now() };
     resumeTimer = setInterval(() => {
       const now = { wall: wall(), mono: performance.now() };
       const jump = now.wall - last.wall - (now.mono - last.mono);
       last = now;
-      if (jump <= jumpMs) return;
+      if (jump <= jumpMs) {
+        // The next schedule's time came by the wall clock (and a little more: the alarm, when it fires, comes first).
+        if (!catchingUp && nextAlarmAt !== null && nextAlarmAt !== caughtUpFor && now.wall >= nextAlarmAt + ALARM_GRACE_MS) {
+          caughtUpFor = nextAlarmAt;
+          catchingUp = true;
+          void caughtUp(false).finally(() => (catchingUp = false));
+        }
+        return;
+      }
       log(`the clock jumped ${Math.round(jump / 1000)}s ahead (resumed); catching up`);
       resumedAt = Date.now();
       void caughtUp();
@@ -948,6 +972,9 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
 }
 
 const STREAMED = Symbol("streamed");
+
+/** How long after a schedule's time the resume check runs what's due itself (workerd's alarm, when it fires, comes first). */
+const ALARM_GRACE_MS = 5000;
 
 export const supervisorFile = (home: Home) => join(home.root, "supervisor.json");
 export const hasWorkerd = () => { const b = workerd(); return !!b && existsSync(b); };
