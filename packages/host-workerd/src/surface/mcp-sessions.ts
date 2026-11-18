@@ -87,10 +87,10 @@ export class McpSessions {
 
   async handle(req: Request, agent: Agent, origin: string | undefined): Promise<Response> {
     const declared = Number(req.headers.get("content-length"));
-    if (declared > MCP_MAX_BODY_BYTES) return tooLarge(declared);
+    if (declared > MCP_MAX_BODY_BYTES) return (await drain(req), tooLarge(declared));
     const res = await this.answer(req, agent, origin);
     // The transport's own refusal (a body sent without its length): in Hewn's words.
-    return res.status === 413 ? tooLarge() : res;
+    return res.status === 413 ? (await drain(req), tooLarge()) : res;
   }
 
   private async answer(req: Request, agent: Agent, origin: string | undefined): Promise<Response> {
@@ -158,9 +158,30 @@ export class McpSessions {
  * The most an MCP request may carry: a submission's 5 MB of files (MAX_BUNDLE_BYTES, counted as files) as it travels,
  * with base64's third and JSON's quoting on top. The SDK's own default is 4 MiB, under what a submission may be.
  */
-export const MCP_MAX_BODY_BYTES = 8 * 1024 * 1024;
+const MCP_MAX_BODY_BYTES = 8 * 1024 * 1024;
 
-const mb = (n: number) => `${Math.round((n / (1024 * 1024)) * 10) / 10} MB`;
+/** Bytes as MB to a tenth, rounded up: a request just over the limit doesn't read as the limit. */
+const mb = (n: number) => `${Math.ceil((n / (1024 * 1024)) * 10) / 10} MB`;
+
+/**
+ * Read what's left of a refused body and drop it, up to DRAIN_MAX_BYTES: answered while the client is still sending,
+ * the connection can be reset under it, and the agent gets "fetch failed" instead of the refusal.
+ */
+async function drain(req: Request) {
+  if (!req.body || req.body.locked) return;
+  const reader = req.body.getReader();
+  try {
+    for (let n = 0; n <= DRAIN_MAX_BYTES; ) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      n += value.byteLength;
+    }
+    await reader.cancel();
+  } catch {
+    // Gone already: nothing to drain.
+  }
+}
+const DRAIN_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Refused before Hewn reads it, naming both limits (what the request was, when it said). */
 function tooLarge(bytes?: number): Response {

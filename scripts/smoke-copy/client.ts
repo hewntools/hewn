@@ -129,6 +129,8 @@ export class CopyClient {
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
     return {
       client,
+      mcpUrl: `${base}/mcp`,
+      token: tokens.access_token as string,
       tool: async (tool: string, args: Record<string, unknown>, timeoutMs = 120_000) => {
         const r = (await client.callTool({ name: tool, arguments: args }, CallToolResultSchema, { timeout: timeoutMs })) as { isError?: boolean; content: { type: string; text?: string }[] };
         const text = r.content.find((c) => c.type === "text")?.text ?? "";
@@ -146,6 +148,9 @@ export class CopyClient {
 
 export interface Agent {
   client: Client;
+  /** Where its MCP requests go, and its bearer token: for a request a scenario sends by hand. */
+  mcpUrl: string;
+  token: string;
   /** Call one of Hewn's MCP tools; its text parsed as JSON when it is. Throws on an error result. */
   tool: (name: string, args: Record<string, unknown>, timeoutMs?: number) => Promise<any>;
   close: () => Promise<void>;
