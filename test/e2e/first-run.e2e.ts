@@ -594,6 +594,57 @@ export const operations = {
     page.off("request", watch);
   });
 
+  await step("a page from before an update stops its own refreshes: it says Hewn was updated, with Reload; the owner's own requests still go, and Reload brings the refreshes back", async () => {
+    // A page of its own, signed in, for its fake clock.
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await ctx.addCookies(await page.context().cookies());
+    const p = await ctx.newPage();
+    try {
+      // Hewn updated under the page: the same server, answering with another web build.
+      let updated = false;
+      await p.route("**/api/**", async (r: any) => {
+        const res = await r.fetch();
+        await r.fulfill({ response: res, headers: { ...res.headers(), ...(updated ? { "x-hewn-web": "0123456789abcdef" } : {}) } });
+      });
+      const refreshes: string[] = [];
+      const owners: string[] = [];
+      p.on("request", (r: { url(): string; headers(): Record<string, string> }) => r.url().includes("/api/") && (r.headers()["x-hewn-refresh"] === "1" ? refreshes : owners).push(r.url()));
+      await p.clock.install();
+      await p.goto(`${web}/#/`);
+      await p.locator(".home-grid").waitFor();
+      const run = async (ms: number) => {
+        for (let t = 0; t < ms; t += 5000) await p.clock.runFor(5000), await p.waitForTimeout(100);
+      };
+      await run(60_000);
+      if (!refreshes.length) throw new Error("no refreshes on Home before the update");
+      updated = true;
+      await run(30_000);
+      const toast = p.locator(".toast", { hasText: "Hewn was updated" });
+      await toast.waitFor({ timeout: 5000 });
+      if ((await toast.getByRole("button").allInnerTexts()).join() !== "Reload") throw new Error("the toast's only action isn't Reload");
+      refreshes.length = 0;
+      await run(180_000);
+      if (refreshes.length) throw new Error(`an outdated page refreshed itself: ${refreshes.join(", ")}`);
+      if ((await toast.count()) !== 1) throw new Error("the toast went away, or came again");
+      // The owner's own requests still go: open Activity.
+      owners.length = 0;
+      await p.goto(`${web}/#/activity`);
+      await p.getByText("Activity").first().waitFor();
+      if (!owners.length) throw new Error("the owner's own request didn't go");
+      await run(60_000);
+      if (refreshes.length) throw new Error(`Activity, outdated, refreshed itself: ${refreshes.join(", ")}`);
+      await p.screenshot({ path: "/tmp/e2e-fr-stale-tab.png" });
+      updated = false;
+      await toast.getByRole("button", { name: "Reload" }).click();
+      await p.waitForLoadState();
+      for (let i = 0; i < 12 && !refreshes.length; i++) await run(5000);
+      if (!refreshes.length) throw new Error("no refreshes after Reload");
+      if (await p.locator(".toast", { hasText: "Hewn was updated" }).count()) throw new Error("the toast is still there after Reload");
+    } finally {
+      await ctx.close();
+    }
+  });
+
   if (!real)
     await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick opens it again after a minute and carries it to the end", async () => {
       let release!: () => void;
