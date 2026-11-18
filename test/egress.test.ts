@@ -46,6 +46,34 @@ describe("egress gate", () => {
     ]);
   });
 
+  test("HEWN_NETWORK=off: nothing goes out, not even to an approved host", async () => {
+    const n = net({ "https://api.example.com/a": () => new Response("ok") });
+    const r = await gatedFetch(new Request("https://api.example.com/a"), ["api.example.com"], n.fetchFn, "off");
+    assert.equal(r.status, 403);
+    assert.match(await r.text(), /^egress denied: the network is off/);
+    assert.equal(n.seen.length, 0);
+  });
+
+  test("HEWN_NETWORK=get: GET and HEAD go to approved hosts; a POST, PUT or DELETE is refused before anything is sent", async () => {
+    const n = net({ "https://api.example.com/a": () => new Response("ok") });
+    assert.equal(await (await gatedFetch(new Request("https://api.example.com/a"), ["api.example.com"], n.fetchFn, "get")).text(), "ok");
+    assert.equal((await gatedFetch(new Request("https://api.example.com/a", { method: "HEAD" }), ["api.example.com"], n.fetchFn, "get")).status, 200);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const r = await gatedFetch(new Request("https://api.example.com/a", { method, body: "payload" }), ["api.example.com"], n.fetchFn, "get");
+      assert.equal(r.status, 403, method);
+      assert.match(await r.text(), new RegExp(`^egress denied: only GET and HEAD go out .* a ${method} to api\\.example\\.com`));
+    }
+    assert.deepEqual(n.seen.map((s) => s.method), ["GET", "HEAD"]);
+    // A GET that would become a WebSocket (a channel both ways) is refused too.
+    const ws = await gatedFetch(new Request("https://api.example.com/a", { headers: { upgrade: "websocket" } }), ["api.example.com"], n.fetchFn, "get");
+    assert.equal(ws.status, 403);
+    assert.match(await ws.text(), /an upgrade to websocket at api\.example\.com wasn't sent/);
+    assert.equal(n.seen.length, 2);
+    // An unapproved host is still refused.
+    assert.equal((await gatedFetch(new Request("https://evil.example/"), ["api.example.com"], n.fetchFn, "get")).status, 403);
+    assert.equal(n.seen.length, 2);
+  });
+
   test("redirect: manual hands the redirect back; loops stop", async () => {
     const n = net({ "https://api.example.com/loop": redirect(302, "/loop") });
     const manual = await gatedFetch(new Request("https://api.example.com/loop", { redirect: "manual" }), ["api.example.com"], n.fetchFn);

@@ -11,7 +11,7 @@ import type { GenerateRequest, GenerateResult } from "@hewntools/core/models.ts"
 import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
-import { gatedFetch } from "./egress.ts";
+import { gatedFetch, networkMode } from "./egress.ts";
 import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, EGRESS_PATH, type EgressMark, HOST_METHODS, type HostCalls, type HostMethod, ISOLATE_HEADER, type SentCode, STARTED_HEADER, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
@@ -26,6 +26,8 @@ interface Env {
   PLATFORM: Fetcher;
   /** Authenticates the platform's calls to this process. */
   TOOLS_TOKEN: string;
+  /** HEWN_NETWORK: "off" (nothing goes out) or "get" (only GET and HEAD); unset, what each grant allows. */
+  NETWORK?: string;
 }
 
 const COMPAT_DATE = "2026-09-01";
@@ -313,7 +315,7 @@ export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: st
     await egressMark(this.env, isolate, 1);
     let res: Response;
     try {
-      res = await gatedFetch(request, hosts ?? []);
+      res = await gatedFetch(request, hosts ?? [], fetch, networkMode(this.env.NETWORK));
     } catch (e) {
       await over();
       throw e;

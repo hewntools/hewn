@@ -21,7 +21,7 @@ import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remot
 import * as service from "./service.ts";
 import { defaultHome, harnesses, realExec, refreshSkill } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
-import { hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
+import { copySwitchesFromEnv, hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
 import { checkFormat, writeFormat } from "./supervisor/format.ts";
 import { renderUnicodeCompact } from "uqr";
 import { dnsRecords, localSite, publicSite } from "@hewntools/host-workerd/surface/site.ts";
@@ -145,6 +145,8 @@ async function main() {
       // A host that runs this Hewn for its owner, who has no terminal (HEWN_HOSTED).
       const hosted = hostedFromEnv();
       if (hosted) log("hosted: the web client sends the owner to the host, not to a terminal");
+      // A copy of someone's Hewn (a restore drill): no schedules (HEWN_SCHEDULES=off), little or no network (HEWN_NETWORK).
+      const copy = copySwitchesFromEnv();
       const sv = await startSupervisor({
         home,
         port,
@@ -161,6 +163,7 @@ async function main() {
         },
         ...(remote ? { remote } : {}),
         ...(hosted ? { hosted } : {}),
+        ...copy,
         setup: await realSetupHooks(),
         sandbox: !flag("no-sandbox"),
         sandboxBuilders: () => readConfig(home).sandbox,
@@ -351,7 +354,7 @@ async function main() {
         console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
         if (st) {
-          console.log(`up ${st.upSeconds}s · restarts: Hewn ${st.restarts}, tools ${st.toolsRestarts ?? 0} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
+          console.log(`up ${st.upSeconds}s · restarts: Hewn ${st.restarts}, tools ${st.toolsRestarts ?? 0} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}${st.schedules === "off" ? " · schedules off" : ""}${st.network && st.network !== "on" ? ` · network ${st.network === "get" ? "GET only" : "off"}` : ""}`);
           if (st.idle) console.log(idleLine(st.idle));
         }
       });

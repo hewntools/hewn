@@ -11,7 +11,7 @@ const APACHE = ["spec/", "packages/ui/", "seeds/", "skills/"];
 const expected = (path: string) => (APACHE.some((p) => path.startsWith(p)) ? "Apache-2.0" : "AGPL-3.0-or-later");
 
 test("every source file names its licence in an SPDX header, matching its folder", () => {
-  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard", "packages", "spec", "seeds", "test", "install.sh"], { cwd: ROOT, encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard", "packages", "spec", "seeds", "test", "scripts", "install.sh"], { cwd: ROOT, encoding: "utf8" })
     .split("\n")
     .filter((f) => /\.(ts|js|mjs|css|sh)$/.test(f) && existsSync(join(ROOT, f)));
   assert.ok(files.length > 100);
