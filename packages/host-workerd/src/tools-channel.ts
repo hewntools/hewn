@@ -2,16 +2,21 @@
 // The channel between the platform and the tools: they run in separate workerd processes, and talk
 // HTTP over Unix sockets in the data dir. The platform calls the tools process (one route per
 // CapabilityHost method, with the tools' token); the tools process calls back for a running call's
-// `call` and `model` (with that call's own token, good only while it runs). A tool's code sees
+// `call` and `model` (with that call's own token, good only while it runs), and tells the platform
+// when a tool's fetch goes out and comes back (`/egress`, with the tools' token). A tool's code sees
 // neither token.
 import type { GenerateRequest } from "@hewntools/core/models.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 
-/** The tools process's token, on every call the platform makes to it. */
+/** The tools' token: on every call the platform makes to the tools process, and on Egress's marks back. */
 export const TOOLS_TOKEN_HEADER = "x-hewn-tools";
 /** A running call's token, on its callbacks to the platform. */
 export const CALL_TOKEN_HEADER = "x-hewn-call";
+/** On an invoke's answer, sent when the call starts (its result follows in the body). */
+export const STARTED_HEADER = "x-hewn-started";
+/** With it: the key of the isolate the call runs in (Egress tells the platform about that isolate's fetches). */
+export const ISOLATE_HEADER = "x-hewn-isolate";
 
 /** Code by hash: the bundle's text only goes when the tools process hasn't got it (it answers 409). */
 export type SentCode = { hash: string; js?: string };
@@ -45,6 +50,13 @@ export type CallbackKind = keyof Callbacks;
 /** Bundles the tools process keeps by hash. */
 export const CODES_KEPT = 200;
 
+/** Egress's mark to the platform (POST `/egress`): a fetch out of `isolate` went out (1) or is over (-1). */
+export const EGRESS_PATH = "/egress";
+export type EgressMark = { isolate: string; delta: 1 | -1 };
+
+/** How a call to the tools process is sent: a bound on its answer, and `started` (an invoke started there, in this isolate). */
+export type SendOptions = { timeoutMs?: number; started?: (isolate: string) => void };
+
 /** The tools process didn't answer: it stopped, was restarted, or is stuck (`timeout`). */
 export class ToolsUnreachable extends Error {
   readonly timeout: boolean;
@@ -59,7 +71,7 @@ export type ToolsSocket = { fetch(url: string, init?: RequestInit): Promise<Resp
 
 /** A call to one capability's host in the tools process. */
 export type ToolsHost = {
-  [M in HostMethod]: (body: Omit<HostCalls[M], "code"> & ("code" extends keyof HostCalls[M] ? { code: CodeRef } : unknown), o?: { timeoutMs?: number }) => Promise<any>;
+  [M in HostMethod]: (body: Omit<HostCalls[M], "code"> & ("code" extends keyof HostCalls[M] ? { code: CodeRef } : unknown), o?: SendOptions) => Promise<any>;
 };
 
 /**
@@ -69,7 +81,8 @@ export type ToolsHost = {
 export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: string) => ToolsHost {
   /** Hashes the tools process has the text of (as far as the platform knows: it says 409 when it hasn't). */
   const sent = new Set<string>();
-  const post = async (capabilityId: string, method: HostMethod, body: Record<string, unknown>, timeoutMs?: number): Promise<unknown> => {
+  const post = async (capabilityId: string, method: HostMethod, body: Record<string, unknown>, o: SendOptions = {}): Promise<unknown> => {
+    const { timeoutMs } = o;
     const code = body.code as CodeRef | undefined;
     const send = async (withJs: boolean) => {
       const payload = code ? { ...body, code: withJs ? { hash: code.hash, js: code.js } : { hash: code.hash } } : body;
@@ -90,8 +103,19 @@ export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: 
       sent.delete(code.hash);
       res = await send(true);
     }
-    const out = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { result?: unknown; error?: string };
-    if (!res.ok) throw new Error(out.error ?? `HTTP ${res.status}`);
+    if (res.headers.has(STARTED_HEADER)) o.started?.(res.headers.get(ISOLATE_HEADER) ?? "");
+    // An invoke's result comes after its headers: the process going meanwhile is the process going.
+    const text = await res.text().catch((e: Error) => {
+      throw new ToolsUnreachable(`Hewn's tools stopped (${e.message})`);
+    });
+    const out = ((): { result?: unknown; error?: string } => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { error: `HTTP ${res.status}` };
+      }
+    })();
+    if (!res.ok || out.error !== undefined) throw new Error(out.error ?? `HTTP ${res.status}`);
     if (code) {
       // As many as the tools process keeps: past that, the text goes again rather than a 409 and a resend.
       if (sent.size >= CODES_KEPT) sent.delete(sent.values().next().value!);
@@ -99,5 +123,5 @@ export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: 
     }
     return out.result;
   };
-  return (capabilityId) => Object.fromEntries(HOST_METHODS.map((m) => [m, (body: Record<string, unknown>, o?: { timeoutMs?: number }) => post(capabilityId, m, body, o?.timeoutMs)])) as unknown as ToolsHost;
+  return (capabilityId) => Object.fromEntries(HOST_METHODS.map((m) => [m, (body: Record<string, unknown>, o?: SendOptions) => post(capabilityId, m, body, o)])) as unknown as ToolsHost;
 }

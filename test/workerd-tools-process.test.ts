@@ -3,9 +3,9 @@
 // them (its tokens, code by hash), and a tool that won't stop when its call's deadline comes.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { platform as osPlatform } from "node:os";
+import { platform as osPlatform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { config as platformConfig, sandboxed, toolsConfig, toolsSandbox } from "@hewntools/cli/supervisor/index.ts";
@@ -14,9 +14,10 @@ import { restoreBackup } from "@hewntools/cli/backup.ts";
 import { openHome } from "@hewntools/cli/home.ts";
 import { STORAGE_KEYS } from "@hewntools/cli/supervisor/format.ts";
 import { toolsChannel, type ToolsSocket, ToolsUnreachable } from "@hewntools/host-workerd/tools-channel.ts";
+import { doingOf, stallRoles } from "@hewntools/host-workerd/stall-blame.ts";
 import { CALL_DEADLINE_MS } from "@hewntools/core/platform.ts";
 import { FIXTURES } from "./helpers.ts";
-import { startTestHost, type TestHost } from "./workerd-helpers.ts";
+import { signedIn, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 const channel = { tools: "unix:/h/workerd/run/tools.sock", calls: "unix:/h/workerd/run/calls.sock" };
 
@@ -235,3 +236,90 @@ describe("a home written by Hewn 0.4.11, when the platform and the tools ran in 
   });
 });
 
+describe("which code held up the tools", () => {
+  const call = (o: Partial<{ started: boolean; waiting: number; isolate: string; capabilityId: string }> & { token: string }) => ({ token: o.token, capabilityId: o.capabilityId ?? o.token, state: "", started: o.started ?? true, waiting: o.waiting ?? 0, isolate: o.isolate ?? `iso-${o.capabilityId ?? o.token}` });
+
+  test("a call that started and isn't waiting on Hewn or the network; not one queued behind it, or waiting", () => {
+    const calls = [call({ token: "loops" }), call({ token: "queued", started: false }), call({ token: "on-a-callback", waiting: 1 }), call({ token: "on-a-fetch" })];
+    const fetches = new Map([["iso-on-a-fetch", 1]]);
+    assert.deepEqual([...doingOf(calls, fetches).values()], ["running", "queued", "waiting on Hewn", "waiting on a fetch"]);
+    const { suspects, role } = stallRoles(calls, fetches, 0);
+    assert.deepEqual([...suspects!], ["loops"]);
+    assert.deepEqual(role({ capabilityId: "on-a-fetch", state: "" }), { caused: false, doing: "waiting on a fetch" });
+    assert.deepEqual(role({ capabilityId: "loops", state: "" }), { caused: true, doing: "running" });
+  });
+
+  test("fetches are counted per isolate: more of a tool's calls than its fetches out means one of them is running", () => {
+    const calls = [call({ token: "a", capabilityId: "tool" }), call({ token: "b", capabilityId: "tool" })];
+    assert.deepEqual([...stallRoles(calls, new Map([["iso-tool", 1]]), 0).suspects!].sort(), ["a", "b"]);
+    assert.equal(stallRoles(calls, new Map([["iso-tool", 2]]), 0).suspects, undefined, "as many fetches out as calls: all waiting");
+  });
+
+  test("can't be told: a tool's code loading or migrating meanwhile, or every call waiting; then every one may have", () => {
+    const loops = [call({ token: "loops" })];
+    const other = stallRoles(loops, new Map(), 1);
+    assert.equal(other.suspects, undefined);
+    assert.deepEqual(other.role({ capabilityId: "loading", state: "test:b-1" }), { caused: true, doing: "running" });
+    assert.equal(stallRoles([call({ token: "w", waiting: 1 }), call({ token: "q", started: false })], new Map(), 0).suspects, undefined);
+  });
+});
+
+describe("which code held up the tools, on the real host", () => {
+  let h: TestHost;
+  let fetchHangs = false;
+  before(async () => {
+    h = await startTestHost();
+    for (const dir of [join(FIXTURES, "runaway"), join(FIXTURES, "running-log")]) {
+      const r = await h.sv.admin("install", { name: dir.split("/").at(-1), purpose: "runs", dir, wait: true });
+      assert.equal(r.status, "promoted", r.log.join("\n"));
+    }
+    // Waiter: calls Runaway's spin@1, and waits on it.
+    const dir = mkdtempSync(join(tmpdir(), "hewn-waiter-"));
+    for (const d of ["src", "tests"]) mkdirSync(join(dir, d));
+    writeFileSync(join(dir, "capability.json"), JSON.stringify({ id: "waiter", name: "Waiter", purpose: "Waits on Runaway.", abi: "2.0", requires: { capabilities: [{ id: "runaway", operations: ["spin@1"] }] }, operations: [{ name: "wait", description: "wait", version: 1, sideEffect: "read", inputSchema: { type: "object" }, outputSchema: { type: "object" } }] }));
+    writeFileSync(join(dir, "src", "index.ts"), `export const operations = { async "wait@1"(_: unknown, ctx: { call: (id: string, op: string, input?: unknown) => Promise<unknown> }) { await ctx.call("runaway", "spin@1", {}); return {}; } };\n`);
+    writeFileSync(join(dir, "tests", "cases.json"), JSON.stringify([{ name: "waits", operation: "wait", input: {}, calls: { "runaway/spin@1": {} }, expect: {} }]));
+    const w = await h.sv.admin("install", { name: "Waiter", purpose: "waits", dir, wait: true });
+    assert.equal(w.status, "promoted", w.log.join("\n"));
+    await h.sv.admin("approve", { capabilityId: "waiter" });
+    // Fetcher: a fetch to TEST-NET-1 (192.0.2.1, an address for documentation, routed nowhere), which hangs until aborted.
+    const fdir = mkdtempSync(join(tmpdir(), "hewn-fetcher-"));
+    for (const d of ["src", "tests"]) mkdirSync(join(fdir, d));
+    writeFileSync(join(fdir, "capability.json"), JSON.stringify({ id: "fetcher", name: "Fetcher", purpose: "Waits on the network.", abi: "2.0", requires: { hosts: ["192.0.2.1"] }, operations: [{ name: "get", description: "get", version: 1, sideEffect: "read", inputSchema: { type: "object" }, outputSchema: { type: "object" } }] }));
+    writeFileSync(join(fdir, "src", "index.ts"), `export const operations = { async "get@1"(input: { ms?: number }) { const t = Date.now(); await fetch("http://192.0.2.1/", { signal: AbortSignal.timeout(input.ms ?? 20000) }).catch(() => {}); return { ms: Date.now() - t }; } };\n`);
+    writeFileSync(join(fdir, "tests", "cases.json"), JSON.stringify([{ name: "gets", operation: "get", input: { ms: 10 }, expect: { ms: "$any" } }]));
+    const f = await h.sv.admin("install", { name: "Fetcher", purpose: "fetches", dir: fdir, wait: true });
+    assert.equal(f.status, "promoted", f.log.join("\n"));
+    await h.sv.admin("approve", { capabilityId: "fetcher" });
+    // Where an address routed nowhere is refused at once, there's no fetch to wait on.
+    fetchHangs = (await h.invoke("fetcher", "get", { ms: 1500 })).result.ms >= 1000;
+  });
+  after(() => h?.stop());
+
+  test("only the tool whose code never yields is told and struck; one waiting on the network, one waiting on it through a call, and one sent after, aren't", async (t) => {
+    if (!fetchHangs) t.diagnostic("192.0.2.1 is refused at once here: no tool waits on a fetch in this run");
+    const before = h.sv.toolsRestarts();
+    const fetching = fetchHangs ? h.invoke("fetcher", "get").then(() => assert.fail("get returned"), (e: Error) => e) : undefined;
+    await new Promise((r) => setTimeout(r, 300));
+    const waiting = h.invoke("waiter", "wait").then(() => assert.fail("wait returned"), (e: Error) => e);
+    await new Promise((r) => setTimeout(r, 300));
+    const queued = h.invoke("running-log", "list_runs").then(() => assert.fail("list_runs returned"), (e: Error) => e);
+    const [w, q, f] = await Promise.all([waiting, queued, fetching]);
+    for (const end = Date.now() + 5000; h.sv.toolsRestarts() === before && Date.now() < end; ) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(h.sv.toolsRestarts(), before + 1);
+    for (const e of [w, q, ...(f ? [f] : [])]) assert.match(e.message, /another tool's code held up Hewn's tools while this ran, and they were restarted/);
+    const lines = async (id: string) => (await h.sv.admin("logs", { capabilityId: id, n: 20 })).lines as string[];
+    assert.equal((await lines("runaway")).filter((l) => / waiter spin@1 ERROR stalled: /.test(l) || / spin@1 ERROR stalled: /.test(l)).length, 1, (await lines("runaway")).join("\n"));
+    for (const id of ["waiter", "running-log", "fetcher"]) assert.deepEqual((await lines(id)).filter((l) => / ERROR stalled: /.test(l)), [], id);
+    // Activity names every tool that was there, and what it was doing.
+    const web = await signedIn(h);
+    const there = async (id: string) => (await web(`/api/activity?capability=${id}`)).items.filter((i: any) => i.kind === "lifecycle" && (i.outcome === "stalled" || i.outcome === "held-up")).map((i: any) => `${i.outcome} ${i.detail}`);
+    assert.deepEqual(await there("runaway"), ["stalled spin@1"]);
+    assert.deepEqual(await there("waiter"), ["held-up wait@1 — waiting on Hewn"]);
+    assert.deepEqual(await there("running-log"), ["held-up list_runs@1 — queued"]);
+    if (fetchHangs) assert.deepEqual(await there("fetcher"), ["held-up get@1 — waiting on a fetch"]);
+    // A held-up call is the other tool's doing: not a failure of its own to fix.
+    for (const id of ["waiter", "running-log"]) assert.deepEqual(await web(`/api/capabilities/${id}/failures`), [], id);
+    assert.deepEqual((await h.invoke("running-log", "list_runs")).result, { runs: [] }, "and it runs again");
+  });
+});

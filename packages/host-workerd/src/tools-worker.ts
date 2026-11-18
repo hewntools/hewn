@@ -12,7 +12,7 @@ import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch } from "./egress.ts";
-import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, HOST_METHODS, type HostCalls, type HostMethod, type SentCode, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
+import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, EGRESS_PATH, type EgressMark, HOST_METHODS, type HostCalls, type HostMethod, ISOLATE_HEADER, type SentCode, STARTED_HEADER, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import RUNTIME from "./capability-runtime.js";
@@ -56,7 +56,7 @@ function callback<K extends CallbackKind>(env: Env, token: string, kind: K, body
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const method = new URL(request.url).pathname.slice(1) as HostMethod;
     if (method === ("health" as HostMethod)) return new Response("ok");
     if (request.method !== "POST" || !HOST_METHODS.includes(method)) return Response.json({ error: "not_found" }, { status: 404 });
@@ -68,6 +68,24 @@ export default {
       if (!code) return Response.json({ missing: body.code.hash }, { status: 409 });
     }
     const host = env.CAPS.get(env.CAPS.idFromName(body.capabilityId)) as unknown as CapabilityHost;
+    if (method === "invoke") {
+      // Its headers go now, the result after: the platform knows the call started here (one queued behind a tool
+      // that never yields doesn't), and in which isolate (whose fetches Egress tells it about).
+      const c = body as unknown as HostCalls["invoke"];
+      const reply = new TransformStream<Uint8Array, Uint8Array>();
+      const writer = reply.writable.getWriter();
+      const done = Promise.resolve()
+        .then(() => run(env, host, method, body, code!))
+        .then((result) => ({ result: result ?? null }), (e: Error) => ({ error: e.message }))
+        .then(async (out) => {
+          await writer.write(new TextEncoder().encode(JSON.stringify(out)));
+          await writer.close();
+        })
+        // The answer can't be written (it doesn't serialize, the platform went): it ends, failed, rather than hanging.
+        .catch((e: Error) => writer.abort(e).catch(() => {}));
+      ctx.waitUntil(done);
+      return new Response(reply.readable, { headers: { "content-type": "application/json", [STARTED_HEADER]: "1", [ISOLATE_HEADER]: isolateKey(code!.hash, c.hosts, c.limit, c.named) } });
+    }
     try {
       return Response.json({ result: (await run(env, host, method, body, code!)) ?? null });
     } catch (e) {
@@ -75,6 +93,16 @@ export default {
     }
   },
 };
+
+/** The key of the isolate that runs `hash` with these hosts and limit (CapabilityHost.worker); `named`: the live tool's own. */
+const isolateKey = (hash: string, hosts: string[], limit: number, named: boolean) => `${hash}|${hosts.join(",")}|${limitBytes(limit)}${named ? "" : "|unnamed"}`;
+
+/** Tell the platform a fetch out of `isolate` went out (1) or is over (-1): its code waits on the network meanwhile. */
+const egressMark = (env: Env, isolate: string, delta: EgressMark["delta"]) =>
+  env.PLATFORM.fetch(`http://platform${EGRESS_PATH}`, { method: "POST", headers: { [TOOLS_TOKEN_HEADER]: env.TOOLS_TOKEN, "content-type": "application/json" }, body: JSON.stringify({ isolate, delta } satisfies EgressMark) }).then(
+    (r) => r.body?.cancel(),
+    () => {},
+  );
 
 function run(env: Env, host: CapabilityHost, method: HostMethod, b: any, code: CodeRef): Promise<unknown> | unknown {
   switch (method) {
@@ -169,7 +197,7 @@ export class CapabilityHost extends DurableObject<Env> {
    * (capability-guard.ts) takes it, with what else the flag adds to storage, out of the
    * capability's reach before its code can use any.
    */
-  private workerCode(code: CodeRef, hosts: string[], bytes: number): WorkerLoaderWorkerCode {
+  private workerCode(code: CodeRef, hosts: string[], bytes: number, key: string): WorkerLoaderWorkerCode {
     return {
       compatibilityDate: COMPAT_DATE,
       compatibilityFlags: ["nodejs_compat", "experimental"],
@@ -177,7 +205,7 @@ export class CapabilityHost extends DurableObject<Env> {
       mainModule: "hewn-runtime.js",
       modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
       env: {},
-      globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts } }),
+      globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts, isolate: key } }),
     };
   }
 
@@ -190,11 +218,11 @@ export class CapabilityHost extends DurableObject<Env> {
    */
   private worker(name: string, code: CodeRef, hosts: string[], named: boolean, limit: number) {
     const bytes = limitBytes(limit);
-    const key = `${code.hash}|${hosts.join(",")}|${bytes}${named ? "" : "|unnamed"}`;
-    if (named) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes)) };
-    if (name === LIVE) return { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes)) };
+    const key = isolateKey(code.hash, hosts, limit, named);
+    if (named) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes, key)) };
+    if (name === LIVE) return { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)) };
     let entry = this.buildIsolates.get(key);
-    if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes)), states: new Set() }));
+    if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)), states: new Set() }));
     entry.states.add(name);
     return { key, stub: entry.stub };
   }
@@ -217,7 +245,7 @@ export class CapabilityHost extends DurableObject<Env> {
 
   // Validation's: an unnamed isolate, gone once described (it opens no state, so no limit).
   async describe(code: CodeRef): Promise<string[]> {
-    return (this.env.LOADER.load(this.workerCode(code, [], 0)).getEntrypoint() as any).describe();
+    return (this.env.LOADER.load(this.workerCode(code, [], 0, isolateKey(code.hash, [], 0, false))).getEntrypoint() as any).describe();
   }
 
   // The data ops' `hosts` and `named`: the tool's calls', when this is the live tool (see `worker`).
@@ -271,8 +299,31 @@ export class CapabilityHost extends DurableObject<Env> {
 
 // ---------- Egress: the only way out of a capability ----------
 
-export class Egress extends WorkerEntrypoint<Env, { hosts: string[] }> {
+export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: string }> {
   async fetch(request: Request): Promise<Response> {
-    return gatedFetch(request, this.ctx.props.hosts ?? []);
+    // While a tool's fetch is out, its code waits on the network: the platform is told before it goes and once it's
+    // over (its body read, or dropped), so a tool waiting on a fetch isn't the one blamed when the tools stop
+    // responding. Each mark is awaited (a loop that follows can't lose it), and kept alive past a stopped call.
+    const { hosts, isolate } = this.ctx.props;
+    const over = () => {
+      const mark = egressMark(this.env, isolate, -1);
+      this.ctx.waitUntil(mark);
+      return mark;
+    };
+    await egressMark(this.env, isolate, 1);
+    let res: Response;
+    try {
+      res = await gatedFetch(request, hosts ?? []);
+    } catch (e) {
+      await over();
+      throw e;
+    }
+    if (!res.body) {
+      await over();
+      return res;
+    }
+    const body = new TransformStream<Uint8Array, Uint8Array>({ flush: () => over() });
+    this.ctx.waitUntil(res.body.pipeTo(body.writable).catch(() => over()));
+    return new Response(body.readable, res);
   }
 }

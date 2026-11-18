@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Starting the real workerd host (supervisor + workerd) for integration tests.
 import { mkdtempSync, rmSync } from "node:fs";
+import { request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -137,5 +138,26 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
       await sv.stop();
       rmSync(root, { recursive: true, force: true });
     },
+  };
+}
+
+/** The web API as the signed-in owner (on Hewn's own host name, which fetch can't send). */
+export async function signedIn(h: TestHost): Promise<(path: string) => Promise<any>> {
+  const get = (path: string, cookie = "") =>
+    new Promise<{ status: number; headers: Record<string, any>; body: string }>((ok, fail) => {
+      const r = request({ host: "127.0.0.1", port: h.port, path, headers: { host: `hewn.localhost:${h.port}`, ...(cookie ? { cookie } : {}), "x-hewn-ui": "1" } }, (m) => {
+        let body = "";
+        m.on("data", (d) => (body += d));
+        m.on("end", () => ok({ status: m.statusCode!, headers: m.headers, body }));
+      });
+      r.on("error", fail);
+      r.end();
+    });
+  const { ticket } = await h.sv.admin("web-ticket");
+  const cookie = String((await get(`/auth?ticket=${ticket}`)).headers["set-cookie"]).split(";")[0];
+  return async (path) => {
+    const r = await get(path, cookie);
+    if (r.status !== 200) throw new Error(`${path}: HTTP ${r.status} ${r.body}`);
+    return JSON.parse(r.body);
   };
 }

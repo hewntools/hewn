@@ -128,7 +128,8 @@ export class Invocation extends Domain {
       } else if (isSignIn) this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: (sign-in failed; details aren't kept)`, []);
       else {
         this.capabilityLog(cap.id, trace.join(" → "), req, started, `ERROR ${err.code ?? "internal"}: ${err.message}`, logs);
-        this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: err.message, input: redact(JSON.stringify(maskInput(req.input ?? {})) ?? "{}"), logs });
+        // Held up by another tool's code (Hewn's tools stopped responding): not this tool's failure to fix.
+        if (!(err.details as { heldUp?: boolean } | undefined)?.heldUp) this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: err.message, input: redact(JSON.stringify(maskInput(req.input ?? {})) ?? "{}"), logs });
       }
       if (err.details && typeof err.details === "object" && "logs" in err.details) {
         const { logs: _omit, ...rest } = err.details as Record<string, unknown>;

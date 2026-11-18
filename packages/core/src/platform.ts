@@ -31,7 +31,7 @@ import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 import { Activity, type ActivityView } from "./platform/activity.ts";
-import { Stalls, type Suspension } from "./platform/stalls.ts";
+import { type StallRole, Stalls, type Suspension } from "./platform/stalls.ts";
 import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
@@ -352,8 +352,11 @@ export class Platform {
 
   // ---------- stalls: what was running when Hewn stopped responding, suspended tools (platform/stalls.ts) ----------
 
-  /** Once at start, before `recoverInterruptedBuilds`. `stalledAt`: when the host restarted Hewn for not responding, if it did. */
-  recoverStall(stalledAt?: string): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt); }
+  /**
+   * What was running when the host found the tools not responding (`stalledAt`, before it restarts them), or once at start
+   * (unset). `role`: what each piece was doing, and whether it may have held them (unset: every one may have).
+   */
+  recoverStall(stalledAt?: string, role?: StallRole): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt, role); }
   suspension(capabilityId: string): Suspension | undefined { return this.d.stalls.suspension(capabilityId); }
   resume(owner: Agent, capabilityId: string) { return this.d.stalls.resume(owner, capabilityId); }
 
