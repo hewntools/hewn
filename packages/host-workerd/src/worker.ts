@@ -29,6 +29,7 @@ import { fetchLink } from "./surface/fetch-link.ts";
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
 import { type CallInFlight, stallRoles } from "./stall-blame.ts";
+import { IDLE_GC_BACKGROUND_EVERY_MS, IDLE_GC_QUIET_MS, IdleGc, tickCall } from "./idle-gc.ts";
 import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, EGRESS_PATH, type EgressMark, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
 
 interface Env {
@@ -541,6 +542,8 @@ export class HewnDO extends DurableObject<Env> {
   /** When the supervisor last said the tools process went away (stalled or exited), and when one answered again (ms). */
   private toolsGoneAt = 0;
   private toolsBackAt = 0;
+  /** The idle GC (`gc` is there in this process only). */
+  private idleGc = new IdleGc((globalThis as { gc?: (o: object) => void }).gc);
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -614,6 +617,7 @@ export class HewnDO extends DurableObject<Env> {
 
   /** A tool call's callback, from the tools process (ToolCalls): answered while that call runs, refused after. */
   async toolCallback(token: string, kind: CallbackKind, body: unknown): Promise<{ result?: unknown; error?: string; code?: string; refused?: boolean }> {
+    this.idleGc.work();
     const running = this.toolCalls.get(token);
     if (!running || running.over) return { error: "this call isn't running", refused: true };
     // Waiting on Hewn meanwhile: not the code that holds the tools, if they stop responding.
@@ -671,6 +675,7 @@ export class HewnDO extends DurableObject<Env> {
   private catchingUp: Promise<void> = Promise.resolve();
 
   async alarm() {
+    this.idleGc.work();
     const pass = this.catchingUp.then(async () => {
       await this.platform.runDueSchedules();
       await this.secrets.flush();
@@ -785,10 +790,16 @@ export class HewnDO extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const res = url.pathname.startsWith("/_admin/") ? await this.admin(request, url) : await handle(this.platform, this.sessions, this.surfaceHost(), request);
+    const admin = url.pathname.startsWith("/_admin/");
+    // For the idle GC, a request is background as it comes and as it's answered (one the idle report counts is work
+    // there too); the watchdog's /health is neither, and admin() tells the CLI's work from the supervisor's ticks.
+    const background = !admin && url.pathname !== "/health";
+    if (background) this.idleGc.background();
+    const res = admin ? await this.admin(request, url) : await handle(this.platform, this.sessions, this.surfaceHost(), request);
     // Secret writes are durable before the answer goes out. (Calls that refresh a secret run
     // inside these requests too.)
     await this.secrets.flush();
+    if (background) this.idleGc.background();
     return res;
   }
 
@@ -796,6 +807,7 @@ export class HewnDO extends DurableObject<Env> {
   private async admin(request: Request, url: URL): Promise<Response> {
     if (!sameDigest(request.headers.get("x-hewn-admin") ?? "", this.env.ADMIN_TOKEN)) return Response.json({ error: "unauthorized" }, { status: 401 });
     const body: any = request.method === "POST" ? await request.json() : {};
+    if (!tickCall(url.pathname, body)) this.idleGc.work();
     // The idle report: what the CLI changes, a backup should keep (a tool call counts itself).
     if (request.method === "POST" && adminChanges(url.pathname, body)) this.platform.activity.changed();
     try {
@@ -808,6 +820,9 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/changed":
           // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });
+        case "/_admin/idle-gc":
+          // The supervisor's tick (tests shorten the times).
+          return Response.json(this.idleGc.collectIfQuiet(this.platform.idleActivity(), this.toolCalls.size > 0, { quietMs: Number.isFinite(body.quietMs) ? body.quietMs : IDLE_GC_QUIET_MS, backgroundEveryMs: Number.isFinite(body.backgroundEveryMs) ? body.backgroundEveryMs : IDLE_GC_BACKGROUND_EVERY_MS }));
         case "/_admin/disk":
           // The supervisor checks the disk with Hewn's data: while it's nearly full, tools' data doesn't grow.
           this.diskLow = body.low === true ? { floor: Number.isFinite(body.floor) ? body.floor : 1024 * MB } : null;
@@ -933,7 +948,7 @@ export class HewnDO extends DurableObject<Env> {
 }
 
 /** Admin routes that change nothing a backup keeps (`/_admin/invoke` counts its own writes). */
-const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed", "/_admin/disk", "/_admin/tools-gone", "/_admin/tools-back"]);
+const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed", "/_admin/disk", "/_admin/tools-gone", "/_admin/tools-back", "/_admin/idle-gc"]);
 
 /** Whether an admin request changes what a backup keeps (the idle report's backup reason). */
 function adminChanges(path: string, body: any): boolean {
