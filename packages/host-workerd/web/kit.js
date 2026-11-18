@@ -25,6 +25,8 @@ function checkBuild(res) {
   webBuild = v;
   if (!changed || outdated) return;
   outdated = true;
+  // What the title counted (the Inbox's) won't be kept up to date either.
+  document.title = BRAND;
   toast(`${BRAND} was updated`, { dot: "warn", ms: Infinity, action: ["Reload", () => location.reload()] });
 }
 
@@ -481,15 +483,15 @@ export const sheetActions = (...buttons) => h("div", { class: "actions flush" },
 /**
  * Request: "X wants to…", who asked, their note as a quote, the rows, then the decline and accept
  * buttons. `onAccept(close)` runs with the primary disabled; `ready()` (optional) gates it.
+ * `alsoAccept` / `onAlsoAccept(close)`: a second way to accept, between the two.
  * Resolves with what the handlers pass to close (decline: false).
  */
-/** `also`: [label, fn(close)], a second way to accept, beside it. */
-export function requestSheet({ icon, title, sub, quote, rows = [], extra, decline = "Not now", accept = "Allow", also, danger = false, onAccept, onDecline, width = 480 }) {
+export function requestSheet({ icon, title, sub, quote, rows = [], extra, decline = "Not now", accept = "Allow", alsoAccept, danger = false, onAccept, onAlsoAccept, onDecline, width = 480 }) {
   return modal(
     (close) => {
       const yes = h("button", { class: danger ? "danger solid" : "primary" }, accept);
       const no = h("button", {}, decline);
-      const other = also ? h("button", { class: danger ? "danger" : "" }, also[0]) : null;
+      const other = alsoAccept ? h("button", { class: danger ? "danger" : "" }, alsoAccept) : null;
       const busy = (on) => [yes, no, other].forEach((b) => b && (b.disabled = on));
       const accepting = (fn) => async () => {
         busy(true);
@@ -502,7 +504,7 @@ export function requestSheet({ icon, title, sub, quote, rows = [], extra, declin
         }
       };
       yes.addEventListener("click", accepting(() => (onAccept ? onAccept(close) : close(true))));
-      other?.addEventListener("click", accepting(() => also[1](close)));
+      other?.addEventListener("click", accepting(() => onAlsoAccept(close)));
       no.addEventListener("click", async () => {
         try {
           await (onDecline ? onDecline(close) : close(false));

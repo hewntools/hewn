@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille dots. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+- **Allow all** of an agent's waiting calls: when one agent has several calls of the same destructive operation waiting, **Allow all** lets them run at once, each still its own call in Activity. The tab's title counts the calls waiting ("(3) Hewn") while it's on screen. See [The Inbox](docs/using-hewn.md#the-inbox).
 
 ### Changes
 
@@ -22,7 +23,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
-- An agent's destructive call that you allowed late could fail with "timed out (call chain deadline)". It now stops waiting before that deadline and tells the agent to call again once you've allowed it. Several waiting calls of one operation from one agent get **Allow all**, and the tab's title counts the calls waiting. See [Using Hewn](docs/using-hewn.md#the-inbox).
+- An agent's destructive call that you allowed late could fail with "timed out (call chain deadline)". It now stops waiting before that deadline and tells the agent to call again once you've allowed it. See [What agents can do](docs/agents.md#what-agents-can-do).
 - A page open from before an upgrade kept refreshing itself with its old code, and a page from an older version could keep a Hewn that suspends when idle awake. Now it stops refreshing once it says **Hewn was updated**, until you click **Reload**; it never reloads by itself. A page open from 0.4.11 or before still refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
 - **Authorize** on a tool's request stayed greyed out while one of its settings was empty, with no word why. It now grants what the tool asks for whatever its settings, and the line under the button and the Inbox name the settings still to set ("Set UPSTREAM_REPO and MAINTAINER before it runs"). See [Grants](docs/concepts.md#grants).
 - A schedule runs on time after the machine wakes from sleep. Before, the next schedule after a wake ran as late as the machine had slept: a laptop asleep from 23:00 to 07:00 ran a 12:00 schedule at about 20:00. The same for any machine that sleeps or suspends Hewn. See [Schedules](docs/using-hewn.md#schedules).

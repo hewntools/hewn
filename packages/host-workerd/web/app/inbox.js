@@ -159,7 +159,8 @@ async function pollInbox(withRecent = false, { refresh = false } = {}) {
       inboxBtn.setAttribute("aria-label", n ? `Inbox, ${n} need${n === 1 ? "s" : ""} you` : "Inbox");
       const waiting = next.needs.filter((x) => x.kind === "confirmation");
       showBanner(waiting);
-      // Agents waiting on you, in the tab's title: seen from another tab while this one is visible (a hidden tab makes no requests).
+      // Agents waiting on you, in the tab's title. Kept up to date only while the tab is visible: a hidden tab makes
+      // no requests, so its title keeps the count it had.
       document.title = waiting.length ? `(${waiting.length}) ${BRAND}` : BRAND;
       renderInbox();
     }

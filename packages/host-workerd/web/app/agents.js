@@ -495,7 +495,7 @@ async function confirmationSheet(c) {
     close(approve);
   };
   const allowAll = async (close) => {
-    await api(`/confirmations/${enc(c.id)}/all`, { method: "POST", body: { ids: alike.map((x) => x.id) } });
+    await api("/confirmations/all", { method: "POST", body: { ids: [c.id, ...alike.map((x) => x.id)] } });
     toast(`${who} may run all ${alike.length + 1} now`);
     pollInbox();
     close(true);
@@ -505,11 +505,12 @@ async function confirmationSheet(c) {
     title: `${who} wants to ${words}`,
     sub: timer,
     rows: [{ pill: kindTag("destructive", "danger"), main: h("span", { class: "row tight wrap" }, h("span", { class: "mono" }, op), "on", capRef(cap, c.capabilityId)), sub: ids || "no input", mono: true }],
-    extra: alike.length > 0 && h("div", { class: "small muted" }, `${alike.length} more ${alike.length === 1 ? "call" : "calls"} like it waiting: ${alike.map((x) => inputText(x) || "no input").join(" · ")}`),
+    extra: alike.length > 0 && h("div", { class: "small muted" }, `${alike.length} more ${alike.length === 1 ? "call" : "calls"} like it waiting: ${alike.map((x) => inputText(x) || "no input").join("; ")}`),
     quote: c.note,
     decline: "Stop",
     accept: "Allow once",
-    also: alike.length > 0 && [`Allow all ${alike.length + 1}`, allowAll],
+    alsoAccept: alike.length > 0 && `Allow all ${alike.length + 1}`,
+    onAlsoAccept: allowAll,
     danger: true,
     onAccept: decide(true),
     onDecline: decide(false),
