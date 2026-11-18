@@ -9,6 +9,7 @@ import { go, put } from "./frame.js";
 import { BELL } from "./glyphs.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { buildingLabel } from "./home.js";
+import { keySheet } from "./models.js";
 import { route } from "./router.js";
 import { proposalSheet, schedulesSheet } from "./schedules.js";
 import { toolModelSheet } from "./tool-model.js";
@@ -79,7 +80,9 @@ async function openNeed(n) {
     } else if (n.kind === "builder-model") go("#/settings/ai");
     // Suspended: the tool's page says why, with Resume.
     else if (n.kind === "suspended") go(`#/c/${enc(n.capabilityId)}`);
-    else if (n.kind === "model-key") go("#/settings/ai/models");
+    else if (n.kind === "model-key") {
+      await keySheet(await api("/models"), n.id);
+    }
     else if (n.kind === "spend") {
       const c = n.capabilityId && (await caps()).get(n.capabilityId);
       if (c) await toolModelSheet(c);

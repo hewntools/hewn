@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille dots. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+- **A model key's expiry date:** providers don't tell Hewn when a key expires, so you can give the date on its sheet (or `hewn models key … --expires`); the Inbox tells you a week before. See [Replacing a key](docs/models.md#replacing-a-key).
 
 ### Changes
 
@@ -22,7 +23,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
-- A model provider's key could be replaced only from the terminal, which stored the new key before checking it. **Replace…** on the provider's row under Settings › AI › Models now does it; in both places the new key is checked first, and the key you had stays if it fails. An optional expiry date gets an Inbox notice a week before. See [Replacing a key](docs/models.md#replacing-a-key).
+- Replacing a model provider's key could store a key that couldn't be checked (the provider unreachable, say) over one that worked, and could be done only from the terminal. Now **Replace…** on the provider's row under Settings › AI › Models does it too, and in both places the new key is stored only once its check passes. See [Replacing a key](docs/models.md#replacing-a-key).
 - A page open from before an upgrade kept refreshing itself with its old code, and a page from an older version could keep a Hewn that suspends when idle awake. Now it stops refreshing once it says **Hewn was updated**, until you click **Reload**; it never reloads by itself. A page open from 0.4.11 or before still refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
 - **Authorize** on a tool's request stayed greyed out while one of its settings was empty, with no word why. It now grants what the tool asks for whatever its settings, and the line under the button and the Inbox name the settings still to set ("Set UPSTREAM_REPO and MAINTAINER before it runs"). See [Grants](docs/concepts.md#grants).
 - A schedule runs on time after the machine wakes from sleep. Before, the next schedule after a wake ran as late as the machine had slept: a laptop asleep from 23:00 to 07:00 ran a 12:00 schedule at about 20:00. The same for any machine that sleeps or suspends Hewn. See [Schedules](docs/using-hewn.md#schedules).

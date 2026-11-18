@@ -263,7 +263,7 @@ A widget is a read operation whose output is a view model for one of five templa
 
 The model port (`core/models.ts`, and `core/platform/models.ts`) runs language models for capabilities that declare `requires.model`. Capability code never holds a key or a provider host: it calls `ctx.model.generate`, and the core checks the request, reserves budget, calls the provider from the host, and settles the cost.
 
-- Providers: Anthropic, OpenAI, OpenRouter. The owner's API keys are secrets (`hewn:models`); the owner maps tiers (`light`, `standard`, `strong`, `max`) to models and sets a monthly budget, overall and per capability.
+- Providers: Anthropic, OpenAI, OpenRouter. The owner's API keys are secrets (`hewn:models`), each checked against the provider's models list before it's stored (`setModelKey`: a refused key never, a key replacing one only once its check passed); an owner-given expiry date per key sits in `platform_kv` (`models.keyExpiry.<provider>`), and the Inbox reads it with `keyExpiries` (days counted in the owner's time zone); the owner maps tiers (`light`, `standard`, `strong`, `max`) to models and sets a monthly budget, overall and per capability.
 - Prices and image support come from the provider's model list and the OpenRouter catalog. Every call is logged in `model_calls`.
 - A pinned model the provider retires makes the capability not ready, with a suggested successor.
 

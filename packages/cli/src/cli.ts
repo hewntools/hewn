@@ -65,7 +65,7 @@ Use it (as the owner; talks to the running Hewn)
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
   accounts            connections to external services: health and what uses them
   models              the model provider, tiers, budget and this month's spend
-                      models key <provider> [--from <path>] [--expires <date>] | --remove | use <provider> | list
+                      models key <provider> [--from <path>|--remove] [--expires <date>] | use <provider> | list
                       | tier <tier> <model-id>|--suggested | cap [<tool>] <usd>|none
                       | price <provider/model> <in> <out> (USD per M tokens) | check
                       | set <tool> <tier>|<provider/model> (what it uses; no builder)
@@ -868,7 +868,7 @@ async function models(c: PlatformClient, rl: ReturnType<typeof createInterface>)
   const [sub, a, b, x] = positional();
   const PROVIDERS = ["anthropic", "openai", "openrouter"];
   if (sub === "key") {
-    if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>] [--expires YYYY-MM-DD] | --remove");
+    if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>|--remove] [--expires YYYY-MM-DD]");
     if (flag("remove")) return void (await c.call("setModelKey", a, null), console.log(`✔ ${a} key removed`));
     const from = option("from");
     const key = from ? readSecretSource(from) : await askHidden(rl, `${a} API key (input hidden): `);

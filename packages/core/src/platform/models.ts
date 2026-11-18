@@ -149,10 +149,7 @@ export class Models extends Domain {
       if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100_000) throw new PlatformError("invalid_request", `${what} must be a number of USD from 0 to 100000`);
       return v;
     };
-    const provider = (p: string) => {
-      if (!(MODEL_PROVIDERS as readonly string[]).includes(p)) throw new PlatformError("invalid_request", `unknown provider ${p} (anthropic, openai, openrouter)`);
-      return p as ModelProvider;
-    };
+    const provider = modelProvider;
     if (change.tiers !== undefined) {
       for (const [p, tiers] of Object.entries(change.tiers ?? {})) {
         const pr = provider(p);
@@ -261,6 +258,21 @@ export class Models extends Domain {
     this.registry.setKv(`models.keyExpiry.${p}`, expiryDate(expiresOn));
     this.logger(`${p} model key's expiry ${expiresOn ? `set to ${expiresOn}` : "cleared"} by ${owner.id}`);
     return this.models(owner);
+  }
+
+  /**
+   * Keys the owner said stop working, with the days left counted in the owner's time zone (0: today, below 0: gone),
+   * for the Inbox. Cheap: it reads only what's stored. Hosted: none (the host runs tools' model calls).
+   */
+  keyExpiries(owner: Agent): { provider: ModelProvider; label: string; expiresOn: string; daysLeft: number }[] {
+    requireOwner(owner);
+    if (this.platform.hostModels) return [];
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: this.platform.timezone(), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    return MODEL_PROVIDERS.flatMap((p) => {
+      const expiresOn = this.keyExpiry(p);
+      if (!expiresOn || this.secrets.get(MODEL_KEYS, p) === undefined) return [];
+      return [{ provider: p, label: PROVIDER_LABEL[p], expiresOn, daysLeft: Math.round((Date.parse(`${expiresOn}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) }];
+    });
   }
 
   /** When the owner said a provider's key stops working (YYYY-MM-DD), if they did. */

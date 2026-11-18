@@ -393,7 +393,8 @@ describe("model port: the platform", () => {
 
   test("a key's expiry: given with the key or on its own, replaced with the key, gone with it; the Inbox tells a week before", async () => {
     await setUp();
-    const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    // Days from today in the owner's time zone, as the Inbox counts them.
+    const day = (n: number) => new Intl.DateTimeFormat("en-CA", { timeZone: t.platform.timezone(), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() + n * 86_400_000));
     const expiry = (m: { providers: { id: string; expiresOn: string | null }[] }) => m.providers.find((p) => p.id === "anthropic")!.expiresOn;
     assert.equal(expiry(await t.platform.setModelKey(USER, "anthropic", "sk-ant-first-key", { expiresOn: day(30) })), day(30));
     await assert.rejects(t.platform.setModelKey(USER, "anthropic", "sk-ant-first-key", { expiresOn: "2027-02-30" }), /expiresOn: a date, YYYY-MM-DD/);

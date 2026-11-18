@@ -334,6 +334,7 @@ export class Platform {
   setModelSettings(owner: Agent, change: { provider?: string; tiers?: Record<string, Record<string, string | null>>; monthlyCapUsd?: unknown; capabilityCapsUsd?: Record<string, unknown>; capabilityCapsHost?: Record<string, unknown>; prices?: Record<string, unknown> }) { return this.d.models.setModelSettings(owner, change); }
   setModelKey(owner: Agent, provider: string, key: string | null, o?: { expiresOn?: string | null }) { return this.d.models.setModelKey(owner, provider, key, o); }
   setModelKeyExpiry(owner: Agent, provider: string, expiresOn: string | null) { return this.d.models.setModelKeyExpiry(owner, provider, expiresOn); }
+  keyExpiries(owner: Agent) { return this.d.models.keyExpiries(owner); }
   retiredModel(model: string): { successor?: string } | undefined { return this.d.models.retiredModel(model); }
   setCapabilityModel(owner: Agent, capabilityId: string, to: { tier?: string; model?: string }): Promise<BuildView> { return this.d.models.setCapabilityModel(owner, capabilityId, to); }
   replacePinnedModel(owner: Agent, capabilityId: string, model: string): Promise<BuildView> { return this.d.models.replacePinnedModel(owner, capabilityId, model); }

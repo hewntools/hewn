@@ -8,7 +8,7 @@ import { route } from "./router.js";
 import { settingsFrame } from "./settings.js";
 import { toolModelSheet } from "./tool-model.js";
 
-export { creditWords, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
+export { creditWords, keySheet, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
 
 // ---------- J1 Settings › AI › Models ----------
 
@@ -57,6 +57,7 @@ function keySheet(m, providerId, { use = false } = {}) {
       };
       save.addEventListener("click", submit);
       key.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+      expires.addEventListener("keydown", (e) => e.key === "Enter" && submit());
       setTimeout(() => key.focus());
       return [
         h("label", { class: "field" }, h("span", { class: "label" }, replace ? "New key" : "Key"), key, h("span", { class: "hint" }, "Get one at ", h("a", { href: PROVIDERS[providerId].keys, target: "_blank", rel: "noopener noreferrer" }, PROVIDERS[providerId].keys.replace(/^https:\/\//, "")))),

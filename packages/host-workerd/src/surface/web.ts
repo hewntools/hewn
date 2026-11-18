@@ -1073,18 +1073,15 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   }
 
   // A model key the owner said stops working: a week before, and once it has.
-  const m0 = platform.models(owner);
-  if (!m0.host)
-    for (const p of m0.providers.filter((x) => x.keySet && x.expiresOn)) {
-      const days = Math.floor((Date.parse(`${p.expiresOn}T00:00:00Z`) - Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`)) / 86_400_000);
-      if (days > 7) continue;
-      const when = new Date(`${p.expiresOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-      needs.push({ kind: "model-key", id: p.id, title: `${p.label} API key`, detail: days < 0 ? `expired on ${when}: tools that use it can't think` : days === 0 ? "expires today" : `expires on ${when}, in ${days} day${days === 1 ? "" : "s"}`, severity: days <= 0 ? "danger" : "warn", action: "Replace…" });
-    }
+  for (const k of platform.keyExpiries(owner).filter((x) => x.daysLeft <= 7)) {
+    const when = new Date(`${k.expiresOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    const days = k.daysLeft;
+    needs.push({ kind: "model-key", id: k.provider, title: `${k.label} API key`, detail: days < 0 ? `expired on ${when}: tools that use it can't think` : days === 0 ? "expires today" : `expires on ${when}, in ${days} day${days === 1 ? "" : "s"}`, severity: days <= 0 ? "danger" : "warn", action: "Replace…" });
+  }
 
   // Model spend: 80% of the month's cap, and caps that refuse calls now.
   if (modelUsers) {
-    const m = m0;
+    const m = platform.models(owner);
     const { totalUsd, capUsd, rows } = m.spend;
     if (capUsd > 0 && totalUsd >= capUsd)
       needs.push({ kind: "spend", id: "all", title: "Models", detail: `${usdText(totalUsd)} of ${usdText(capUsd)}: calls are refused until you raise the cap`, severity: "danger", action: "Raise cap…" });

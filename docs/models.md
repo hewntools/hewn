@@ -37,7 +37,7 @@ Paste the key; Hewn checks it before saving. Tools never see the key. You can al
 
 To rotate a key, **Replace…** on the provider's row under Settings › AI › Models opens the same sheet: paste the new key. Hewn checks it first and stores it only if it works; if it doesn't, or can't be checked, the key you had stays. From the terminal, running `hewn models key <provider>` again does the same.
 
-Providers don't tell Hewn when a key expires. If yours has an expiry date, put it in **Expires on** on the same sheet (or `--expires YYYY-MM-DD`): the row shows it, and the Inbox tells you a week before, and again once it has expired. To change only the date, leave the key empty. A new key's date replaces the old key's.
+Providers don't tell Hewn when a key expires. If yours has an expiry date, put it in **Expires on** on the same sheet: the row shows it, and the Inbox tells you a week before (by your time zone), and again once it has expired. On the sheet, the date in the field goes with the new key (clear it if the new key doesn't expire), and to change only the date, leave the key empty. From the terminal, `--expires YYYY-MM-DD` gives the new key its date; without it, the new key has none.
 
 ## Tiers
 
