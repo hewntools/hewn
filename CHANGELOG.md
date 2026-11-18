@@ -21,6 +21,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- With Hewn open in two tabs, a model picked in one changed what the other tab's next build ran on, while its box still showed the old one. A build now goes with the model its box shows, and a tab shows the setting again when you come back to it. See [Models](docs/models.md#building-tools).
 - A schedule runs on time after the machine wakes from sleep. Before, the next schedule after a wake ran as late as the machine had slept: a laptop asleep from 23:00 to 07:00 ran a 12:00 schedule at about 20:00. The same for any machine that sleeps or suspends Hewn. See [Schedules](docs/using-hewn.md#schedules).
 - When a tool's code never lets go, Hewn now blames only that tool: a tool that was waiting on it, on a model or on the network at that moment isn't told it was its doing, and gets no strike toward being suspended. Activity lists every tool that was there and what it was doing, and a suspension says which stalls it came from. See [the threat model](docs/threat-model.md).
 - Opening a tool Hewn had suspended showed what it may do, not why it was suspended. It now says why, with Ask builder to fix and Resume, as its Info page does (since 0.4.11).
