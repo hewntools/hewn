@@ -48,9 +48,12 @@ export default {
       const page = await s.page(`#/activity?capability=${encodeURIComponent(tool)}`);
       await page.getByText("read the call log").first().waitFor({ timeout: 15_000 });
       const row = page.locator("main li.link").filter({ hasText: op }).first();
-      await row.click({ position: { x: 30, y: 12 } });
-      await row.locator(".row-detail").waitFor({ timeout: 5000 });
-      if (call.lineCount) await row.locator(".row-detail .log").waitFor({ timeout: 5000 });
+      // A lone call that went fine and printed nothing doesn't open.
+      if ((await row.getAttribute("aria-expanded")) !== null) {
+        await row.click({ position: { x: 30, y: 12 } });
+        await row.locator(".row-detail").waitFor({ timeout: 5000 });
+        if (call.lineCount) await row.locator(".row-detail .log").waitFor({ timeout: 5000 });
+      } else if (call.lineCount || call.outcome !== "ok") throw new Error("a call with lines or an error doesn't open");
       await s.shot("activity");
     });
 
