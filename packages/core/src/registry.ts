@@ -690,26 +690,29 @@ export class Registry {
 
   /** The header lines of a capability's last `n` calls, newest first ("<at> <caller> <op> <outcome> <ms>ms"); the rest of each entry stays in the database. */
   capabilityLogHeaders(capabilityId: string, n: number): string[] {
-    return this.capabilityLogHeads(capabilityId, n).map((h) => h.header);
+    return this.capabilityLogHeadersWithIds(capabilityId, n).map((h) => h.header);
   }
 
-  /** The same with each entry's row id, for its lines later (`capabilityLogEntries`). */
-  capabilityLogHeads(capabilityId: string, n: number): { id: number; header: string }[] {
+  /**
+   * The same with each entry's row id (for its lines, `capabilityLogEntriesByIds`) and how many lines follow it. A
+   * header is everything before the first indented line: one an error broke over lines (before 0.4.12) is joined.
+   */
+  capabilityLogHeadersWithIds(capabilityId: string, n: number): { id: number; header: string; lines: number }[] {
     return this.db
-      .prepare("SELECT rowid AS id, CASE WHEN instr(entry, char(10)) > 0 THEN substr(entry, 1, instr(entry, char(10)) - 1) ELSE entry END AS header FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?")
+      .prepare(
+        "SELECT rowid AS id, CASE WHEN instr(entry, char(10) || '  ') > 0 THEN substr(entry, 1, instr(entry, char(10) || '  ') - 1) ELSE entry END AS header, (length(entry) - length(replace(entry, char(10) || '  ', ''))) / 3 AS lines FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?",
+      )
       .all(capabilityId, n)
-      .map((r) => ({ id: Number(r.id), header: String(r.header) }));
+      .map((r) => ({ id: Number(r.id), header: String(r.header).replace(/\s*\n\s*/g, " "), lines: Number(r.lines) }));
   }
 
-  /** A capability's call-log entries: its last `n`, newest first, or those with these row ids. */
-  capabilityLogEntries(capabilityId: string, which: { n: number } | { ids: number[] }): { id: number; entry: string }[] {
-    const rows =
-      "ids" in which
-        ? which.ids.length
-          ? this.db.prepare(`SELECT rowid AS id, entry FROM capability_logs WHERE capability_id = ? AND rowid IN (${which.ids.map(() => "?").join(", ")}) ORDER BY at DESC, rowid DESC`).all(capabilityId, ...which.ids)
-          : []
-        : this.db.prepare("SELECT rowid AS id, entry FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?").all(capabilityId, which.n);
-    return rows.map((r) => ({ id: Number(r.id), entry: String(r.entry) }));
+  /** These call-log entries of a capability (by row id), newest first. */
+  capabilityLogEntriesByIds(capabilityId: string, ids: number[]): { id: number; entry: string }[] {
+    if (!ids.length) return [];
+    return this.db
+      .prepare(`SELECT rowid AS id, entry FROM capability_logs WHERE capability_id = ? AND rowid IN (${ids.map(() => "?").join(", ")}) ORDER BY at DESC, rowid DESC`)
+      .all(capabilityId, ...ids)
+      .map((r) => ({ id: Number(r.id), entry: String(r.entry) }));
   }
 
   /** The last `n` log lines of a capability, oldest first. */
@@ -1284,6 +1287,13 @@ export class Registry {
   /** Lifecycle actions for the activity timeline: delete, restore, rollback, purge …, and Hewn's own (stalled, suspend). */
   addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "held-up" | "suspend" | "resume" | "logs", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
+  }
+
+  /** An agent read a tool's call log: one row per agent and tool while it keeps reading (within an hour of its last), counting the reads. */
+  noteLogRead(capabilityId: string, actor: string) {
+    const last = this.db.prepare("SELECT rowid AS id, detail FROM lifecycle_events WHERE capability_id = ? AND action = 'logs' AND actor = ? AND at >= ? ORDER BY at DESC LIMIT 1").get(capabilityId, actor, new Date(Date.now() - 3600_000).toISOString());
+    if (last) this.db.prepare("UPDATE lifecycle_events SET detail = ?, at = ? WHERE rowid = ?").run(String((Number(last.detail) || 1) + 1), now(), last.id);
+    else this.addLifecycleEvent(capabilityId, "logs", "1", actor);
   }
 
   lifecycleEvents(limit = 500) {

@@ -98,14 +98,14 @@ function startOverDialog(c, hasSample) {
 }
 
 /** One section of Info: a card with its title (and an action on the right), then the thing itself. */
+const section = (title, body, { action, order } = {}) => h("section", { class: "card info-section", style: { order } }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, title), action), body);
+
 /** A tool's last calls, each opening to what its code printed, as in Activity. */
 const recentCalls = (id, calls, all, order) =>
   section("Recent calls", calls.length ? byDay(calls, all, false) : h("ul", { class: "list" }, h("li", {}, h("span", { class: "grow muted" }, "No calls yet."))), {
     order,
     action: calls.length > 0 && h("a", { class: "btn link sm", href: `#/activity?capability=${enc(id)}&view=calls` }, "All in Activity ›"),
   });
-
-const section = (title, body, { action, order } = {}) => h("section", { class: "card info-section", style: { order } }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, title), action), body);
 
 /**
  * Agents: each connected agent, switched on or off for this tool. That overrides its default (every

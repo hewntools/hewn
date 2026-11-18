@@ -56,6 +56,8 @@ function activityRow(g, all, showCap) {
   let dot = "";
   let text;
   let expand = null;
+  /** Runs the first time the row opens. */
+  let onOpen = null;
   if (g.kind === "calls") {
     const errors = g.items.filter((c) => c.outcome !== "ok");
     const spent = (g.models ?? []).reduce((n, x) => n + x.costUsd, 0);
@@ -63,17 +65,26 @@ function activityRow(g, all, showCap) {
     if (g.items.length === 1) {
       const c = g.items[0];
       dot = c.outcome === "ok" ? "ok" : "danger";
-      text = on(h("span", { class: "mono" }, c.operation.split("@")[0]), c.outcome === "ok" ? "" : /timed? ?out/i.test(c.outcome) ? "timed out" : "failed", modelNote, ref && ["on", ref]);
+      text = on(h("span", { class: "mono" }, c.operation.split("@")[0]), c.outcome === "ok" ? "" : /timed? ?out/i.test(c.outcome) ? "timed out" : "failed", c.lineCount ? h("span", { class: "faint" }, `${c.lineCount} ${c.lineCount === 1 ? "line" : "lines"}`) : "", modelNote, ref && ["on", ref]);
     } else {
       dot = errors.length === g.items.length ? "danger" : errors.length ? "warn" : "ok";
       text = on(`${who} made ${g.items.length} calls`, ref && ["to", ref], errors.length ? h("span", { class: "faint" }, `${errors.length} failed`) : "", modelNote);
     }
-    // One call or several, the row opens the same way: each call's version, error, time taken, and what its code printed.
+    // One call or several, the row opens the same way: each call's version, error, time taken, and what its code
+    // printed (read when the row first opens).
+    const printed = g.items.map((c) => (c.lineCount ? h("pre", { class: "log short", hidden: true }) : null));
     expand = h(
       "ul",
       { class: "list nested", hidden: true },
-      g.items.map((c) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, "")), c.lines?.length && h("pre", { class: "log short" }, c.lines.join("\n"))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
+      g.items.map((c, k) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, "")), printed[k]), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
     );
+    onOpen = () =>
+      g.items.forEach((c, k) => {
+        const pre = printed[k];
+        if (!pre) return;
+        const show = (text) => ((pre.textContent = text), (pre.hidden = false));
+        api(`/capabilities/${enc(c.capabilityId)}/calls/${c.logId}`).then((e) => show(e.lines.join("\n")), () => show("This call is no longer in the log."));
+      });
   } else if (g.kind === "models") {
     const failed = g.items.filter((x) => x.outcome === "failed");
     const cost = g.items.reduce((n, x) => n + x.costUsd, 0);
@@ -108,7 +119,7 @@ function activityRow(g, all, showCap) {
     // A stall's details read "spin@1", or "list_runs@1 — waiting on a fetch": what of the tool was there, and what it was doing.
     const [stallOp, stallState] = (g.detail ?? "").split(" — ");
     const op = h("span", { class: "mono" }, stallOp.split("@")[0]);
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`], logs: [`${who} read the call log`, h("span", { class: "faint" }, g.detail)] };
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`], logs: [`${who} read the call log`, Number(g.detail) > 1 && h("span", { class: "faint" }, `${g.detail} times`)] };
     dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : g.outcome === "stalled" || g.outcome === "suspend" ? "danger" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
@@ -156,7 +167,10 @@ function activityRow(g, all, showCap) {
     h("span", { class: "mono faint small time" }, clock(g.at)),
   );
   const act = (e) => {
-    if (expand && !expand.contains(e.target)) expand.hidden = !expand.hidden;
+    if (expand && !expand.contains(e.target)) {
+      expand.hidden = !expand.hidden;
+      if (!expand.hidden && onOpen) onOpen(), (onOpen = null);
+    }
     else if (href) go(href);
   };
   if (href || expand) li.addEventListener("click", act), li.addEventListener("keydown", (e) => e.key === "Enter" && act(e));

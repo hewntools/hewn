@@ -10,7 +10,7 @@ import { readSummary } from "@hewntools/core/bundle.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
-import { type CallLogEntry, callLogHeader, type Platform } from "@hewntools/core/platform.ts";
+import type { CallLogEntry, Platform } from "@hewntools/core/platform.ts";
 import { failureOf } from "@hewntools/core/platform/builds.ts";
 import type { CapabilityRow } from "@hewntools/core/registry.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
@@ -143,15 +143,13 @@ async function serveStatic(host: SurfaceHost, site: Site, path: string, setCooki
   });
 }
 
-/** The newest calls in the call logs, from their header lines (`logId`: the entry, for its lines). */
-function recentCalls(platform: Platform, owner: Agent, limit: number, perCapability = 400) {
-  const calls: (Omit<CallLogEntry, "lines"> & { capabilityId: string; logId: number })[] = [];
+/** The newest calls in the call logs (one tool's, with `only`), from their header lines; `logId` opens one to its lines. */
+function recentCalls(platform: Platform, owner: Agent, limit: number, perCapability = 400, only?: string) {
+  const calls: (Omit<CallLogEntry, "lines"> & { capabilityId: string; logId: number; lineCount: number })[] = [];
   for (const c of platform.list(owner)) {
-    for (const { id, header } of platform.registry.capabilityLogHeads(c.id, perCapability)) {
-      // The caller is who made the call; `via`, the tools on its way here ("codex → weekly-review").
-      const call = callLogHeader(header);
-      if (call) calls.push({ ...call, capabilityId: c.id, logId: id });
-    }
+    if (only && c.id !== only) continue;
+    // The caller is who made the call; `via`, the tools on its way here ("codex → weekly-review").
+    for (const { id, ...call } of platform.callLogHeadsFor(owner, c.id, perCapability)) calls.push({ ...call, capabilityId: c.id, logId: id });
   }
   return calls.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
@@ -304,6 +302,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       }
       case "GET logs":
         return { lines: platform.logLines(id, n) };
+      case "GET calls":
+        // One call in the log, opened to its lines (Activity's logId).
+        return platform.callLogEntryFor(owner, id, Number(arg));
       case "GET icon": {
         platform.get(owner, id);
         // ?default=1: the builder's glyph, without the owner's (what Use default goes back to).
@@ -1137,10 +1138,11 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       ...(b.discardedAt ? { discarded: true } : {}),
     });
   }
-  for (const c of recentCalls(platform, owner, 5000, 2000)) {
+  for (const c of recentCalls(platform, owner, 5000, 2000, q.capability)) {
     // Home's widgets refreshing themselves: kept in the tool's own call log, not in Activity.
     if (c.caller.startsWith("widget:")) continue;
-    items.push({ kind: "call", at: c.at, capabilityId: c.capabilityId, actor: c.caller, outcome: c.outcome, operation: c.operation, ms: c.ms, via: c.via, logId: c.logId });
+    // `lineCount`: how many lines its code printed; the call opens to them (GET …/calls/<logId>).
+    items.push({ kind: "call", at: c.at, capabilityId: c.capabilityId, actor: c.caller, outcome: c.outcome, operation: c.operation, ms: c.ms, via: c.via, logId: c.logId, lineCount: c.lineCount });
   }
   for (const m of platform.registry.recentModelCalls(2000)) {
     items.push({ kind: "model", at: m.at, capabilityId: m.capabilityId, actor: m.caller, outcome: m.status, model: m.model, costUsd: m.costUsd, inputTokens: m.inputTokens, outputTokens: m.outputTokens, ...(m.error ? { error: m.error } : {}) });
@@ -1158,14 +1160,6 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
     .filter((i) => (!q.kinds?.length || q.kinds.includes(i.kind)) && (!q.capability || i.capabilityId === q.capability) && (!q.agent || actorIs(i.actor, q.agent) || (i.kind === "authority" && i.subject === q.agent)) && (!q.before || i.at < q.before))
     .sort((a, b) => b.at.localeCompare(a.at));
   const page = filtered.slice(0, q.limit);
-  // A call opens to the lines its code printed: read for this page's calls only.
-  const calls = page.filter((i) => i.kind === "call");
-  for (const capabilityId of new Set(calls.map((i) => i.capabilityId))) {
-    const of = calls.filter((i) => i.capabilityId === capabilityId);
-    const lines = platform.callLogLines(owner, capabilityId, of.map((i) => i.logId as number));
-    for (const i of of) if (lines.get(i.logId as number)?.length) i.lines = lines.get(i.logId as number);
-  }
-  for (const i of calls) delete i.logId;
   return { items: page, next: filtered.length > page.length ? page.at(-1)!.at : null };
 }
 

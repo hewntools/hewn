@@ -95,7 +95,7 @@ Everything that happened, newest first: builds, calls, and access changes (agent
 
 Builds show their milestones (spec, code, tests, and for a new tool or a Polish the design review and fixing details) as they happen. Open one for its steps and its log ([A build](#a-build)).
 
-Click a call to open it: its operation, its error if it failed, how long it took, and the lines the tool's code printed during it (`| ` for a log line, `! ` for a warning or an error). An agent reading a tool's log shows here too, as "read the call log".
+Click a call to open it: its operation, its error if it failed, how long it took, and the lines the tool's code printed during it (`| ` for a log line, `! ` for a warning or an error). An agent reading a tool's log shows here too, as "read the call log": one row while it keeps reading, with how many times.
 
 Call logs are kept for two weeks by default (Settings › Data).
 

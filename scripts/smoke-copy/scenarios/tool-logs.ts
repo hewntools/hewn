@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the owner would try by hand after "Tool logs" (§4): an agent calls a tool and reads its call log over MCP;
-// Activity shows the read and opens the call; the tool's Info page lists it under Recent calls; an agent that can't
-// see the tool gets not_found.
+// What the owner would try by hand after "Agents and the owner can read what a tool printed" (#124): an agent calls a
+// tool and reads its call log over MCP; Activity shows the read and opens the call to its lines; the tool's Info page
+// lists it under Recent calls; an agent that can't see the tool gets not_found.
 import type { Scenario } from "../scenario.ts";
 
 export default {
@@ -32,15 +32,24 @@ export default {
       at = last.at;
       s.log(`${tool}: ${r.entries.length} entries, the last ${last.operation} ${last.outcome} ${last.ms}ms, ${last.lines.length} line(s)`);
       const only = await reader.tool("capabilities_logs", { capabilityId: tool, operation: op, n: 3 });
-      if (!only.entries.every((e: { operation: string }) => e.operation.split("@")[0] === op)) throw new Error("operation didn't narrow it");
+      if (!only.entries.length || !only.entries.every((e: { operation: string }) => e.operation.split("@")[0] === op)) throw new Error(`operation didn't narrow it: ${JSON.stringify(only.entries.map((e: { operation: string }) => e.operation))}`);
+      const again = await reader.tool("capabilities_logs", { capabilityId: tool, n: 1 });
+      if (again.entries.length !== 1) throw new Error("n didn't limit it");
     });
 
-    await s.step("Activity shows the read, by the agent, and the call", async () => {
+    await s.step("Activity shows the reads as one row, by the agent, and the call, which opens to its lines", async () => {
       const items = (await s.copy.api<{ items: any[] }>("GET", `/api/activity?capability=${encodeURIComponent(tool)}`)).items;
-      if (!items.some((i) => i.kind === "lifecycle" && i.outcome === "logs")) throw new Error("no 'read the call log' in Activity");
-      if (!items.some((i) => i.kind === "call" && i.at === at)) throw new Error("the call isn't in Activity");
+      const reads = items.filter((i) => i.kind === "lifecycle" && i.outcome === "logs");
+      if (reads.length !== 1 || reads[0].detail !== "3") throw new Error(`three reads should be one row saying 3: ${JSON.stringify(reads)}`);
+      const call = items.find((i) => i.kind === "call" && i.at === at);
+      if (!call) throw new Error("the call isn't in Activity");
+      const opened = await s.copy.api<{ lines: string[]; operation: string }>("GET", `/api/capabilities/${encodeURIComponent(tool)}/calls/${call.logId}`);
+      if (opened.operation !== call.operation || opened.lines.length !== call.lineCount) throw new Error(`opening it gave ${JSON.stringify(opened).slice(0, 200)} for ${call.lineCount} line(s)`);
       const page = await s.page(`#/activity?capability=${encodeURIComponent(tool)}`);
       await page.getByText("read the call log").first().waitFor({ timeout: 15_000 });
+      const row = page.locator("main li.link").filter({ hasText: op }).first();
+      await row.click({ position: { x: 30, y: 12 } });
+      await row.locator(".list.nested").waitFor({ timeout: 5000 });
       await s.shot("activity");
     });
 
