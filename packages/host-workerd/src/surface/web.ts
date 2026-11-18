@@ -1041,8 +1041,9 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     const asking = st.pendingGrants.filter((g) => !st.declinedGrants?.includes(g));
     if (asking.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
       const first = platform.authorization(c.id).items.find((i) => !i.approved && asking.includes(i.grant));
-      // Authorized, settings still unset: name them (the grant sheet takes them).
-      const onlySettings = !first && !connection && !asking.length && st.missingConfig.length > 0;
+      // Held back by unset settings alone: name them (the grant sheet takes them). Anything else it lacks (a no, a
+      // key, a model) keeps the general words, since setting them wouldn't be enough.
+      const onlySettings = !asking.length && !st.declinedGrants?.length && !st.missingSecrets.length && !st.missingModel && st.missingConfig.length > 0;
       const words = onlySettings
         ? `Set ${andList(st.missingConfig)} before it runs`
         : !first

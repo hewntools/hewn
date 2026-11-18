@@ -95,6 +95,9 @@ const askToConnect = async () => {
   const html = await (await fetch(`${base}/authorize?${q}`)).text();
   agentReq = { id: /id:"([^"]+)"/.exec(html)![1], secret: /secret:"([^"]+)"/.exec(html)![1], clientId: reg.client_id };
 };
+/** What the Inbox says about a tool, if anything (as the owner's page reads it). */
+const inboxNeed = (id: string) =>
+  page.evaluate(async (id: string) => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { capabilityId?: string; detail: string; action: string }[]).find((n) => n.capabilityId === id), id);
 let token: string | undefined;
 const agentToken = async () => {
   if (token) return token;
@@ -364,7 +367,7 @@ try {
     await page.getByText("Saved. Set REVIEWER before it runs.").waitFor();
     const half = await sv.admin("readiness", { capabilityId: "repo-counter" });
     if (half.ready || half.missingConfig.join() !== "REVIEWER") throw new Error(`after a Save with REVIEWER empty: ${JSON.stringify(half)}`);
-    const need = await page.evaluate(async () => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { capabilityId?: string; detail: string; action: string }[]).find((n) => n.capabilityId === "repo-counter"));
+    const need = await inboxNeed("repo-counter");
     if (need?.detail !== "Set REVIEWER before it runs" || need.action !== "Set…") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
     await page.getByRole("button", { name: "Set…" }).first().click();
     await page.locator("dialog input[type=text]").first().fill("Ada");
@@ -374,13 +377,17 @@ try {
     if (!r.ready) throw new Error(`not ready after Save: ${JSON.stringify(r)}`);
   });
 
-  await step("Authorize approves a tool's grants whatever its settings, and names the ones still unset; the Inbox does too", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-grants-settings-"));
-    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
-    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "upstream-counter", name: "Upstream Counter", abi: "2.6", requires: { hosts: ["api.example.com", "status.example.com"] }, config: [{ name: "UPSTREAM_REPO", description: "The upstream repository" }, { name: "MAINTAINER", description: "Who maintains it" }] }));
-    const installed = await sv.admin("install", { name: "Upstream Counter", purpose: "Counts, for an upstream", dir, wait: true });
-    rmSync(dir, { recursive: true, force: true });
-    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+  await step("Authorize approves a tool's grants whatever its settings, and names the ones still unset; the Inbox does too; a Deny of everything doesn't ask for them", async () => {
+    // A counter that asks to reach two hosts and has two settings, installed by the owner.
+    const install = async (id: string, name: string) => {
+      const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-grants-settings-"));
+      cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+      editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id, name, abi: "2.6", requires: { hosts: ["api.example.com", "status.example.com"] }, config: [{ name: "UPSTREAM_REPO", description: "The upstream repository" }, { name: "MAINTAINER", description: "Who maintains it" }] }));
+      const installed = await sv.admin("install", { name, purpose: "Counts, for an upstream", dir, wait: true });
+      rmSync(dir, { recursive: true, force: true });
+      if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    };
+    await install("upstream-counter", "Upstream Counter");
     await page.goto(`${web}/#/c/upstream-counter`);
     await page.getByRole("button", { name: "Give it what it needs" }).click();
     const authorize = page.locator("dialog").getByRole("button", { name: "Authorize" });
@@ -392,13 +399,29 @@ try {
     await page.getByText("Authorized. Set UPSTREAM_REPO and MAINTAINER before it runs.").waitFor();
     const r = await sv.admin("readiness", { capabilityId: "upstream-counter" });
     if (r.ready || r.pendingGrants.length || r.missingConfig.join() !== "UPSTREAM_REPO,MAINTAINER") throw new Error(`after Authorize: ${JSON.stringify(r)}`);
-    const need = await page.evaluate(async () => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { capabilityId?: string; detail: string }[]).find((n) => n.capabilityId === "upstream-counter"));
-    if (need?.detail !== "Set UPSTREAM_REPO and MAINTAINER before it runs") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
+    const need = await inboxNeed("upstream-counter");
+    if (need?.detail !== "Set UPSTREAM_REPO and MAINTAINER before it runs" || need.action !== "Set…") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
     await page.goto(`${web}/#/`);
     await page.locator(".inbox-btn").click();
     await page.locator(".inbox-row", { hasText: "Set UPSTREAM_REPO and MAINTAINER before it runs" }).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-authorize-inbox.png" });
     await page.keyboard.press("Escape");
+
+    // Every switch off: the button says Deny, nothing asks for the settings, and the Inbox doesn't say they'd be enough.
+    await install("declined-counter", "Declined Counter");
+    await page.goto(`${web}/#/c/declined-counter`);
+    await page.getByRole("button", { name: "Give it what it needs" }).click();
+    await page.locator("dialog input.switch").first().waitFor();
+    for (const sw of await page.locator("dialog input.switch").all()) await sw.uncheck();
+    const deny = page.locator("dialog").getByRole("button", { name: "Deny" });
+    await deny.waitFor();
+    if (await page.locator("dialog").getByText("before it runs").count()) throw new Error("a Deny of everything asks for the settings");
+    await deny.click();
+    const said = page.locator(".toast", { hasText: "Said no to 2 things." });
+    await said.waitFor();
+    if ((await said.innerText()).includes("before it runs")) throw new Error(`the toast asks for the settings: ${await said.innerText()}`);
+    const declined = await inboxNeed("declined-counter");
+    if (declined?.detail.startsWith("Set ")) throw new Error(`the Inbox says settings would do: ${JSON.stringify(declined)}`);
   });
 
   await step("a tool Hewn suspended: opening it from Home says why, with Ask builder to fix and Resume, as its Info page does; Resume opens it", async () => {

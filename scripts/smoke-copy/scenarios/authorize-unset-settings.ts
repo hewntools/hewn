@@ -2,8 +2,8 @@
 // What the owner would try by hand after "Authorize grants whatever the settings" (#74): a tool that asks for two hosts
 // and two settings, installed on the copy; Authorize works with the settings empty, names them, and so does the Inbox;
 // the tool stays not ready. The tool is archived afterwards.
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { resolve } from "node:path";
+import { readTree } from "@hewntools/cli/workbench.ts";
 import type { Scenario } from "../scenario.ts";
 
 const ID = "smoke-upstream-counter";
@@ -11,19 +11,11 @@ const FIXTURE = resolve(import.meta.dirname, "../../../test/fixtures/ui-counter"
 
 /** The fixture's files as the admin install takes them (path → base64), with the manifest changed. */
 function files(): Record<string, string> {
-  const out: Record<string, string> = {};
-  const walk = (dir: string) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else out[relative(FIXTURE, p)] = readFileSync(p).toString("base64");
-    }
-  };
-  walk(FIXTURE);
-  const m = JSON.parse(readFileSync(join(FIXTURE, "capability.json"), "utf8"));
+  const tree = readTree(FIXTURE);
+  const m = JSON.parse(Buffer.from(tree["capability.json"]).toString("utf8"));
   Object.assign(m, { id: ID, name: "Smoke Upstream Counter", abi: "2.6", requires: { hosts: ["api.example.com", "status.example.com"] }, config: [{ name: "UPSTREAM_REPO", description: "The upstream repository" }, { name: "MAINTAINER", description: "Who maintains it" }] });
-  out["capability.json"] = Buffer.from(JSON.stringify(m, null, 2)).toString("base64");
-  return out;
+  tree["capability.json"] = new TextEncoder().encode(JSON.stringify(m, null, 2));
+  return Object.fromEntries(Object.entries(tree).map(([p, b]) => [p, Buffer.from(b).toString("base64")]));
 }
 
 export default {
@@ -63,6 +55,9 @@ export default {
     });
 
     await s.step("archive it", async () => {
+      // The page first: an open Home would redraw at the change, and its redraw counts as the owner's (the next
+      // scenario may be watching for quiet).
+      await page.context().close();
       await s.copy.admin("archive", { capabilityId: ID });
     });
   },
