@@ -29,6 +29,7 @@ import { fetchLink } from "./surface/fetch-link.ts";
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
 import { type CallInFlight, stallRoles } from "./stall-blame.ts";
+import { IdleGc, tickCall } from "./idle-gc.ts";
 import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, EGRESS_PATH, type EgressMark, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
 
 interface Env {
@@ -539,6 +540,9 @@ export class HewnDO extends DurableObject<Env> {
   /** When the supervisor last said the tools process went away (stalled or exited), and when one answered again (ms). */
   private toolsGoneAt = 0;
   private toolsBackAt = 0;
+  /** The idle GC (`gc` is there in this process only), and when anything last came in or ran here (ms; the start counts). */
+  private idleGc = new IdleGc((globalThis as { gc?: (o: object) => void }).gc);
+  private activeAt = Date.now();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -611,6 +615,7 @@ export class HewnDO extends DurableObject<Env> {
 
   /** A tool call's callback, from the tools process (ToolCalls): answered while that call runs, refused after. */
   async toolCallback(token: string, kind: CallbackKind, body: unknown): Promise<{ result?: unknown; error?: string; code?: string; refused?: boolean }> {
+    this.activeAt = Date.now();
     const running = this.toolCalls.get(token);
     if (!running || running.over) return { error: "this call isn't running", refused: true };
     // Waiting on Hewn meanwhile: not the code that holds the tools, if they stop responding.
@@ -668,6 +673,7 @@ export class HewnDO extends DurableObject<Env> {
   private catchingUp: Promise<void> = Promise.resolve();
 
   async alarm() {
+    this.activeAt = Date.now();
     const pass = this.catchingUp.then(async () => {
       await this.platform.runDueSchedules();
       await this.secrets.flush();
@@ -782,17 +788,31 @@ export class HewnDO extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const res = url.pathname.startsWith("/_admin/") ? await this.admin(request, url) : await handle(this.platform, this.sessions, this.surfaceHost(), request);
+    const admin = url.pathname.startsWith("/_admin/");
+    // The idle GC counts every request but the watchdog's /health and the supervisor's own ticks (read in admin()). A
+    // page's own refreshes count here, though not in the idle report: Home's polls are what grows the heap.
+    const counts = !admin && url.pathname !== "/health";
+    if (counts) this.activeAt = Date.now();
+    const res = admin ? await this.admin(request, url) : await handle(this.platform, this.sessions, this.surfaceHost(), request);
     // Secret writes are durable before the answer goes out. (Calls that refresh a secret run
     // inside these requests too.)
     await this.secrets.flush();
+    if (counts) this.activeAt = Date.now();
     return res;
+  }
+
+  /** The supervisor's tick: one last-resort GC once Hewn has been quiet a while after doing something (idle-gc.ts). */
+  private collectIfIdle(quietMs: number | undefined) {
+    const a = this.platform.idleActivity();
+    const lastActiveAt = Math.max(this.activeAt, ...[a.lastRequestAt, a.lastCallAt, a.lastStreamAt, a.lastIntakeAt, a.lastBuildAt].filter((t): t is number => t !== null));
+    return this.idleGc.run({ lastActiveAt, busy: a.building || a.intakes > 0 || this.toolCalls.size > 0 }, quietMs);
   }
 
   /** The supervisor's channel: CLI actions as the owner (open, init, install, status). */
   private async admin(request: Request, url: URL): Promise<Response> {
     if (!sameDigest(request.headers.get("x-hewn-admin") ?? "", this.env.ADMIN_TOKEN)) return Response.json({ error: "unauthorized" }, { status: 401 });
     const body: any = request.method === "POST" ? await request.json() : {};
+    if (!tickCall(url.pathname, body)) this.activeAt = Date.now();
     // The idle report: what the CLI changes, a backup should keep (a tool call counts itself).
     if (request.method === "POST" && adminChanges(url.pathname, body)) this.platform.activity.changed();
     try {
@@ -805,6 +825,8 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/changed":
           // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });
+        case "/_admin/idle-gc":
+          return Response.json(this.collectIfIdle(Number.isFinite(body.quietMs) ? body.quietMs : undefined));
         case "/_admin/disk":
           // The supervisor checks the disk with Hewn's data: while it's nearly full, tools' data doesn't grow.
           this.diskLow = body.low === true ? { floor: Number.isFinite(body.floor) ? body.floor : 1024 * MB } : null;
@@ -930,7 +952,7 @@ export class HewnDO extends DurableObject<Env> {
 }
 
 /** Admin routes that change nothing a backup keeps (`/_admin/invoke` counts its own writes). */
-const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed", "/_admin/disk", "/_admin/tools-gone", "/_admin/tools-back"]);
+const ADMIN_READS = new Set(["/_admin/visual-invoke", "/_admin/web-ticket", "/_admin/status", "/_admin/invoke", "/_admin/readiness", "/_admin/logs", "/_admin/export", "/_admin/data", "/_admin/share", "/_admin/resumed", "/_admin/disk", "/_admin/tools-gone", "/_admin/tools-back", "/_admin/idle-gc"]);
 
 /** Whether an admin request changes what a backup keeps (the idle report's backup reason). */
 function adminChanges(path: string, body: any): boolean {
