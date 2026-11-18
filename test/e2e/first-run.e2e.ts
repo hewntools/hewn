@@ -716,13 +716,36 @@ export const operations = {
     await sv.admin("modify", { capabilityId: "reading-list", request: "another one", wait: true });
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     await page.locator(".toast", { hasText: `v${before + 2} is ready` }).getByRole("button", { name: "Dismiss" }).click();
-    // With the drawer open, the drawer says it (no toast).
+    // With the drawer open on its box (it follows no build, so it says nothing), the page says it.
     await page.goto(`${web}/#/run/reading-list?change=1`);
     await page.locator(".drawer").waitFor();
     await sv.admin("modify", { capabilityId: "reading-list", request: "a third one", wait: true });
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await page.waitForTimeout(800);
-    if (await page.locator(".toast", { hasText: "is ready" }).count()) throw new Error("a toast while the drawer is open");
+    await page.locator(".toast", { hasText: `v${before + 3} is ready` }).waitFor({ timeout: 10_000 });
+    // Change… with the note up keeps it (the drawer's box says nothing of it).
+    await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "Change…" }).click();
+    await page.locator(".drawer").waitFor();
+    if (!(await page.locator(".toast", { hasText: `v${before + 3} is ready` }).count())) throw new Error("the note went when the drawer opened");
+    await page.locator(".toast", { hasText: "is ready" }).getByRole("button", { name: "Dismiss" }).click();
+    // A change built from the drawer: the drawer says it's ready, the page doesn't; closed without Reload, the page does.
+    const draft = { kind: "draft", message: "A line more.", draft: { request: "One more line." } };
+    await page.route("**/api/intake", (r: any) => r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: reply\ndata: ${JSON.stringify(draft)}\n\n` }));
+    try {
+      await page.goto(`${web}/#/run/reading-list?change=1`);
+      const box = page.locator(".drawer").getByRole("textbox", { name: "Message" });
+      await box.fill("One more line");
+      await box.press("Enter");
+      await page.locator(".drawer").getByRole("button", { name: /^Build/ }).click();
+      await page.locator(".drawer .drawer-ready", { hasText: `v${before + 4} is ready` }).waitFor({ timeout: 20_000 });
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForTimeout(800);
+      if (await page.locator(".toast", { hasText: "is ready" }).count()) throw new Error("a note on the page while the drawer says it");
+      await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+      await page.locator(".toast", { hasText: `v${before + 4} is ready` }).waitFor({ timeout: 5000 });
+    } finally {
+      await page.unroute("**/api/intake");
+    }
     if (!started.buildId) throw new Error("no build");
   });
 } finally {

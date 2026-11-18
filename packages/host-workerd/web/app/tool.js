@@ -110,7 +110,8 @@ function changeDrawer(c, q, { onReload, onClose, onPromoted, noUi = false }) {
   // A change already building: follow it here.
   if (c.building?.buildId) showBuild(c.building.buildId);
   else showIntake();
-  return { el, focus: () => intake?.focus(), setText: (t) => intake?.setText(t) };
+  // `following`: it shows a build (and says itself when it's ready), not the intake.
+  return { el, focus: () => intake?.focus(), setText: (t) => intake?.setText(t), following: () => intake === null };
 }
 
 /** Undo a change from the drawer: back to the version before it (as Versions does). */
@@ -120,48 +121,55 @@ async function undoChange(c, b) {
   await rollbackTo(c, from);
 }
 
-/** Opened tool or Run view with the drawer when ?change=1. Toggling it keeps the tool where it is. */
-function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
-  const { el: barEl, change, setVersion } = appBar(c, { onChange: () => toggle() });
-  // The version on screen (the tool's own screen keeps it until Reload), and the newest one already said to be ready.
+/**
+ * The note that a newer version of the open tool is live (#110): "v3 is ready", with Reload, on the page. The bar's
+ * version follows at once; the tool's own screen waits for Reload; the page never reloads itself. Said once per
+ * version, unless the drawer is following the build that made it (its own notice says it then; closing the drawer
+ * without Reload brings the note). `drawerSays()`: the drawer is open on a build it follows.
+ */
+function readyNote(c, { setVersion, reload, drawerSays }) {
+  // The version the tool's screen shows (until Reload), the newest live one, and the newest the note was shown for.
   let onScreen = c.version ?? 0;
-  let told = onScreen;
-  let readyToast = null;
-  const dropToast = () => (readyToast?.remove(), (readyToast = null));
-  onLeave(dropToast);
-  /**
-   * A build of this tool went live: the bar's version follows at once; the tool's own screen waits for Reload, which
-   * the drawer offers when it's open, and a toast on the page when it's closed. The page never reloads itself.
-   * `reloaded`: the screen shows the newest version now.
-   */
-  const refreshVersion = async ({ reloaded = false } = {}) => {
+  let live = onScreen;
+  let noted = onScreen;
+  let el = null;
+  const drop = () => (el?.remove(), (el = null));
+  const show = () => {
+    if (live <= onScreen || live <= noted || drawerSays()) return;
+    noted = live;
+    drop();
+    el = toast(`v${live} is ready`, { action: ["Reload", () => ((el = null), reload())], ms: Infinity, dismiss: true });
+  };
+  /** Read the tool's live version; `reloaded`: the screen shows it now. */
+  const refresh = async ({ reloaded = false } = {}) => {
     invalidateCaps();
     const now = (await caps(true).catch(() => new Map())).get(c.id);
     if (!now?.version) return;
-    setVersion(now.version);
-    if (reloaded) {
-      onScreen = told = now.version;
-      dropToast();
-    } else if (now.version > onScreen && now.version > told) {
-      told = now.version;
-      if (shown()) return;
-      dropToast();
-      readyToast = toast(`v${now.version} is ready`, { action: ["Reload", () => ((readyToast = null), reload())], ms: Infinity, dismiss: true });
-    }
+    live = now.version;
+    setVersion(live);
+    if (reloaded) (onScreen = noted = live), drop();
+    else show();
   };
-  // A build of this tool that was in flight ended (the Inbox's poll sees it go), or this tab is looked at again (a
-  // build in another tab, or by an agent): see whether a newer version went live.
+  // A build of this tool that was in flight ended (the Inbox's poll sees it go, `hewn:inbox`), or this tab is looked
+  // at again (a build in another tab, or by an agent): see whether a newer version went live.
   let inFlight = new Set();
   const onInbox = (e) => {
     const now = new Set((e.detail?.building ?? []).filter((b) => b.capabilityId === c.id).map((b) => b.buildId));
     const ended = [...inFlight].some((id) => !now.has(id));
     inFlight = now;
-    if (ended) void refreshVersion();
+    if (ended) void refresh();
   };
-  const onVisible = () => !document.hidden && void refreshVersion();
-  addEventListener("hewn:inbox", onInbox);
+  const onVisible = () => !document.hidden && void refresh();
+  window.addEventListener("hewn:inbox", onInbox);
   document.addEventListener("visibilitychange", onVisible);
-  onLeave(() => (removeEventListener("hewn:inbox", onInbox), document.removeEventListener("visibilitychange", onVisible)));
+  onLeave(() => (window.removeEventListener("hewn:inbox", onInbox), document.removeEventListener("visibilitychange", onVisible), drop()));
+  return { refresh, show };
+}
+
+/** Opened tool or Run view with the drawer when ?change=1. Toggling it keeps the tool where it is. */
+function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
+  const { el: barEl, change, setVersion } = appBar(c, { onChange: () => toggle() });
+  const note = readyNote(c, { setVersion, reload, drawerSays: () => shown() && !!drawer?.following() });
   const layout = h("div", { class: "with-drawer" }, h("div", { class: "drawer-main" }, main));
   let drawer = null;
   const setUrl = (open) => {
@@ -173,10 +181,8 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
   const shown = () => !!drawer && drawer.el.style.display !== "none";
   const open = () => {
-    // The drawer says what's ready itself.
-    dropToast();
     if (!drawer) {
-      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), onPromoted: () => void refreshVersion(), noUi });
+      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), onPromoted: () => void note.refresh(), noUi });
       layout.append(drawer.el);
     } else drawer.el.style.display = "";
     change.setAttribute("aria-pressed", "true");
@@ -189,12 +195,14 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
       change.setAttribute("aria-pressed", "false");
       for (const k of ["m", "send", "widget", "from", "fix", "polish"]) q.delete(k);
       setUrl(false);
+      // Closed without Reload on a version it said was ready: the page says it now.
+      note.show();
     } else drawer?.focus();
   };
   if (q.get("change") === "1") open();
   /** Open the drawer (if it isn't), with `text` in the composer when given; without, what's typed stays. */
   drawerApi.open = (text) => (toggle(true), text === undefined ? drawer?.focus() : drawer?.setText(text));
-  return [barEl, layout, refreshVersion];
+  return [barEl, layout, note.refresh];
 }
 
 async function appPage(id, q) {

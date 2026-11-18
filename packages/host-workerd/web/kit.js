@@ -377,7 +377,10 @@ export function setWallpaper(hues, { dim = true } = {}) {
 
 // ---------- toasts ----------
 
-/** A toast at the bottom; with `undo`, an Undo button for `ms` (6 s by default); `action`: [label, fn]. */
+/**
+ * A toast at the bottom; with `undo`, an Undo button for `ms` (6 s by default); `action`: [label, fn]; `dismiss`: a ×
+ * to close it (for one that stays: `ms: Infinity`).
+ */
 export function toast(text, { undo, action, dot = "ok", ms = 6000, dismiss = false } = {}) {
   let region = document.querySelector(".toast-region");
   if (!region) document.body.append((region = h("div", { class: "toast-region", role: "status", "aria-live": "polite" })));
