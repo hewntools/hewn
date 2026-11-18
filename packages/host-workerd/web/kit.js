@@ -130,6 +130,8 @@ export const ago = (iso) => {
 };
 export const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 export const enc = encodeURIComponent;
+/** ["A", "B", "C"] → "A, B and C". */
+export const andList = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
 export const skeleton = (...widths) =>
   h("div", { class: "stack", "aria-busy": "true", "aria-label": "Loading" }, (widths.length ? widths : ["40%", "70%", "55%"]).map((w) => h("span", { class: "skeleton", style: { width: w, height: "18px" } })));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The grants sheet (what a tool may do, to authorize or revoke), and signing in to a connection.
-import { actorLabel, api, appIcon, capRef, caps, enc, fail, h, invalidateCaps, kindTag, modal, requestRows, sheetActions, sheetHead, sheetSteps, toast } from "../kit.js";
+import { actorLabel, andList, api, appIcon, capRef, caps, enc, fail, h, invalidateCaps, kindTag, modal, requestRows, sheetActions, sheetHead, sheetSteps, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
 import { put } from "./frame.js";
 import { PROVIDERS, titleCase, usd } from "./models.js";
@@ -125,18 +125,25 @@ async function grantsSheet(capId) {
   return modal(
     (close) => {
       const authorize = h("button", { class: "primary", disabled: true }, "Authorize");
+      // Settings don't hold the grants back: Authorize approves them whatever is set, and this line names what's still
+      // unset (the tool isn't ready until it is).
+      const unsetNote = h("div", { class: "small muted" });
+      const unset = () => [...config].filter(([, input]) => !input.value.trim()).map(([name]) => name);
       check = () => {
-        authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || [...config.values()].some((input) => !input.value.trim());
+        const settingsOnly = !pending.length;
+        authorize.disabled = !keyOk || [...secrets.entries()].some(([name, input]) => missingSecrets.has(name) && !input.value) || (settingsOnly && unset().length === config.size);
         // Every switch off and nothing else to give: the button says what it does.
-        const saysNo = picks.size > 0 && ![...picks.values()].some((sw) => sw.checked) && !pending.some((i) => !picks.has(i.grant)) && !config.size;
-        authorize.textContent = saysNo ? "Deny" : "Authorize";
+        const saysNo = picks.size > 0 && ![...picks.values()].some((sw) => sw.checked) && !pending.some((i) => !picks.has(i.grant)) && unset().length === config.size;
+        authorize.textContent = saysNo ? "Deny" : settingsOnly ? "Save" : "Authorize";
         authorize.classList.toggle("primary", !saysNo);
+        unsetNote.textContent = unset().length ? `Set ${andList(unset())} before it runs.` : "";
       };
       authorize.addEventListener("click", async () => {
         authorize.disabled = true;
         try {
           await keyBlock?.saveBudget();
-          for (const [name, input] of config) await api(`/capabilities/${id}/config/${enc(name)}`, { method: "PUT", body: { value: input.value.trim() } });
+          const stillUnset = unset();
+          for (const [name, input] of config) if (input.value.trim()) await api(`/capabilities/${id}/config/${enc(name)}`, { method: "PUT", body: { value: input.value.trim() } });
           for (const [name, input] of secrets) if (input.value) await api(`/capabilities/${id}/secrets/${enc(name)}`, { method: "PUT", body: { value: input.value } });
           const left = [...picks].filter(([, sw]) => !sw.checked).map(([grant]) => grant);
           // A different tier than asked for: a quick change (manifest only) that carries its own grant.
@@ -151,11 +158,8 @@ async function grantsSheet(capId) {
           const now = await api(`/capabilities/${id}`);
           // What was said: a switch left off is a no, so "Authorized" only when something was.
           const yes = pending.filter((i) => !i.approved && !left.includes(i.grant)).length;
-          if (!otherTier)
-            toast(
-              now.status.ready ? `${c.name} is ready` : !yes && left.length ? `Said no to ${left.length === 1 ? "it" : `${left.length} things`}. ${c.name} won't run until you allow ${left.length === 1 ? "it" : "them"}.` : left.length ? `Authorized. Said no to ${left.length === 1 ? "one thing" : `${left.length} things`}.` : "Authorized",
-              { dot: yes ? "ok" : "" },
-            );
+          const said = !yes && left.length ? `Said no to ${left.length === 1 ? "it" : `${left.length} things`}. ${c.name} won't run until you allow ${left.length === 1 ? "it" : "them"}.` : left.length ? `Authorized. Said no to ${left.length === 1 ? "one thing" : `${left.length} things`}.` : pending.length ? "Authorized." : "Saved.";
+          if (!otherTier) toast(now.status.ready ? `${c.name} is ready` : stillUnset.length ? `${said} Set ${andList(stillUnset)} before it runs.` : said.replace(/\.$/, ""), { dot: yes ? "ok" : "" });
           close(now.status.ready);
         } catch (e) {
           fail(e);
@@ -214,6 +218,7 @@ async function grantsSheet(capId) {
           signIn ? "Next, you sign in to the service here in Hewn. Agents never see your password or tokens." : pending.some((i) => i.kind === "secret") ? "Secrets go to your Keychain only." : null,
         ),
         sheetActions(h("button", { onclick: () => close(false) }, "Not now"), authorize),
+        unsetNote,
       ];
     },
     { width: 480 },

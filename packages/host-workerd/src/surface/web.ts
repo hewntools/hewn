@@ -988,6 +988,8 @@ export interface InboxItem {
   at?: string;
 }
 
+/** ["A", "B", "C"] → "A, B and C". */
+const andList = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 const usdText = (n: number) => `$${n >= 10 ? Math.round(n) : n.toFixed(2).replace(/\.00$/, "")}`;
 
 /**
@@ -1039,7 +1041,11 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     const asking = st.pendingGrants.filter((g) => !st.declinedGrants?.includes(g));
     if (asking.length || st.missingConfig.length || (st.missingSecrets.length && !connection)) {
       const first = platform.authorization(c.id).items.find((i) => !i.approved && asking.includes(i.grant));
-      const words = !first
+      // Authorized, settings still unset: name them (the grant sheet takes them).
+      const onlySettings = !first && !connection && !asking.length && st.missingConfig.length > 0;
+      const words = onlySettings
+        ? `Set ${andList(st.missingConfig)} before it runs`
+        : !first
         ? connection ? "needs setting up" : "needs your authorization"
         : first.kind === "capability"
           ? `wants to ${first.sideEffect === "read" ? "read" : "write to"} ${first.target ? nameOf(first.target) : "another tool"}`
@@ -1048,7 +1054,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
             : first.kind === "secret"
               ? `needs ${first.grant.slice(7)}`
               : "wants to use a model";
-      needs.push({ kind: connection ? "connection" : "grant", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: words, severity: "warn", action: connection ? "Set up" : "Review" });
+      needs.push({ kind: connection ? "connection" : "grant", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: words, severity: "warn", action: connection ? "Set up" : onlySettings ? "Set…" : "Review" });
     } else if (st.retiredModel) {
       needs.push({ kind: "model", id: c.id, capabilityId: c.id, title: nameOf(c.id), detail: "its pinned model was retired", severity: "danger", action: "Replace…" });
     } else if (st.missingModel && !connection) {

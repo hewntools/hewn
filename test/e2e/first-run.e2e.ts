@@ -357,14 +357,48 @@ try {
     await field.waitFor();
     if ((await field.inputValue()) !== "hewntools/hewn") throw new Error(`the field opened with "${await field.inputValue()}"`);
     if ((await sv.admin("readiness", { capabilityId: "repo-counter" })).ready) throw new Error("ready while the form is open");
-    // Authorize waits for the setting with no suggestion; the suggested one counts as filled.
-    const authorize = page.getByRole("button", { name: "Authorize" });
-    if (await authorize.isEnabled()) throw new Error("Authorize enabled with REVIEWER empty");
-    await reviewer.fill("Ada");
-    await authorize.click();
+    // Only settings to give: Save takes what's filled (the suggested one counts), and the line under it names the rest.
+    const save = page.getByRole("button", { name: "Save" });
+    await page.locator("dialog").getByText("Set REVIEWER before it runs.").waitFor();
+    await save.click();
+    await page.getByText("Saved. Set REVIEWER before it runs.").waitFor();
+    const half = await sv.admin("readiness", { capabilityId: "repo-counter" });
+    if (half.ready || half.missingConfig.join() !== "REVIEWER") throw new Error(`after a Save with REVIEWER empty: ${JSON.stringify(half)}`);
+    const need = await page.evaluate(async () => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { capabilityId?: string; detail: string; action: string }[]).find((n) => n.capabilityId === "repo-counter"));
+    if (need?.detail !== "Set REVIEWER before it runs" || need.action !== "Set…") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
+    await page.getByRole("button", { name: "Set…" }).first().click();
+    await page.locator("dialog input[type=text]").first().fill("Ada");
+    await page.getByRole("button", { name: "Save" }).click();
     await page.locator(".pill.ok", { hasText: /^ready$/ }).waitFor();
     const r = await sv.admin("readiness", { capabilityId: "repo-counter" });
     if (!r.ready) throw new Error(`not ready after Save: ${JSON.stringify(r)}`);
+  });
+
+  await step("Authorize approves a tool's grants whatever its settings, and names the ones still unset; the Inbox does too", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-grants-settings-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "upstream-counter", name: "Upstream Counter", abi: "2.6", requires: { hosts: ["api.example.com", "status.example.com"] }, config: [{ name: "UPSTREAM_REPO", description: "The upstream repository" }, { name: "MAINTAINER", description: "Who maintains it" }] }));
+    const installed = await sv.admin("install", { name: "Upstream Counter", purpose: "Counts, for an upstream", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    await page.goto(`${web}/#/c/upstream-counter`);
+    await page.getByRole("button", { name: "Give it what it needs" }).click();
+    const authorize = page.locator("dialog").getByRole("button", { name: "Authorize" });
+    await authorize.waitFor();
+    if (!(await authorize.isEnabled())) throw new Error("Authorize disabled with the settings empty");
+    await page.locator("dialog").getByText("Set UPSTREAM_REPO and MAINTAINER before it runs.").waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-authorize-unset.png" });
+    await authorize.click();
+    await page.getByText("Authorized. Set UPSTREAM_REPO and MAINTAINER before it runs.").waitFor();
+    const r = await sv.admin("readiness", { capabilityId: "upstream-counter" });
+    if (r.ready || r.pendingGrants.length || r.missingConfig.join() !== "UPSTREAM_REPO,MAINTAINER") throw new Error(`after Authorize: ${JSON.stringify(r)}`);
+    const need = await page.evaluate(async () => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { capabilityId?: string; detail: string }[]).find((n) => n.capabilityId === "upstream-counter"));
+    if (need?.detail !== "Set UPSTREAM_REPO and MAINTAINER before it runs") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
+    await page.goto(`${web}/#/`);
+    await page.locator(".inbox-btn").click();
+    await page.locator(".inbox-row", { hasText: "Set UPSTREAM_REPO and MAINTAINER before it runs" }).waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-authorize-inbox.png" });
+    await page.keyboard.press("Escape");
   });
 
   await step("a tool Hewn suspended: opening it from Home says why, with Ask builder to fix and Resume, as its Info page does; Resume opens it", async () => {
