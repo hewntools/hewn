@@ -70,7 +70,7 @@ const stub = (name: string) => ({
     if (/\[smoke:slow(-exit)?\]/.test(request) && !(job.carriesOn && found)) {
       appendFileSync(index, `\n${PROGRESS}${job.buildId}\n`);
       note({ buildId: job.buildId, event: "waiting" });
-      // Two minutes at most; a Stop ends it at once, as a builder that's killed would.
+      // Two minutes at most; a Stop ends it at once, as a builder that's killed would (with [smoke:slow-exit], 1.5 s later).
       const stopped = new Promise<void>((r) => (job.signal?.aborted ? r() : job.signal?.addEventListener("abort", () => r(), { once: true })));
       for (let i = 0; i < 60; i++) {
         job.onActivity?.("smoke stub: working slowly (waiting for a Stop)");

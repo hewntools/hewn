@@ -26,9 +26,12 @@ export interface LocalWorkbenchOptions {
   visualCheck?: VisualCheck;
   /** How long a builder may go with no activity before it's stopped and resumed (ms), read for each build. Unset, or undefined: the builder's default. */
   builderIdleMs?: () => number | undefined;
-  /** How long a carry-over waits for a stopped build's builder to exit (ms; default 10 s). */
+  /** How long a carry-over waits for a stopped build's builder to exit (ms; default STOP_WAIT_MS). */
   stopWaitMs?: number;
 }
+
+/** How long a retry carrying on from a stopped build waits for that build's builder to exit. */
+export const STOP_WAIT_MS = 10_000;
 
 /** Files of a directory as a map, artefacts (node_modules …) excluded; `skip`: paths (files or folders) not to read either. */
 export function readTree(dir: string, skip: (rel: string) => boolean = () => false): Files {
@@ -241,18 +244,18 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
   const transcript = (buildId: string) => join(opts.root, `${buildId}.log`);
   const builders = () => (typeof opts.builders === "function" ? opts.builders() : opts.builders);
   mkdirSync(opts.root, { recursive: true });
-  /** Builds whose builder is running here: it ends when the builder has exited (a Stop doesn't wait for that). */
-  const building = new Map<string, Promise<void>>();
+  /** Build → its builder's run here, settled once the builder has exited (a Stop doesn't wait for that). */
+  const runs = new Map<string, Promise<void>>();
   /**
    * A stopped build is marked cancelled at once and its builder told to stop, but the builder exits in its own time: a
    * retry carrying on from it waits for that (up to `stopWaitMs`), so the workspace isn't copied while the builder still
    * writes to it. After that it carries on from the workspace as it is.
    */
-  const exited = async (buildId: string) => {
-    const run = building.get(buildId);
+  const waitForExit = async (buildId: string) => {
+    const run = runs.get(buildId);
     if (!run) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([run, new Promise<void>((r) => (timer = setTimeout(r, opts.stopWaitMs ?? 10_000)))]);
+    await Promise.race([run, new Promise<void>((r) => (timer = setTimeout(r, opts.stopWaitMs ?? STOP_WAIT_MS)))]);
     clearTimeout(timer);
   };
   /**
@@ -279,7 +282,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     },
     snapshot: (buildId, to) => copyWorkspace(buildId, to),
     async carryOver(from, to, overlay) {
-      await exited(from);
+      await waitForExit(from);
       if (!existsSync(ws(from))) return false;
       await copyWorkspace(from, to, overlay);
       return true;
@@ -336,11 +339,11 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         () => {},
         () => {},
       );
-      building.set(job.buildId, ended);
+      runs.set(job.buildId, ended);
       try {
         await run;
       } finally {
-        if (building.get(job.buildId) === ended) building.delete(job.buildId);
+        if (runs.get(job.buildId) === ended) runs.delete(job.buildId);
       }
     },
     async bundle(buildId) {
