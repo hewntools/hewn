@@ -52,6 +52,32 @@ export type HostModels = (req: HostGenerateRequest, signal: AbortSignal) => Prom
 export const saneCharge = (c: unknown): c is HostCharge =>
   !!c && typeof c === "object" && Number.isFinite((c as HostCharge).amount) && (c as HostCharge).amount >= 0 && (c as HostCharge).amount <= 1e6 && typeof (c as HostCharge).unit === "string" && /^[A-Za-z][A-Za-z ]{0,19}$/.test((c as HostCharge).unit);
 
+/**
+ * What the host says of the owner's allowance (`GET /v1/allowance`, docs/internal/remote-builder.md), shown as given:
+ * `used` is the host's own count and isn't reconciled with the charges Hewn records. `of` null: unmetered or included.
+ * `resetsAt` null: it doesn't renew. `perBuild`: where a build pauses and asks before going on. `more` null: fixed.
+ */
+export interface HostAllowance {
+  unit: string;
+  used: number;
+  of: number | null;
+  resetsAt: string | null;
+  perBuild: number | null;
+  more: string | null;
+}
+
+/** An answer's allowance, if it makes sense; unknown fields are dropped, and a `more` that isn't https is left out. */
+export function saneAllowance(x: unknown): HostAllowance | undefined {
+  const a = (x as { allowance?: Record<string, unknown> } | null)?.allowance;
+  if (!a || typeof a !== "object") return undefined;
+  const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1e9 ? v : undefined);
+  const used = count(a.used);
+  if (used === undefined || !saneCharge({ amount: 0, unit: a.unit })) return undefined;
+  const at = typeof a.resetsAt === "string" && !Number.isNaN(Date.parse(a.resetsAt)) ? new Date(a.resetsAt).toISOString() : null;
+  const more = typeof a.more === "string" && URL.canParse(a.more) && new URL(a.more).protocol === "https:" ? a.more : null;
+  return { unit: a.unit as string, used, of: count(a.of) ?? null, resetsAt: at, perBuild: count(a.perBuild) ?? null, more };
+}
+
 // ---------- limits ----------
 
 export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;

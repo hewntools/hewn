@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { EFFORT } from "@hewntools/core/build-models.ts";
+import { type HostAllowance, saneAllowance } from "@hewntools/core/models.ts";
 import type { ModelCatalog, ModelChoice } from "@hewntools/host-workerd/surface/host.ts";
 import { OPENCODE_NO_UPDATE } from "./opencode-dirs.ts";
 
@@ -131,6 +132,34 @@ export async function remoteCatalog(url: string, token: string, fetchImpl: typeo
   // What each tier runs on for tools' model calls (hosted), as the host labels it.
   const tiers = Object.fromEntries(["light", "standard", "strong", "max"].flatMap((t) => (typeof body.tiers?.[t] === "string" ? [[t, (body.tiers[t] as string).slice(0, 60)]] : [])));
   return { agent: "remote", models: models.some((m) => m.id === "default") ? models : [defaultChoice([]), ...models], ...(Object.keys(tiers).length ? { tiers } : {}) };
+}
+
+/** A remote builder's allowance: `GET <url>/v1/allowance`. Null when it offers none (404); throws on anything else. */
+export async function remoteAllowance(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<HostAllowance | null> {
+  const res = await fetchImpl(new URL("v1/allowance", url.endsWith("/") ? url : `${url}/`), { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`allowance: HTTP ${res.status}`);
+  const a = saneAllowance(await res.json());
+  if (!a) throw new Error("allowance: an answer that doesn't make sense");
+  return a;
+}
+
+/**
+ * The allowance, read at most every 10 minutes (the Inbox asks on every poll), or now with `fresh` (the Models page).
+ * A 404 means none; any other failure keeps the last good answer (none before one).
+ */
+export function hostAllowance(remote: { url: string; token: string }, fetchImpl: typeof fetch = fetch) {
+  let last: { at: number; value: HostAllowance | null } | undefined;
+  return async (fresh = false): Promise<HostAllowance | null> => {
+    if (last && !fresh && Date.now() - last.at < 10 * 60_000) return last.value;
+    try {
+      last = { at: Date.now(), value: await remoteAllowance(remote.url, remote.token, fetchImpl) };
+    } catch {
+      // Asked again in 10 minutes, with what we had meanwhile.
+      last = { at: Date.now(), value: last?.value ?? null };
+    }
+    return last.value;
+  };
 }
 
 /**

@@ -9,7 +9,7 @@ import { applyTheme, THEME_KEY } from "./appearance.js";
 import { brandTile, browserZone, hewnMachine, hues, sandboxNotice, setSettings, settings, shortcutsDialog, stillHere, topBar, view } from "./frame.js";
 import { buildsChosen, jobModelOf, modelWords } from "./home.js";
 import { plural } from "./intake.js";
-import { creditWords, modelsPage, PROVIDERS, usd } from "./models.js";
+import { allowanceWords, creditWords, modelsPage, PROVIDERS, usd } from "./models.js";
 import { route } from "./router.js";
 import { instructionsSheet } from "./tool-actions.js";
 import { segmented } from "./widgets.js";
@@ -175,13 +175,16 @@ async function aiSection() {
         h(
           "div",
           { class: "grow" },
-          h("span", { class: "strong" }, "Thinks inside tools"),
+          // Hosted: one allowance covers building, the talks before it and tools that think.
+          h("span", { class: "strong" }, m?.host ? "Credits" : "Thinks inside tools"),
           h(
             "span",
             { class: "sub row tight" },
             // Hosted: included; what was used this month (it's implied who runs them).
             m?.host
-              ? m.host.charges.totals.length ? `${m.host.charges.totals.map(creditWords).join(", ")} used this month` : "Included"
+              ? m.host.allowance
+                ? `${allowanceWords(m.host.allowance)} · builds, talks and tools that think`
+                : m.host.charges.totals.length ? `${m.host.charges.totals.map(creditWords).join(", ")} used this month` : "Included"
               : prov
                 ? [providerTile(prov.id, 20), `${PROVIDERS[prov.id].label} API · your key · ${usd(m.spend.totalUsd)} of ${usd(m.spend.capUsd)} this month`]
                 : "No provider yet · your key, metered",

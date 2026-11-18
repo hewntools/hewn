@@ -30,7 +30,7 @@ import { type KeySource, masterKey } from "./master-key.ts";
 import { Tunnel, validTunnelConfig } from "./tunnel.ts";
 import { toolStatus } from "../setup/tools.ts";
 import { cliCatalogs } from "../builders/cli-agents.ts";
-import { modelCatalogs } from "../builders/models.ts";
+import { hostAllowance, modelCatalogs } from "../builders/models.ts";
 import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
 import type { Hosted, JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import { networkMode, type NetworkMode } from "@hewntools/host-workerd/egress.ts";
@@ -38,6 +38,7 @@ import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
+import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
 
 export interface SupervisorOptions {
@@ -102,6 +103,8 @@ export interface SupervisorOptions {
   network?: NetworkMode;
   /** Each agent's model list (default: read from its CLI, or the remote service). Tests stub it. */
   models?: (agent: string) => Promise<ModelCatalog>;
+  /** The owner's allowance as the host's builder states it (tests; default: read from `remote`). */
+  allowance?: (fresh?: boolean) => Promise<HostAllowance | null>;
   /**
    * The check on the disk with Hewn's data, every `intervalMs` (default 5 s): with less than its
    * floor free (diskFloor), tools' data doesn't grow. `space` says how big the disk is and how much
@@ -384,6 +387,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
   const models = o.models ?? modelCatalogs({ catalogs: cliCatalogs(), ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
+  // What the host's builder says of the owner's allowance (hosted); none without one.
+  const allowance = o.allowance ?? (o.remote ? hostAllowance({ url: o.remote.url, token: o.remote.token }) : async () => null);
   const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined), builderIdleMs: () => {
       const minutes = readConfig(o.home).builderIdleMinutes;
       return minutes === undefined ? undefined : minutes * 60_000;
@@ -537,6 +542,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     // Hosted: no agents on the machine, only the host's builder.
     "/setup/tools": async () => [...(o.hosted ? [] : (o.tools ?? toolStatus)()), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
     "/models/catalog": async (b) => models(String(b.agent), b.fresh === true),
+    "/models/allowance": async (b) => ({ allowance: await allowance(b.fresh === true) }),
     "/status/info": async () => ({ machine: hostname().replace(/\.local$/, ""), version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(backupDir())[0]?.at ?? null, backupDir: backupDir(), latest: o.latest?.() ?? null, notes: o.latestNotes?.() ?? [] }),
     "/setup/connect": async (b, req, res) => {
       const send = ndjson(res);
