@@ -14,7 +14,7 @@ export const operations = {
   async "probe@1"(input: { what: string; port?: number }, ctx: any) {
     switch (input.what) {
       case "globals":
-        return { found: ["process", "Deno", "Bun", "require"].filter((k) => typeof (globalThis as any)[k] === "function" || (k === "process" && (globalThis as any).process?.env?.HOME)) };
+        return { found: ["process", "Deno", "Bun", "require", "gc"].filter((k) => typeof (globalThis as any)[k] === "function" || (k === "process" && (globalThis as any).process?.env?.HOME)) };
       case "undeclared":
         return attempt(async () => gate(await fetch("https://example.com/")));
       case "declared":
