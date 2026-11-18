@@ -58,9 +58,34 @@ export default {
         const done = await s.waitBuild(b.buildId);
         if (done.status !== "promoted") throw new Error(`the build ${done.status}`);
       });
+
+      await s.step("when another tab switched who builds, the chip's model (that builder's) isn't sent: the new builder's setting goes", async () => {
+        const otherBuilder = builder === "codex" ? "claude" : "codex";
+        // A fresh drawer (the last one follows its build).
+        await s.page("#/");
+        page = await s.page(`${hash}?change=1`);
+        await page.locator(".drawer .model-chip").waitFor();
+        await page.waitForTimeout(500);
+        await s.copy.api("PUT", "/api/settings", { builder: otherBuilder });
+        const request = "Smoke scenario: a change after the builder was switched elsewhere.";
+        const draft = { kind: "draft", message: "Another small change.", draft: { request } };
+        await page.unroute("**/api/intake");
+        await page.route("**/api/intake", (r: any) => r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: reply\ndata: ${JSON.stringify(draft)}\n\n` }));
+        const box = page.locator(".drawer").getByRole("textbox", { name: "Message" });
+        await box.fill("Another small change");
+        await box.press("Enter");
+        await page.locator(".drawer").getByRole("button", { name: /^Build/ }).click();
+        let b: any;
+        for (let i = 0; i < 40 && !b; i++, await page.waitForTimeout(250)) b = (await s.copy.admin("status")).builds.find((x: any) => x.capabilityId === tool && x.request?.request === request);
+        if (!b) throw new Error("no build started");
+        if (b.request?.model !== undefined) throw new Error(`it asked for ${b.request.model}, a model of the builder it no longer is`);
+        if (b.builder !== otherBuilder) throw new Error(`built by ${b.builder}`);
+        await s.waitBuild(b.buildId);
+      });
     } finally {
       await page?.unroute("**/api/intake").catch(() => {});
       await setModel(mine).catch(() => {});
+      await s.copy.api("PUT", "/api/settings", { builder }).catch(() => {});
       const now = (await s.copy.admin("status")).capabilities.find((x: { id: string }) => x.id === tool).version;
       if (now !== before) await s.copy.admin("rollback", { capabilityId: tool, version: before });
     }

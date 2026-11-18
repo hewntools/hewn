@@ -371,7 +371,7 @@ async function firstRun() {
           onclick: async (e) => {
             e.currentTarget.disabled = true;
             try {
-              const b = await api("/capabilities", { method: "POST", body: { name: st.name, purpose: st.purpose, requirements: st.requirements, ...(chip?.choice() ?? {}) } });
+              const b = await api("/capabilities", { method: "POST", body: { name: st.name, purpose: st.purpose, requirements: st.requirements, ...((await chip?.choice()) ?? {}) } });
               invalidateCaps();
               go(`#/b/${b.buildId}`);
             } catch (err) {
