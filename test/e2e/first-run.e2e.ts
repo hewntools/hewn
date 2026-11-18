@@ -95,6 +95,9 @@ const askToConnect = async () => {
   const html = await (await fetch(`${base}/authorize?${q}`)).text();
   agentReq = { id: /id:"([^"]+)"/.exec(html)![1], secret: /secret:"([^"]+)"/.exec(html)![1], clientId: reg.client_id };
 };
+/** What the Inbox says about a tool, if anything (as the owner's page reads it). */
+const inboxNeed = (id: string) =>
+  page.evaluate(async (id: string) => ((await (await fetch("/api/inbox", { headers: { "x-hewn-ui": "1" } })).json()).needs as { capabilityId?: string; detail: string; action: string }[]).find((n) => n.capabilityId === id), id);
 let token: string | undefined;
 const agentToken = async () => {
   if (token) return token;
@@ -357,14 +360,68 @@ try {
     await field.waitFor();
     if ((await field.inputValue()) !== "hewntools/hewn") throw new Error(`the field opened with "${await field.inputValue()}"`);
     if ((await sv.admin("readiness", { capabilityId: "repo-counter" })).ready) throw new Error("ready while the form is open");
-    // Authorize waits for the setting with no suggestion; the suggested one counts as filled.
-    const authorize = page.getByRole("button", { name: "Authorize" });
-    if (await authorize.isEnabled()) throw new Error("Authorize enabled with REVIEWER empty");
-    await reviewer.fill("Ada");
-    await authorize.click();
+    // Only settings to give: Save takes what's filled (the suggested one counts), and the line under it names the rest.
+    const save = page.getByRole("button", { name: "Save" });
+    await page.locator("dialog").getByText("Set REVIEWER before it runs.").waitFor();
+    await save.click();
+    await page.getByText("Saved. Set REVIEWER before it runs.").waitFor();
+    const half = await sv.admin("readiness", { capabilityId: "repo-counter" });
+    if (half.ready || half.missingConfig.join() !== "REVIEWER") throw new Error(`after a Save with REVIEWER empty: ${JSON.stringify(half)}`);
+    const need = await inboxNeed("repo-counter");
+    if (need?.detail !== "Set REVIEWER before it runs" || need.action !== "Set…") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
+    await page.getByRole("button", { name: "Set…" }).first().click();
+    await page.locator("dialog input[type=text]").first().fill("Ada");
+    await page.getByRole("button", { name: "Save" }).click();
     await page.locator(".pill.ok", { hasText: /^ready$/ }).waitFor();
     const r = await sv.admin("readiness", { capabilityId: "repo-counter" });
     if (!r.ready) throw new Error(`not ready after Save: ${JSON.stringify(r)}`);
+  });
+
+  await step("Authorize approves a tool's grants whatever its settings, and names the ones still unset; the Inbox does too; a Deny of everything doesn't ask for them", async () => {
+    // A counter that asks to reach two hosts and has two settings, installed by the owner.
+    const install = async (id: string, name: string) => {
+      const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-grants-settings-"));
+      cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+      editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id, name, abi: "2.6", requires: { hosts: ["api.example.com", "status.example.com"] }, config: [{ name: "UPSTREAM_REPO", description: "The upstream repository" }, { name: "MAINTAINER", description: "Who maintains it" }] }));
+      const installed = await sv.admin("install", { name, purpose: "Counts, for an upstream", dir, wait: true });
+      rmSync(dir, { recursive: true, force: true });
+      if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    };
+    await install("upstream-counter", "Upstream Counter");
+    await page.goto(`${web}/#/c/upstream-counter`);
+    await page.getByRole("button", { name: "Give it what it needs" }).click();
+    const authorize = page.locator("dialog").getByRole("button", { name: "Authorize" });
+    await authorize.waitFor();
+    if (!(await authorize.isEnabled())) throw new Error("Authorize disabled with the settings empty");
+    await page.locator("dialog").getByText("Set UPSTREAM_REPO and MAINTAINER before it runs.").waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-authorize-unset.png" });
+    await authorize.click();
+    await page.getByText("Authorized. Set UPSTREAM_REPO and MAINTAINER before it runs.").waitFor();
+    const r = await sv.admin("readiness", { capabilityId: "upstream-counter" });
+    if (r.ready || r.pendingGrants.length || r.missingConfig.join() !== "UPSTREAM_REPO,MAINTAINER") throw new Error(`after Authorize: ${JSON.stringify(r)}`);
+    const need = await inboxNeed("upstream-counter");
+    if (need?.detail !== "Set UPSTREAM_REPO and MAINTAINER before it runs" || need.action !== "Set…") throw new Error(`the Inbox says ${JSON.stringify(need)}`);
+    await page.goto(`${web}/#/`);
+    await page.locator(".inbox-btn").click();
+    await page.locator(".inbox-row", { hasText: "Set UPSTREAM_REPO and MAINTAINER before it runs" }).waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-authorize-inbox.png" });
+    await page.keyboard.press("Escape");
+
+    // Every switch off: the button says Deny, nothing asks for the settings, and the Inbox doesn't say they'd be enough.
+    await install("declined-counter", "Declined Counter");
+    await page.goto(`${web}/#/c/declined-counter`);
+    await page.getByRole("button", { name: "Give it what it needs" }).click();
+    await page.locator("dialog input.switch").first().waitFor();
+    for (const sw of await page.locator("dialog input.switch").all()) await sw.uncheck();
+    const deny = page.locator("dialog").getByRole("button", { name: "Deny" });
+    await deny.waitFor();
+    if (await page.locator("dialog").getByText("before it runs").count()) throw new Error("a Deny of everything asks for the settings");
+    await deny.click();
+    const said = page.locator(".toast", { hasText: "Said no to 2 things." });
+    await said.waitFor();
+    if ((await said.innerText()).includes("before it runs")) throw new Error(`the toast asks for the settings: ${await said.innerText()}`);
+    const declined = await inboxNeed("declined-counter");
+    if (declined?.detail.startsWith("Set ")) throw new Error(`the Inbox says settings would do: ${JSON.stringify(declined)}`);
   });
 
   await step("a tool Hewn suspended: opening it from Home says why, with Ask builder to fix and Resume, as its Info page does; Resume opens it", async () => {
@@ -592,6 +649,91 @@ export const operations = {
     const r = await asked;
     if (r.headers()["x-hewn-refresh"] !== "1") throw new Error("a refresh without the x-hewn-refresh header");
     page.off("request", watch);
+  });
+
+  await step("a page from before an update stops its own refreshes: it says Hewn was updated, with Reload; the owner's own requests still go, and Reload brings the refreshes back", async () => {
+    // A page of its own, signed in, for its fake clock.
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await ctx.addCookies(await page.context().cookies());
+    const p = await ctx.newPage();
+    try {
+      // Hewn updated under the page: the same server, answering with another web build.
+      let updated = false;
+      await p.route("**/api/**", async (r: any) => {
+        const res = await r.fetch();
+        await r.fulfill({ response: res, headers: { ...res.headers(), ...(updated ? { "x-hewn-web": "0123456789abcdef" } : {}) } });
+      });
+      const refreshes: string[] = [];
+      const owners: string[] = [];
+      p.on("request", (r: { url(): string; headers(): Record<string, string> }) => r.url().includes("/api/") && (r.headers()["x-hewn-refresh"] === "1" ? refreshes : owners).push(r.url()));
+      await p.clock.install();
+      await p.goto(`${web}/#/`);
+      await p.locator(".home-grid").waitFor();
+      const run = async (ms: number) => {
+        for (let t = 0; t < ms; t += 5000) await p.clock.runFor(5000), await p.waitForTimeout(100);
+      };
+      await run(60_000);
+      if (!refreshes.length) throw new Error("no refreshes on Home before the update");
+      // The update lands while the tab is hidden and a poll waits for it to be shown: that poll never goes, and
+      // the owner's own look at the tools doesn't wait on it.
+      await p.evaluate(async () => {
+        let hidden = true;
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+        (window as any).__show = () => ((hidden = false), document.dispatchEvent(new Event("visibilitychange")));
+        document.dispatchEvent(new Event("visibilitychange"));
+        const kit = "/kit.js";
+        const k = await import(kit);
+        k.invalidateCaps();
+        void k.caps(true, { poll: true });
+      });
+      updated = true;
+      await p.evaluate(async () => {
+        const kit = "/kit.js";
+        const k = await import(kit);
+        await k.api("/settings");
+        (window as any).__show();
+      });
+      refreshes.length = 0;
+      // (The page's clock is fake: the wait is real, outside it.)
+      await p.evaluate(async () => {
+        const kit = "/kit.js";
+        const k = await import(kit);
+        void k.caps().then((m: Map<string, unknown>) => ((window as any).__looked = m.size));
+      });
+      await p.waitForTimeout(2000);
+      if (typeof (await p.evaluate(() => (window as any).__looked)) !== "number") throw new Error("the owner's own look at the tools waited on a poll that never goes");
+      await run(30_000);
+      const toast = p.locator(".toast", { hasText: "Hewn was updated" });
+      await toast.waitFor({ timeout: 5000 });
+      if ((await toast.getByRole("button").allInnerTexts()).join() !== "Reload") throw new Error("the toast's only action isn't Reload");
+      refreshes.length = 0;
+      await run(180_000);
+      if (refreshes.length) throw new Error(`an outdated page refreshed itself: ${refreshes.join(", ")}`);
+      if ((await toast.count()) !== 1) throw new Error("the toast went away, or came again");
+      // The owner's own requests still go: open Activity.
+      owners.length = 0;
+      await p.goto(`${web}/#/activity`);
+      await p.getByText("Activity").first().waitFor();
+      if (!owners.length) throw new Error("the owner's own request didn't go");
+      await run(60_000);
+      if (refreshes.length) throw new Error(`Activity, outdated, refreshed itself: ${refreshes.join(", ")}`);
+      // Opening the Inbox is the owner's: it goes.
+      owners.length = 0;
+      await p.getByRole("button", { name: /^Inbox/ }).click();
+      await p.waitForTimeout(500);
+      if (!owners.some((u) => u.includes("/api/inbox"))) throw new Error("opening the Inbox didn't ask for it");
+      await p.keyboard.press("Escape");
+      await p.screenshot({ path: "/tmp/e2e-fr-stale-tab.png" });
+      updated = false;
+      await toast.getByRole("button", { name: "Reload" }).click();
+      await p.waitForLoadState();
+      for (let i = 0; i < 12 && !refreshes.length; i++) await run(5000);
+      if (!refreshes.length) throw new Error("no refreshes after Reload");
+      if (await p.locator(".toast", { hasText: "Hewn was updated" }).count()) throw new Error("the toast is still there after Reload");
+    } finally {
+      await ctx.close();
+    }
   });
 
   if (!real)
