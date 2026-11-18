@@ -7,31 +7,51 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { config as platformConfig, toolsConfig } from "@hewntools/cli/supervisor/index.ts";
 import { STORAGE_KEYS } from "@hewntools/cli/supervisor/format.ts";
+import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import { IdleGc, tickCall } from "@hewntools/host-workerd/idle-gc.ts";
 import { FIXTURES } from "./helpers.ts";
 import { startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 describe("when the platform collects", () => {
-  const gcs: object[] = [];
-  const gc = (o: object) => void gcs.push(o);
+  const view = (o: Partial<ActivityView> = {}): ActivityView => ({ startedAt: 0, lastRequestAt: null, lastCallAt: null, lastStreamAt: null, intakes: 0, lastIntakeAt: null, building: false, lastBuildAt: null, changedAt: null, nextAlarmAt: null, ...o });
+  const t = { quietMs: 30_000, backgroundEveryMs: 300_000 };
+  const recorder = () => {
+    const gcs: object[] = [];
+    return { gcs, idle: new IdleGc((o) => void gcs.push(o)) };
+  };
 
-  test("once after activity and a quiet spell; not while something runs, and not again until something new ran", () => {
-    const idle = new IdleGc(gc);
-    assert.deepEqual(idle.run({ lastActiveAt: 10_000, busy: false }, 30_000, 20_000), { ran: false, why: "recent", runs: 0 });
-    assert.deepEqual(idle.run({ lastActiveAt: 10_000, busy: true }, 30_000, 50_000), { ran: false, why: "busy", runs: 0 });
-    const ran = idle.run({ lastActiveAt: 10_000, busy: false }, 30_000, 40_000);
-    assert.equal(ran.ran, true);
+  test("once, 30 s after the last work; not while something runs; not again until there's more", () => {
+    const { gcs, idle } = recorder();
+    idle.work(10_000);
+    assert.deepEqual(idle.collectIfQuiet(view(), false, t, 20_000), { ran: false, why: "recent", runs: 0 });
+    for (const [a, running] of [[view({ building: true }), false], [view({ intakes: 1 }), false], [view(), true]] as const) assert.deepEqual(idle.collectIfQuiet(a, running, t, 50_000), { ran: false, why: "busy", runs: 0 });
+    assert.equal(idle.collectIfQuiet(view(), false, t, 40_000).ran, true);
     assert.deepEqual(gcs, [{ type: "major", execution: "sync", flavor: "last-resort" }], "a last-resort GC: a plain major one gives back far less");
-    assert.deepEqual(idle.run({ lastActiveAt: 10_000, busy: false }, 30_000, 90_000), { ran: false, why: "nothing new", runs: 1 });
-    assert.equal(idle.run({ lastActiveAt: 95_000, busy: false }, 30_000, 125_000).ran, true);
+    assert.deepEqual(idle.collectIfQuiet(view(), false, t, 90_000), { ran: false, why: "nothing new", runs: 1 });
+    // A request the idle report counted is work too.
+    assert.deepEqual(idle.collectIfQuiet(view({ lastRequestAt: 95_000 }), false, t, 110_000), { ran: false, why: "recent", runs: 1 });
+    assert.equal(idle.collectIfQuiet(view({ lastRequestAt: 95_000 }), false, t, 125_000).ran, true);
     assert.equal(gcs.length, 2);
   });
 
-  test("without gc() (a process started without --expose-gc), it says so and does nothing", () => {
-    assert.deepEqual(new IdleGc(undefined).run({ lastActiveAt: 0, busy: false }, 0, 1), { ran: false, why: "no gc", runs: 0 });
+  test("an open page's refreshes every 15 s don't hold it off: after only those, one every few minutes", () => {
+    const { idle } = recorder();
+    idle.work(0);
+    let ran = 0;
+    // An hour of a visible tab polling, and nothing else.
+    for (let now = 15_000; now <= 3_600_000; now += 15_000) {
+      idle.background(now - 1);
+      if (idle.collectIfQuiet(view(), false, t, now).ran) ran++;
+    }
+    assert.equal(ran, 12, "the start's work 30 s in, then one per 5 minutes");
+    assert.deepEqual(new IdleGc(() => {}).collectIfQuiet(view(), false, t, 1), { ran: false, why: "recent", runs: 0 }, "the start counts as work");
   });
 
-  test("the supervisor's own ticks and reads aren't activity; what the CLI does is", () => {
+  test("without gc() (a process started without --expose-gc), it says so and does nothing", () => {
+    assert.deepEqual(new IdleGc(undefined).collectIfQuiet(view(), false, { quietMs: 0, backgroundEveryMs: 0 }), { ran: false, why: "no gc", runs: 0 });
+  });
+
+  test("the supervisor's own ticks and reads are neither work nor background; what the CLI does is work", () => {
     for (const [path, body] of [["/_admin/idle-gc", {}], ["/_admin/disk", { low: false }], ["/_admin/call", { method: "idleActivity" }], ["/_admin/call", { method: "metrics" }], ["/_admin/call", { method: "nextScheduleAt" }]] as const) assert.ok(tickCall(path, body), `${path} ${JSON.stringify(body)}`);
     for (const [path, body] of [["/_admin/invoke", {}], ["/_admin/install", {}], ["/_admin/call", { method: "list" }], ["/_admin/resumed", {}]] as const) assert.ok(!tickCall(path, body), `${path} ${JSON.stringify(body)}`);
   });
@@ -45,7 +65,7 @@ describe("when the platform collects", () => {
   });
 });
 
-/** A GET on the web API as the signed-in owner; `refresh`: as a page's own poll (Home's), which the idle report ignores. */
+/** A GET on the web API as the signed-in owner; `refresh`: as a page's own poll (Home's), which the idle report ignores; `anonymous`: refused. */
 async function owner(h: TestHost) {
   const get = (path: string, headers: Record<string, string> = {}) =>
     new Promise<{ status: number; headers: Record<string, any>; body: string }>((ok, fail) => {
@@ -59,25 +79,25 @@ async function owner(h: TestHost) {
     });
   const { ticket } = await h.sv.admin("web-ticket");
   const cookie = String((await get(`/auth?ticket=${ticket}`)).headers["set-cookie"]).split(";")[0];
-  return async (path: string, o: { refresh?: boolean } = {}) => {
-    const r = await get(path, { cookie, ...(o.refresh ? { "x-hewn-refresh": "1" } : {}) });
-    assert.equal(r.status, 200, `${path}: ${r.body}`);
+  return async (path: string, o: { refresh?: boolean; anonymous?: boolean } = {}) => {
+    const r = await get(path, { ...(o.anonymous ? {} : { cookie }), ...(o.refresh ? { "x-hewn-refresh": "1" } : {}) });
+    assert.equal(r.status, o.anonymous ? 401 : 200, `${path}: ${r.body}`);
   };
 }
 
 describe("the idle GC on the real host", () => {
   let h: TestHost;
   before(async () => {
-    // No tick: the test asks itself, with its own quiet time (0: collect now if anything ran since the last).
+    // No tick: the test asks itself, with its own times (0: collect now if anything ran since the last).
     h = await startTestHost({ idleGc: false });
     const r = await h.sv.admin("install", { name: "Runaway", purpose: "runs", dir: join(FIXTURES, "runaway"), wait: true });
     assert.equal(r.status, "promoted", r.log?.join("\n"));
   });
   after(() => h?.stop());
-  const ask = (quietMs: number) => h.sv.admin("idle-gc", { quietMs });
+  const ask = (quietMs: number, backgroundEveryMs = 0) => h.sv.admin("idle-gc", { quietMs, backgroundEveryMs });
   const report = async () => (await h.sv.admin("call", { method: "idleActivity" })).result;
 
-  test("collects after a request once it's quiet, once; the tick's own call, the health check and the supervisor's reads don't count", async () => {
+  test("collects after a request once it's quiet, once; the tick's own call, the health check and the supervisor's reads are nothing", async () => {
     const get = await owner(h);
     await ask(0);
     await get("/api/capabilities");
@@ -98,13 +118,16 @@ describe("the idle GC on the real host", () => {
     assert.equal(later.changedAt, before.changedAt);
   });
 
-  test("Home's polls count, though the idle report ignores them: they're what grows the heap", async () => {
+  test("Home's polls and refused requests are background: they don't hold it off, and are collected now and then", async () => {
     const get = await owner(h);
     await ask(0);
     const { lastRequestAt } = await report();
-    await get("/api/capabilities", { refresh: true });
-    assert.equal((await report()).lastRequestAt, lastRequestAt);
-    assert.equal((await ask(0)).ran, true);
+    for (const o of [{ refresh: true }, { anonymous: true }]) {
+      await get("/api/capabilities", o);
+      assert.equal((await report()).lastRequestAt, lastRequestAt, "not in the idle report");
+      assert.equal((await ask(0, 60_000)).why, "too soon", JSON.stringify(o));
+      assert.equal((await ask(0, 0)).ran, true, JSON.stringify(o));
+    }
   });
 
   test("not while a tool call runs", async () => {
@@ -120,7 +143,7 @@ describe("the idle GC on the real host", () => {
 describe("the supervisor's tick", () => {
   let h: TestHost;
   before(async () => {
-    h = await startTestHost({ idleGc: { intervalMs: 100, quietMs: 400 } });
+    h = await startTestHost({ idleGc: { intervalMs: 100, quietMs: 400, backgroundEveryMs: 1500 } });
   });
   after(() => h?.stop());
   // Never collects itself (its quiet time never passes); says how many the tick has run.
@@ -138,8 +161,21 @@ describe("the supervisor's tick", () => {
     const n = await runs();
     await get("/api/capabilities");
     assert.equal(await until(n + 1), n + 1);
-    // Ten more quiet ticks: none of them is activity.
+    // Ten more quiet ticks: none of them is anything.
     await new Promise((r) => setTimeout(r, 1000));
     assert.equal(await runs(), n + 1);
+  });
+
+  test("a page polling all the time is still collected, every backgroundEveryMs", async () => {
+    const get = await owner(h);
+    await new Promise((r) => setTimeout(r, 1000));
+    const n = await runs();
+    const until = Date.now() + 4000;
+    while (Date.now() < until) {
+      await get("/api/capabilities", { refresh: true });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const m = await runs();
+    assert.ok(m >= n + 2 && m <= n + 3, `${m - n} in 4 s`);
   });
 });

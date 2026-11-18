@@ -100,10 +100,11 @@ export interface SupervisorOptions {
    */
   disk?: { intervalMs?: number; space?: () => { free: number; total: number } };
   /**
-   * The idle GC, asked every `intervalMs`: once the platform has been quiet `quietMs` after doing something, one
-   * last-resort GC gives back the heap workerd never returns by itself (host-workerd idle-gc.ts). Tests shorten it.
+   * The idle GC, asked every `intervalMs`: `quietMs` after the last work, one last-resort GC gives back the heap
+   * workerd never returns by itself; after only an open page's refreshes and the like, at most every
+   * `backgroundEveryMs` (host-workerd idle-gc.ts). Tests shorten them.
    */
-  idleGc?: { intervalMs?: number; quietMs?: number } | false;
+  idleGc?: { intervalMs?: number; quietMs?: number; backgroundEveryMs?: number } | false;
 }
 
 /** How long after a schedule's time the resume check runs what's due itself (workerd's alarm, when it fires, comes first). */
@@ -976,18 +977,21 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
 
   // ---------- the idle GC ----------
   // workerd never runs V8's idle-time GC, so the platform's heap stays as big as its last burst of requests made it.
-  // Asked on a tick; the platform decides (something ran since the last collection, nothing for `quietMs`), and the
-  // tick itself doesn't count as something.
+  // Asked on a tick; the platform decides when (idle-gc.ts), and the tick itself counts as nothing.
   let gcTimer: ReturnType<typeof setInterval> | undefined;
   if (o.idleGc !== false) {
-    const { intervalMs = 5000, quietMs } = o.idleGc ?? {};
+    const { intervalMs = 5000, ...times } = o.idleGc ?? {};
     let asking = false;
     gcTimer = setInterval(async () => {
       if (asking) return;
       asking = true;
-      // workerd restarting: the next tick.
-      await admin("idle-gc", quietMs === undefined ? {} : { quietMs }, 5000).catch(() => {});
-      asking = false;
+      try {
+        await admin("idle-gc", times, 5000);
+      } catch {
+        // workerd restarting: the next tick
+      } finally {
+        asking = false;
+      }
     }, intervalMs);
     gcTimer.unref();
   }
