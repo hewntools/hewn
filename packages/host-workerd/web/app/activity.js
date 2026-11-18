@@ -6,7 +6,7 @@ import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones
 import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
-export { activityPage, activityRow, groupItems };
+export { activityPage, activityRow, byDay, groupItems };
 
 // ---------- C3 / H1: Activity (All · Builds · Calls · Access) ----------
 
@@ -38,6 +38,17 @@ function groupItems(items) {
   return out;
 }
 
+/** Items as Activity lists them: grouped, under each day's label. */
+function byDay(items, all, showCap) {
+  const days = new Map();
+  for (const g of groupItems(items)) {
+    const d = dayLabel(g.at);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(g);
+  }
+  return [...days].flatMap(([d, gs]) => [h("div", { class: "eyebrow" }, d), h("ul", { class: "list" }, gs.map((g) => activityRow(g, all, showCap)))]);
+}
+
 function activityRow(g, all, showCap) {
   const who = actorLabel(g.actor, all);
   const ref = showCap && g.capabilityId ? capRef(all.get(g.capabilityId), g.capabilityId) : null;
@@ -57,11 +68,11 @@ function activityRow(g, all, showCap) {
       dot = errors.length === g.items.length ? "danger" : errors.length ? "warn" : "ok";
       text = on(`${who} made ${g.items.length} calls`, ref && ["to", ref], errors.length ? h("span", { class: "faint" }, `${errors.length} failed`) : "", modelNote);
     }
-    // One call or several, the row opens the same way: each call's version, error, time taken.
+    // One call or several, the row opens the same way: each call's version, error, time taken, and what its code printed.
     expand = h(
       "ul",
       { class: "list nested", hidden: true },
-      g.items.map((c) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, ""))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
+      g.items.map((c) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, "")), c.lines?.length && h("pre", { class: "log short" }, c.lines.join("\n"))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
     );
   } else if (g.kind === "models") {
     const failed = g.items.filter((x) => x.outcome === "failed");
@@ -97,7 +108,7 @@ function activityRow(g, all, showCap) {
     // A stall's details read "spin@1", or "list_runs@1 — waiting on a fetch": what of the tool was there, and what it was doing.
     const [stallOp, stallState] = (g.detail ?? "").split(" — ");
     const op = h("span", { class: "mono" }, stallOp.split("@")[0]);
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`] };
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`], logs: [`${who} read the call log`, h("span", { class: "faint" }, g.detail)] };
     dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : g.outcome === "stalled" || g.outcome === "suspend" ? "danger" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
@@ -202,13 +213,7 @@ async function activityPage(q) {
   };
   const render = () => {
     if (!items.length) return cardEl.replaceWith(empty("Nothing yet", capability || agent || kinds ? "Nothing matches these filters." : "Calls, builds and access changes show up here."));
-    const days = new Map();
-    for (const g of groupItems(items)) {
-      const d = dayLabel(g.at);
-      if (!days.has(d)) days.set(d, []);
-      days.get(d).push(g);
-    }
-    put(cardEl, ...[...days].map(([d, gs]) => [h("div", { class: "eyebrow" }, d), h("ul", { class: "list" }, gs.map((g) => activityRow(g, all, !capability)))]).flat());
+    put(cardEl, ...byDay(items, all, !capability));
   };
   page("", 760, head, cardEl, more);
   more.hidden = true;

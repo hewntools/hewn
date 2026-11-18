@@ -44,6 +44,7 @@ There are four scopes. The web client shows them as See, Use, Make and Change. A
 | `widgets_show` | | yes | | |
 | `schedules_propose` | | yes | | |
 | `capabilities_request_access` | | yes | yes | yes |
+| `capabilities_logs` | | yes | yes | yes |
 | `capabilities_create` | | | yes | |
 | `capabilities_modify` | | | | yes |
 | `capabilities_add_widgets` | | | | yes |
@@ -96,6 +97,8 @@ A failed call is an MCP tool result with `isError: true` and JSON text `{ error,
 | `invalid_request`, `conflict`, `unauthenticated`, `internal` | Bad requests to the MCP tools themselves, state conflicts (a build already running), and the rest. |
 
 **Destructive operations.** When an agent calls an operation whose `sideEffect` is `destructive`, the host holds the call and asks the owner to confirm exactly that call: the same agent, operation and input. It waits up to about a minute. If the owner confirms in time, the call runs and returns normally. If not, it returns `awaiting_confirmation` and stays on the owner's list; the agent tells the owner, and calls again with the same input once they have confirmed. A rejection is reported once, as `forbidden`. Only agents' calls are held: the owner's own calls aren't (Hewn's web client asks before running a destructive one), and neither are one tool's calls to another, which the owner granted.
+
+**A tool's log.** `capabilities_logs` takes `{ capabilityId, n?, operation? }` (scope `invoke`, `create` or `modify`) and returns `{ capabilityId, entries }`: the tool's last `n` calls (default 20, at most 100), newest first, only `operation`'s when given (`"name"` for every version, or `"name@2"`). Each entry has `at`, `caller` (who started the call), `via` (the tools it went through to this one), `operation`, `outcome` (`"ok"`, or `"ERROR <code>: <message>"`), `ms`, and `lines`: what the tool's code printed during the call, each starting `"| "` (`console.log`, `info`, `debug`) or `"! "` (`warn`, `error`), at most 200 of 500 characters. The host keeps them as long as the owner keeps call logs (two weeks by default). Stored secrets are never in it, and a connection's sign-in step keeps no lines. A tool the agent can't see is `not_found`. Each read is recorded for the owner (Hewn shows it in Activity): reading the log is reading the tool.
 
 ## Builds
 

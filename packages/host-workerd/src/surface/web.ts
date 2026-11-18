@@ -10,7 +10,7 @@ import { readSummary } from "@hewntools/core/bundle.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
-import type { Platform } from "@hewntools/core/platform.ts";
+import { type CallLogEntry, callLogHeader, type Platform } from "@hewntools/core/platform.ts";
 import { failureOf } from "@hewntools/core/platform/builds.ts";
 import type { CapabilityRow } from "@hewntools/core/registry.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
@@ -143,14 +143,14 @@ async function serveStatic(host: SurfaceHost, site: Site, path: string, setCooki
   });
 }
 
-/** Header lines of the call logs: "<iso> <caller> <op> <outcome…> <ms>ms". */
+/** The newest calls in the call logs, from their header lines (`logId`: the entry, for its lines). */
 function recentCalls(platform: Platform, owner: Agent, limit: number, perCapability = 400) {
-  const calls: { at: string; capabilityId: string; caller: string; via: string[]; operation: string; outcome: string; ms: number }[] = [];
+  const calls: (Omit<CallLogEntry, "lines"> & { capabilityId: string; logId: number })[] = [];
   for (const c of platform.list(owner)) {
-    for (const line of platform.logLines(c.id, perCapability)) {
-      // The caller is the call path ("codex → weekly-review"); the origin is who made it.
-      const m = /^(\S+) (.+?) ([a-z][a-z0-9_]*(?:@\d+)?) (ok|ERROR .*) (\d+)ms$/.exec(line);
-      if (m) calls.push({ at: m[1], capabilityId: c.id, caller: m[2].split(" → ")[0], via: m[2].split(" → ").slice(1), operation: m[3], outcome: m[4], ms: Number(m[5]) });
+    for (const { id, header } of platform.registry.capabilityLogHeads(c.id, perCapability)) {
+      // The caller is who made the call; `via`, the tools on its way here ("codex → weekly-review").
+      const call = callLogHeader(header);
+      if (call) calls.push({ ...call, capabilityId: c.id, logId: id });
     }
   }
   return calls.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
@@ -1140,7 +1140,7 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
   for (const c of recentCalls(platform, owner, 5000, 2000)) {
     // Home's widgets refreshing themselves: kept in the tool's own call log, not in Activity.
     if (c.caller.startsWith("widget:")) continue;
-    items.push({ kind: "call", at: c.at, capabilityId: c.capabilityId, actor: c.caller, outcome: c.outcome, operation: c.operation, ms: c.ms, via: c.via });
+    items.push({ kind: "call", at: c.at, capabilityId: c.capabilityId, actor: c.caller, outcome: c.outcome, operation: c.operation, ms: c.ms, via: c.via, logId: c.logId });
   }
   for (const m of platform.registry.recentModelCalls(2000)) {
     items.push({ kind: "model", at: m.at, capabilityId: m.capabilityId, actor: m.caller, outcome: m.status, model: m.model, costUsd: m.costUsd, inputTokens: m.inputTokens, outputTokens: m.outputTokens, ...(m.error ? { error: m.error } : {}) });
@@ -1158,6 +1158,14 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
     .filter((i) => (!q.kinds?.length || q.kinds.includes(i.kind)) && (!q.capability || i.capabilityId === q.capability) && (!q.agent || actorIs(i.actor, q.agent) || (i.kind === "authority" && i.subject === q.agent)) && (!q.before || i.at < q.before))
     .sort((a, b) => b.at.localeCompare(a.at));
   const page = filtered.slice(0, q.limit);
+  // A call opens to the lines its code printed: read for this page's calls only.
+  const calls = page.filter((i) => i.kind === "call");
+  for (const capabilityId of new Set(calls.map((i) => i.capabilityId))) {
+    const of = calls.filter((i) => i.capabilityId === capabilityId);
+    const lines = platform.callLogLines(owner, capabilityId, of.map((i) => i.logId as number));
+    for (const i of of) if (lines.get(i.logId as number)?.length) i.lines = lines.get(i.logId as number);
+  }
+  for (const i of calls) delete i.logId;
   return { items: page, next: filtered.length > page.length ? page.at(-1)!.at : null };
 }
 

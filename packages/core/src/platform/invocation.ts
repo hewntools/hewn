@@ -232,6 +232,78 @@ export class Invocation extends Domain {
   logLines(capabilityId: string, n: number): string[] {
     return this.registry.capabilityLogLines(capabilityId, n);
   }
+
+  /**
+   * A tool's call log, for the owner or an agent that may see the tool (`capabilities_logs`): its last `n` calls
+   * (default 20, at most 100), newest first, an `operation`'s only if given ("name" for every version, or
+   * "name@2"), each with the lines its code printed. Stored secrets are redacted again, for one set after a line
+   * was kept. An agent's read shows in Activity: reading the log is reading the tool.
+   */
+  callLog(agent: Agent, capabilityId: string, { n, operation }: { n?: number; operation?: string } = {}): { capabilityId: string; entries: CallLogEntry[] } {
+    if (agent.kind !== "user" && !LOG_SCOPES.some((s) => agent.scopes.has(s))) throw new PlatformError("forbidden", `reading a tool's log needs one of the scopes ${LOG_SCOPES.join(", ")}`);
+    const cap = this.visibleActive(agent, capabilityId);
+    const count = Math.min(Math.max(Math.trunc(Number(n ?? 20)) || 20, 1), 100);
+    const matches = (op: string) => !operation || op === operation || (!operation.includes("@") && op.split("@")[0] === operation);
+    const redact = this.storedSecretRedactor(cap.id);
+    const entries = this.registry
+      .capabilityLogEntries(cap.id, { n: operation ? LOG_SCAN : count })
+      .map((r) => callLogEntry(redact(r.entry)))
+      .filter((e): e is CallLogEntry => !!e && matches(e.operation))
+      .slice(0, count);
+    if (agent.kind !== "user") this.registry.addLifecycleEvent(cap.id, "logs", `${entries.length} ${entries.length === 1 ? "call" : "calls"}${operation ? ` of ${operation}` : ""}`, agent.id);
+    return { capabilityId: cap.id, entries };
+  }
+
+  /** The lines of these call-log entries (by row id, from the call log's heads), owner only: what Activity opens a call to. */
+  callLogLines(owner: Agent, capabilityId: string, ids: number[]): Map<number, string[]> {
+    requireOwner(owner);
+    const redact = this.storedSecretRedactor(capabilityId);
+    return new Map(this.registry.capabilityLogEntries(capabilityId, { ids }).map((r) => [r.id, callLogEntry(redact(r.entry))?.lines ?? []]));
+  }
+
+  /** Replaces the tool's stored secrets (those its live version declares) with [secret]. */
+  private storedSecretRedactor(capabilityId: string): (s: string) => string {
+    const cap = this.registry.getCapability(capabilityId);
+    const declared = cap?.activeVersion ? (this.activeManifest(capabilityId).requires?.secrets?.map((x) => x.name) ?? []) : [];
+    const needles = declared.flatMap((name) => {
+      const v = this.secrets.get(capabilityId, name);
+      return v === undefined ? [] : secretNeedles(v);
+    });
+    return (s) => needles.reduce((acc, v) => acc.split(v).join("[secret]"), s);
+  }
+}
+
+/** The scopes an agent reads a tool's log with: any that lets it call, make or change tools. */
+const LOG_SCOPES = ["invoke", "create", "modify"] as const;
+/** How many of the newest entries a read filtered by operation looks through. */
+const LOG_SCAN = 2000;
+
+/** One call in a tool's call log. `caller` is who started it; `via`, the tools it went through to this one. */
+export interface CallLogEntry {
+  at: string;
+  caller: string;
+  via: string[];
+  operation: string;
+  /** "ok", or "ERROR <code>: <message>". */
+  outcome: string;
+  ms: number;
+  /** What its code printed, in order: "| " for console.log, info and debug, "! " for warn and error. */
+  lines: string[];
+}
+
+/** A call-log header: "<at> <call path> <op> <outcome…> <ms>ms" (the call path may hold " → "). */
+export function callLogHeader(header: string): Omit<CallLogEntry, "lines"> | undefined {
+  const m = /^(\S+) (.+?) ([a-z][a-z0-9_]*(?:@\d+)?) (ok|ERROR .*) (\d+)ms$/.exec(header);
+  if (!m) return undefined;
+  const path = m[2].split(" → ");
+  return { at: m[1], caller: path[0], via: path.slice(1), operation: m[3], outcome: m[4], ms: Number(m[5]) };
+}
+
+/** A whole entry: its header, then its lines (kept indented by two spaces). */
+function callLogEntry(entry: string): CallLogEntry | undefined {
+  const [header, ...lines] = entry.split("\n");
+  const head = callLogHeader(header);
+  return head && { ...head, lines: lines.map((l) => l.replace(/^ {2}/, "")) };
 }
 
 /** The operation's side effect, or "read" for one that doesn't resolve (execute reports that). */

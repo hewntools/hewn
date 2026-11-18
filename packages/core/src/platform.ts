@@ -43,7 +43,7 @@ export { type Readiness, hostOf, hostWords, resolveHosts } from "./platform/gran
 export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
 export { MODEL_KEYS } from "./platform/models.ts";
 export { type ConnectionHealth, HEALTH_DEADLINE_MS, HEALTH_CACHE_MS } from "./platform/connections.ts";
-export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH } from "./platform/invocation.ts";
+export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH, type CallLogEntry, callLogHeader } from "./platform/invocation.ts";
 export { WIDGET_DEADLINE_MS, type HomeEntry, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
@@ -354,6 +354,8 @@ export class Platform {
   invoke(agent: Agent, req: InvokeRequest, trace?: string[], within?: Deadline | number, opts?: { record?: boolean; readOnly?: boolean; readChain?: boolean; origin?: Agent }) { return this.d.invocation.invoke(agent, req, trace, within, opts); }
   recentFailures(owner: Agent, capabilityId: string) { return this.d.invocation.recentFailures(owner, capabilityId); }
   logLines(capabilityId: string, n: number): string[] { return this.d.invocation.logLines(capabilityId, n); }
+  callLog(agent: Agent, capabilityId: string, o?: { n?: number; operation?: string }) { return this.d.invocation.callLog(agent, capabilityId, o); }
+  callLogLines(owner: Agent, capabilityId: string, ids: number[]) { return this.d.invocation.callLogLines(owner, capabilityId, ids); }
 
   // ---------- stalls: what was running when Hewn stopped responding, suspended tools (platform/stalls.ts) ----------
 

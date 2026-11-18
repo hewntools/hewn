@@ -690,10 +690,26 @@ export class Registry {
 
   /** The header lines of a capability's last `n` calls, newest first ("<at> <caller> <op> <outcome> <ms>ms"); the rest of each entry stays in the database. */
   capabilityLogHeaders(capabilityId: string, n: number): string[] {
+    return this.capabilityLogHeads(capabilityId, n).map((h) => h.header);
+  }
+
+  /** The same with each entry's row id, for its lines later (`capabilityLogEntries`). */
+  capabilityLogHeads(capabilityId: string, n: number): { id: number; header: string }[] {
     return this.db
-      .prepare("SELECT CASE WHEN instr(entry, char(10)) > 0 THEN substr(entry, 1, instr(entry, char(10)) - 1) ELSE entry END AS header FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?")
+      .prepare("SELECT rowid AS id, CASE WHEN instr(entry, char(10)) > 0 THEN substr(entry, 1, instr(entry, char(10)) - 1) ELSE entry END AS header FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?")
       .all(capabilityId, n)
-      .map((r) => String(r.header));
+      .map((r) => ({ id: Number(r.id), header: String(r.header) }));
+  }
+
+  /** A capability's call-log entries: its last `n`, newest first, or those with these row ids. */
+  capabilityLogEntries(capabilityId: string, which: { n: number } | { ids: number[] }): { id: number; entry: string }[] {
+    const rows =
+      "ids" in which
+        ? which.ids.length
+          ? this.db.prepare(`SELECT rowid AS id, entry FROM capability_logs WHERE capability_id = ? AND rowid IN (${which.ids.map(() => "?").join(", ")}) ORDER BY at DESC, rowid DESC`).all(capabilityId, ...which.ids)
+          : []
+        : this.db.prepare("SELECT rowid AS id, entry FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?").all(capabilityId, which.n);
+    return rows.map((r) => ({ id: Number(r.id), entry: String(r.entry) }));
   }
 
   /** The last `n` log lines of a capability, oldest first. */
@@ -1266,7 +1282,7 @@ export class Registry {
   }
 
   /** Lifecycle actions for the activity timeline: delete, restore, rollback, purge …, and Hewn's own (stalled, suspend). */
-  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "held-up" | "suspend" | "resume", detail: string, actor: string) {
+  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "held-up" | "suspend" | "resume" | "logs", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
   }
 
