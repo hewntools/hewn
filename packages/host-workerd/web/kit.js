@@ -15,8 +15,9 @@ export const CLI = "hewn";
  */
 let webBuild;
 let outdated = false;
+export const isOutdated = () => outdated;
 /** What a page's own refresh gets once the page is outdated: an answer that never comes, so its poll stops there. */
-const never = new Promise(() => {});
+const unanswered = new Promise(() => {});
 function checkBuild(res) {
   const v = res.headers.get("x-hewn-web");
   if (!v || v === webBuild) return;
@@ -43,7 +44,7 @@ export const shown = () =>
  */
 export async function api(path, { method = "GET", body, refresh = false } = {}) {
   if (refresh) await shown();
-  if (refresh && outdated) return never;
+  if (refresh && outdated) return unanswered;
   const res = await fetch(`/api${path}`, {
     method,
     headers: { "x-hewn-ui": "1", ...(refresh ? { "x-hewn-refresh": "1" } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
@@ -243,9 +244,14 @@ export const builderLabel = (b) => (b === "agent" ? "your agent" : BUILDERS[b] ?
 let capCache = null;
 /** id → capability summary (Home data), shared by cap-refs across screens. `poll`: a page's own refresh (see api). */
 export async function caps(refresh = false, { poll = false } = {}) {
-  // An outdated page's poll stops here, and leaves the cache to the owner's own requests.
-  if (poll && outdated) return never;
-  if (!capCache || refresh) capCache = api("/capabilities", { refresh: poll }).then((list) => new Map(list.map((c) => [c.id, c])));
+  // A poll fills the cache only once it's answered: an outdated page's never is (see api), and the owner's own
+  // requests mustn't wait on it.
+  if (poll) {
+    const fresh = await api("/capabilities", { refresh: true }).then((list) => new Map(list.map((c) => [c.id, c])));
+    capCache = Promise.resolve(fresh);
+    return fresh;
+  }
+  if (!capCache || refresh) capCache = api("/capabilities").then((list) => new Map(list.map((c) => [c.id, c])));
   try {
     return await capCache;
   } catch (e) {

@@ -617,7 +617,35 @@ export const operations = {
       };
       await run(60_000);
       if (!refreshes.length) throw new Error("no refreshes on Home before the update");
+      // The update lands while the tab is hidden and a poll waits for it to be shown: that poll never goes, and
+      // the owner's own look at the tools doesn't wait on it.
+      await p.evaluate(async () => {
+        let hidden = true;
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+        (window as any).__show = () => ((hidden = false), document.dispatchEvent(new Event("visibilitychange")));
+        document.dispatchEvent(new Event("visibilitychange"));
+        const kit = "/kit.js";
+        const k = await import(kit);
+        k.invalidateCaps();
+        void k.caps(true, { poll: true });
+      });
       updated = true;
+      await p.evaluate(async () => {
+        const kit = "/kit.js";
+        const k = await import(kit);
+        await k.api("/settings");
+        (window as any).__show();
+      });
+      refreshes.length = 0;
+      // (The page's clock is fake: the wait is real, outside it.)
+      await p.evaluate(async () => {
+        const kit = "/kit.js";
+        const k = await import(kit);
+        void k.caps().then((m: Map<string, unknown>) => ((window as any).__looked = m.size));
+      });
+      await p.waitForTimeout(2000);
+      if (typeof (await p.evaluate(() => (window as any).__looked)) !== "number") throw new Error("the owner's own look at the tools waited on a poll that never goes");
       await run(30_000);
       const toast = p.locator(".toast", { hasText: "Hewn was updated" });
       await toast.waitFor({ timeout: 5000 });
@@ -633,6 +661,12 @@ export const operations = {
       if (!owners.length) throw new Error("the owner's own request didn't go");
       await run(60_000);
       if (refreshes.length) throw new Error(`Activity, outdated, refreshed itself: ${refreshes.join(", ")}`);
+      // Opening the Inbox is the owner's: it goes.
+      owners.length = 0;
+      await p.getByRole("button", { name: /^Inbox/ }).click();
+      await p.waitForTimeout(500);
+      if (!owners.some((u) => u.includes("/api/inbox"))) throw new Error("opening the Inbox didn't ask for it");
+      await p.keyboard.press("Escape");
       await p.screenshot({ path: "/tmp/e2e-fr-stale-tab.png" });
       updated = false;
       await toast.getByRole("button", { name: "Reload" }).click();
