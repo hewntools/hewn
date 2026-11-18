@@ -542,7 +542,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // The CLI (owner, same machine) → supervisor. Separate token from workerd's.
   const control: typeof routes = {
     "/control/tunnel": async (b) => {
-      if (b.action === "start") return tunnel.start(validTunnelConfig(b.tunnel));
+      if (b.action === "start") {
+        // A copy (HEWN_NETWORK) never goes on a public address.
+        if (o.network) throw new Error("no tunnel here: this Hewn's network is off (HEWN_NETWORK)");
+        return tunnel.start(validTunnelConfig(b.tunnel));
+      }
       if (b.action === "stop") return tunnel.stop();
       return tunnel.current();
     },
@@ -829,7 +833,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       toolsRestarting = false;
     }
   };
-  tunnel.resume();
+  if (!o.network) tunnel.resume();
 
   // Nightly backup: one per day, checked hourly (and a minute after start, for machines that sleep at night).
   const nightly = () => {

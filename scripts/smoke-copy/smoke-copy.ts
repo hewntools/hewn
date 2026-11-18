@@ -3,16 +3,18 @@
 // `hewn backup` zip, or a home), runs the fixed checks and any scenario steps, and writes a report.
 //
 //   npm run smoke:copy -- --from <backup.zip | home> --tree <checkout> [--scenarios <dir>] [--out <dir>]
-//                         [--network] [--tool <id>] [--keep]
+//                         [--network] [--tool <id>] [--baseline <results.json>] [--keep]
 //
 // See docs/internal/smoke-copy.md.
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import type { NetworkMode } from "../../packages/host-workerd/src/egress.ts";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { Browser } from "./browser.ts";
 import * as checks from "./checks.ts";
+import { alive, until } from "./checks.ts";
 import { type Ready, CopyClient } from "./client.ts";
 import { makeCopy } from "./copy.ts";
 import { assertSpare, copyPorts, LIVE_PORTS } from "./ports.ts";
@@ -40,7 +42,7 @@ if (o.help || !o.from || !o.tree) {
 
 const say = (l: string) => console.log(`[smoke] ${l}`);
 const tree = realpathSync(resolve(o.tree));
-const network: "off" | "get" = o.network ? "get" : "off";
+const network: NetworkMode = o.network ? "get" : "off";
 const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const out = resolve(o.out ?? join(tmpdir(), `hewn-smoke-${stamp}`));
 mkdirSync(join(out, "shots"), { recursive: true });
@@ -68,25 +70,25 @@ const git = (...a: string[]) => spawnSync("git", ["-C", tree, ...a], { encoding:
 const treeRef = `${git("rev-parse", "--short", "HEAD") || "?"}${git("rev-parse", "--abbrev-ref", "HEAD") && git("rev-parse", "--abbrev-ref", "HEAD") !== "HEAD" ? ` (${git("rev-parse", "--abbrev-ref", "HEAD")})` : ""}${git("status", "--porcelain") ? ", with uncommitted changes" : ""}`;
 
 // ---------- the copy ----------
-const work = mkdtempSync(join(tmpdir(), "hewn-copy-"));
+const work = mkdtempSync(join(tmpdir(), "hewn-smoke-copy-"));
 const facts: RunFacts = { startedAt: new Date().toISOString(), tree, treeRef, source: basename(resolve(o.from)), network, ports: { port: 0, publicPort: 0 }, copy: {}, timings: {}, memory: [], scenarios: [], ...(o.baseline ? { baseline: resolve(o.baseline) } : {}) };
 const results: CheckResult[] = [];
-let hewn: Hewn | undefined;
+let hewn: CopyProcess | undefined;
 let browser: Browser | undefined;
 
 /** The copy's Hewn: launch.ts in a child process, stopped by its own pid. */
-class Hewn {
+class CopyProcess {
   child?: ChildProcess;
   ready?: Ready;
-  /** The workerd pids it had last (for the orphan check after a stop). */
-  workerds: number[] = [];
   private env: NodeJS.ProcessEnv;
+  private starts = 0;
   constructor(env: NodeJS.ProcessEnv) {
     this.env = env;
   }
 
   start(): Promise<Ready> {
     const t0 = Date.now();
+    const label = this.starts++ ? "start-up after a stop (spawn to ready)" : "start-up (spawn to ready)";
     const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", join(import.meta.dirname, "launch.ts")], { cwd: tree, env: this.env, stdio: ["ignore", "pipe", "pipe"] });
     this.child = child;
     let tail = "";
@@ -100,7 +102,7 @@ class Hewn {
         if (m) {
           clearTimeout(timer);
           this.ready = JSON.parse(m[1]);
-          facts.timings[this.workerds.length ? "start-up after a stop (spawn to ready)" : "start-up (spawn to ready)"] = Date.now() - t0;
+          facts.timings[label] = Date.now() - t0;
           ok(this.ready!);
         }
       };
@@ -126,26 +128,34 @@ class Hewn {
     }
     return clean;
   }
-
-  /** Workerd processes of this copy still running after a stop: killed by pid (only ones running from the copy's home). */
-  orphans(): number[] {
-    const left = this.workerds.filter((pid) => alive(pid) && spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.includes(work));
-    for (const pid of left) process.kill(pid, "SIGKILL");
-    return left;
-  }
 }
 
-const alive = (pid?: number | null) => {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+/**
+ * Processes of the copy still running once it's stopped: any whose command line names the copy's work dir (each
+ * workerd's config is there), whichever start they came from. Killed by pid; their pids returned.
+ */
+function sweep(): number[] {
+  const ps = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout;
+  // workerd is given real paths (on macOS the temp dir is under /private).
+  const paths = existsSync(work) ? [work, realpathSync(work)] : [work];
+  const left = ps
+    .split("\n")
+    .map((l) => /^\s*(\d+)\s+(.*)$/.exec(l))
+    .filter((m): m is RegExpExecArray => !!m && paths.some((p) => m[2].includes(p)) && Number(m[1]) !== process.pid)
+    .map((m) => Number(m[1]));
+  for (const pid of left) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
   }
-};
+  return left;
+}
 
-const until = checks.until;
+/** A stop's outcome as an item's status and reason. */
+const stopOutcome = (clean: boolean, orphans: number[]): Pick<Item, "status" | "reason"> => ({
+  status: clean && !orphans.length ? "pass" : "fail",
+  reason: orphans.length ? `left running: ${orphans.join(", ")} (killed)` : clean ? "supervisor and both workerds gone" : "didn't stop within 20 s (killed)",
+});
 
 /** Before anything runs on the copy: its switches are on, its configs say so, nothing is active, no secret is there. */
 async function safety(c: CopyClient, home: string, ports: number[]): Promise<CheckResult> {
@@ -156,6 +166,8 @@ async function safety(c: CopyClient, home: string, ports: number[]): Promise<Che
     const toolsConfig = readFileSync(join(data, "tools.capnp"), "utf8");
     const schedules = (await c.admin<any[]>("schedules", {})) ?? [];
     const secrets = (await c.call<any[]>("unreadableSecrets")) ?? [];
+    const settings = await c.adminGet<{ builder: string; intake: string }>("settings");
+    const stubs = c.ready.builders ?? [];
     const items: Item[] = [
       { name: "schedules off (HEWN_SCHEDULES=off)", status: st.schedules === "off" && /name = "SCHEDULES", text = "off"/.test(platformConfig) ? "pass" : "fail", reason: `the supervisor says ${st.schedules}` },
       { name: `${facts.copy.paused} schedule(s) paused before start, none active`, status: schedules.some((s) => s.status === "active") ? "fail" : "pass", reason: `${schedules.length} in the copy: ${[...new Set(schedules.map((s) => s.status))].join(", ") || "none"}` },
@@ -163,7 +175,7 @@ async function safety(c: CopyClient, home: string, ports: number[]): Promise<Che
       { name: "no secrets in the copy", status: secrets.length === 0 ? "pass" : "fail", reason: `rows removed before start: ${JSON.stringify(facts.copy.stripped)}` },
       { name: "spare ports, never a live Hewn's", status: ports.every((p) => !LIVE_PORTS.has(p)) && Number(new URL(c.ready.url).port) === ports[0] ? "pass" : "fail", reason: `${ports.join(", ")} (never ${[...LIVE_PORTS].join(", ")})` },
       { name: "the sandbox on; the secrets key a file in the copy", status: st.sandbox && st.keySource === "file" && existsSync(join(home, "master.key")) ? "pass" : "fail", reason: `sandbox ${st.sandbox ? "on" : "OFF"}, key ${st.keySource}` },
-      { name: "stub builders only", status: "pass", reason: "every builder name runs the stub; the intake is a stub" },
+      { name: "stub builders only", status: stubs.includes(settings.builder) && stubs.includes(settings.intake) ? "pass" : "fail", reason: `builder ${settings.builder}, intake ${settings.intake}; the stub under ${stubs.join(", ") || "no name"}` },
     ];
     return { status: worst(items.map((i) => i.status)), summary: items.every((i) => i.status === "pass") ? "every switch on and checked" : "a safety switch isn't on: stopped", items };
   });
@@ -191,11 +203,9 @@ async function restartCycle(r: checks.RunContext): Promise<CheckResult> {
     const st2 = await r.c.control<any>("status");
     items.push({ name: "the platform's workerd killed: restarted, the tools with it", status: alive(st2.toolsPid) && st2.toolsPid !== st1.toolsPid ? "pass" : "fail", reason: `restarts: platform ${st2.restarts}, tools ${st2.toolsRestarts}` });
     // A stop by the supervisor's pid, and a start on the same home.
-    hewn!.workerds = [st2.workerdPid, st2.toolsPid];
     const clean = await hewn!.stop();
     await sleep(500);
-    const orphans = hewn!.orphans();
-    items.push({ name: "stopped by its pid: nothing orphaned", status: clean && !orphans.length && !alive(st2.pid) ? "pass" : "fail", reason: clean ? (orphans.length ? `workerd left running: ${orphans.join(", ")} (killed)` : "supervisor and both workerds gone") : "didn't stop within 20 s (killed)" });
+    items.push({ name: "stopped by its pid: nothing orphaned", ...stopOutcome(clean && !alive(st2.pid), sweep()) });
     const ready = await hewn!.start();
     r.c.ready = ready;
     await until("up again", () => r.c.health(), 30_000);
@@ -207,6 +217,37 @@ async function restartCycle(r: checks.RunContext): Promise<CheckResult> {
 }
 
 let exitCode = 0;
+let finishing: Promise<never> | undefined;
+/**
+ * The end of every run, however it ends (done, stopped early, interrupted): the copy stopped and swept, the log
+ * scanned, the copy's home deleted (unless --keep), the report written. Once.
+ */
+function finish(code: number): Promise<never> {
+  finishing ??= (async () => {
+    await browser?.close();
+    if (hewn?.child) {
+      const clean = await hewn.stop();
+      await sleep(500);
+      const { status, reason } = stopOutcome(clean, sweep());
+      results.push({ id: "stop", title: "Stopped by its pid, nothing orphaned", status, summary: reason!, ms: 0 });
+    } else sweep();
+    if (existsSync(logFile)) results.push(await checks.logScan({ logFile }));
+    if (o.keep) say(`kept the copy: ${work}`);
+    else rmSync(work, { recursive: true, force: true });
+    const { file, status } = writeReport(out, facts, baseline ? againstBaseline(results, baseline) : results);
+    say(`${status}: ${file}`);
+    process.exit(code || (status === "fail" ? 1 : 0));
+  })();
+  return finishing;
+}
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    facts.aborted ??= `interrupted (${sig})`;
+    say(`interrupted: stopping the copy`);
+    void finish(130);
+  });
+}
+
 try {
   say(`copying ${o.from} into ${work}`);
   const t0 = Date.now();
@@ -222,7 +263,7 @@ try {
   const base = Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]));
   // Only these: nothing of a live Hewn's environment (a build service, a proxy secret, a metrics port) reaches the copy.
   const copyEnv = { ...base, HEWN_HOME: copy.home, HEWN_PORT: String(ports.port), HEWN_PUBLIC_PORT: String(ports.publicPort), HEWN_KEY_SOURCE: "file", HEWN_SCHEDULES: "off", HEWN_NETWORK: network };
-  hewn = new Hewn({ ...copyEnv, SMOKE_TREE: tree, SMOKE_PUBLIC_PORT: String(ports.publicPort), SMOKE_NETWORK: network, SMOKE_STUB: stubFile });
+  hewn = new CopyProcess({ ...copyEnv, SMOKE_TREE: tree, SMOKE_PUBLIC_PORT: String(ports.publicPort), SMOKE_NETWORK: network, SMOKE_STUB: stubFile });
   say(`starting ${treeRef} on ${ports.port}`);
   const c = new CopyClient(await hewn.start());
   const safe = await safety(c, copy.home, [ports.port, ports.publicPort]);
@@ -242,8 +283,8 @@ try {
   const opened = await Browser.open(c);
   if (typeof opened === "string") say(`no browser: ${opened}`);
   else browser = opened;
-  const r: checks.RunContext = { c, tree, out, env: copyEnv, network, stubFile, logFile, timings: facts.timings, memory: facts.memory, browser, tools, pick: checks.pickTool(tools, o.tool) };
-  if (o.tool && !r.pick) throw new Error(`no tool ${o.tool} in the copy`);
+  const r: checks.RunContext = { c, tree, out, env: copyEnv, network, stubFile, logFile, timings: facts.timings, memory: facts.memory, browser, tools, changeTool: checks.pickTool(tools, o.tool) };
+  if (o.tool && !r.changeTool) throw new Error(`no tool ${o.tool} in the copy`);
 
   for (const run of [checks.processes, checks.doctor, checks.readiness, checks.widgets, checks.readOps, checks.pages, checks.changeAndRollback, checks.stopAndRetry]) {
     const res = await run(r);
@@ -259,14 +300,11 @@ try {
         let seen = 0;
         return {
           copy: c,
-          tool: r.pick?.id,
+          tool: r.changeTool?.id,
           log: (l) => say(`  ${l}`),
           stub: {
             events: (id) => stubEvents(stubFile).filter((e) => !id || e.buildId === id),
-            waitFor: async (id, event, ms = 120_000) => {
-              await until(`the stub's ${event} for ${id}`, () => stubEvents(stubFile).some((e) => e.buildId === id && e.event === event), ms);
-              return stubEvents(stubFile).find((e) => e.buildId === id && e.event === event)!;
-            },
+            waitFor: (id, event, ms) => checks.stubEvent(stubFile, id, event, ms),
           },
           waitBuild: (id, ms) => checks.waitBuild(c, id, ms),
           page: async (hash = "#/") => {
@@ -306,25 +344,8 @@ try {
   say(`${restart.status.padEnd(4)} ${restart.title}: ${restart.summary}`);
   results.push(restart);
 } catch (e) {
-  facts.aborted = (e as Error).message;
+  facts.aborted ??= (e as Error).message;
   say(`stopped: ${facts.aborted}`);
   exitCode = 2;
-} finally {
-  await browser?.close();
-  if (hewn?.ready) {
-    try {
-      const st = await new CopyClient(hewn.ready).control<any>("status");
-      hewn.workerds = [st.workerdPid, st.toolsPid].filter(Boolean);
-    } catch {}
-  }
-  const clean = await hewn?.stop();
-  await sleep(500);
-  const orphans = hewn?.orphans() ?? [];
-  if (hewn?.ready) results.push({ id: "stop", title: "Stopped by its pid, nothing orphaned", status: clean && !orphans.length ? "pass" : "fail", summary: orphans.length ? `workerd left running: ${orphans.join(", ")} (killed)` : clean ? "supervisor and both workerds gone" : "didn't stop within 20 s (killed)", ms: 0 });
-  if (existsSync(logFile)) results.push(await checks.logScan({ logFile }));
-  if (o.keep) say(`kept the copy: ${work}`);
-  else rmSync(work, { recursive: true, force: true });
 }
-const { file, status } = writeReport(out, facts, baseline ? againstBaseline(results, baseline) : results);
-say(`${status}: ${file}`);
-process.exit(exitCode || (status === "fail" ? 1 : 0));
+await finish(exitCode);

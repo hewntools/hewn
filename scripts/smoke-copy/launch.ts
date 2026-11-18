@@ -88,8 +88,23 @@ const builders = Object.fromEntries(names.map((n) => [n, stub(n)]));
 const intake = () => async () => ({ kind: "answer", message: "This is a smoke copy: its intake is a stub and drafts nothing." });
 
 const home = openHome(root);
+// A stop asked for while it's still starting is kept until it's up (startSupervisor leaves nothing running when it
+// fails): Node's default on SIGTERM ends the process without its exit handlers, which would orphan both workerds.
+let s: any;
+let stopping = false;
+const stop = async () => {
+  if (stopping) return;
+  stopping = true;
+  if (!s) return;
+  rmSync(sv.supervisorFile(home), { force: true });
+  await s.stop();
+  process.exit(0);
+};
+process.on("SIGINT", stop);
+process.on("SIGTERM", stop);
+
 const startedAt = Date.now();
-const s = await sv.startSupervisor({
+s = await sv.startSupervisor({
   home,
   port,
   publicPort,
@@ -106,18 +121,12 @@ const s = await sv.startSupervisor({
   models: async (agent: string) => ({ agent, models: [{ id: "default", label: "Default", kind: "default", efforts: [] }] }),
   log,
 });
+if (stopping) {
+  stopping = false;
+  await stop();
+}
 writeFormat(home);
 // What `hewn doctor`, `hewn status` and `hewn open --print` read, as `hewn serve` writes it.
 writeFileAtomic(sv.supervisorFile(home), JSON.stringify({ url: s.url, adminToken: s.adminToken, control: s.control, publicListener: s.publicUrl, pid: process.pid }) + "\n", 0o600);
-console.log(`SMOKE-READY ${JSON.stringify({ url: s.url, adminToken: s.adminToken, control: s.control, pid: process.pid, startMs: Date.now() - startedAt })}`);
-
-let stopping = false;
-const stop = async () => {
-  if (stopping) return;
-  stopping = true;
-  rmSync(sv.supervisorFile(home), { force: true });
-  await s.stop();
-  process.exit(0);
-};
-process.on("SIGINT", stop);
-process.on("SIGTERM", stop);
+// `builders`: every name the copy's workbench has, each the stub (the safety check holds the settings to them).
+console.log(`SMOKE-READY ${JSON.stringify({ url: s.url, adminToken: s.adminToken, control: s.control, pid: process.pid, startMs: Date.now() - startedAt, builders: names })}`);

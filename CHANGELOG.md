@@ -17,7 +17,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Safety and limits
 
-- **A copy of a Hewn can't act for you.** To try a backup on another machine or home, start it with `HEWN_SCHEDULES=off` (no schedule runs, not even by hand) and `HEWN_NETWORK=off` (nothing goes out; `get` lets tools read, never post). See [Trying a backup without it acting for you](docs/data.md#trying-a-backup-without-it-acting-for-you).
+- **Try a backup in a second Hewn without it acting for you:** start it with `HEWN_SCHEDULES=off` (no schedule runs, not even by hand) and `HEWN_NETWORK=off` (nothing goes out; `get` lets tools read, never post). See [Trying a backup without it acting for you](docs/data.md#trying-a-backup-without-it-acting-for-you).
 
 ### Fixes
 

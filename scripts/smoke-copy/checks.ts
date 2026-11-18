@@ -3,10 +3,11 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { NetworkMode } from "../../packages/host-workerd/src/egress.ts";
 import { Browser, HOME_READY, type Watched } from "./browser.ts";
 import type { CopyClient } from "./client.ts";
 import { type CheckResult, type Item, type RunFacts, type Status, worst } from "./report.ts";
-import { sleep, stubEvents } from "./scenario.ts";
+import { sleep, type StubEvent, stubEvents } from "./scenario.ts";
 
 /** A tool of the copy as the checks see it: its manifest and readiness, and its live version. */
 export interface Tool {
@@ -24,7 +25,7 @@ export interface RunContext {
   out: string;
   /** The copy's environment for the tree's CLI (`hewn doctor`). */
   env: NodeJS.ProcessEnv;
-  network: "off" | "get";
+  network: NetworkMode;
   stubFile: string;
   logFile: string;
   timings: RunFacts["timings"];
@@ -32,7 +33,7 @@ export interface RunContext {
   browser?: Browser;
   tools: Tool[];
   /** The tool changes are made on. */
-  pick?: Tool;
+  changeTool?: Tool;
 }
 
 const TERMINAL = new Set(["promoted", "failed", "cancelled", "review"]);
@@ -40,6 +41,29 @@ const TERMINAL = new Set(["promoted", "failed", "cancelled", "review"]);
 /** Wait until `fn` holds, or throw after `ms`. */
 export async function until(what: string, fn: () => boolean | Promise<boolean>, ms: number) {
   for (const end = Date.now() + ms; !(await Promise.resolve().then(fn).catch(() => false)); await sleep(250)) if (Date.now() > end) throw new Error(`${what}: not within ${ms / 1000} s`);
+}
+
+/** The stub builder's `event` for a build, once it's noted, or throws after `ms`. */
+export async function stubEvent(file: string, buildId: string, event: StubEvent["event"], ms = 120_000): Promise<StubEvent> {
+  const find = () => stubEvents(file).find((e) => e.buildId === buildId && e.event === event);
+  await until(`the stub builder's ${event} for ${buildId}`, () => !!find(), ms);
+  return find()!;
+}
+
+/** Whether a process is running. */
+export function alive(pid?: number | null): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A tool's live version. */
+export async function liveVersion(c: CopyClient, id: string): Promise<number | undefined> {
+  return (await c.admin<{ capabilities: { id: string; version?: number }[] }>("status")).capabilities.find((x) => x.id === id)?.version;
 }
 
 /** Run `fn` as a check: its time, and a failure if it throws. */
@@ -128,15 +152,19 @@ function cantRun(t: Tool, all: Tool[]): string | undefined {
   return undefined;
 }
 
-/** After a failed call: a skip when it's what a copy can't do (the network), else a failure. */
-function failedCall(t: Tool, all: Tool[], network: RunContext["network"], message: string): Item["status"] {
-  if (/egress denied|network is off|HEWN_NETWORK/.test(message)) return "skip";
-  if (network === "off" && reachesNetwork(t, all)) return "skip";
-  if (/not_ready/.test(message) && calleesOf(t, all).some((x) => !x.ready)) return "skip";
-  return "fail";
+/**
+ * A failed call, as an item: a skip only when it's what a copy can't do: its fetch refused by the copy's switch (the
+ * gate's own words, or a tool that reaches the network failing on a fetch while it's off), or a tool it calls not ready.
+ * A host outside the tool's grant, or any other error, is a failure.
+ */
+function failedCall(name: string, t: Tool, all: Tool[], network: NetworkMode, message: string): Item {
+  const hosts = [...new Set([t, ...calleesOf(t, all)].flatMap(hostsOf))].join(", ") || "the network";
+  if (/network is off/.test(message)) return { name, status: "skip", reason: `network off: it reaches ${hosts}` };
+  if (/only GET and HEAD go out/.test(message)) return { name, status: "skip", reason: "it posts (or upgrades), and the copy lets only GET and HEAD out (--network)" };
+  if (network === "off" && reachesNetwork(t, all) && !/approved hosts/.test(message) && /\b403\b|forbidden|egress|fetch|network/i.test(message)) return { name, status: "skip", reason: `network off: it reaches ${hosts} (${message.slice(0, 120)})` };
+  if (/not_ready/.test(message) && calleesOf(t, all).some((x) => !x.ready)) return { name, status: "skip", reason: `a tool it calls isn't ready on the copy (${message.slice(0, 120)})` };
+  return { name, status: "fail", reason: message.slice(0, 300) };
 }
-const networkReason = (t: Tool, all: Tool[], network: RunContext["network"], message: string) =>
-  network === "off" ? `network off: it reaches ${[...new Set([t, ...calleesOf(t, all)].flatMap(hostsOf))].join(", ") || "the network"}` : /only GET and HEAD/.test(message) ? "it posts, and the copy lets only GET and HEAD out (--network)" : `not run on the copy: ${message.slice(0, 160)}`;
 
 // ---------- the checks ----------
 
@@ -160,7 +188,6 @@ export const doctor = (r: RunContext) =>
 export const processes = (r: RunContext) =>
   check("processes", "Both processes up", async () => {
     const st = await r.c.control<any>("status");
-    const alive = (pid: number | null) => !!pid && (() => { try { process.kill(pid, 0); return true; } catch { return false; } })();
     const items: Item[] = [
       { name: "supervisor", status: alive(st.pid) ? "pass" : "fail", reason: `pid ${st.pid}` },
       { name: "platform (workerd)", status: alive(st.workerdPid) && (await r.c.health()) ? "pass" : "fail", reason: `pid ${st.workerdPid}` },
@@ -195,9 +222,7 @@ export const widgets = (r: RunContext) =>
         if (!v || typeof v !== "object") return { name, status: "fail", reason: `no view: ${JSON.stringify(view).slice(0, 160)}` };
         return { name, status: "pass", ms: Date.now() - t0 };
       } catch (e) {
-        const m = (e as Error).message;
-        const st = failedCall(t, r.tools, r.network, m);
-        return { name, status: st, reason: st === "skip" ? networkReason(t, r.tools, r.network, m) : m.slice(0, 300) };
+        return failedCall(name, t, r.tools, r.network, (e as Error).message);
       }
     });
     return { status: worst(items.map((i) => i.status)), summary: `${items.length} widgets: ${counts(items)}`, items };
@@ -223,9 +248,7 @@ export const readOps = (r: RunContext) =>
         if (!reachesNetwork(t, r.tools) && (!fastest || ms < fastest.ms)) fastest = { t, o, ms };
         return { name, status: "pass", ms };
       } catch (e) {
-        const m = (e as Error).message;
-        const st = failedCall(t, r.tools, r.network, m);
-        return { name, status: st, reason: st === "skip" ? networkReason(t, r.tools, r.network, m) : m.slice(0, 300) };
+        return failedCall(name, t, r.tools, r.network, (e as Error).message);
       }
     });
     if (fastest) r.timings[`a tool call, as the owner (${fastest.t.id} · ${fastest.o.name})`] = fastest.ms;
@@ -269,7 +292,7 @@ export const pages = (r: RunContext) =>
     await w.page.waitForSelector(".inbox-panel", { state: "visible", timeout: 10_000 });
     await shoot(w, "inbox", "Inbox", n);
     await w.page.keyboard.press("Escape");
-    const tool = r.pick ?? r.tools.find((t) => t.ready) ?? r.tools[0];
+    const tool = r.changeTool ?? r.tools.find((t) => t.ready) ?? r.tools[0];
     for (const [hash, name, title] of [...(tool ? [[`#/c/${encodeURIComponent(tool.id)}`, "info", `A tool's Info (${tool.id})`]] : []), ["#/activity", "activity", "Activity"], ["#/settings", "settings", "Settings"]] as [string, string, string][]) {
       n = w.errors.length;
       await w.page.goto(`${r.c.origin}/${hash}`);
@@ -298,13 +321,12 @@ export { waitBuild };
 
 /** Back to `version` (when the tool isn't there already). */
 async function backTo(c: CopyClient, id: string, version: number) {
-  const now = (await c.admin<{ capabilities: { id: string; version?: number }[] }>("status")).capabilities.find((x) => x.id === id)?.version;
-  if (now !== version) await c.admin("rollback", { capabilityId: id, version });
+  if ((await liveVersion(c, id)) !== version) await c.admin("rollback", { capabilityId: id, version });
 }
 
 export const changeAndRollback = (r: RunContext) =>
   check("change", "A change goes live (stub builder), then a rollback", async () => {
-    const t = r.pick;
+    const t = r.changeTool;
     if (!t?.version) return { status: "skip", summary: "no tool fits (ready, its own code only)" };
     const items: Item[] = [];
     const t0 = Date.now();
@@ -313,7 +335,7 @@ export const changeAndRollback = (r: RunContext) =>
     items.push({ name: `change ${t.id} v${t.version}`, status: b.status === "promoted" ? "pass" : "fail", reason: b.status === "promoted" ? `v${b.resultVersion}, ${b.tests ? `${b.tests.passed}/${b.tests.total} test cases` : "no test cases"}` : `${b.status}: ${b.failure?.message ?? b.log?.slice(-3).join(" | ")}` });
     if (b.status === "promoted") {
       const rb = await r.c.admin("rollback", { capabilityId: t.id, version: t.version });
-      const now = (await r.c.admin<{ capabilities: { id: string; version?: number }[] }>("status")).capabilities.find((x) => x.id === t.id)?.version;
+      const now = await liveVersion(r.c, t.id);
       items.push({ name: "rollback", status: now === t.version ? "pass" : "fail", reason: `v${rb.from} → v${rb.to}, live: v${now}` });
       const call = (t.manifest.operations ?? []).find((o: any) => o.sideEffect === "read" && !o.inputSchema?.required?.length);
       if (call) {
@@ -330,17 +352,17 @@ export const changeAndRollback = (r: RunContext) =>
 
 export const stopAndRetry = (r: RunContext) =>
   check("retry", "Stop a build mid-way, then Retry: it carries on", async () => {
-    const t = r.pick;
+    const t = r.changeTool;
     if (!t?.version) return { status: "skip", summary: "no tool fits (ready, its own code only)" };
     const items: Item[] = [];
     const started = await r.c.admin("modify", { capabilityId: t.id, request: "Smoke run [smoke:slow]: work slowly until stopped." });
     const id = started.buildId as string;
-    await until("the stub builder starts working", () => stubEvents(r.stubFile).some((e) => e.buildId === id && e.event === "waiting"), 120_000);
+    await stubEvent(r.stubFile, id, "waiting");
     items.push({ name: "the build is working", status: "pass", reason: id });
     await r.c.call("cancelBuild", id);
     await until("the build stops", async () => (await r.c.call("getBuild", id)).status === "cancelled", 30_000);
     // Its builder told to stop, as the owner sees it stop before pressing Start again.
-    const told = await until("the builder is told to stop", () => stubEvents(r.stubFile).some((e) => e.buildId === id && e.event === "stopped"), 10_000).then(() => true, () => false);
+    const told = await stubEvent(r.stubFile, id, "stopped", 10_000).then(() => true, () => false);
     items.push({ name: "Stop", status: told ? "pass" : "fail", reason: told ? "cancelled; its builder stopped" : "cancelled, but its builder wasn't told to stop within 10 s" });
     const t0 = Date.now();
     const retry = await r.c.call("retryBuild", id);

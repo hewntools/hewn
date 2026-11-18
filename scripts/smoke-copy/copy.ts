@@ -13,6 +13,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { backupNow, restoreBackup } from "../../packages/cli/src/backup.ts";
 import type { Home } from "../../packages/cli/src/home.ts";
+import { STORAGE_KEYS } from "../../packages/cli/src/supervisor/format.ts";
 
 /** Tables whose rows a copy never keeps: the owner's secrets (ciphertext), and sign-in tokens (hashes). */
 export const STRIPPED_TABLES = ["secrets_enc", "oauth_tokens", "web_sessions"] as const;
@@ -39,20 +40,24 @@ export interface CopyFacts {
 /** A Home for a path without making anything in it (openHome makes folders: never in a source). */
 const homeAt = (root: string): Home => ({ root, db: join(root, "platform.db"), capabilities: join(root, "capabilities"), builds: join(root, "builds") });
 
-/** Every SQLite file of a home's data: the workerd host's under workerd/do, and a Node host's platform.db. */
+/** SQLite files under `dir`, all the way down. */
+function sqliteFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sqliteFiles(join(dir, e.name)) : e.isFile() && e.name.endsWith(".sqlite") ? [join(dir, e.name)] : []));
+}
+
+/** Every SQLite file of a home's data: Hewn's own and each tool's (workerd/do), and a Node host's platform.db. */
 export function databases(root: string): string[] {
-  const out: string[] = [];
-  const walk = (d: string) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile() && e.name.endsWith(".sqlite")) out.push(p);
-    }
-  };
-  const doDir = join(root, "workerd", "do");
-  if (existsSync(doDir)) walk(doDir);
-  if (existsSync(join(root, "platform.db"))) out.push(join(root, "platform.db"));
-  return out.sort();
+  return [...sqliteFiles(join(root, "workerd", "do")), ...(existsSync(join(root, "platform.db")) ? [join(root, "platform.db")] : [])].sort();
+}
+
+/**
+ * Hewn's own databases, where schedules, secrets and tokens are: the owner's Durable Object (workerd/do/hewn-owner),
+ * and a Node host's platform.db. Never a tool's own (workerd/do/hewn-capability): a table there called `schedules`
+ * or `web_sessions` is the tool's data, which the copy keeps as it is.
+ */
+export function hewnDatabases(root: string): string[] {
+  return [...sqliteFiles(join(root, "workerd", "do", STORAGE_KEYS.owner)), ...(existsSync(join(root, "platform.db")) ? [join(root, "platform.db")] : [])].sort();
 }
 
 const tablesOf = (db: DatabaseSync) => new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => String((r as { name: string }).name)));
@@ -62,7 +67,7 @@ const tablesOf = (db: DatabaseSync) => new Set(db.prepare("SELECT name FROM sqli
  * Throws when anything is off: then the copy must not start.
  */
 export function makeSafe(home: string): Omit<CopyFacts, "home" | "backupDir" | "source"> {
-  const files = databases(home);
+  const files = hewnDatabases(home);
   if (!files.length) throw new Error(`no databases in ${home}: nothing to start`);
   const stripped: Record<string, number> = {};
   const schedules: Record<string, number> = {};

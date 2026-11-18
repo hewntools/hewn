@@ -24,12 +24,12 @@ Exit code: 0 pass (or warnings, skips), 1 a check failed, 2 the run stopped earl
 
 Each of these fails closed: when it can't be done or checked, the copy doesn't start (or is stopped at once).
 
-- **No secrets.** The copy's home is new: only `workerd/do` and `workerd/blobs` come from the source, never its `master.key`, `platform.json` or tunnel. Before start, `secrets_enc` (the owner's secrets, encrypted), `oauth_tokens` and `web_sessions` are emptied in every database, then checked empty. The copy gets a key of its own (`HEWN_KEY_SOURCE=file`, a `master.key` in the copy: no Keychain entry). So a connection's sign-in is gone: it can't refresh a token and sign the live Hewn out of a service, and the report skips it as "needs signing in again".
-- **No schedules,** twice: every active schedule is paused in SQLite before start (every `*.sqlite` under `workerd/do`, and `platform.db`), then none may be left active; and the copy runs with `HEWN_SCHEDULES=off`. The report says how many were paused.
+- **No secrets.** The copy's home is new: only `workerd/do` and `workerd/blobs` come from the source, never its `master.key`, `platform.json` or tunnel. Before start, `secrets_enc` (the owner's secrets, encrypted), `oauth_tokens` and `web_sessions` are emptied in Hewn's own database (`workerd/do/hewn-owner`, or a Node host's `platform.db`), then checked empty. Tools' own databases (`workerd/do/hewn-capability`) are left as they are: a table there called `schedules` is the tool's data. The copy gets a key of its own (`HEWN_KEY_SOURCE=file`, a `master.key` in the copy: no Keychain entry). So a connection's sign-in is gone: it can't refresh a token and sign the live Hewn out of a service, and the report skips it as "needs signing in again".
+- **No schedules,** twice: every active schedule is paused in SQLite before start (in Hewn's own database, as above), then none may be left active; and the copy runs with `HEWN_SCHEDULES=off`. The report says how many were paused.
 - **No network** unless `--network`, and then only GET and HEAD: `HEWN_NETWORK`. A read operation's `sideEffect` is only its author's word, and a tool's config (a webhook URL) can point anywhere. A GET can still carry data in its address, to a host the tool is allowed: use `--network` on copies whose tools are known to only read.
 - **No real builder or model.** The copy runs the tree's own supervisor and workerd host (`startSupervisor`, as `hewn serve` does, from `scripts/smoke-copy/launch.ts`), with a stub builder under every builder's name and a stub intake: nothing runs Claude Code, Codex or OpenCode on the owner's accounts. The copy has no model keys (they're secrets).
 - **Its own ports**, never 7717, 7718 or 9091 (nor `HEWN_PORT`'s and the next), and only its own environment: nothing of a live Hewn's (`HEWN_BUILD_URL`, `HEWN_PROXY_SECRET`, `HEWN_METRICS_PORT`) reaches it. Its backups go to its own folder, with today's already there so the nightly one doesn't run.
-- **The sandbox on.** Stopped by its own pid (SIGTERM, SIGKILL after 20 s); a workerd of the copy's still running after that is reported and killed by its pid, checked to be the copy's. Never `pkill`.
+- **The sandbox on.** Stopped by its own pid (SIGTERM, SIGKILL after 20 s), however the run ends (Ctrl-C too); then any process whose command line names the copy's folder is reported and killed by its pid. Never `pkill`. A stop asked for while it's still starting waits until it's up, then stops it.
 - **A tree without `HEWN_SCHEDULES` and `HEWN_NETWORK`** (one from before 0.4.12) is refused: the copy would start with its schedules and network on.
 
 Right after start, the **Safety** check reads the supervisor's status and the two workerd configs (`config.capnp`, `tools.capnp`) and stops the run unless every switch is on.
@@ -42,15 +42,15 @@ For copies and drills, never an owner's own Hewn. Both are read by `hewn serve` 
 | --- | --- |
 | `HEWN_SCHEDULES=off` | No schedule runs, whatever its status: nothing is due (the DO alarm isn't armed, the resume check finds nothing), and Run now is refused (`PlatformOptions.schedulesOff`). |
 | `HEWN_NETWORK=off` | Tools' Egress refuses every fetch (`egress denied: the network is off…`), and the tools' workerd has no network. |
-| `HEWN_NETWORK=get` | Tools' Egress lets only GET and HEAD to approved hosts out; anything else is refused before it's sent. |
+| `HEWN_NETWORK=get` | Tools' Egress lets only GET and HEAD to approved hosts out (not an upgrade to a WebSocket); anything else is refused before it's sent. |
 
-With either network mode, the platform's own fetches are off too (its `internet` service allows nothing): model providers, a connection's sign-in, an install from a link, the model catalog. `hewn status` and `/control/status` say when either switch is on.
+With either network mode, the platform's own fetches are off too (its `internet` service allows nothing): model providers, a connection's sign-in, an install from a link, the model catalog; and no tunnel starts. `hewn status` and `/control/status` say when either switch is on. Neither stops a build that was running when the backup was made from starting again at start, on the builder the settings name: the harness's stubs make that harmless; a `hewn serve` of a copy doesn't have them.
 
 ## The fixed checks
 
 | Check | |
 | --- | --- |
-| Safety | Above. |
+| Safety | Above, and the settings' builder and intake are names the stub runs under. |
 | Both processes up | The supervisor and both workerds alive, `/health`, the sandbox on. |
 | `hewn doctor` | The tree's own, on the copy. The warnings every copy gets (its key is a file, agents point at the live Hewn) don't count. |
 | Every tool ready | Skipped with the reason when it's only what a copy lacks: a connection's sign-in, a secret, a model key, a grant the owner hasn't given (as on the source). A tool suspended in the source is a warning. |

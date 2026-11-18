@@ -33,6 +33,10 @@ export async function gatedFetch(request: Request, hosts: string[], fetchFn: (re
   if (network === "get" && request.method !== "GET" && request.method !== "HEAD") {
     return new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); a ${request.method} to ${url.hostname} wasn't sent`, { status: 403 });
   }
+  // A GET that asks to become a WebSocket would be a channel both ways.
+  if (network === "get" && request.headers.has("upgrade")) {
+    return new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); an upgrade to ${request.headers.get("upgrade")} at ${url.hostname} wasn't sent`, { status: 403 });
+  }
   if (!hostAllowed(url.hostname, hosts)) return denied(url.hostname);
   let method = request.method;
   const headers = new Headers(request.headers);

@@ -35,6 +35,7 @@ export async function copyPorts(pick: () => Promise<number> = freePort, avoid: I
 /** Throws unless every port the copy uses is spare (a last look before it starts). */
 export function assertSpare(ports: number[], avoid: Iterable<number> = []) {
   const off = new Set([...LIVE_PORTS, ...avoid]);
+  for (const p of [...off]) off.add(p + 1);
   const bad = ports.filter((p) => off.has(p));
   if (bad.length) throw new Error(`port ${bad.join(", ")} is a live Hewn's: the copy never uses it`);
 }

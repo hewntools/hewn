@@ -13,6 +13,8 @@ export interface Ready {
   control: { url: string; token: string };
   pid: number;
   startMs: number;
+  /** Every builder name the copy's workbench has: each one the stub builder. */
+  builders?: string[];
 }
 
 export interface WebResponse {
@@ -40,6 +42,13 @@ export class CopyClient {
     const out = (await res.json().catch(() => ({}))) as any;
     if (!res.ok || out?.error) throw new Error(out?.message ?? out?.error ?? `HTTP ${res.status}`);
     return out as T;
+  }
+
+  /** A read on the admin channel (GET), e.g. `settings`. */
+  async adminGet<T = any>(path: string): Promise<T> {
+    const res = await fetch(`${this.ready.url}/_admin/${path}`, { headers: { "x-hewn-admin": this.ready.adminToken }, signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    return (await res.json()) as T;
   }
 
   /** An allow-listed core method, as the owner (`hewn`'s admin calls). */

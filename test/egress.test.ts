@@ -64,6 +64,11 @@ describe("egress gate", () => {
       assert.match(await r.text(), new RegExp(`^egress denied: only GET and HEAD go out .* a ${method} to api\\.example\\.com`));
     }
     assert.deepEqual(n.seen.map((s) => s.method), ["GET", "HEAD"]);
+    // A GET that would become a WebSocket (a channel both ways) is refused too.
+    const ws = await gatedFetch(new Request("https://api.example.com/a", { headers: { upgrade: "websocket" } }), ["api.example.com"], n.fetchFn, "get");
+    assert.equal(ws.status, 403);
+    assert.match(await ws.text(), /an upgrade to websocket at api\.example\.com wasn't sent/);
+    assert.equal(n.seen.length, 2);
     // An unapproved host is still refused.
     assert.equal((await gatedFetch(new Request("https://evil.example/"), ["api.example.com"], n.fetchFn, "get")).status, 403);
     assert.equal(n.seen.length, 2);

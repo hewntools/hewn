@@ -46,6 +46,12 @@ describe("a copy with schedules off and the network at GET only (workerd host)",
     assert.match(readFileSync(join(data, "tools.capnp"), "utf8"), /\(name = "NETWORK", text = "get"\)/);
   });
 
+  test("no tunnel starts on a copy", async () => {
+    const res = await fetch(`${h.sv.control.url}/control/tunnel`, { method: "POST", headers: { "x-hewn-control": h.sv.control.token, "content-type": "application/json" }, body: JSON.stringify({ action: "start", tunnel: { kind: "cloudflared" } }) });
+    assert.notEqual(res.status, 200);
+    assert.match(await res.text(), /no tunnel here: this Hewn's network is off/);
+  });
+
   test("a POST from a tool is refused before it's sent, even to its approved host", async () => {
     const r = (await h.invoke("probe", "probe", { what: "post" })).result;
     assert.deepEqual(r, { ok: true, value: "denied" });

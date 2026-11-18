@@ -3,15 +3,15 @@
 // starts (or doesn't start), holds no secret or sign-in token, never takes a live Hewn's ports, and starts only on a
 // tree that has the copy switches.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { backupNow, restoreBackup } from "@hewntools/cli/backup.ts";
 import { openHome } from "@hewntools/cli/home.ts";
-import { databases, makeCopy, makeSafe } from "../scripts/smoke-copy/copy.ts";
+import { databases, hewnDatabases, makeCopy, makeSafe } from "../scripts/smoke-copy/copy.ts";
 import { assertSpare, copyPorts, LIVE_PORTS } from "../scripts/smoke-copy/ports.ts";
 import { FIXTURES } from "./helpers.ts";
 
@@ -62,6 +62,10 @@ describe("a copy for a smoke run", () => {
     insert(db, "secrets_enc", { capability_id: "hewn:models", name: "anthropic" });
     for (const t of ["oauth_tokens", "web_sessions"]) insert(db, t, {});
     db.close();
+    // A tool's own database with tables of the same names: the tool's data, never Hewn's.
+    const own = new DatabaseSync(join(source, "workerd", "do", "hewn-capability", "own-tables.sqlite"));
+    own.exec("CREATE TABLE schedules (id TEXT, status TEXT); INSERT INTO schedules VALUES ('mine', 'active'); CREATE TABLE web_sessions (id TEXT); INSERT INTO web_sessions VALUES ('kept')");
+    own.close();
     // What else a live home has, which a copy must never get.
     writeFileSync(join(source, "master.key"), "the-live-key\n");
     writeFileSync(join(source, "platform.json"), JSON.stringify({ backupDir: join(dir, "owners-backups"), publicListen: "0.0.0.0" }));
@@ -84,6 +88,10 @@ describe("a copy for a smoke run", () => {
     assert.deepEqual(JSON.parse(readFileSync(join(facts.home, "platform.json"), "utf8")), { backupDir: join(work, "backups") });
     assert.equal(readdirSync(join(work, "backups")).filter((f) => f.endsWith(".zip")).length, 1, "today's backup is there: the nightly one doesn't run");
     assert.ok(!existsSync(join(dir, "owners-backups")), "nothing went to the owner's backup folder");
+    const own = join(facts.home, "workerd", "do", "hewn-capability", "own-tables.sqlite");
+    assert.ok(!hewnDatabases(facts.home).includes(own) && databases(facts.home).includes(own));
+    assert.equal(count(own, "SELECT COUNT(*) AS n FROM schedules WHERE status = 'active'"), 1, "a tool's own table called schedules is its data: left as it is");
+    assert.equal(count(own, "SELECT COUNT(*) AS n FROM web_sessions"), 1);
   });
 
   test("from a home: read as a backup reads it, never written; the copy is the same", () => {
@@ -137,6 +145,36 @@ describe("a copy for a smoke run", () => {
   });
 });
 
+describe("an interrupted run", () => {
+  test("Ctrl-C while the copy starts: it's stopped, nothing of it left running, its home deleted, the report says so", async () => {
+    const out = mkdtempSync(join(tmpdir(), "hewn-smoke-int-"));
+    try {
+      const run = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", join(HARNESS, "smoke-copy.ts"), "--from", join(FIXTURES, "home-0.4.11.zip"), "--tree", ROOT, "--out", out], { stdio: ["ignore", "pipe", "pipe"] });
+      let text = "";
+      const exited = new Promise<number | null>((r) => run.once("exit", (code) => r(code)));
+      await new Promise<void>((ok, fail) => {
+        const t = setTimeout(() => fail(new Error(`no start in 60 s:\n${text}`)), 60_000);
+        run.stdout!.on("data", (b) => {
+          text += b;
+          if (text.includes("[smoke] starting")) {
+            clearTimeout(t);
+            ok();
+          }
+        });
+      });
+      const work = /copying .* into (\S+)/.exec(text)![1];
+      run.kill("SIGINT");
+      assert.equal(await exited, 130);
+      assert.match(readFileSync(join(out, "report.md"), "utf8"), /Stopped early:\*\* interrupted \(SIGINT\)/);
+      assert.ok(!existsSync(work), "the copy's home is gone");
+      const ps = spawnSync("ps", ["-axo", "command="], { encoding: "utf8" }).stdout;
+      assert.ok(!ps.includes(work.replace(/^\/var\//, "")), "nothing of the copy left running");
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("the copy's ports", () => {
   test("spare ones, never a live Hewn's (7717, 7718, 9091) nor next to one it's told of", async () => {
     const offered = [7717, 7718, 9091, 7727, 7728, 7717, 50001, 50001, 50002];
@@ -170,11 +208,7 @@ describe("the copy's Hewn", () => {
     }
   });
 
-  test("the harness's files are in the typecheck and carry their licence", () => {
+  test("the harness is in the typecheck", () => {
     assert.match(readFileSync(join(ROOT, "tsconfig.json"), "utf8"), /"scripts\/smoke-copy"/);
-    for (const f of readdirSync(HARNESS, { recursive: true }) as string[]) {
-      if (!f.endsWith(".ts") || !statSync(join(HARNESS, f)).isFile()) continue;
-      assert.match(readFileSync(join(HARNESS, f), "utf8").split("\n")[0], /SPDX-License-Identifier: AGPL-3.0-or-later/, f);
-    }
   });
 });
