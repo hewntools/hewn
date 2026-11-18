@@ -483,21 +483,26 @@ export const sheetActions = (...buttons) => h("div", { class: "actions flush" },
  * buttons. `onAccept(close)` runs with the primary disabled; `ready()` (optional) gates it.
  * Resolves with what the handlers pass to close (decline: false).
  */
-export function requestSheet({ icon, title, sub, quote, rows = [], extra, decline = "Not now", accept = "Allow", danger = false, onAccept, onDecline, width = 480 }) {
+/** `also`: [label, fn(close)], a second way to accept, beside it. */
+export function requestSheet({ icon, title, sub, quote, rows = [], extra, decline = "Not now", accept = "Allow", also, danger = false, onAccept, onDecline, width = 480 }) {
   return modal(
     (close) => {
       const yes = h("button", { class: danger ? "danger solid" : "primary" }, accept);
       const no = h("button", {}, decline);
-      yes.addEventListener("click", async () => {
-        yes.disabled = no.disabled = true;
+      const other = also ? h("button", { class: danger ? "danger" : "" }, also[0]) : null;
+      const busy = (on) => [yes, no, other].forEach((b) => b && (b.disabled = on));
+      const accepting = (fn) => async () => {
+        busy(true);
         try {
-          await (onAccept ? onAccept(close) : close(true));
+          await fn();
         } catch (e) {
           fail(e);
         } finally {
-          yes.disabled = no.disabled = false;
+          busy(false);
         }
-      });
+      };
+      yes.addEventListener("click", accepting(() => (onAccept ? onAccept(close) : close(true))));
+      other?.addEventListener("click", accepting(() => also[1](close)));
       no.addEventListener("click", async () => {
         try {
           await (onDecline ? onDecline(close) : close(false));
@@ -505,7 +510,7 @@ export function requestSheet({ icon, title, sub, quote, rows = [], extra, declin
           fail(e);
         }
       });
-      return [sheetHead(icon, title, sub), quote && h("div", { class: "quote small" }, `“${quote}”`), rows.length > 0 && requestRows(rows), extra, sheetActions(no, yes)];
+      return [sheetHead(icon, title, sub), quote && h("div", { class: "quote small" }, `“${quote}”`), rows.length > 0 && requestRows(rows), extra, sheetActions(no, other, yes)];
     },
     { width },
   );

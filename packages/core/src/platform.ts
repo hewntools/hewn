@@ -301,6 +301,7 @@ export class Platform {
   setConfig(owner: Agent, capabilityId: string, name: string, value: string) { return this.d.grants.setConfig(owner, capabilityId, name, value); }
   confirmations(owner: Agent): Confirmation[] { return this.d.grants.confirmations(owner); }
   decideConfirmation(owner: Agent, id: string, approve: boolean) { return this.d.grants.decideConfirmation(owner, id, approve); }
+  approveConfirmations(owner: Agent, ids: string[]) { return this.d.grants.approveConfirmations(owner, ids); }
 
   // ---------- tool UIs, web sessions, the public URL, passkeys (platform/sessions.ts) ----------
 

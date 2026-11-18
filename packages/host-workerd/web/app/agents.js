@@ -472,13 +472,17 @@ async function agentRequestSheet(p, { inline } = {}) {
 /**
  * L3 An agent's destructive call, as a Request: what it wants to delete, on which tool and with
  * what input, its note, and a timer; Stop or Allow once. The agent is blocked until you decide.
+ * With two or more of that agent's calls of that operation waiting, Allow all N allows them all
+ * (each stays its own call in Activity); never across agents or operations.
  */
 async function confirmationSheet(c) {
-  const all = await caps().catch(() => new Map());
+  const [all, waiting] = await Promise.all([caps().catch(() => new Map()), api("/confirmations").catch(() => [])]);
+  const alike = waiting.filter((x) => x.id !== c.id && x.agentId === c.agentId && x.capabilityId === c.capabilityId && x.operation === c.operation);
   const cap = all.get(c.capabilityId) ?? { id: c.capabilityId, name: c.capabilityId };
   const who = actorLabel(c.agentId, all);
   const [op] = c.operation.split("@");
-  const ids = c.input && typeof c.input === "object" ? Object.entries(c.input).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ") : "";
+  const inputText = (x) => (x.input && typeof x.input === "object" ? Object.entries(x.input).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ") : "");
+  const ids = inputText(c);
   const words = op.replace(/_/g, " ");
   const timer = h("span", {});
   const tick = () => (timer.textContent = `It's waiting · ${mmss(Date.now() - Date.parse(c.createdAt))}`);
@@ -490,14 +494,22 @@ async function confirmationSheet(c) {
     pollInbox();
     close(approve);
   };
+  const allowAll = async (close) => {
+    await api(`/confirmations/${enc(c.id)}/all`, { method: "POST", body: { ids: alike.map((x) => x.id) } });
+    toast(`${who} may run all ${alike.length + 1} now`);
+    pollInbox();
+    close(true);
+  };
   return requestSheet({
     icon: agentTile(c.agentId, who, 48),
     title: `${who} wants to ${words}`,
     sub: timer,
     rows: [{ pill: kindTag("destructive", "danger"), main: h("span", { class: "row tight wrap" }, h("span", { class: "mono" }, op), "on", capRef(cap, c.capabilityId)), sub: ids || "no input", mono: true }],
+    extra: alike.length > 0 && h("div", { class: "small muted" }, `${alike.length} more ${alike.length === 1 ? "call" : "calls"} like it waiting: ${alike.map((x) => inputText(x) || "no input").join(" · ")}`),
     quote: c.note,
     decline: "Stop",
     accept: "Allow once",
+    also: alike.length > 0 && [`Allow all ${alike.length + 1}`, allowAll],
     danger: true,
     onAccept: decide(true),
     onDecline: decide(false),

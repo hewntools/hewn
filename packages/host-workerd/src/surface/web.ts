@@ -563,6 +563,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   if (resource === "confirmations") {
+    // Allow all N: this one and the others like it the owner saw (one agent, one operation).
+    if (id && method === "POST" && sub === "all") return platform.approveConfirmations(owner, [id, ...((await readJson(req)).ids ?? [])].map(String));
     if (id && method === "POST") return platform.decideConfirmation(owner, id, !!(await readJson(req)).approve);
     return platform.confirmations(owner);
   }

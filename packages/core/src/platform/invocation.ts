@@ -63,7 +63,7 @@ export class Invocation extends Domain {
     if (origin.kind === "agent" || readChain) {
       const op = resolveOperation(manifest, req.operation, req.operationVersion);
       if (readChain && op.sideEffect !== "read") throw new PlatformError("forbidden", `widgets are read-only: ${cap.id}/${opKey(op.name, op.version)} is a ${op.sideEffect} operation`);
-      if (op.sideEffect === "destructive" && origin.kind === "agent") await this.d.grants.confirmDestructive(origin, cap.id, opKey(op.name, op.version), req.input ?? {}, trace.slice(1));
+      if (op.sideEffect === "destructive" && origin.kind === "agent") await this.d.grants.confirmDestructive(origin, cap.id, opKey(op.name, op.version), req.input ?? {}, trace.slice(1), deadline);
     }
     // Only what is declared, granted and stored reaches the capability.
     const declared = manifest.requires?.secrets?.map((s) => s.name) ?? [];
