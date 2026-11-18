@@ -134,7 +134,7 @@ On the server, over SSH:
 hewn open --print
 ```
 
-It prints a one-time link on the public URL and a QR code. Scan it with your phone (or open the link on your laptop). The link works once, for two minutes. You're signed in, and Hewn offers to **add a passkey** on the device: Face ID, a fingerprint or the screen lock. From then on, open `https://hewn.example.com` and tap **Sign in with a passkey**.
+It prints a one-time link on the public URL and a QR code. Scan it with your phone (or open the link on your laptop). The link works once, for two minutes. You're signed in, and Hewn offers to **add a passkey** on the device: Face ID, a fingerprint or the screen lock. From then on, open `https://hewn.example.com` and tap **Sign in with a passkey**. A link to one of Hewn's pages (a bookmark, a tool's Info) asks for it too when the browser isn't signed in, and then opens that page.
 
 ![The sign-in page on the public URL, on a phone: Sign in with a passkey, and for a new device, hewn open --print on the server](images/passkey-sign-in.png)
 

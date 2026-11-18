@@ -683,6 +683,51 @@ export const operations = {
     if (notes !== 1) throw new Error(`${notes} Stopped. notes`);
     await page.unroute("**/api/intake");
   });
+  await step("a link in a tool's own screen to one of Hewn's pages opens it signed in, here or in a new tab as it asks, and never sends for the owner (#114)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-links-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "link-counter", name: "Link Counter" }));
+    writeFileSync(
+      join(dir, "ui", "index.html"),
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Links</title><link rel="stylesheet" href="/_platform/ui.css"></head>
+<body><main class="page stack"><h1>Links</h1>
+<a id="here" href="/#/activity">Activity</a>
+<a id="tab" href="/#/c/link-counter" target="_blank">Info</a>
+<a id="send" href="/#/new?m=Hello%20from%20a%20tool&send=1">Ask</a>
+<a id="own" href="#more">More</a></main></body></html>`,
+    );
+    const installed = await sv.admin("install", { name: "Link Counter", purpose: "Links", dir, wait: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    const frame = page.frameLocator("iframe.app-frame");
+    await page.goto(`${web}/#/app/link-counter`);
+    // Its own link stays in its frame.
+    await frame.locator("#own").click();
+    await page.waitForTimeout(300);
+    if (!page.url().endsWith("#/app/link-counter")) throw new Error(`its own link left the tool: ${page.url()}`);
+    // Here: the web client goes to the page, signed in (no sign-in page).
+    await frame.locator("#here").click();
+    await page.waitForURL(/#\/activity$/);
+    await page.locator("main").getByText("Activity").first().waitFor();
+    if (await page.getByText(/Signed out|Sign in/).count()) throw new Error("a sign-in page");
+    // A new tab, as the link asks: signed in there too.
+    await page.goto(`${web}/#/app/link-counter`);
+    const [tab] = await Promise.all([page.context().waitForEvent("page"), frame.locator("#tab").click()]);
+    await tab.waitForLoadState();
+    if (!tab.url().endsWith("#/c/link-counter")) throw new Error(`the new tab is at ${tab.url()}`);
+    await tab.getByRole("heading", { name: "Link Counter" }).first().waitFor({ timeout: 10_000 });
+    if (await tab.getByText(/Signed out|Sign in/).count()) throw new Error("the new tab has a sign-in page");
+    await tab.close();
+    // A link that would send a message for the owner: the message waits in the box.
+    await page.goto(`${web}/#/app/link-counter`);
+    await frame.locator("#send").click();
+    await page.waitForURL(/#\/new\?m=/);
+    if (page.url().includes("send=1")) throw new Error(`send stayed: ${page.url()}`);
+    const box = page.getByRole("textbox", { name: "Message" });
+    await box.waitFor();
+    await page.waitForTimeout(500);
+    if ((await box.inputValue()) !== "Hello from a tool") throw new Error(`box: ${await box.inputValue()}`);
+    if (await page.locator(".bubble.me").count()) throw new Error("a message was sent for the owner");
+  });
 } finally {
   await browser.close();
   await sv.stop();

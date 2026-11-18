@@ -21,6 +21,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- A link in a tool's own screen to one of Hewn's pages opened a new tab that asked you to sign in, and a passkey sign-in then went to Home. It now opens in Hewn, in its tab or a new one as the link asks, signed in; and a passkey sign-in goes back to the page it was asked on. See [Tool UIs](spec/tools.md#tool-uis) and [Sign in, then add a passkey](docs/remote-access.md#4-sign-in-then-add-a-passkey).
 - A schedule runs on time after the machine wakes from sleep. Before, the next schedule after a wake ran as late as the machine had slept: a laptop asleep from 23:00 to 07:00 ran a 12:00 schedule at about 20:00. The same for any machine that sleeps or suspends Hewn. See [Schedules](docs/using-hewn.md#schedules).
 - When a tool's code never lets go, Hewn now blames only that tool: a tool that was waiting on it, on a model or on the network at that moment isn't told it was its doing, and gets no strike toward being suspended. Activity lists every tool that was there and what it was doing, and a suspension says which stalls it came from. See [the threat model](docs/threat-model.md).
 - Opening a tool Hewn had suspended showed what it may do, not why it was suspended. It now says why, with Ask builder to fix and Resume, as its Info page does (since 0.4.11).

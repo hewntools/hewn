@@ -201,6 +201,8 @@ async function restartCycle(r: checks.RunContext): Promise<CheckResult> {
     }, 30_000);
     await sleep(1000);
     const st2 = await r.c.control<any>("status");
+    // The tools as they are now (a scenario may have added one), to find them all again after the start.
+    const tools = (await r.c.call<any[]>("list")).length;
     items.push({ name: "the platform's workerd killed: restarted, the tools with it", status: alive(st2.toolsPid) && st2.toolsPid !== st1.toolsPid ? "pass" : "fail", reason: `restarts: platform ${st2.restarts}, tools ${st2.toolsRestarts}` });
     // A stop by the supervisor's pid, and a start on the same home.
     const clean = await hewn!.stop();
@@ -211,7 +213,7 @@ async function restartCycle(r: checks.RunContext): Promise<CheckResult> {
     await until("up again", () => r.c.health(), 30_000);
     const st3 = await r.c.control<any>("status");
     const list = await r.c.call<any[]>("list");
-    items.push({ name: "started again on the same copy", status: alive(st3.workerdPid) && alive(st3.toolsPid) && list.length === r.tools.length ? "pass" : "fail", reason: `restarts: platform ${st3.restarts}, tools ${st3.toolsRestarts}; ${list.length} tools` });
+    items.push({ name: "started again on the same copy", status: alive(st3.workerdPid) && alive(st3.toolsPid) && list.length === tools ? "pass" : "fail", reason: `restarts: platform ${st3.restarts}, tools ${st3.toolsRestarts}; ${list.length} of ${tools} tools` });
     return { status: worst(items.map((i) => i.status)), summary: items.map((i) => i.reason).join("; "), items };
   });
 }
