@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Review of an agent's change: what's new, and what else changes.
-import { actorLabel, capRef, h } from "../kit.js";
+import { actorLabel, andList, capRef, h } from "../kit.js";
 
 export { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle };
 
@@ -12,7 +12,6 @@ const opLabel = (key) => {
   const [name, v] = key.split("@");
   return `${name.replace(/_/g, " ")}${v && v !== "1" ? ` (v${v})` : ""}`;
 };
-const andList = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
 /** "Claude Code wants to add “export all” to <Reading Log>" (the tool as a cap-ref). */
 function reviewTitle(b, all) {

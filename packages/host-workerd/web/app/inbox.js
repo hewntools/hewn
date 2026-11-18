@@ -144,10 +144,11 @@ async function renderInbox() {
 }
 
 let inboxTimer = null;
-async function pollInbox(withRecent = false) {
+/** `refresh`: the Inbox's own timer (see api), not something the owner did. */
+async function pollInbox(withRecent = false, { refresh = false } = {}) {
   clearTimeout(inboxTimer);
   if (!document.hidden) {
-    const next = await api(`/inbox${inboxPanel.isConnected || withRecent ? "?recent=1" : ""}`, { refresh: true }).catch(() => null);
+    const next = await api(`/inbox${inboxPanel.isConnected || withRecent ? "?recent=1" : ""}`, { refresh }).catch(() => null);
     if (next) {
       inboxData = { ...next, recent: next.recent ?? inboxData.recent };
       const n = next.needs.length;
@@ -160,7 +161,7 @@ async function pollInbox(withRecent = false) {
       renderInbox();
     }
   }
-  inboxTimer = setTimeout(pollInbox, inboxData.building?.length ? 4000 : 15000);
+  inboxTimer = setTimeout(() => pollInbox(false, { refresh: true }), inboxData.building?.length ? 4000 : 15000);
 }
 
 /** The one exception to "everything goes to the Inbox": an agent blocked on a destructive call. */

@@ -9,16 +9,23 @@ export const CLI = "hewn";
 
 /**
  * The server's web-client fingerprint (x-hewn-web). If it changes while this page is open, Hewn was
- * upgraded and this page runs old code against the new server: offer a reload (not forced, so
- * nothing typed is lost).
+ * upgraded and this page runs old code against the new server: offer a reload (never forced, hidden tab or not, so
+ * nothing typed is lost), and from then on the page's own refreshes stop until the owner reloads: old code polling
+ * the new server would keep it awake for a page nobody looks at.
  */
 let webBuild;
+let outdated = false;
+export const isOutdated = () => outdated;
+/** What a page's own refresh gets once the page is outdated: an answer that never comes, so its poll stops there. */
+const unanswered = new Promise(() => {});
 function checkBuild(res) {
   const v = res.headers.get("x-hewn-web");
   if (!v || v === webBuild) return;
   const changed = webBuild !== undefined;
   webBuild = v;
-  if (changed) toast(`${BRAND} was updated`, { dot: "warn", ms: Infinity, action: ["Reload", () => location.reload()] });
+  if (!changed || outdated) return;
+  outdated = true;
+  toast(`${BRAND} was updated`, { dot: "warn", ms: Infinity, action: ["Reload", () => location.reload()] });
 }
 
 /** Resolves when the tab is shown (at once if it is). */
@@ -33,10 +40,11 @@ export const shown = () =>
 /**
  * `refresh`: the page's own refresh (a poll, Home's widgets), not something the owner did. It waits while the tab is
  * hidden, so a forgotten tab makes no requests (and catches up when shown), and Hewn's idle clock ignores it, so an
- * open page doesn't keep Hewn awake.
+ * open page doesn't keep Hewn awake. Once Hewn was updated under the page, a refresh never goes (see checkBuild).
  */
 export async function api(path, { method = "GET", body, refresh = false } = {}) {
   if (refresh) await shown();
+  if (refresh && outdated) return unanswered;
   const res = await fetch(`/api${path}`, {
     method,
     headers: { "x-hewn-ui": "1", ...(refresh ? { "x-hewn-refresh": "1" } : {}), ...(body !== undefined ? { "content-type": "application/json" } : {}) },
@@ -130,6 +138,8 @@ export const ago = (iso) => {
 };
 export const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 export const enc = encodeURIComponent;
+/** ["A", "B", "C"] → "A, B and C". */
+export const andList = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
 export const skeleton = (...widths) =>
   h("div", { class: "stack", "aria-busy": "true", "aria-label": "Loading" }, (widths.length ? widths : ["40%", "70%", "55%"]).map((w) => h("span", { class: "skeleton", style: { width: w, height: "18px" } })));
@@ -236,7 +246,14 @@ export const builderLabel = (b) => (b === "agent" ? "your agent" : BUILDERS[b] ?
 let capCache = null;
 /** id → capability summary (Home data), shared by cap-refs across screens. `poll`: a page's own refresh (see api). */
 export async function caps(refresh = false, { poll = false } = {}) {
-  if (!capCache || refresh) capCache = api("/capabilities", { refresh: poll }).then((list) => new Map(list.map((c) => [c.id, c])));
+  // A poll fills the cache only once it's answered: an outdated page's never is (see api), and the owner's own
+  // requests mustn't wait on it.
+  if (poll) {
+    const fresh = await api("/capabilities", { refresh: true }).then((list) => new Map(list.map((c) => [c.id, c])));
+    capCache = Promise.resolve(fresh);
+    return fresh;
+  }
+  if (!capCache || refresh) capCache = api("/capabilities").then((list) => new Map(list.map((c) => [c.id, c])));
   try {
     return await capCache;
   } catch (e) {
