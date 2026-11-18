@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// #116: on a phone the tool's top bar showed Change…, Share… and •••, and the tool's name shrank to a letter. Now at
-// 640 px and under it keeps ••• alone, which holds Change… and Share…; nothing else moves. What the owner would try:
-// open a tool and its Info on a phone, light and dark, and find Change… and Share… under •••.
+// #116: on a phone an open tool's top bar showed Change…, Share… and •••, and the tool's name shrank to a letter. Now at
+// 640 px and under it keeps ••• alone, which holds Change… (the drawer, as the bar's did) and Share…; nothing else
+// moves. What the owner would try: open a tool on a phone, light and dark, and use Change… and Share… under •••.
 import type { Scenario } from "../scenario.ts";
 
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
 
 export default {
-  name: "On a phone, a tool's bar is ••• alone (#116)",
+  name: "On a phone, an open tool's bar is ••• alone (#116)",
   async run(s) {
     const tool = s.tool;
     if (!tool) throw new Error("the copy has no tool to open");
@@ -29,29 +29,35 @@ export default {
       await s.shot("desktop-light");
     });
 
-    for (const [hash, where] of [[open, "the tool"], [info, "its Info"]] as const) {
-      await s.step(`on a phone, ${where}'s bar is ••• alone, with Change… and Share… in it`, async () => {
-        const page = await s.page(hash);
-        await page.setViewportSize(PHONE);
-        const bar = await shown(page);
-        if (bar !== "•••") throw new Error(`the bar shows ${bar}`);
-        await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).click();
-        for (const item of ["Change…", "Share…"]) await page.getByRole("menuitem", { name: item }).waitFor({ timeout: 5000 });
-        await page.keyboard.press("Escape");
-        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-        // The opened tool's bar has its name in the middle (Info's has none): it gets the room the pill gave up.
-        if (where === "the tool") {
-          const title = await page.locator(".topbar-center").first().evaluate((e: Element) => e.getBoundingClientRect().width);
-          if (title < 150) throw new Error(`the name has ${Math.round(title)} px`);
-        }
-        const name = where === "the tool" ? "phone-tool" : "phone-info";
-        await page.emulateMedia({ colorScheme: "light" });
-        await s.shot(`${name}-light`);
-        await page.emulateMedia({ colorScheme: "dark" });
-        await s.shot(`${name}-dark`);
-        await page.emulateMedia({ colorScheme: "light" });
-        await page.setViewportSize(DESKTOP);
-      });
-    }
+    await s.step("on a phone, the tool's bar is ••• alone, with Change… (the drawer, the tool kept) and Share… in it", async () => {
+      const page = await s.page(open);
+      await page.setViewportSize(PHONE);
+      const bar = await shown(page);
+      if (bar !== "•••") throw new Error(`the bar shows ${bar}`);
+      // The tool's name gets the room the pill gave up.
+      const title = await page.locator(".topbar-center").first().evaluate((e: Element) => e.getBoundingClientRect().width);
+      if (title < 150) throw new Error(`the name has ${Math.round(title)} px`);
+      await page.emulateMedia({ colorScheme: "light" });
+      await s.shot("phone-tool-light");
+      await page.emulateMedia({ colorScheme: "dark" });
+      await s.shot("phone-tool-dark");
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Share…" }).waitFor({ timeout: 5000 });
+      await s.shot("phone-menu");
+      await page.locator(".with-drawer").evaluate((e: Element) => e.setAttribute("data-smoke", "same"));
+      await page.getByRole("menuitem", { name: "Change…" }).click();
+      await page.locator(".drawer").waitFor({ timeout: 10_000 });
+      if (!(await page.locator(".with-drawer[data-smoke='same']").count())) throw new Error("•••'s Change… opened a new page (the tool reloaded)");
+      await page.setViewportSize(DESKTOP);
+    });
+
+    await s.step("its Info's bar is as it was (it has no name to make room for)", async () => {
+      const page = await s.page(info);
+      await page.setViewportSize(PHONE);
+      await page.getByRole("link", { name: "Change…" }).waitFor({ timeout: 10_000 });
+      await s.shot("phone-info-light");
+      await page.setViewportSize(DESKTOP);
+    });
   },
 } satisfies Scenario;

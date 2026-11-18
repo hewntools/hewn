@@ -21,7 +21,8 @@ export { appPage, field, runnableOps, runPage, sidePill };
  */
 function appBar(c, { onChange } = {}) {
   const name = h("span", {}, c.name);
-  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
+  // Its Change… (the bar's, or •••'s on a phone) opens the drawer: the tool stays as it is.
+  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name), change: () => onChange?.() })) }, "•••");
   const change = h("button", { class: "wide-only", "aria-pressed": "false", onclick: () => onChange?.() }, "Change…");
   const version = h("span", { class: "pill", hidden: !c.version }, c.version ? `v${c.version}` : "");
   const el = bar({
