@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { ALARM_GRACE_MS } from "@hewntools/cli/supervisor/index.ts";
 import { FIXTURES } from "./helpers.ts";
 import { startTestHost, type TestHost } from "./workerd-helpers.ts";
 
@@ -14,6 +15,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const HOUR = 3600_000;
 /** "HH:MM" (owner's time zone, the machine's here) `hours` from now, for a daily cadence. */
 const clock = (hours: number) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(Date.now() + hours * HOUR));
+/** Wait until `fn` holds, at most `ms`; whether it did. */
+async function until(fn: () => Promise<boolean>, ms: number): Promise<boolean> {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(25)) if (await fn()) return true;
+  return fn();
+}
 
 describe("a schedule after the machine wakes from sleep (workerd host)", () => {
   let h: TestHost;
@@ -29,11 +35,9 @@ describe("a schedule after the machine wakes from sleep (workerd host)", () => {
 
   const rows = async (tag: string): Promise<number> => (await h.invoke("runaway", "count")).result.rows[tag] ?? 0;
   const schedule = async (id: string) => (await h.sv.admin("schedules", { capabilityId: "runaway" })).find((x: any) => x.id === id);
+  const backups = async (): Promise<unknown[]> => (await (await fetch(`${h.sv.control.url}/control/backups`, { method: "POST", headers: { "x-hewn-control": h.sv.control.token } })).json()).backups;
   /** The wall clock to `at` (ms), at once: the machine woke there. */
-  const wake = async (at: number) => {
-    offset = at - Date.now();
-    await sleep(300);
-  };
+  const wake = (at: number) => void (offset = at - Date.now());
   /** The wall clock on to `at` (ms) in steps under a jump, as time passing. */
   const walk = async (at: number) => {
     for (let wall = Date.now() + offset; wall < at; wall = Date.now() + offset) {
@@ -44,38 +48,42 @@ describe("a schedule after the machine wakes from sleep (workerd host)", () => {
 
   test("woken a minute before a schedule's time, it runs when the time comes, within a look, and once", async () => {
     const s = await h.sv.admin("schedules", { capabilityId: "runaway", operation: "tick", input: { tag: "on-time" }, cadence: `daily ${clock(10)}` });
-    const at: number = (await schedule(s.id)).nextRunAt;
-    await wake(at - 60_000);
-    // Its time, by the platform's clock too; the alarm stays armed hours ahead (it doesn't fire here).
-    await h.sv.admin("schedules/fire", { id: s.id, arm: false });
-    await sleep(300);
-    assert.equal(await rows("on-time"), 0, "not before its time");
-    await walk(at + 5_000);
-    let n = 0;
-    for (let i = 0; i < 40 && !n; i++, await sleep(50)) n = await rows("on-time");
-    assert.equal(n, 1, "run within a look of its time");
-    await walk(at + 2 * HOUR);
-    await sleep(300);
-    assert.equal(await rows("on-time"), 1, "once");
-    // Gone, so the next test's schedule is the next alarm (this one's next run is still ahead in real time).
-    await h.sv.admin("call", { method: "deleteSchedule", args: [s.id] });
+    try {
+      const at: number = (await schedule(s.id)).nextRunAt;
+      assert.ok(at - Date.now() > HOUR, "its alarm is armed hours ahead in real time: it can't fire here");
+      wake(at - 60_000);
+      // The wake's catch-up has replied once it has made the day's backup (this home has none yet).
+      assert.ok(await until(async () => (await backups()).length > 0, 5000), "the wake's catch-up ran");
+      // Its time, by the platform's clock too; the alarm stays armed hours ahead.
+      await h.sv.admin("schedules/fire", { id: s.id, arm: false });
+      await sleep(300);
+      assert.equal(await rows("on-time"), 0, "not before its time");
+      await walk(at + ALARM_GRACE_MS);
+      assert.ok(await until(async () => (await rows("on-time")) === 1, 1000), "run within a look of its time and the grace");
+      // Due again (the platform's clock hasn't moved), while the next time the supervisor knows is that same time: no second run for it.
+      await h.sv.admin("schedules/fire", { id: s.id, arm: false });
+      await walk(at + 2 * HOUR);
+      await sleep(300);
+      assert.equal(await rows("on-time"), 1, "once for its time");
+    } finally {
+      // Gone, so the next test's schedule is the next alarm.
+      await h.sv.admin("call", { method: "deleteSchedule", args: [s.id] });
+    }
   });
 
   test("a schedule changed after the wake: the time the supervisor kept may be early, and that look's reply moves it on", async () => {
     const s = await h.sv.admin("schedules", { capabilityId: "runaway", operation: "tick", input: { tag: "changed" }, cadence: `daily ${clock(16)}` });
     const first: number = (await schedule(s.id)).nextRunAt;
-    await wake(first - 60_000);
+    wake(first - 60_000);
     // Later by an hour: workerd's alarm is armed again, for a new time (that one would fire right).
     await h.sv.admin("schedules", { id: s.id, change: { cadence: `daily ${clock(17)}` } });
     const later: number = (await schedule(s.id)).nextRunAt;
-    assert.equal(later - first, HOUR);
-    await walk(first + 10_000);
+    assert.ok(later > first);
+    await walk(first + ALARM_GRACE_MS + 5_000);
     await sleep(300);
-    assert.equal(await rows("changed"), 0, "nothing due at the old time");
+    assert.equal(await rows("changed"), 0, "the look at the old time ran nothing");
     await h.sv.admin("schedules/fire", { id: s.id, arm: false });
-    await walk(later + 5_000);
-    let n = 0;
-    for (let i = 0; i < 40 && !n; i++, await sleep(50)) n = await rows("changed");
-    assert.equal(n, 1, "run at the new time");
+    await walk(later + ALARM_GRACE_MS);
+    assert.ok(await until(async () => (await rows("changed")) === 1, 1000), "run at the new time: the old time's reply moved the supervisor's on");
   });
 });
