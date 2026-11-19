@@ -598,7 +598,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   if (resource === "models") {
     if (!id && method === "GET") return platform.models(owner);
     if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsHost", "capabilityCapsUsd", "prices"]));
-    if (id === "keys" && sub && method === "PUT") return platform.setModelKey(owner, sub, String((await readJson(req)).key ?? ""));
+    if (id === "keys" && sub && method === "PUT") {
+      // A key (with its expiry, if the owner gave one), or only the expiry of the key that's set.
+      const b = await readJson(req);
+      const expiresOn = typeof b.expiresOn === "string" ? b.expiresOn : null;
+      return b.key === undefined ? platform.setModelKeyExpiry(owner, sub, expiresOn) : platform.setModelKey(owner, sub, String(b.key ?? ""), { expiresOn });
+    }
     if (id === "keys" && sub && method === "DELETE") return platform.setModelKey(owner, sub, null);
     if (id === "check" && sub && method === "POST") return platform.checkModelProvider(owner, sub);
     if (id === "catalog" && method === "POST") {
@@ -982,8 +987,8 @@ export function unresolvedFailures<T extends { buildId: string; capabilityId: st
 export const failureReason = (f?: { title: string; detail: string }) => (!f ? "" : f.title === "The builder stopped" && f.detail ? f.detail : f.title);
 
 export interface InboxItem {
-  /** "builder-model": the model the owner picked for building has a successor. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model" | "suspended";
+  /** "builder-model": the model the owner picked for building has a successor. "model-key": a provider's key the owner said expires. */
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "model-key" | "spend" | "connection" | "builder-model" | "suspended";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -1072,6 +1077,13 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   for (const x of (await platform.accounts(owner)).connections) {
     if (live.has(x.id) || needs.some((n) => n.capabilityId === x.id) || x.health.status === "connected") continue;
     needs.push({ kind: "connection", id: x.id, capabilityId: x.id, title: x.name, detail: x.health.detail ?? x.health.status, severity: x.health.status === "broken" ? "danger" : "warn", action: x.signIn ? "Sign in" : "Set up" });
+  }
+
+  // A model key the owner said stops working: a week before, and once it has.
+  for (const k of platform.keyExpiries(owner).filter((x) => x.daysLeft <= 7)) {
+    const when = new Date(`${k.expiresOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    const days = k.daysLeft;
+    needs.push({ kind: "model-key", id: k.provider, title: `${k.label} API key`, detail: days < 0 ? `expired on ${when}: tools that use it can't think` : days === 0 ? "expires today" : `expires on ${when}, in ${days} day${days === 1 ? "" : "s"}`, severity: days <= 0 ? "danger" : "warn", action: "Replace…" });
   }
 
   // Model spend: 80% of the month's cap, and caps that refuse calls now.

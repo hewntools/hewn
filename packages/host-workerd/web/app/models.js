@@ -8,7 +8,7 @@ import { route } from "./router.js";
 import { settingsFrame } from "./settings.js";
 import { toolModelSheet } from "./tool-model.js";
 
-export { creditWords, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
+export { creditWords, keySheet, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
 
 // ---------- J1 Settings › AI › Models ----------
 
@@ -22,22 +22,33 @@ const usd = (n) => (n >= 0.01 ? `$${n.toFixed(2)}` : n > 0 ? `$${n.toFixed(4)}` 
 const perM = (p) => `${usd(p.input * 1e6)} / ${usd(p.output * 1e6)}`;
 const titleCase = (t) => t[0].toUpperCase() + t.slice(1);
 const modelLabel = (prov, id) => prov.models.find((x) => x.id === id)?.name ?? id;
+/** "2027-01-31" → "31 Jan 2027". */
+const dayText = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
-/** O8 A provider's key: a Form that checks it (no tokens spent). Resolves the new /models, or null. */
+/**
+ * O8 A provider's key: a Form that checks it (no tokens spent), with an optional date it stops working (providers don't
+ * say; the Inbox tells a week before). With a key set, it replaces it: the new one is stored only once it passes, else
+ * the old one stays; left empty, only the date changes. Resolves the new /models, or null.
+ */
 function keySheet(m, providerId, { use = false } = {}) {
+  const prov = m.providers.find((p) => p.id === providerId);
+  const replace = !!prov?.keySet;
   return formSheet({
-    title: `${PROVIDERS[providerId].label} API key`,
-    sub: "Tools call models with it, metered; they never see it.",
+    title: `${replace ? "Replace the " : ""}${PROVIDERS[providerId].label} API key`,
+    sub: replace ? "The new key is checked first: if it doesn't work, the one you have stays." : "Tools call models with it, metered; they never see it.",
     build: (close) => {
-      const key = h("input", { type: "password", autocomplete: "off", placeholder: "Paste API key", "aria-label": "API key" });
-      const save = h("button", { class: "primary" }, "Check and save");
+      const key = h("input", { type: "password", autocomplete: "off", placeholder: replace ? "Paste the new key" : "Paste API key", "aria-label": "API key" });
+      const expires = h("input", { type: "date", value: prov?.expiresOn ?? "", "aria-label": "Expires on" });
+      const save = h("button", { class: "primary" }, replace ? "Check and replace" : "Check and save");
       const submit = async () => {
-        if (!key.value.trim()) return key.focus();
+        const dateOnly = replace && !key.value.trim();
+        if (!key.value.trim() && !dateOnly) return key.focus();
+        if (dateOnly && expires.value === (prov.expiresOn ?? "")) return key.focus();
         save.disabled = true;
         try {
-          let next = await api(`/models/keys/${providerId}`, { method: "PUT", body: { key: key.value.trim() } });
+          let next = await api(`/models/keys/${providerId}`, { method: "PUT", body: dateOnly ? { expiresOn: expires.value || null } : { key: key.value.trim(), expiresOn: expires.value || null } });
           if (use && next.provider !== providerId) next = await api("/models", { method: "PUT", body: { provider: providerId } });
-          toast(`${PROVIDERS[providerId].label} key works`);
+          toast(dateOnly ? (expires.value ? `${PROVIDERS[providerId].label} key: expires on ${dayText(expires.value)}` : `${PROVIDERS[providerId].label} key: no expiry date`) : `${PROVIDERS[providerId].label} key works`);
           close(next);
         } catch (e) {
           save.disabled = false;
@@ -46,9 +57,11 @@ function keySheet(m, providerId, { use = false } = {}) {
       };
       save.addEventListener("click", submit);
       key.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+      expires.addEventListener("keydown", (e) => e.key === "Enter" && submit());
       setTimeout(() => key.focus());
       return [
-        h("label", { class: "field" }, h("span", { class: "label" }, "Key"), key, h("span", { class: "hint" }, "Get one at ", h("a", { href: PROVIDERS[providerId].keys, target: "_blank", rel: "noopener noreferrer" }, PROVIDERS[providerId].keys.replace(/^https:\/\//, "")))),
+        h("label", { class: "field" }, h("span", { class: "label" }, replace ? "New key" : "Key"), key, h("span", { class: "hint" }, "Get one at ", h("a", { href: PROVIDERS[providerId].keys, target: "_blank", rel: "noopener noreferrer" }, PROVIDERS[providerId].keys.replace(/^https:\/\//, "")))),
+        h("label", { class: "field" }, h("span", { class: "label" }, "Expires on (optional)"), expires, h("span", { class: "hint" }, replace ? "If the new key has an expiry date, or to change the date of the one you have. The Inbox tells you a week before." : "If the key has an expiry date. The Inbox tells you a week before.")),
         sheetActions(h("button", { onclick: () => close(null) }, "Cancel"), save),
       ];
     },
@@ -219,7 +232,7 @@ async function modelsPage() {
   const prov = m.providers.find((p) => p.id === m.provider);
   const providerRow = (p) => {
     const inUse = p.id === m.provider;
-    const status = !p.keySet ? "No key" : p.check?.ok ? `${inUse ? "In use · " : ""}key works` : p.check?.error ?? "Key saved";
+    const status = (!p.keySet ? "No key" : p.check?.ok ? `${inUse ? "In use · " : ""}key works` : (p.check?.error ?? "Key saved")) + (p.keySet && p.expiresOn ? ` · expires ${dayText(p.expiresOn)}` : "");
     const checkBtn = p.keySet && p.check && !p.check.ok && h("button", { class: "sm ghost", onclick: () => api(`/models/check/${p.id}`, { method: "POST" }).then(() => route(), fail) }, "Check again");
     return h(
       "div",
@@ -227,6 +240,7 @@ async function modelsPage() {
       providerTile(p.id, 32),
       h("div", { class: "grow" }, h("span", { class: inUse ? "strong" : "" }, PROVIDERS[p.id].label), h("span", { class: `sub ${p.keySet && p.check && !p.check.ok ? "danger-text" : ""}` }, inUse && p.check?.ok && h("span", { class: "dot ok" }), ` ${status}`)),
       checkBtn,
+      p.keySet && h("button", { class: "sm ghost", onclick: () => keySheet(m, p.id).then(reload) }, "Replace…"),
       inUse
         ? kindTag("in use", "ok")
         : p.keySet

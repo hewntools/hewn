@@ -40,7 +40,9 @@ test("hewn models: the subcommand right after models is the one that runs", asyn
       );
 
     assert.match(await hewn("models", "key", "anthropic", "--from", join(home, "key.txt")), /anthropic key works/);
-    assert.deepEqual(calls.at(-1), { method: "setModelKey", args: ["anthropic", "sk-test"] });
+    assert.deepEqual(calls.at(-1), { method: "setModelKey", args: ["anthropic", "sk-test", { expiresOn: null }] });
+    await hewn("models", "key", "anthropic", "--from", join(home, "key.txt"), "--expires", "2027-01-31");
+    assert.deepEqual(calls.at(-1), { method: "setModelKey", args: ["anthropic", "sk-test", { expiresOn: "2027-01-31" }] });
 
     assert.match(await hewn("models", "use", "openai"), /tiers now run on openai/);
     assert.deepEqual(calls.at(-1), { method: "setModelSettings", args: [{ provider: "openai" }] });
