@@ -462,7 +462,8 @@ describe("Polish", () => {
       assert.equal(asked[0].messages[0].content, "Polish it. The count should lead.");
       await page.eval(`[...document.querySelectorAll(".drawer-intake .proposal button")].find((b) => b.textContent === "Build polish").click()`);
       const started = await until("the Polish to start", async () => t.platform.registry.recentBuilds(5).map((id) => t.platform.getBuild(USER, id)).find((x) => x.request.polish && x.step?.step === "critique"));
-      assert.deepEqual(started.request, { capabilityId: "ui-counter", request: "Polish: Bolder, the count first", note: "Bolder, the count first", polish: true });
+      // With the model on the drawer's chip (#111): the builder's own here.
+      assert.deepEqual(started.request, { capabilityId: "ui-counter", request: "Polish: Bolder, the count first", note: "Bolder, the count first", polish: true, model: "default" });
       const context = t.platform.buildContext(USER, started.buildId);
       assert.deepEqual(context.conversation?.map((m) => [m.role, m.content.split("\n")[0]]), [["user", "Polish it. The count should lead."], ["intake", "I'll give it a second look."]]);
       // The drawer follows the build: a Polish's steps.

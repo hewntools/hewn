@@ -356,6 +356,8 @@ async function firstRun() {
     // The intake's box: the message, then the model it builds with and Send (the same as New tool).
     const ask = h("textarea", { class: "composer-input", rows: 1, placeholder: "Track my coffee beans and how I rated each brew", "aria-label": "Describe it", disabled: !builderOk });
     const next = h("button", { type: "submit", class: "lg", disabled: !builderOk }, "Send");
+    // A starter's build goes with the model on the chip.
+    const chip = builderOk ? modelChip() : null;
     const start = () => ask.value.trim() && go(`#/new?m=${enc(ask.value.trim())}&send=1`);
     ask.addEventListener("input", () => ((ask.style.height = "auto"), (ask.style.height = `${ask.scrollHeight + ask.offsetHeight - ask.clientHeight}px`)));
     ask.addEventListener("keydown", (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && (e.preventDefault(), start()));
@@ -369,7 +371,7 @@ async function firstRun() {
           onclick: async (e) => {
             e.currentTarget.disabled = true;
             try {
-              const b = await api("/capabilities", { method: "POST", body: { name: st.name, purpose: st.purpose, requirements: st.requirements } });
+              const b = await api("/capabilities", { method: "POST", body: { name: st.name, purpose: st.purpose, requirements: st.requirements, ...((await chip?.choice()) ?? {}) } });
               invalidateCaps();
               go(`#/b/${b.buildId}`);
             } catch (err) {
@@ -385,7 +387,7 @@ async function firstRun() {
     put(
       make,
       h("div", { class: "eyebrow" }, hosted ? "2 · Make something" : "3 · Make something"),
-      h("form", { class: "composer boxed", onsubmit: (e) => (e.preventDefault(), start()) }, ask, h("div", { class: "composer-tools" }, builderOk && modelChip(), next)),
+      h("form", { class: "composer boxed", onsubmit: (e) => (e.preventDefault(), start()) }, ask, h("div", { class: "composer-tools" }, chip?.el, next)),
       h("div", { class: "row tight wrap" }, starters),
       hosted && shelf,
     );

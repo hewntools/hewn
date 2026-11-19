@@ -961,6 +961,51 @@ export const operations = {
     }
     if (!started.buildId) throw new Error("no build");
   });
+  const waitBuildDone = async (id: string) => {
+    for (let i = 0; i < 120; i++, await page.waitForTimeout(250)) if (!["waiting", "open", "building", "validating"].includes((await sv.admin("call", { method: "getBuild", args: [id] })).result.status)) return;
+    throw new Error(`build ${id} still running`);
+  };
+  await step("a change goes with the model on its box's chip, even if another tab changed the setting; looked at again, the chip shows the setting (#111)", async () => {
+    const models = (m: Record<string, string>) => ({ builder: { claude: m }, intake: { claude: m } });
+    await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
+    // The intake answers with a change to build (it's stubbed here).
+    const draft = { kind: "draft", message: "A line more.", draft: { request: "Add a line to each run." } };
+    await page.route("**/api/intake", (r: any) => r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: reply\ndata: ${JSON.stringify(draft)}\n\n` }));
+    try {
+      // Looked at again, a box's chip shows what's set now (another tab may have changed it).
+      await page.goto(`${web}/#/new`);
+      const newChip = page.locator(".model-chip");
+      await newChip.getByText(/Fable/).waitFor();
+      await sv.admin("settings", { jobModels: models({ model: "opus" }) });
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await newChip.getByText(/Opus/).waitFor({ timeout: 5000 });
+      if (await newChip.getByText(/high/).count()) throw new Error("the chip kept the old effort");
+      await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
+      await page.goto(`${web}/#/run/reading-list?change=1`);
+      const chip = page.locator(".drawer .model-chip");
+      await chip.getByText(/Fable/).waitFor();
+      await chip.getByText(/high/).waitFor();
+      // Another tab picks another model: the setting changes, this tab's chip doesn't know yet.
+      await sv.admin("settings", { jobModels: models({ model: "opus" }) });
+      const box = page.locator(".drawer").getByRole("textbox", { name: "Message" });
+      await box.fill("Add a line to each run");
+      await box.press("Enter");
+      await page.locator(".drawer").getByRole("button", { name: /^Build/ }).click();
+      const b = await (async () => {
+        for (let i = 0; i < 40; i++, await page.waitForTimeout(250)) {
+          const st = await sv.admin("status");
+          const x = st.builds.find((y: any) => y.capabilityId === "reading-list" && y.request?.request === "Add a line to each run.");
+          if (x) return x;
+        }
+        throw new Error("no build");
+      })();
+      if (b.model?.model !== "fable" || b.model?.effort !== "high") throw new Error(`the build asked for ${JSON.stringify(b.model)}, not the chip's fable · high`);
+      await waitBuildDone(b.buildId);
+    } finally {
+      await page.unroute("**/api/intake");
+      await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
+    }
+  });
 } finally {
   await browser.close();
   await sv.stop();
