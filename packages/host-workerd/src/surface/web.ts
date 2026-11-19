@@ -596,7 +596,13 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 
   // Settings → Models: provider keys (write-only), tiers, budget, the model catalog, spend.
   if (resource === "models") {
-    if (!id && method === "GET") return platform.models(owner);
+    if (!id && method === "GET") {
+      const m = platform.models(owner);
+      // Hosted: the allowance as stated (read now for the Models page, `fresh=1`; else the last 10 minutes').
+      if (!m.host || !host.allowance) return m;
+      const allowance = await host.allowance(url.searchParams.get("fresh") === "1").catch(() => null);
+      return { ...m, host: { ...m.host, allowance } };
+    }
     if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsHost", "capabilityCapsUsd", "prices"]));
     if (id === "keys" && sub && method === "PUT") {
       // A key (with its expiry, if the owner gave one), or only the expiry of the key that's set.
@@ -1002,6 +1008,18 @@ export interface InboxItem {
 
 /** ["A", "B", "C"] → "A, B and C". */
 const andList = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
+/**
+ * Hosted: the allowance at 80% and once it's used up (as stated: `used` is the host's own count), saying when it
+ * renews in the owner's time zone ("renews on 1 Dec"; 00:00Z on the 1st is still the 30th in the Americas).
+ */
+async function allowanceNotices(platform: Platform, host: SurfaceHost): Promise<InboxItem[]> {
+  const a = host.allowance && platform.hostModels ? await host.allowance().catch(() => null) : null;
+  if (!a || !a.of || a.used < 0.8 * a.of) return [];
+  const on = a.resetsAt && new Intl.DateTimeFormat("en-GB", { timeZone: platform.timezone(), day: "numeric", month: "short" }).format(new Date(a.resetsAt));
+  if (a.used >= a.of) return [{ kind: "spend", id: "allowance", title: a.unit, detail: on ? `all ${a.of} used · they renew on ${on}` : `all ${a.of} used`, severity: "danger", action: "Open" }];
+  return [{ kind: "spend", id: "allowance", title: a.unit, detail: `${Math.floor((a.used / a.of) * 100)}% of ${a.of} used · ${on ? `they renew on ${on}` : "they don't renew"}`, severity: "warn", action: "Open" }];
+}
+
 const usdText = (n: number) => `$${n >= 10 ? Math.round(n) : n.toFixed(2).replace(/\.00$/, "")}`;
 
 /**
@@ -1105,6 +1123,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     }
   }
   needs.push(...(await modelNotices(host)));
+  needs.push(...(await allowanceNotices(platform, host)));
 
   const order = { danger: 0, warn: 1 };
   needs.sort((a, b) => (a.kind === "confirmation" ? -1 : b.kind === "confirmation" ? 1 : 0) || order[a.severity] - order[b.severity] || (b.at ?? "").localeCompare(a.at ?? ""));

@@ -2,13 +2,13 @@
 // Settings › AI › Models: providers and keys, tiers, prices, this month's spend and its cap.
 import { ago, api, appIcon, capRef, caps, fail, formSheet, h, kindTag, modal, sheetActions, sheetHead, toast } from "../kit.js";
 import { providerTile } from "./agents.js";
-import { put, stillHere } from "./frame.js";
+import { browserZone, put, settings, stillHere } from "./frame.js";
 import { pollInbox } from "./inbox.js";
 import { route } from "./router.js";
 import { settingsFrame } from "./settings.js";
 import { toolModelSheet } from "./tool-model.js";
 
-export { creditWords, keySheet, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
+export { allowanceWords, creditWords, keySheet, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
 
 // ---------- J1 Settings › AI › Models ----------
 
@@ -178,6 +178,13 @@ const meter = (n, on, warn) => h("div", { class: `blocks ${warn ? "warn" : ""}`,
  */
 /** "12.37 Credits": a host's charge as given (2 decimals at most). */
 const creditWords = (t) => `${Math.round(t.amount * 100) / 100} ${t.unit}`;
+/** When the allowance renews, in the owner's time zone (Settings › Time zone, as the Inbox says it): "1 Dec". */
+const renewsOn = (a) => a.resetsAt && new Date(a.resetsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: settings?.timeZone ?? browserZone() });
+/** Hosted: the allowance as stated, for Settings › AI's row: "2014 of 2500 Credits used · they renew on 1 Dec". */
+const allowanceWords = (a) => {
+  const on = renewsOn(a);
+  return a.of === null ? `${a.used} ${a.unit} used · included` : `${a.used} of ${a.of} ${a.unit} used${on ? ` · they renew on ${on}` : ""}`;
+};
 const CHARGE_KINDS = { build: "builds", intake: "talking requests through", model: "tools that think" };
 
 /**
@@ -189,6 +196,10 @@ async function hostedModelsPage(m, all) {
   const catalog = await api(`/tools/remote/models`).catch(() => null);
   const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
   const { totals, rows } = m.host.charges;
+  const a = m.host.allowance;
+  const on = a && renewsOn(a);
+  // What each kind took this month, in Hewn's own records (not reconciled with the allowance's count).
+  const byKind = rows.length > 0 && h("div", { class: "small muted" }, `This month: ${rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")}`);
   const tierRow = (tier) => {
     const users = m.usage[tier] ?? [];
     return h(
@@ -202,13 +213,26 @@ async function hostedModelsPage(m, all) {
   settingsFrame(
     "ai",
     h("div", { class: "row tight baseline" }, back, h("h1", { class: "flush" }, "Models")),
-    h(
-      "div",
-      { class: "card stack-sm month-card" },
-      h("span", { class: "eyebrow" }, "This month"),
-      totals.length ? totals.map((t) => h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, creditWords(t)), h("span", { class: "muted" }, "used"))) : h("div", { class: "muted" }, "Nothing used yet"),
-      rows.length > 0 && h("div", { class: "small muted" }, rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")),
-    ),
+    a
+      ? h(
+          "div",
+          { class: "card stack-sm month-card" },
+          // As stated: the count may differ by a few from what each build and call shows (it's rounded up there).
+          h("span", { class: "eyebrow" }, a.unit),
+          h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, String(a.used)), h("span", { class: "muted" }, a.of === null ? "used · included" : `of ${a.of} used`)),
+          a.of !== null && meter(40, Math.round(Math.min(1, a.used / a.of) * 40), a.used >= 0.8 * a.of),
+          h("div", { class: "small muted" }, [on ? `They renew on ${on}.` : a.of !== null && "They don't renew.", a.perBuild !== null && `A build pauses at ${a.perBuild} ${a.unit} and asks before going on.`].filter(Boolean).join(" ")),
+          byKind,
+          // Checked again here, as it goes into an href.
+          a.of !== null && (a.more?.startsWith("https://") ? h("a", { class: "link", href: a.more, target: "_blank", rel: "noopener noreferrer" }, `More ${a.unit} ›`) : h("div", { class: "small faint" }, "The allowance is fixed.")),
+        )
+      : h(
+          "div",
+          { class: "card stack-sm month-card" },
+          h("span", { class: "eyebrow" }, "This month"),
+          totals.length ? totals.map((t) => h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, creditWords(t)), h("span", { class: "muted" }, "used"))) : h("div", { class: "muted" }, "Nothing used yet"),
+          rows.length > 0 && h("div", { class: "small muted" }, rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")),
+        ),
     h("div", { class: "card settings-card" }, h("div", { class: "eyebrow card-eyebrow" }, "Tiers"), m.tierNames.map(tierRow)),
     m.pinned.length > 0 &&
       h(
@@ -222,7 +246,8 @@ async function hostedModelsPage(m, all) {
 
 async function modelsPage() {
   const here = stillHere();
-  const [m, all] = await Promise.all([api("/models"), caps().catch(() => new Map())]);
+  // Hosted: the allowance read now, not the last 10 minutes'.
+  const [m, all] = await Promise.all([api("/models?fresh=1"), caps().catch(() => new Map())]);
   if (!here()) return;
   if (m.host) return hostedModelsPage(m, all);
   const reload = (next) => next && route();

@@ -11,6 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Activity opens a call to its lines,** and a tool's Info page lists its recent calls the same way. See [Activity](docs/using-hewn.md#activity).
 - **Allow all** of an agent's waiting calls: when one agent has several calls of the same destructive operation waiting, **Allow all** lets them run at once, each still its own call in Activity. The tab's title counts the calls waiting ("(3) Hewn") while it's on screen. See [The Inbox](docs/using-hewn.md#the-inbox).
 - **A model key's expiry date:** providers don't tell Hewn when a key expires, so you can give the date on its sheet (or `hewn models key … --expires`); the Inbox tells you a week before. See [Replacing a key](docs/models.md#replacing-a-key).
+- **Hosted: the allowance on Settings › AI and in the Inbox.** With a builder's service that states it (`GET /v1/allowance`), Settings › AI's row is the allowance: used of how many and when it renews; the Models page adds where a build pauses and where to get more, and the Inbox tells you at 80% and once it's used up. See [Running Hewn for someone else](docs/remote-access.md#running-hewn-for-someone-else-hewn_hosted).
 
 ### Changes
 

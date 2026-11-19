@@ -12,7 +12,7 @@ import { type Agent, USER } from "@hewntools/core/auth.ts";
 import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { DOC_NAME } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
-import type { GenerateRequest, GenerateResult, HostGenerateResult } from "@hewntools/core/models.ts";
+import type { GenerateRequest, GenerateResult, HostAllowance, HostGenerateResult } from "@hewntools/core/models.ts";
 import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import { checkToJson } from "@hewntools/core/checks.ts";
@@ -753,6 +753,7 @@ export class HewnDO extends DurableObject<Env> {
       },
       intakeLog: async (entry) => void (await sv.json("/intake/log", entry)),
       modelCatalog: (agent, fresh) => sv.json<ModelCatalog>("/models/catalog", { agent, ...(fresh ? { fresh: true } : {}) }),
+      allowance: async (fresh) => (await sv.json<{ allowance: HostAllowance | null }>("/models/allowance", fresh ? { fresh: true } : {})).allowance,
       // The supervisor checked the link is https; checked again, as it goes into an href.
       ...(hosted ? { hosted: env.HOST_SIGNIN_URL && URL.canParse(env.HOST_SIGNIN_URL) && new URL(env.HOST_SIGNIN_URL).protocol === "https:" ? { signInUrl: env.HOST_SIGNIN_URL } : {} } : {}),
       // Hosted: no local agents to connect, and the public address is the host's (no tunnel).
