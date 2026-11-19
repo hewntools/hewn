@@ -45,7 +45,7 @@ Fix failures and measured defects, then look at every screenshot and fix what lo
 /** What changes from the brief, each found exactly once (a brief edit that moves one fails the build of the Skill, and its test). */
 const SWAPS: [string, string][] = [
   ["Write a **candidate** in this workspace; the platform owns validation and promotion.", "Write a **candidate** in your workspace; Hewn owns validation and promotion."],
-  ["{{SUBMIT}} If you have a `check` tool, use it before you stop (see the end).", SUBMIT],
+  ["{{SUBMIT}} If you have a `check` tool, run it until it passes before you stop (see the end): what you leave is validated the same way, and a failure costs a whole attempt.", SUBMIT],
   ["Keep `id` equal to the capability id in `BUILDER.md`.", 'Keep `id` equal to the tool\'s id: for a change, the `capabilityId` you packed; for a new tool, its name in lowercase letters, digits and dashes ("Plant Care" → `plant-care`).'],
   ["after reading `BUILDER.md`, this brief, and any `OWNERS_WORDS.md` and `OTHER_TOOLS.md`,", "after reading this brief and the pack's `OTHER_TOOLS.md`,"],
   ["The owner's other capabilities are named at the end of `BUILDER.md`; `CONTRACTS.md` lists their operations,", "The owner's other capabilities are in the pack's `CONTRACTS.md`, which lists their operations,"],
