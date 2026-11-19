@@ -43,7 +43,7 @@ const str = (description?: string): JSONSchema => ({ type: "string", ...(descrip
 const files: JSONSchema = {
   type: "array",
   maxItems: 1000,
-  description: "The tool's files, each { path, content, encoding? }: path relative to the tool's folder (capability.json, src/index.ts, tests/cases.json, ui/index.html …); content as UTF-8 text, or base64 with encoding \"base64\". 5 MB in all. Only the tool's own files: not the pack's CONTRACTS.md, .hewn-contracts/, OTHER_TOOLS.md or PLATFORM_UI.css, no screenshots/, no dotfiles, CLAUDE.md or AGENTS.md (refused, naming the rule).",
+  description: "The tool's files, each { path, content, encoding? }: path relative to the tool's folder (capability.json, src/index.ts, tests/cases.json, ui/index.html …); content as UTF-8 text, or base64 with encoding \"base64\". 5 MB of files in all; the request itself may be at most 8 MB, and base64 makes a file about a third bigger as it travels, so send text as UTF-8. Only the tool's own files: not the pack's CONTRACTS.md, .hewn-contracts/, OTHER_TOOLS.md or PLATFORM_UI.css, no screenshots/, no dotfiles, CLAUDE.md or AGENTS.md (refused, naming the rule).",
   items: obj({ path: str(), content: str(), encoding: { type: "string", enum: ["utf-8", "base64"] } }, ["path", "content"]),
 };
 /** What a build runs on. The host appends the names this agent may ask for to the tool's description. */

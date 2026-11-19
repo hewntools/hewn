@@ -39,6 +39,31 @@ describe("Hewn over MCP", () => {
     t.cleanup();
   });
 
+  test("a submission up to 5 MB of files gets to Hewn as base64; a request over 8 MB is refused in Hewn's words, naming both limits", async () => {
+    const claude = await connect(url, TOKENS.claude);
+    // Just under 5 MB of files as base64 is about 6.7 MB on the wire: over the MCP SDK's 4 MiB default, under Hewn's
+    // 8 MB. Hewn reads it and answers about its files (one it never keeps), not the transport.
+    const blob = Buffer.alloc(5 * 1024 * 1024 - 64, 7).toString("base64");
+    const big = await claude.callTool({ name: "capabilities_check", arguments: { files: [{ path: "capability.json", content: "{}" }, { path: "assets/data.bin", content: blob, encoding: "base64" }, { path: ".npmrc", content: "x" }] } });
+    assert.equal(big.isError, true);
+    assert.match(parse(big).message, /\.npmrc/);
+    await claude.close();
+
+    const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "capabilities_check", arguments: { files: [{ path: "assets/data.bin", content: "A".repeat(9 * 1024 * 1024), encoding: "base64" }] } } });
+    const headers = { authorization: `Bearer ${TOKENS.claude}`, "content-type": "application/json", accept: "application/json, text/event-stream" };
+    const said = await fetch(url, { method: "POST", headers, body });
+    assert.equal(said.status, 413);
+    assert.match((await said.json()).error.message, /^This request is 9\.1 MB: Hewn takes MCP requests of at most 8 MB\. A tool's files may come to 5 MB in all; as they travel, base64 makes a file about a third bigger/);
+    // Just over: it doesn't read as the limit.
+    const over = await fetch(url, { method: "POST", headers: { ...headers, "content-length": String(8 * 1024 * 1024 + 1) }, body: "x".repeat(8 * 1024 * 1024 + 1) });
+    assert.match((await over.json()).error.message, /^This request is 8\.1 MB: /);
+    // Sent without its length: refused once 8 MB have come, in the same words.
+    const stream = new ReadableStream({ start: (c) => (c.enqueue(new TextEncoder().encode(body)), c.close()) });
+    const streamed = await fetch(url, { method: "POST", headers, body: stream, duplex: "half" } as RequestInit);
+    assert.equal(streamed.status, 413);
+    assert.match((await streamed.json()).error.message, /^This request is too large: Hewn takes MCP requests of at most 8 MB/);
+  });
+
   test("rejects missing or bad tokens", async () => {
     const res = await fetch(url, { method: "POST", body: "{}" });
     assert.equal(res.status, 401);
