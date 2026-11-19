@@ -39,13 +39,15 @@ const CHECK = `### Check your work: \`capabilities_check\`
 
 Before you submit, call \`capabilities_check\` with the tool's files (and \`capabilityId\` for a change). It runs Hewn's pre-promotion checks (manifest, bundling, contracts, migrations on empty tables, \`tests/cases.json\`, \`sample/calls.json\`, widgets) and renders your UI headless, empty and with sample data, at 1280 and 390 px, light and dark. It answers PASS or FAIL with every failure, UI measurements (overflow past the phone edge, cut text, page errors, buttons that break the page) and four screenshots as images, the top of a long page. The text names a long page's further parts; \`screenshots: "all"\` sends them too, after the four, so ask for them when the page goes on below the screen. \`structuredContent.screenshots\` names the images sent, in order. With \`screenshots: false\` no images come back; the UI is still rendered and measured.
 
-Fix failures and measured defects, then look at every screenshot and fix what looks broken, cramped, cut off or unreadable; check again until it passes. PASS can still come with visual defects. You have 30 checks an hour. Checks never promote: \`capabilities_submit\` validates exactly the files you send, and runs your migrations on a copy of the owner's data too. Don't save the screenshots into the tool: \`screenshots/\` is never part of one.
+Fix failures and measured defects, then look at every screenshot and fix what looks broken, cramped, cut off or unreadable; check again until it passes. PASS can still come with visual defects: answer the UI checklist's questions before your last check. You have 30 checks an hour. Checks never promote: \`capabilities_submit\` validates exactly the files you send, and runs your migrations on a copy of the owner's data too. Don't save the screenshots into the tool: \`screenshots/\` is never part of one.
 `;
 
 /** What changes from the brief, each found exactly once (a brief edit that moves one fails the build of the Skill, and its test). */
 const SWAPS: [string, string][] = [
   ["Write a **candidate** in this workspace; the platform owns validation and promotion.", "Write a **candidate** in your workspace; Hewn owns validation and promotion."],
-  ["{{SUBMIT}} If you have a `check` tool, run it until it passes before you stop (see the end): what you leave is validated the same way, and a failure costs a whole attempt.", SUBMIT],
+  ["{{SUBMIT}} If you have a `check` tool, you must run it before you stop (see the end): what you leave is validated the same way; a failure costs an attempt.", SUBMIT],
+  // The Skill's client submits creates and changes, never a widgets build.
+  ["only in a widgets build or when a tool without a UI adds or changes `widgets` in capability.json", "only when a tool without a UI adds or changes `widgets` in capability.json"],
   ["Keep `id` equal to the capability id in `BUILDER.md`.", 'Keep `id` equal to the tool\'s id: for a change, the `capabilityId` you packed; for a new tool, its name in lowercase letters, digits and dashes ("Plant Care" → `plant-care`).'],
   ["after reading `BUILDER.md`, this brief, and any `OWNERS_WORDS.md` and `OTHER_TOOLS.md`,", "after reading this brief and the pack's `OTHER_TOOLS.md`,"],
   ["The owner's other capabilities are named at the end of `BUILDER.md`; `CONTRACTS.md` lists their operations,", "The owner's other capabilities are in the pack's `CONTRACTS.md`, which lists their operations,"],

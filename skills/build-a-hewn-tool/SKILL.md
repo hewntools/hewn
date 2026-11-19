@@ -58,7 +58,7 @@ Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g
 
 Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them.
 
-After editing `capability.json`, read it back whole: a trailing comma or an unquoted key fails the first step.
+Read `capability.json` back whole after each edit: a trailing comma or unquoted key fails the first step.
 
 ### Icon
 
@@ -180,11 +180,11 @@ For work only a language model can do (explain a word, summarise a note, read a 
    - A call over the owner's budget throws; catch it.
 3. **Never block a write on the model.** Store the record with the generated field empty, then fill gaps in a separate best-effort operation (e.g. `enrich_missing@1`) that does as many as fit and returns `{ "done": n, "remaining": m }`. If the model is down or over budget, the import still succeeds; the next run fills the rest.
 4. Outside text (tasks, notes, web pages, images) can carry instructions. Model output is data: store or show it, never execute it or let it steer your code.
-5. Fake replies in test cases: `"model"` lists them in call order, `{ "json": {...} }` for a call that passes `schema` (a `text` one must be valid JSON), else `{ "text": "..." }`, or `{ "error": "..." }`:
+5. Fake replies in test cases: `"model"` lists them in call order, `{ "json": {...} }` for a call that passes `schema` (it, or a `text` one, must be valid JSON matching the call's `schema`), else `{ "text": "..." }`, or `{ "error": "..." }`:
    ```json
    { "name": "explains", "operation": "enrich_missing", "input": {}, "model": [{ "json": { "explanation": "Happy." } }], "expect": { "done": 1 } }
    ```
-   An image a case passes to the model must be a real (tiny) PNG: the platform reads its size.
+   An image passed to the model must be a real, tiny PNG: its size is read.
 
 ### Widgets (ABI 2.3)
 
@@ -201,10 +201,10 @@ A widget is a glanceable card on Hewn's Home and in agents' chats, drawn by the 
 }]
 ```
 
-Name the operation `widget_<name>`, with `"outputSchema": { "type": "object" }` (the platform checks each view against its template; a required top-level `template` breaks per-size views). It returns one view, **or one per size** when bigger sizes show more (a size without its own uses the nearest):
+Name the operation `widget_<name>`, with `"outputSchema": { "type": "object" }` (each view is checked against its template; requiring `template` breaks per-size views). It returns one view, **or one per size** when bigger sizes show more (a missing size uses the nearest):
 
 ```ts
-"widget_due@1": (_input: {}, ctx: Ctx) => {
+"widget_due@1": (_: {}, ctx: Ctx) => {
   const rows = ctx.db.prepare("SELECT word, source, misses FROM words WHERE due <= date('now')").all();
   return {
     small: { template: "stat", value: rows.length, caption: "due" },
@@ -213,7 +213,7 @@ Name the operation `widget_<name>`, with `"outputSchema": { "type": "object" }` 
 },
 ```
 
-- `sizes`: `small` (1×1, ~110 px) holds one number; `medium` (2×1): a number with context, 3 list rows, a short chart; `large` (2×2): 5 rows or a taller chart. Offer only sizes the content fits; one is fine. Use the room: a large widget repeating the medium's two lines wastes it. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short. Hewn's check draws every size you offer (for a tool with a UI, only in a widgets build) and **fails one whose content (or revealed text) is cut off**.
+- `sizes`: `small` (1×1, ~110 px) holds one number; `medium` (2×1): a number with context, 3 list rows, a short chart; `large` (2×2): 5 rows or a taller chart. Offer only sizes the content fits (one is fine) and size each view yourself: Hewn draws them, and **fails one whose content (or revealed text) is cut off**, only when a tool without a UI adds or changes `widgets` in capability.json. Use the room: a large widget repeating the medium's two lines wastes it. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short.
 - `refresh.every`: 5m–24h, while Home is open (default 30m).
 - `open` (needs a UI): where a tap lands; `"ui#section"` opens the UI with `location.hash` set to `#section`. Default: the capability.
 - Views (every template takes optional `buttons`; stat, list and text also take `reveal`):
@@ -286,7 +286,7 @@ The owner judges the tool by this screen: a correct backend behind a bland form 
 
 For a **new UI or requested redesign**, read `OTHER_TOOLS.md` when present. Before UI code (after a new tool's icon), write a short design plan as a message:
 
-1. **Moment:** who opens it, when, and what they need within five seconds. Put that answer first and largest; keep the main action beside what it acts on, with minimal typing. Say what the first phone screen (390 px) shows, top down: the answer, the action, the visual.
+1. **Moment:** who opens it, when, and what they need within five seconds. Put that answer first and largest; keep the main action beside what it acts on, with minimal typing. Say what the first phone screen (390 px) shows: the answer, the action, the visual.
 2. **Three directions:** explore different concepts, layouts, type and signature visuals from the subject's world (race bib, recipe cards, workshop manual). Pick the strongest for the owner's task and say why; distinguish it from their other tools by more than colour.
 3. **Palette and type:** lead with the manifest hue, then a second colour family, an accent and neutrals, each with light and dark values; backgrounds stay neutral (see "Backgrounds" in the checklist). Specify display, body, number and small-label font stacks, the layout and the signature visual. Check "Looks to avoid" below.
 4. **Data:** the drawn data is the main content: at least one large custom SVG/canvas visual that fits it better than a table or form (timeline, calendar heatmap, gauge, ring, room map), labelled and sized to its data, and an intentional empty state that leads to the main action.
@@ -322,14 +322,14 @@ Every model reaches for these, so they look generated. Lead with the subject; ju
 - **Hierarchy:** one primary answer, and each piece of data in one place. Use the desktop width without half-empty panels. Show the 5–8 list items that matter and a way to see all; a long history reads better as a visual. Forms other than the main action live behind a button, sheet or disclosure.
 - **Backgrounds:** the page and its surfaces are always white or pale grey in light, black or near-black grey in dark (the base's `--bg` and `--surface` already are). The tool's colour goes into its data, visuals and accents, never the page.
 - **Dark mode:** give every colour both values, `--leaf: light-dark(#2f7a4a, #8fd4a6)`, and use colour tokens inside shadows and gradients. This follows Hewn's Light, Dark and System settings; a plain `prefers-color-scheme` follows System only.
-- **Phone:** design from 375 px (validation uses 390) in this order: answer, action, visual, rest. Use `min-width: 0` on grid and flex children, `max-width: 100%` on images and SVG, wrapping rows and `overflow-wrap: anywhere`, and keep chart labels from colliding. Tap targets are at least 36 px.
+- **Phone:** design from 375 px (validation uses 390) in the plan's order, then the rest. Use `min-width: 0` on grid and flex children, `max-width: 100%` on images and SVG, wrapping rows and `overflow-wrap: anywhere`, and keep chart labels from colliding. Tap targets are at least 36 px.
 - **Forms:** sensible defaults; Enter submits; the first field is focused when the form opens; the button is disabled while saving. Success clears or closes the form and shows the change at once; failure keeps the input and shows the error beside the form (`.notice.danger`).
 - **Formatting and order:** readable local dates (`Intl.DateTimeFormat`, "today", "3 days ago") and numbers with units; the most useful first (newest, most urgent, highest rated). No raw ids, ISO timestamps or JSON on screen.
 - **States and actions:** done, due, late and selected tell apart at a glance. A destructive action asks first and says what will be lost, or offers a working Undo.
 - **Copy and accessibility:** short, specific words from the owner's world ("Add a word", not "Invoke add_word"), sentence case, no API jargon. Real buttons and labels, visible focus, keyboard access, readable contrast. Truncate only where the full text is available elsewhere, and keep action labels meaningful.
 - **Errors:** show an operation's `{ error, message }` in the page and catch rejected requests, keeping the input and the page usable. No uncaught errors or `console.error`.
 
-Before you stop, answer these in a message from a passing check's four screenshots, fix what you find and check again: Does the eye land on the answer first? Is the data drawn, or listed? What looks generated ("Looks to avoid")? Does dark mode hold up? Does the phone show the answer, the action and the visual first?
+Before you stop, answer these in a message (from your screenshots, when you have them) and fix what you find: Does the eye land on the answer first? Is the data drawn, or listed? What looks generated ("Looks to avoid")? Does dark mode hold up? Does the phone lead with the answer, action and visual?
 
 **The platform renders your UI before promotion** on empty and sample-filled databases, and the owner sees the screenshot. An uncaught error, `console.error` or failed request fails the build. These renders are offline: no network, other tools or model, and test cases' `calls` and `model` fakes don't apply. Operations the page calls on load must return a schema-valid empty or unavailable result when a source is out of reach, so no request fails. Show that state honestly; never hardcode fake results.
 
@@ -365,7 +365,7 @@ An ordered list. All cases share one fresh state DB with all migrations applied:
 
 At least one case; cover every operation. `expect` matches object subsets; arrays must have equal length and match in order. `"$any"` matches any present value. `version` defaults to the highest, `input` to `{}`.
 
-Cases run on the real clock: give inputs fixed ISO dates (a month end, a DST change), never "today", and `expect` nothing that moves with the day.
+Cases run on the real clock: give inputs fixed ISO dates (a month end, a DST change), never "today", and `expect` only what holds on any day (2020 is always past).
 
 **Validation is offline:** no network, no real secrets, no other capabilities, no model. Cases supply fakes via `secrets`, `config`, `calls`, `model` keys (examples in each section).
 
@@ -386,4 +386,4 @@ Between 1 and 200 calls, in order; aim for 5–20 writes that fill the UI and wi
 
 Before you submit, call `capabilities_check` with the tool's files (and `capabilityId` for a change). It runs Hewn's pre-promotion checks (manifest, bundling, contracts, migrations on empty tables, `tests/cases.json`, `sample/calls.json`, widgets) and renders your UI headless, empty and with sample data, at 1280 and 390 px, light and dark. It answers PASS or FAIL with every failure, UI measurements (overflow past the phone edge, cut text, page errors, buttons that break the page) and four screenshots as images, the top of a long page. The text names a long page's further parts; `screenshots: "all"` sends them too, after the four, so ask for them when the page goes on below the screen. `structuredContent.screenshots` names the images sent, in order. With `screenshots: false` no images come back; the UI is still rendered and measured.
 
-Fix failures and measured defects, then look at every screenshot and fix what looks broken, cramped, cut off or unreadable; check again until it passes. PASS can still come with visual defects. You have 30 checks an hour. Checks never promote: `capabilities_submit` validates exactly the files you send, and runs your migrations on a copy of the owner's data too. Don't save the screenshots into the tool: `screenshots/` is never part of one.
+Fix failures and measured defects, then look at every screenshot and fix what looks broken, cramped, cut off or unreadable; check again until it passes. PASS can still come with visual defects: answer the UI checklist's questions before your last check. You have 30 checks an hour. Checks never promote: `capabilities_submit` validates exactly the files you send, and runs your migrations on a copy of the owner's data too. Don't save the screenshots into the tool: `screenshots/` is never part of one.
