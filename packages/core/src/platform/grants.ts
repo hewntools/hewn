@@ -3,6 +3,7 @@
 // secrets and config, delegated agents, and the owner's confirmation of agents' destructive calls.
 import type { AgentDetails, ApprovalMode, PendingRequest } from "../agents.ts";
 import { type Agent, requireOwner, requireScope, type Scope } from "../auth.ts";
+import type { Deadline } from "../deadline.ts";
 import { PlatformError } from "../errors.ts";
 import { abiOf, abiUnsupported, type CapabilityManifest, connectOperation, isConnection, modelGrant, opKey } from "../manifest.ts";
 import { resolveModel } from "../models.ts";
@@ -32,7 +33,7 @@ export interface Readiness {
   missingModel?: string;
   /** Set when a pinned model was retired: the platform's suggested successor, if it knows one. */
   retiredModel?: { model: string; successor?: string };
-  /** Set while Hewn has it suspended (it kept Hewn from responding): nothing runs it until the owner resumes it. */
+  /** Set while Hewn has it suspended (it kept Hewn's tools from responding): nothing runs it until the owner resumes it. */
   suspended?: { at: string; reason: string };
   /** For agents: what to ask the user to do. */
   userAction?: string;
@@ -355,8 +356,11 @@ export class Grants extends Domain {
    * call (same agent, operation and input). It waits a while for the decision; if none comes,
    * it fails with awaiting_confirmation and stays on the owner's list, and calling again with
    * the same input after the owner confirms goes through. A rejection is reported once.
+   * The wait ends CONFIRM_RESERVE_MS before the call chain's deadline, so the agent gets
+   * awaiting_confirmation (and what to do) rather than the chain's plain timeout, and a call
+   * confirmed in time has that long to run.
    */
-  async confirmDestructive(agent: Agent, capabilityId: string, operation: string, input: unknown, via: string[] = []) {
+  async confirmDestructive(agent: Agent, capabilityId: string, operation: string, input: unknown, via: string[] = [], deadline?: Deadline) {
     const hash = sha256(JSON.stringify(input));
     const existing = this.registry.findConfirmation(agent.id, capabilityId, operation, hash);
     const take = (c: Confirmation) => {
@@ -373,7 +377,8 @@ export class Grants extends Domain {
       this.logger(`${agent.id} asks to run destructive ${capabilityId}/${operation}${via.length ? ` (through ${via.join(" → ")})` : ""}: waiting for the owner`);
     }
     const decided = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => (this.events.off(`confirm:${id}`, done), resolve(false)), this.platform.confirmWaitMs);
+      const wait = Math.max(0, Math.min(this.platform.confirmWaitMs, (deadline?.remaining() ?? Infinity) - CONFIRM_RESERVE_MS));
+      const timer = setTimeout(() => (this.events.off(`confirm:${id}`, done), resolve(false)), wait);
       const done = () => (clearTimeout(timer), resolve(true));
       this.events.once(`confirm:${id}`, done);
     });
@@ -389,6 +394,21 @@ export class Grants extends Domain {
     return this.registry.pendingConfirmations();
   }
 
+  /**
+   * Allow all N: several waiting calls of one operation from one agent, allowed at once. Each
+   * stays its own confirmation (and its own line on the authority trail); never across agents,
+   * tools or operations.
+   */
+  approveConfirmations(owner: Agent, ids: string[]) {
+    requireOwner(owner);
+    const calls = [...new Set(ids)].map((id) => this.registry.getConfirmation(id));
+    if (!calls.length || calls.some((c) => !c || c.status !== "pending")) throw new PlatformError("not_found", "no such call waiting for confirmation");
+    const [first] = calls as Confirmation[];
+    if (calls.some((c) => c!.agentId !== first.agentId || c!.capabilityId !== first.capabilityId || c!.operation !== first.operation)) throw new PlatformError("invalid_request", "allowing several calls at once is for one agent's calls of one operation");
+    for (const c of calls) this.decideConfirmation(owner, c!.id, true);
+    return { ok: true, approved: calls.length };
+  }
+
   decideConfirmation(owner: Agent, id: string, approve: boolean) {
     requireOwner(owner);
     const c = this.registry.getConfirmation(id);
@@ -400,6 +420,9 @@ export class Grants extends Domain {
     return { ok: true };
   }
 }
+
+/** How long before the call chain's deadline an agent's wait for the owner ends (see confirmDestructive). */
+export const CONFIRM_RESERVE_MS = 5_000;
 
 /** A declared host as the owner reads it: "*.example.com" is any site ending in .example.com. */
 export const hostWords = (h: string) => (h.startsWith("*.") ? `any site ending in ${h.slice(1)}` : h);

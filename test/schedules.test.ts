@@ -31,6 +31,19 @@ describe("schedules", () => {
     assert.match(t.platform.logLines("running-log", 10).join("\n"), new RegExp(`schedule:${s.id} record_run@1 ok`));
   });
 
+  test("HEWN_SCHEDULES=off: nothing is due and nothing runs, not even Run now (a copy of someone's Hewn)", async () => {
+    t.cleanup();
+    t = setup({ schedulesOff: true });
+    await installSeed(t.platform);
+    const again = t.platform.createSchedule(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: 1, durationSeconds: 300 }, cadence: "hourly" });
+    assert.equal(again.status, "active");
+    assert.equal(t.platform.nextScheduleAt(), null, "no alarm to arm");
+    assert.deepEqual(await t.platform.runDueSchedules(again.nextRunAt! + 48 * HOUR), []);
+    await assert.rejects(t.platform.runScheduleNow(USER, again.id), (e: PlatformError) => e.code === "invalid_request" && /HEWN_SCHEDULES=off/.test(e.message));
+    assert.equal((await runs()).length, 0);
+    assert.equal(t.platform.schedules.get(again.id)!.lastRunAt, null, "never ran");
+  });
+
   test("agents can only propose; a proposal never runs until the owner enables it", async () => {
     const p = t.platform.proposeSchedule(t.codex, { capabilityId: "running-log", operation: "get_summary", cadence: "daily 07:00", note: "morning summary" });
     assert.equal(p.status, "proposed");

@@ -56,7 +56,7 @@ Each row has one action. **Activity** in the Inbox shows what just happened, and
 
 ![The Inbox open over Home: a failed build to show, an agent that wants to connect, a tool that wants to reach a host, and a connection to sign in to again, each with one button, then the recent calls](images/inbox.png)
 
-One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it.
+One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it, and the tab's title counts the calls waiting ("(3) Hewn") while the tab is open on screen (a tab in the background asks Hewn nothing). When one agent has several calls of the same operation waiting, **Allow all** lets them all run; each is still its own call in Activity.
 
 ## A tool's page
 
@@ -69,6 +69,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 - **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
 - **Versions:** the last two, and **All versions**; a version's **Details** has its conversation, spec, log and code ([Building tools](building-tools.md#versions))
+- **Recent calls:** its last ten calls, each opening to the lines its code printed, as in [Activity](#activity); **All in Activity** for the rest
 
 Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule, **Resume** for a suspended tool) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
@@ -84,6 +85,8 @@ A schedule runs a read or write operation hourly, daily, weekly or on a custom c
 
 Agents can propose a schedule, but nothing runs until you enable it from the Inbox. A schedule that fails three times in a row pauses itself and says why. Resume it when it's fixed.
 
+While the machine Hewn runs on sleeps, nothing runs. When it wakes, what came due runs once, and later schedules run on time.
+
 ## Activity
 
 Everything that happened, newest first: builds, calls, and access changes (agents approved or disconnected, grants, secrets and settings, destructive calls, an agent's change you approved or declined, signing in to a connection). Filter by kind (All, Builds, Calls, Access), by tool or by agent. Press `a` to open it.
@@ -91,6 +94,8 @@ Everything that happened, newest first: builds, calls, and access changes (agent
 ![Activity: today's calls, builds and access changes, newest first, each with who did it and when](images/activity.png)
 
 Builds show their milestones (spec, code, tests, and for a new tool or a Polish the design review and fixing details) as they happen. Open one for its steps and its log ([A build](#a-build)).
+
+Click a call to open it: its operation, its error if it failed, how long it took, and the lines the tool's code printed during it (`| ` for a log line, `! ` for a warning or an error). An agent reading a tool's log shows here too, as "read the call log": one row while it keeps reading, with how many times.
 
 Call logs are kept for two weeks by default (Settings › Data).
 
@@ -106,7 +111,7 @@ A build's page lists its steps while it runs. So does the change panel while a c
 
 ![A new tool's build page, Bike Care: the builder, its model and effort, Conversation, then the steps, with Spec agreed, Writing code and Running tests done and timed, Reviewing the design running, Fixing details and Your authorization to come, and the log below](images/build-second-look.png)
 
-Each step shows how long it took, by Hewn's clock, so it's the same whenever you open the page; the running one counts up. You can leave: it keeps building. Once it's live, the log folds under **Show log**. A failed build says why (in the second look, which step), with its log open, **Ask builder to fix** and **Retry**. A build a host's builder paused shows the host's note with **Continue** and **Stop** ([When a build fails](building-tools.md#when-a-build-fails)).
+Each step shows how long it took, by Hewn's clock, so it's the same whenever you open the page; the running one counts up. You can leave: it keeps building. Once it's live, the log folds under **Show log**. A failed build says why (in the second look, which step), with its log open, **Ask builder to fix** and **Retry**; once it's been retried, it says by which build instead. A build a host's builder paused shows the host's note with **Continue** and **Stop** ([When a build fails](building-tools.md#when-a-build-fails)).
 
 ## Agents and Accounts
 
@@ -125,9 +130,13 @@ Each step shows how long it took, by Hewn's clock, so it's the same whenever you
 
 ## On a phone
 
-On a narrow screen, Home is a four-column grid, the menu folds into ☰ (the Inbox stays), and tools open full screen. The other pages work on a phone, but are laid out for a computer. To reach Hewn from your phone at all, see [Using Hewn from anywhere](remote-access.md).
+On a narrow screen, Home is a four-column grid, the menu folds into ☰ (the Inbox stays), and tools open full screen, with **•••** alone in the top bar so the tool's name has the room (**Change…** and **Share…** are in it). The other pages work on a phone, but are laid out for a computer. To reach Hewn from your phone at all, see [Using Hewn from anywhere](remote-access.md).
 
 ![Home on a phone: tools in a four-column grid, the menu folded into ☰ next to the Inbox, and widgets full width below](images/phone-home.png)
+
+## Hewn's mark
+
+Behind the first run, a new tool, a build and the sign-in page is Hewn's mark, drawn in dots: the thirteen pixels of the H run together into one pixel and part again, every 26 seconds. It pauses while the tab is hidden. With your system's reduce motion setting on, it rests on the H. A browser without WebGL 2 shows the H standing still.
 
 ## Shortcuts
 

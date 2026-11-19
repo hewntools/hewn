@@ -92,6 +92,9 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 **"opencode said nothing for 3 minutes, so Hewn stopped it (it never started)"**
 OpenCode sometimes never gets going (seen with 1.18.18, mostly when a model it can't resolve is involved). Hewn stops it after three silent minutes instead of waiting the whole build out. Retry the build; if it keeps happening, check that the model in Settings › AI is one `opencode models` lists.
 
+**"no activity for 15 minutes"** in a build's log
+The builder did nothing (no output, no file written) for 15 minutes. If it had been working, Hewn resumed it where it was (the log says "; resuming") and the attempt goes on. If it never did anything, it hung from the start, and the attempt failed: retry it, and if it keeps happening, check the builder's sign-in and the model in Settings › AI. To give a slow builder longer, set `builderIdleMinutes` in `platform.json`.
+
 **"intake took longer than 15 minutes, so Hewn stopped it"**
 The talk before a build had no answer after 15 minutes, which usually means it hung (a dropped connection, a stuck sign-in). Send your message again. If it keeps happening with a long brief, pick a faster model or a lower effort in the chat box's model menu.
 
@@ -122,11 +125,14 @@ Better still, run Hewn as a user other than root.
 **A call fails with "timed out (call chain deadline)", or "stopped: … ran past its deadline"**
 A call chain has 30 seconds (a widget 15), and past that the call is stopped, code and all. Other calls running on the same tool then stop with it and say which call ran out of time. A tool with long work should do part of it per call ([Writing a tool](../spec/tools.md#runtime)): **Ask builder to fix this** on the failed call.
 
-**"Suspended: it kept Hewn from responding 3 times within an hour"**
-A tool whose code never lets go (an endless loop) holds up all of Hewn, not only itself: Hewn restarts about 5 seconds later, and calls and builds running then fail (a build is tried again once). Afterwards, the tool that was running has a line in its log (`hewn logs <id>`: `ERROR stalled: Hewn stopped responding while this ran and was restarted`) and in Activity. If two tools were running at that moment, both have it: Hewn can't tell which one looped. A tool named 3 times within an hour is suspended: its calls, schedules and widgets are refused, saying why, until you resume it. Its page has **Ask builder to fix** and **Resume**; `hewn resume <id>` does the same. A schedule refused while the tool is suspended doesn't count as a failure, and runs again once it's resumed.
+**"Suspended: it kept Hewn's tools from responding 3 times within an hour"**
+A tool whose code never lets go (an endless loop) holds up all your tools, not only itself: Hewn restarts its tools about 5 seconds later, and tool calls and builds running then fail. Hewn itself (the web client, your agents' connections) keeps answering. Afterwards, the tool that was running has a line in its log (`hewn logs <id>`: `ERROR stalled: Hewn's tools stopped responding while this ran and were restarted`) and in Activity. Tools that were only waiting at that moment (on another tool, a model or the network) aren't blamed: their call fails saying another tool held Hewn's tools up, and Activity lists them as held up, with what they were doing. When Hewn can't tell (a tool was loading, migrating or having its data read at the time), every tool that was running has the line. A tool named 3 times within an hour is suspended (the suspension says which three stalls): its calls, schedules and widgets are refused, saying why, until you resume it. Its page has **Ask builder to fix** and **Resume**; `hewn resume <id>` does the same. A schedule refused while the tool is suspended doesn't count as a failure, and runs again once it's resumed.
 
-**A build fails with "Its code kept Hewn from responding"**
-Its tests, sample data or screen ran code that never let go, so Hewn restarted. The build isn't tried again by itself: it would do the same. **Ask builder to fix** starts a new attempt with that as the reason.
+**`hewn doctor`: "the tools restarted 2× (a tool stuck in a loop, or a crash)"**
+Hewn's tools run in a process of their own, and since Hewn started it was restarted that many times: a tool's code held it (`hewn.log` says "Hewn's tools stopped responding … restarting them", and Activity names the tool, as above), or it exited ("tools: workerd exited"). Hewn itself kept answering. "workerd restarted N× (watchdog/crash)" on the same line is Hewn's own process; the tools restart with it, so they count that one too. `hewn status` shows both: `restarts: Hewn 0, tools 2`. If the tools keep restarting with no tool named in Activity, open an issue with those lines from `hewn.log`.
+
+**A build fails with "Its code kept Hewn's tools from responding"**
+Its tests, sample data or screen ran code that never let go, so Hewn restarted its tools. The build isn't tried again by itself: it would do the same. **Ask builder to fix** starts a new attempt with that as the reason.
 
 ## Agents
 

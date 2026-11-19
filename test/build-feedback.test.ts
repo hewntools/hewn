@@ -42,7 +42,8 @@ describe("build feedback: Got what you asked for?", () => {
     t.platform.setBuildFeedback(USER, first.buildId, { score: "yes" });
     const broken = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "break it" }), (ws) => editText(`${ws}/src/index.ts`, (s) => s.replace("runCount: r.n,", "runCount: r.n + 1,")));
     assert.equal(broken.status, "failed");
-    t.queue(() => {});
+    // The fix carries on from the broken build's workspace (#87): it undoes the break there.
+    t.queue((ws) => editText(`${ws}/src/index.ts`, (s) => s.replace("runCount: r.n + 1,", "runCount: r.n,")));
     const fixed = await t.platform.settle((await t.platform.retryBuild(USER, broken.buildId, { fix: true })).buildId);
     assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
     t.platform.setBuildFeedback(USER, fixed.buildId, { score: "no", note: "still wrong" });

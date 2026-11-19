@@ -31,7 +31,7 @@ import { Validation } from "./platform/validation.ts";
 import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 import { Activity, type ActivityView } from "./platform/activity.ts";
-import { Stalls, type Suspension } from "./platform/stalls.ts";
+import { type StallRole, Stalls, type Suspension } from "./platform/stalls.ts";
 import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
@@ -43,7 +43,7 @@ export { type Readiness, hostOf, hostWords, resolveHosts } from "./platform/gran
 export { WEB_SESSION_MS, normalizePublicUrl } from "./platform/sessions.ts";
 export { MODEL_KEYS } from "./platform/models.ts";
 export { type ConnectionHealth, HEALTH_DEADLINE_MS, HEALTH_CACHE_MS } from "./platform/connections.ts";
-export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH } from "./platform/invocation.ts";
+export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH, type CallLogEntry } from "./platform/invocation.ts";
 export { WIDGET_DEADLINE_MS, type HomeEntry, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
@@ -89,6 +89,11 @@ export interface PlatformOptions {
   timezone?: () => string;
   /** Called when the next schedule time may have changed (the host re-arms its timer). */
   onSchedulesChanged?: () => void;
+  /**
+   * No schedule runs, however it's set (HEWN_SCHEDULES=off): a copy of someone's Hewn (a restore drill, a smoke run)
+   * must never act for them. Nothing is due, and Run now is refused. Default: schedules run.
+   */
+  schedulesOff?: boolean;
   /** Days to keep capability call logs (owner setting, read at each cleanup). 0 = forever. Default 14. */
   logRetentionDays?: () => number;
   /** How long an agent's destructive call waits for the owner's confirmation before it returns "awaiting_confirmation". */
@@ -296,6 +301,7 @@ export class Platform {
   setConfig(owner: Agent, capabilityId: string, name: string, value: string) { return this.d.grants.setConfig(owner, capabilityId, name, value); }
   confirmations(owner: Agent): Confirmation[] { return this.d.grants.confirmations(owner); }
   decideConfirmation(owner: Agent, id: string, approve: boolean) { return this.d.grants.decideConfirmation(owner, id, approve); }
+  approveConfirmations(owner: Agent, ids: string[]) { return this.d.grants.approveConfirmations(owner, ids); }
 
   // ---------- tool UIs, web sessions, the public URL, passkeys (platform/sessions.ts) ----------
 
@@ -327,7 +333,9 @@ export class Platform {
   modelProblem(r: ModelRequirement): string | undefined { return this.d.models.modelProblem(r); }
   models(owner: Agent) { return this.d.models.models(owner); }
   setModelSettings(owner: Agent, change: { provider?: string; tiers?: Record<string, Record<string, string | null>>; monthlyCapUsd?: unknown; capabilityCapsUsd?: Record<string, unknown>; capabilityCapsHost?: Record<string, unknown>; prices?: Record<string, unknown> }) { return this.d.models.setModelSettings(owner, change); }
-  setModelKey(owner: Agent, provider: string, key: string | null) { return this.d.models.setModelKey(owner, provider, key); }
+  setModelKey(owner: Agent, provider: string, key: string | null, o?: { expiresOn?: string | null }) { return this.d.models.setModelKey(owner, provider, key, o); }
+  setModelKeyExpiry(owner: Agent, provider: string, expiresOn: string | null) { return this.d.models.setModelKeyExpiry(owner, provider, expiresOn); }
+  keyExpiries(owner: Agent) { return this.d.models.keyExpiries(owner); }
   retiredModel(model: string): { successor?: string } | undefined { return this.d.models.retiredModel(model); }
   setCapabilityModel(owner: Agent, capabilityId: string, to: { tier?: string; model?: string }): Promise<BuildView> { return this.d.models.setCapabilityModel(owner, capabilityId, to); }
   replacePinnedModel(owner: Agent, capabilityId: string, model: string): Promise<BuildView> { return this.d.models.replacePinnedModel(owner, capabilityId, model); }
@@ -349,11 +357,17 @@ export class Platform {
   invoke(agent: Agent, req: InvokeRequest, trace?: string[], within?: Deadline | number, opts?: { record?: boolean; readOnly?: boolean; readChain?: boolean; origin?: Agent }) { return this.d.invocation.invoke(agent, req, trace, within, opts); }
   recentFailures(owner: Agent, capabilityId: string) { return this.d.invocation.recentFailures(owner, capabilityId); }
   logLines(capabilityId: string, n: number): string[] { return this.d.invocation.logLines(capabilityId, n); }
+  callLog(agent: Agent, capabilityId: string, o?: { n?: number; operation?: string }) { return this.d.invocation.callLog(agent, capabilityId, o); }
+  callLogHeadsFor(owner: Agent, capabilityId: string, n: number) { return this.d.invocation.callLogHeadsFor(owner, capabilityId, n); }
+  callLogEntryFor(owner: Agent, capabilityId: string, id: number) { return this.d.invocation.callLogEntryFor(owner, capabilityId, id); }
 
   // ---------- stalls: what was running when Hewn stopped responding, suspended tools (platform/stalls.ts) ----------
 
-  /** Once at start, before `recoverInterruptedBuilds`. `stalledAt`: when the host restarted Hewn for not responding, if it did. */
-  recoverStall(stalledAt?: string): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt); }
+  /**
+   * What was running when the host found the tools not responding (`stalledAt`, before it restarts them), or once at start
+   * (unset). `role`: what each piece was doing, and whether it may have held them (unset: every one may have).
+   */
+  recoverStall(stalledAt?: string, role?: StallRole): { tools: string[]; suspended: string[]; builds: string[] } { return this.d.stalls.recover(stalledAt, role); }
   suspension(capabilityId: string): Suspension | undefined { return this.d.stalls.suspension(capabilityId); }
   resume(owner: Agent, capabilityId: string) { return this.d.stalls.resume(owner, capabilityId); }
 

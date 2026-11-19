@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The egress gate's rules, runtime-neutral (the Egress entrypoint in worker.ts applies them).
+// The egress gate's rules, runtime-neutral (the Egress entrypoint in tools-worker.ts applies them).
 
 export const hostAllowed = (host: string, allowed: string[]) =>
   allowed.some((h) => (h.startsWith("*.") ? host.endsWith(h.slice(1)) && host.length > h.length - 1 : host === h));
 
 const denied = (host: string) => new Response(`egress denied: ${host} is not in this capability's approved hosts`, { status: 403 });
+
+/**
+ * What a copy of someone's Hewn lets out (HEWN_NETWORK, for a smoke run or a restore drill): `off`, nothing; `get`,
+ * only GET and HEAD to the approved hosts, so a call can read but never post anything. Unset: what the grant allows.
+ * A tool's declared sideEffect is only its author's word, and its config (a webhook URL) can still point anywhere.
+ */
+export type NetworkMode = "off" | "get";
+
+export const networkMode = (raw: string | undefined): NetworkMode | undefined => (raw === "off" || raw === "get" ? raw : undefined);
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const MAX_HOPS = 10;
@@ -16,9 +25,18 @@ const MAX_HOPS = 10;
  * aren't carried to another origin. A capability that asked for `redirect: "manual"` gets the
  * redirect itself.
  */
-export async function gatedFetch(request: Request, hosts: string[], fetchFn: (req: Request) => Promise<Response> = fetch): Promise<Response> {
+export async function gatedFetch(request: Request, hosts: string[], fetchFn: (req: Request) => Promise<Response> = fetch, network?: NetworkMode): Promise<Response> {
   const manual = request.redirect === "manual";
   let url = new URL(request.url);
+  // Before anything else: nothing is sent, the body isn't read.
+  if (network === "off") return new Response(`egress denied: the network is off in this Hewn (HEWN_NETWORK=off), so ${url.hostname} wasn't reached`, { status: 403 });
+  if (network === "get" && request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); a ${request.method} to ${url.hostname} wasn't sent`, { status: 403 });
+  }
+  // A GET that asks to become a WebSocket would be a channel both ways.
+  if (network === "get" && request.headers.has("upgrade")) {
+    return new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); an upgrade to ${request.headers.get("upgrade")} at ${url.hostname} wasn't sent`, { status: 403 });
+  }
   if (!hostAllowed(url.hostname, hosts)) return denied(url.hostname);
   let method = request.method;
   const headers = new Headers(request.headers);

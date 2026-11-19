@@ -40,6 +40,8 @@ export interface PlatformConfig {
   toolDataLimitMB: number;
   /** One tool's own limit instead, in MB, by tool id. */
   toolDataLimitsMB?: Record<string, number>;
+  /** How long a builder on this machine may go with no activity (no output, no file change) before Hewn stops it and resumes it, in minutes. Unset: 15. Read for each build; platform.json only. */
+  builderIdleMinutes?: number;
 }
 
 export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttempts: 3, sandbox: true, intake: "claude", logRetentionDays: 14, buildPasses: defaultPasses(), toolDataLimitMB: TOOL_DATA_LIMIT_MB };
@@ -47,7 +49,7 @@ export const DEFAULT_CONFIG: PlatformConfig = { builder: "claude", maxBuildAttem
 /** The defaults here: a host that runs the builder and intake (HEWN_BUILD_URL) makes them the default. */
 const defaults = (): PlatformConfig => ({ ...DEFAULT_CONFIG, ...(process.env.HEWN_BUILD_URL ? { builder: "remote", intake: "remote" } : {}) });
 
-const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"] as const;
+const KEYS = ["builder", "maxBuildAttempts", "sandbox", "intake", "backupDir", "firstRunDone", "logRetentionDays", "publicListen", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB", "builderIdleMinutes"] as const;
 
 const path = (home: Home) => join(home.root, "platform.json");
 
@@ -70,7 +72,7 @@ const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]
 /** Re-read on every call so edits apply without restarting Hewn. */
 export function readConfig(home: Home): PlatformConfig {
   // Unknown keys (e.g. the retired "discovery") are ignored.
-  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels, buildPasses, toolDataLimitMB, toolDataLimitsMB } = { ...defaults(), ...stored(home) } as Record<string, any>;
+  const { builder, maxBuildAttempts, sandbox, intake, backupDir, firstRunDone, logRetentionDays, publicListen, timeZone, jobsChosen, jobModels, agentModels, buildPasses, toolDataLimitMB, toolDataLimitsMB, builderIdleMinutes } = { ...defaults(), ...stored(home) } as Record<string, any>;
   return {
     builder,
     maxBuildAttempts,
@@ -80,6 +82,8 @@ export function readConfig(home: Home): PlatformConfig {
     buildPasses: Array.isArray(buildPasses) ? passesIn(buildPasses) : defaultPasses(),
     toolDataLimitMB,
     ...(toolDataLimitsMB !== undefined ? { toolDataLimitsMB } : {}),
+    // A whole number of minutes, at least 1; anything else: the default.
+    ...(Number.isInteger(builderIdleMinutes) && builderIdleMinutes >= 1 ? { builderIdleMinutes } : {}),
     ...(typeof backupDir === "string" && backupDir ? { backupDir } : {}),
     ...(firstRunDone === true ? { firstRunDone } : {}),
     ...(typeof publicListen === "string" && IPV4.test(publicListen) ? { publicListen } : {}),

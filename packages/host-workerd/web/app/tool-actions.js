@@ -27,7 +27,7 @@ import { route } from "./router.js";
 import { shareSheet } from "./share.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
-export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, rollbackTo, toolActions };
+export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, fixSuspended, resumeSuspended, rollbackTo, suspendedText, toolActions, wideOnly };
 
 // ---------- tool actions (menu, change, rename, delete, icon, versions) ----------
 
@@ -35,9 +35,41 @@ async function openCapability(c) {
   if (c.building && !c.version) return go(`#/b/${c.building.buildId}`);
   // A change waiting for the owner comes up first, as what a tool asks for does (Later on it opens the tool as it is).
   if (c.held) return go(`#/b/${enc(c.held)}`);
+  // Suspended by Hewn: why, and Resume (it opens once resumed), as its Info page says it.
+  if (c.suspended) {
+    if (!(await suspendedSheet(c))) return;
+    c = (await caps(true)).get(c.id) ?? c;
+  }
   if (!c.ready && !(await grantsSheet(c.id))) return;
   go(c.ui ? `#/app/${enc(c.id)}` : `#/run/${enc(c.id)}`);
 }
+
+// ---------- a tool Hewn suspended (it kept Hewn's tools from responding) ----------
+
+/** What a suspension says, on the tool's Info page and when it's opened. */
+const suspendedText = (reason) => `Suspended: ${reason}. Its calls, schedules and widgets are refused until you resume it.`;
+
+/** Ask builder to fix: a Change with what happened in the box. */
+const fixSuspended = (c) => openChange(c, { m: "It kept Hewn's tools from responding while it ran (an endless loop?), so Hewn suspended it. Find what never lets go and fix it." });
+
+/** Resume: it runs again. Resolves whether it did. */
+const resumeSuspended = (c) =>
+  api(`/capabilities/${enc(c.id)}/resume`, { method: "POST" }).then(
+    () => (invalidateCaps(), toast(`${c.name} resumed`), true),
+    (e) => (fail(e), false),
+  );
+
+/** Opening a suspended tool: the suspension, with Ask builder to fix and Resume. Resolves true once it's resumed. */
+const suspendedSheet = (c) =>
+  modal((close) => {
+    const resume = h("button", { class: "primary" }, "Resume");
+    resume.onclick = async () => {
+      resume.disabled = true;
+      if (await resumeSuspended(c)) close(true);
+      else resume.disabled = false;
+    };
+    return [sheetHead(appIcon(c, { size: 40 }), c.name, "Suspended by Hewn"), h("p", { class: "notice danger" }, suspendedText(c.suspended)), sheetActions(h("button", { onclick: () => (close(false), fixSuspended(c)) }, "Ask builder to fix"), resume)];
+  }, { width: 480 });
 
 /**
  * Change… always opens the tool with the change drawer beside it (P1): its own UI, or the Run view
@@ -77,13 +109,19 @@ function toolActions(c, { rename, extra } = {}) {
   return h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), extra, more);
 }
 
-/** The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools. */
-function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
+/** `el`, shown only where a tool's bar has room for it (not on a phone, where ••• holds it). */
+const wideOnly = (el) => (el.classList.add("wide-only"), el);
+
+/**
+ * The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools.
+ * `change`: what Change… does where it isn't a new page (an opened tool's drawer, which keeps the tool where it is).
+ */
+function capabilityMenu(c, { rename, editHome, hidden, show, change } = {}) {
   const id = enc(c.id);
   const connection = c.kind === "connection";
   return [
     ["Open", () => openCapability(c).catch(fail)],
-    ["Change…", () => openChange(c)],
+    ["Change…", change ?? (() => openChange(c))],
     // A tool with a screen: a second look at its design, in the Change drawer (the owner's, 2026-11-02: in this menu, under Change…).
     c.ui && !connection && ["Polish…", () => openChange(c, { polish: true })],
     ["Info", () => go(`#/c/${id}`)],

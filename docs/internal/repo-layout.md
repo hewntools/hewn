@@ -11,7 +11,7 @@ packages/
 seeds/                    Apache-2.0                            example tools
 skills/                   Apache-2.0                            the Agent Skill "build a Hewn tool", made from the spec (spec/src/skill.ts and the brief; npm run skill)
 test/                                                           integration tests across packages
-scripts/                                                        the npm build, and the one-line install served by hewn.tools
+scripts/                                                        the npm build, the one-line install served by hewn.tools, smoke runs on a copy (smoke-copy/)
 docs/                                                           user docs; docs/internal/ for contributors
 design/                                                         design references for the web client
 ```

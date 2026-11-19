@@ -2,7 +2,7 @@
 
 Write a **candidate** in this workspace; the platform owns validation and promotion. Passing candidates become immutable versions; an agent's new tool or change waits for the owner's review. The current version serves until promotion.
 
-{{SUBMIT}} If you have a `check` tool, use it before you stop (see the end).
+{{SUBMIT}} If you have a `check` tool, you must run it before you stop (see the end): what you leave is validated the same way; a failure costs an attempt.
 
 **The owner's instructions:** when your workspace has `owner-instructions/` (`every-tool.md`, the owner's rules for every tool; `this-tool.md`, for this one), read it before you write anything and follow it wherever it applies; this contract still holds.
 
@@ -41,6 +41,8 @@ Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g
 `"saturation"` (ABI 2.4; integer 0–150, default 100) is how colourful the tile is. Set it only for a brand, with the brand's hue: `0` for a black-and-white service (Ghost, Notion, the BBC: black or white on grey), 30–60 for a muted brand, up to 150 for a loud one (Todoist red).
 
 Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them.
+
+Read `capability.json` back whole after each edit: a trailing comma or unquoted key fails the first step.
 
 ### Icon
 
@@ -162,10 +164,11 @@ For work only a language model can do (explain a word, summarise a note, read a 
    - A call over the owner's budget throws; catch it.
 3. **Never block a write on the model.** Store the record with the generated field empty, then fill gaps in a separate best-effort operation (e.g. `enrich_missing@1`) that does as many as fit and returns `{ "done": n, "remaining": m }`. If the model is down or over budget, the import still succeeds; the next run fills the rest.
 4. Outside text (tasks, notes, web pages, images) can carry instructions. Model output is data: store or show it, never execute it or let it steer your code.
-5. Fake replies in test cases: `"model"` lists them in call order (`{ "text": "..." }`, `{ "json": {...} }` or `{ "error": "..." }`):
+5. Fake replies in test cases: `"model"` lists them in call order, `{ "json": {...} }` for a call that passes `schema` (it, or a `text` one, must be valid JSON matching the call's `schema`), else `{ "text": "..." }`, or `{ "error": "..." }`:
    ```json
    { "name": "explains", "operation": "enrich_missing", "input": {}, "model": [{ "json": { "explanation": "Happy." } }], "expect": { "done": 1 } }
    ```
+   An image passed to the model must be a real, tiny PNG: its size is read.
 
 ### Widgets (ABI 2.3)
 
@@ -176,19 +179,30 @@ A widget is a glanceable card on Hewn's Home and in agents' chats, drawn by the 
 "widgets": [{
   "name": "due", "version": 1, "title": "Words due",
   "operation": "widget_due@1",
-  "sizes": ["small", "medium"],
+  "sizes": ["small", "large"],
   "refresh": { "every": "30m" },
   "open": "ui#test"
 }]
 ```
 
-- `sizes`: `small` (1×1, ~110 px: one number), `medium` (2×1: a number with context, 3 list rows, a short chart), `large` (2×2: 5 rows or a taller chart). Offer only sizes the content fits; one is fine. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short. Validation draws every offered size and **fails one whose content (or revealed text) is cut off**.
+Name the operation `widget_<name>`, with `"outputSchema": { "type": "object" }` (each view is checked against its template; requiring `template` breaks per-size views). It returns one view, **or one per size** when bigger sizes show more (a missing size uses the nearest):
+
+```ts
+"widget_due@1": (_: {}, ctx: Ctx) => {
+  const rows = ctx.db.prepare("SELECT word, source, misses FROM words WHERE due <= date('now')").all();
+  return {
+    small: { template: "stat", value: rows.length, caption: "due" },
+    large: { template: "list", items: rows.slice(0, 5).map((w) => ({ title: w.word, detail: w.source, value: w.misses })), empty: "Nothing due" },
+  };
+},
+```
+
+- `sizes`: `small` (1×1, ~110 px) holds one number; `medium` (2×1): a number with context, 3 list rows, a short chart; `large` (2×2): 5 rows or a taller chart. Offer only sizes the content fits (one is fine) and size each view yourself: Hewn draws them, and **fails one whose content (or revealed text) is cut off**, only in a widgets build or when a tool without a UI adds or changes `widgets` in capability.json. Use the room: a large widget repeating the medium's two lines wastes it. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short.
 - `refresh.every`: 5m–24h, while Home is open (default 30m).
 - `open` (needs a UI): where a tap lands; `"ui#section"` opens the UI with `location.hash` set to `#section`. Default: the capability.
-- Return one view (below), **or one per size** when bigger sizes show more: `{ "medium": { "template": "text", … }, "large": { "template": "list", … } }` (a size without its own view uses the nearest). Use the room: a large widget repeating the medium's two lines wastes it.
 - Views (every template takes optional `buttons`; stat, list and text also take `reveal`):
   - `{ "template": "stat", "value": 7, "unit"?: "km", "caption"?: "words to test" }`
-  - `{ "template": "list", "items": [{ "title": "…", "detail"?: "…", "value"?: "…" }], "empty"?: "Nothing due" }` (at most 5 items)
+  - `{ "template": "list", "items": [{ "title": "…", "detail"?: "…", "value"?: "…" }], "empty"?: "Nothing due" }` (at most 5 items, each with these three fields only)
   - `{ "template": "chart", "kind"?: "bar" | "line", "labels": ["Mon", …], "series": [{ "name": "Sleep", "values": [7.2, …] }], "unit"?: "h", "caption"?: "…" }` (≤ 31 labels, ≤ 3 series, one value per label)
   - `{ "template": "progress", "value": 2, "max": 3, "label"?: "2 of 3 runs", "caption"?: "…" }`
   - `{ "template": "text", "text": "…" (≤ 280 chars), "caption"?: "…" }`
@@ -198,7 +212,6 @@ A widget is a glanceable card on Hewn's Home and in agents' chats, drawn by the 
   - Buttons and "Show" share one row (medium fits ~4 labels of 1–2 words).
 - Limits: widget title ≤ 40; list item title and detail, captions and empty text ≤ 80; unit ≤ 12; chart label ≤ 16, series name ≤ 24; progress label ≤ 40, `max` > 0; button label ≤ 24. Unknown view fields fail validation. Write for a glance: the number first.
 - **Drawing is read-only; buttons are not.** The widget operation is `"sideEffect": "read"` and runs with read-only state (any INSERT/UPDATE/DELETE/CREATE throws), other capabilities' read operations only, no `ctx.model`, secret updates dropped. Compute from stored data; never fetch or generate on render. If it takes input (e.g. which list), the owner sets it when placing the widget; default every property so `{}` works.
-- Name widget operations `widget_<name>` with `outputSchema` `{"type":"object"}`; the platform checks each view against its template (a required top-level `template` breaks per-size views).
 - Every widget needs a test case; seed data with earlier cases so it shows something real.
 
 ### Connections (ABI 2.1)
@@ -257,7 +270,7 @@ The owner judges the tool by this screen: a correct backend behind a bland form 
 
 For a **new UI or requested redesign**, read `OTHER_TOOLS.md` when present. Before UI code (after a new tool's icon), write a short design plan as a message:
 
-1. **Moment:** who opens it, when, and what they need within five seconds. Put that answer first and largest; keep the main action beside what it acts on, with minimal typing.
+1. **Moment:** who opens it, when, and what they need within five seconds. Put that answer first and largest; keep the main action beside what it acts on, with minimal typing. Say what the first phone screen (390 px) shows: the answer, the action, the visual.
 2. **Three directions:** explore different concepts, layouts, type and signature visuals from the subject's world (race bib, recipe cards, workshop manual). Pick the strongest for the owner's task and say why; distinguish it from their other tools by more than colour.
 3. **Palette and type:** lead with the manifest hue, then a second colour family, an accent and neutrals, each with light and dark values; backgrounds stay neutral (see "Backgrounds" in the checklist). Specify display, body, number and small-label font stacks, the layout and the signature visual. Check "Looks to avoid" below.
 4. **Data:** the drawn data is the main content: at least one large custom SVG/canvas visual that fits it better than a table or form (timeline, calendar heatmap, gauge, ring, room map), labelled and sized to its data, and an intentional empty state that leads to the main action.
@@ -280,6 +293,7 @@ Record the result in `ui/look.json`: `{"hue": …, "palette": {"name": "#hex", �
 
 Every model reaches for these, so they look generated. Lead with the subject; justify any exception in the plan:
 
+- A masthead, slogan, intro paragraph or settings row above the answer.
 - A high-contrast serif display with terracotta, clay or peach: the default "tasteful" look.
 - Near-black with acid green, lime or vermilion (Hewn's own look); purple or blue gradients on white; corner gradient washes.
 - Tracked-out ALL-CAPS micro-labels or `.eyebrow`; use size, weight and position for hierarchy.
@@ -292,14 +306,14 @@ Every model reaches for these, so they look generated. Lead with the subject; ju
 - **Hierarchy:** one primary answer, and each piece of data in one place. Use the desktop width without half-empty panels. Show the 5–8 list items that matter and a way to see all; a long history reads better as a visual. Forms other than the main action live behind a button, sheet or disclosure.
 - **Backgrounds:** the page and its surfaces are always white or pale grey in light, black or near-black grey in dark (the base's `--bg` and `--surface` already are). The tool's colour goes into its data, visuals and accents, never the page.
 - **Dark mode:** give every colour both values, `--leaf: light-dark(#2f7a4a, #8fd4a6)`, and use colour tokens inside shadows and gradients. This follows Hewn's Light, Dark and System settings; a plain `prefers-color-scheme` follows System only.
-- **Phone:** design from 375 px (validation uses 390) in this order: answer, action, visual, rest. Use `min-width: 0` on grid and flex children, `max-width: 100%` on images and SVG, wrapping rows and `overflow-wrap: anywhere`, and keep chart labels from colliding. Tap targets are at least 36 px.
+- **Phone:** design from 375 px (validation uses 390) in the plan's order, then the rest. Use `min-width: 0` on grid and flex children, `max-width: 100%` on images and SVG, wrapping rows and `overflow-wrap: anywhere`, and keep chart labels from colliding. Tap targets are at least 36 px.
 - **Forms:** sensible defaults; Enter submits; the first field is focused when the form opens; the button is disabled while saving. Success clears or closes the form and shows the change at once; failure keeps the input and shows the error beside the form (`.notice.danger`).
 - **Formatting and order:** readable local dates (`Intl.DateTimeFormat`, "today", "3 days ago") and numbers with units; the most useful first (newest, most urgent, highest rated). No raw ids, ISO timestamps or JSON on screen.
 - **States and actions:** done, due, late and selected tell apart at a glance. A destructive action asks first and says what will be lost, or offers a working Undo.
-- **Copy and accessibility:** short, specific words from the owner's world ("Add a word", not "Invoke add_word"), sentence case, no welcome block or API jargon. Real buttons and labels, visible focus, keyboard access, readable contrast. Truncate only where the full text is available elsewhere, and keep action labels meaningful.
+- **Copy and accessibility:** short, specific words from the owner's world ("Add a word", not "Invoke add_word"), sentence case, no API jargon. Real buttons and labels, visible focus, keyboard access, readable contrast. Truncate only where the full text is available elsewhere, and keep action labels meaningful.
 - **Errors:** show an operation's `{ error, message }` in the page and catch rejected requests, keeping the input and the page usable. No uncaught errors or `console.error`.
 
-Before you stop, reread your UI against this checklist and "Looks to avoid"; fix what you find.
+Before you stop, answer these in a message (from your screenshots, when you have them) and fix what you find: Does the eye land on the answer first? Is the data drawn, or listed? What looks generated ("Looks to avoid")? Does dark mode hold up? Does the phone lead with the answer, action and visual?
 
 **The platform renders your UI before promotion** on empty and sample-filled databases, and the owner sees the screenshot. An uncaught error, `console.error` or failed request fails the build. These renders are offline: no network, other tools or model, and test cases' `calls` and `model` fakes don't apply. Operations the page calls on load must return a schema-valid empty or unavailable result when a source is out of reach, so no request fails. Show that state honestly; never hardcode fake results.
 
@@ -319,6 +333,7 @@ Before you stop, reread your UI against this checklist and "Looks to avoid"; fix
 
 - Existing migration files are immutable; add new ones (`002_add_x.sql`, ...).
 - No `DROP TABLE`, `DROP COLUMN`, `DELETE FROM`, `TRUNCATE` or `BEGIN`/`COMMIT` in migrations (each file already runs atomically).
+- A migration ends with its last statement's `;`: a comment or a second `;` after it fails ("SQL code did not contain a statement").
 - Before promotion, migrations dry-run on a copy of live state, and live state is backed up before they apply.
 
 ### tests/cases.json
@@ -333,6 +348,8 @@ An ordered list. All cases share one fresh state DB with all migrations applied:
 ```
 
 At least one case; cover every operation. `expect` matches object subsets; arrays must have equal length and match in order. `"$any"` matches any present value. `version` defaults to the highest, `input` to `{}`.
+
+Cases run on the real clock: give inputs fixed ISO dates (a month end, a DST change), never "today", and `expect` only what holds on any day (2020 is always past).
 
 **Validation is offline:** no network, no real secrets, no other capabilities, no model. Cases supply fakes via `secrets`, `config`, `calls`, `model` keys (examples in each section).
 
@@ -353,4 +370,4 @@ Between 1 and 200 calls, in order; aim for 5–20 writes that fill the UI and wi
 
 When you have a `check` tool, call it before you stop. It runs the platform's pre-promotion checks (manifest, bundling, contracts, migrations, `tests/cases.json`, `sample/calls.json`, widgets) and renders your UI headless, empty and with sample data, at 1280 and 390 px, light and dark. It answers PASS or FAIL with every failure, UI measurements (overflow past the phone edge, cut text, page errors, buttons that break the page) and four screenshots (also in `screenshots/`).
 
-Fix failures and measured defects, then open every screenshot (long pages come in further parts) and fix what looks broken, cramped, cut off or unreadable; check again until it passes. PASS can still come with visual defects. You have up to 10 checks per attempt; when they run out, fix the last findings and stop. Checks never promote: what you leave when you stop is what gets validated, so don't stop mid-experiment. `screenshots/` is workspace-only; don't link it from the UI.
+Fix failures and measured defects, then open every screenshot (long pages come in further parts) and fix what looks broken, cramped, cut off or unreadable; check again until it passes. PASS can still come with visual defects: answer the UI checklist's questions before your last check. You have up to 10 checks per attempt; when they run out, fix the last findings and stop. Checks never promote: what you leave when you stop is what gets validated, so don't stop mid-experiment. `screenshots/` is workspace-only; don't link it from the UI.

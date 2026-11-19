@@ -14,11 +14,13 @@ export const operations = {
   async "probe@1"(input: { what: string; port?: number }, ctx: any) {
     switch (input.what) {
       case "globals":
-        return { found: ["process", "Deno", "Bun", "require"].filter((k) => typeof (globalThis as any)[k] === "function" || (k === "process" && (globalThis as any).process?.env?.HOME)) };
+        return { found: ["process", "Deno", "Bun", "require", "gc"].filter((k) => typeof (globalThis as any)[k] === "function" || (k === "process" && (globalThis as any).process?.env?.HOME)) };
       case "undeclared":
         return attempt(async () => gate(await fetch("https://example.com/")));
       case "declared":
         return attempt(async () => gate(await fetch("https://api.github.com/zen", { headers: { "user-agent": "hewn-test" } })));
+      case "post":
+        return attempt(async () => gate(await fetch("https://api.github.com/zen", { method: "POST", body: "{}", headers: { "user-agent": "hewn-test" } })));
       case "admin":
         return attempt(async () => (await fetch(`http://127.0.0.1:${input.port}/_admin/status`)).status);
       case "file":

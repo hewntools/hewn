@@ -21,7 +21,7 @@ import { remoteBuilder, remoteIntake, remoteJobsFromEnv } from "./builders/remot
 import * as service from "./service.ts";
 import { defaultHome, harnesses, realExec, refreshSkill } from "./setup/harnesses.ts";
 import { runSetup } from "./setup/wizard.ts";
-import { hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
+import { copySwitchesFromEnv, hostedFromEnv, startSupervisor, supervisorFile } from "./supervisor/index.ts";
 import { checkFormat, writeFormat } from "./supervisor/format.ts";
 import { renderUnicodeCompact } from "uqr";
 import { dnsRecords, localSite, publicSite } from "@hewntools/host-workerd/surface/site.ts";
@@ -65,7 +65,7 @@ Use it (as the owner; talks to the running Hewn)
                       a connection with a sign-in step asks you to sign in (--again to sign in anew)
   accounts            connections to external services: health and what uses them
   models              the model provider, tiers, budget and this month's spend
-                      models key <provider> [--from <path>|--remove] | use <provider> | list
+                      models key <provider> [--from <path>|--remove] [--expires <date>] | use <provider> | list
                       | tier <tier> <model-id>|--suggested | cap [<tool>] <usd>|none
                       | price <provider/model> <in> <out> (USD per M tokens) | check
                       | set <tool> <tier>|<provider/model> (what it uses; no builder)
@@ -80,7 +80,7 @@ Use it (as the owner; talks to the running Hewn)
   review [approve|reject <buildId>]
                       agents' changes waiting for you (to a connection, or adding operations)
   restore <id>        bring back a deleted tool, with its data
-  resume <id>         let a tool Hewn suspended run again (it kept Hewn from responding, 3 times in an hour)
+  resume <id>         let a tool Hewn suspended run again (it kept Hewn's tools from responding, 3 times in an hour)
   rollback <id> [version]
   export <id> [--out file.json]
   data reset <id> [--sample]
@@ -145,6 +145,8 @@ async function main() {
       // A host that runs this Hewn for its owner, who has no terminal (HEWN_HOSTED).
       const hosted = hostedFromEnv();
       if (hosted) log("hosted: the web client sends the owner to the host, not to a terminal");
+      // A copy of someone's Hewn (a restore drill): no schedules (HEWN_SCHEDULES=off), little or no network (HEWN_NETWORK).
+      const copy = copySwitchesFromEnv();
       const sv = await startSupervisor({
         home,
         port,
@@ -161,6 +163,7 @@ async function main() {
         },
         ...(remote ? { remote } : {}),
         ...(hosted ? { hosted } : {}),
+        ...copy,
         setup: await realSetupHooks(),
         sandbox: !flag("no-sandbox"),
         sandboxBuilders: () => readConfig(home).sandbox,
@@ -351,7 +354,7 @@ async function main() {
         console.log(`Hewn at ${c.url}`);
         console.table(caps.map((x: any) => ({ id: x.id, name: x.name, ready: x.ready })));
         if (st) {
-          console.log(`up ${st.upSeconds}s · workerd restarts ${st.restarts} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}`);
+          console.log(`up ${st.upSeconds}s · restarts: Hewn ${st.restarts}, tools ${st.toolsRestarts ?? 0} · secrets key: ${st.keySource} · sandbox ${st.sandbox ? "on" : "OFF"} · last backup ${st.backups.last?.date ?? "none"}${st.schedules === "off" ? " · schedules off" : ""}${st.network && st.network !== "on" ? ` · network ${st.network === "get" ? "GET only" : "off"}` : ""}`);
           if (st.idle) console.log(idleLine(st.idle));
         }
       });
@@ -865,12 +868,13 @@ async function models(c: PlatformClient, rl: ReturnType<typeof createInterface>)
   const [sub, a, b, x] = positional();
   const PROVIDERS = ["anthropic", "openai", "openrouter"];
   if (sub === "key") {
-    if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>|--remove]");
+    if (!a || !PROVIDERS.includes(a)) throw new Error("usage: hewn models key anthropic|openai|openrouter [--from <path>|--remove] [--expires YYYY-MM-DD]");
     if (flag("remove")) return void (await c.call("setModelKey", a, null), console.log(`✔ ${a} key removed`));
     const from = option("from");
     const key = from ? readSecretSource(from) : await askHidden(rl, `${a} API key (input hidden): `);
     if (!key) throw new Error("empty key, nothing stored");
-    const m = await c.call("setModelKey", a, key);
+    // Checked before it's stored: a key that doesn't pass leaves the one you had.
+    const m = await c.call("setModelKey", a, key, { expiresOn: option("expires") ?? null });
     const p = m.providers.find((p: any) => p.id === a);
     console.log(p.check?.ok ? `✔ ${a} key works (${p.models.length} models)` : `✔ ${a} key stored, but it couldn't be checked: ${p.check?.error}`);
     if (m.provider === a) console.log(`  ${a} runs the tiers${Object.keys(p.tiers).length ? `: ${Object.entries(p.tiers).map(([t, id]) => `${t} ${id}`).join(", ")}` : ""}`);

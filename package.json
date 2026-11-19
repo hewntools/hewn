@@ -1,6 +1,6 @@
 {
   "name": "hewn",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "private": true,
   "type": "module",
   "description": "Hewn: your own capabilities (small tools with their own data) that every agent you connect can use",
@@ -15,7 +15,8 @@
     "bench": "node --disable-warning=ExperimentalWarning bench/bench.ts",
     "spec:schemas": "node --disable-warning=ExperimentalWarning spec/build-schemas.ts",
     "skill": "node --disable-warning=ExperimentalWarning scripts/build-skill.ts",
-    "build:npm": "node --disable-warning=ExperimentalWarning scripts/build-npm.ts"
+    "build:npm": "node --disable-warning=ExperimentalWarning scripts/build-npm.ts",
+    "smoke:copy": "node --disable-warning=ExperimentalWarning scripts/smoke-copy/smoke-copy.ts"
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",

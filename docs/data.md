@@ -22,9 +22,20 @@ hewn backup restore <date|file>
 
 Restoring replaces the data and keeps Hewn running: it stops and starts its runtime itself. What was replaced is kept next to the data. Hewn also takes a backup itself before every upgrade, and before migrating a tool's data to a new version.
 
+### Trying a backup without it acting for you
+
+To look at a backup in a second Hewn (another home, another machine) while yours keeps running, restore it there and start that one with schedules and the network off, so it can't run a schedule twice or post anything in your name:
+
+```sh
+HEWN_HOME=~/hewn-try HEWN_PORT=7727 hewn backup restore ~/hewn-backups/hewn-backup-2026-11-18.zip
+HEWN_HOME=~/hewn-try HEWN_PORT=7727 HEWN_SCHEDULES=off HEWN_NETWORK=off hewn serve
+```
+
+`HEWN_NETWORK=get` lets your tools read from the sites they're allowed (GET and HEAD only). Its secrets were stored with your Hewn's key, so connections need signing in again there: skip that to keep it from touching your accounts. A build that was running when the backup was made starts again there, on your builder and your plan: stop it on its card if you don't want that. `HEWN_HOME=~/hewn-try hewn status` shows the switches: `schedules off · network off` (or `network GET only`).
+
 ## Export
 
-**Export data** in a tool's menu, or **Export** in Info › Data, downloads all its data as JSON. Or `hewn export <id> --out file.json`. Info › Data also shows how many rows the tool keeps, in how many tables, and when it last wrote.
+**Export data** in a tool's menu, or **Export** in Info › Data, downloads all its data as JSON. Or `hewn export <id> --out file.json`. Info › Data also shows how many rows the tool keeps, in how many tables, and when it last wrote. Neither stops a call the tool is making at the time.
 
 Export is your data, for you. **Share…** is the tool, for someone else: its code and its made-up sample data, never your data ([Sharing tools](sharing.md)). To take your tools and their data to another machine, use a backup ([below](#moving-to-a-new-machine)).
 
@@ -58,7 +69,7 @@ Deleting a tool keeps its data. Settings › Data › Deleted tools brings it ba
 
 ## Call logs
 
-Every call to a tool is logged: who called it, when, and how it went, with up to 200 of the tool's own log lines (500 characters each) and, for a failed call, its error (1,000 characters). Settings › Data › Keep call logs sets how long (two weeks by default). Builds, grants and access changes are always kept. `hewn logs <id>` shows a tool's calls.
+Every call to a tool is logged: who called it, when, and how it went, with up to 200 of the tool's own log lines (500 characters each) and, for a failed call, its error (1,000 characters). Settings › Data › Keep call logs sets how long (two weeks by default). Builds, grants and access changes are always kept. `hewn logs <id>` shows a tool's calls. Activity and the tool's Info page open each call to its lines ([Activity](using-hewn.md#activity)). An agent that may see a tool and use, make or change tools can read its log too (`capabilities_logs`), which shows in Activity. Stored secrets are never in it, and a connection's sign-in step keeps no lines.
 
 ## Moving to a new machine
 

@@ -19,7 +19,8 @@
     "spec/src",
     "test",
     "seeds",
-    "bench"
+    "bench",
+    "scripts/smoke-copy"
   ],
   "exclude": [
     "packages/host-workerd"

@@ -26,3 +26,26 @@ test("a home from before a column was added gets it, and keeps its rows", () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a version is read from the database once, shared, and forgotten with its tool", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hewn-registry-"));
+  try {
+    const sql = nodeSql(join(dir, "hewn.db"));
+    const registry = new Registry(sql);
+    const add = (name: string) => {
+      registry.insertCapability({ id: "log", name, purpose: "p", createdBy: "user" });
+      registry.insertVersion({ capabilityId: "log", version: 1, manifest: { id: "log", name, purpose: "p", operations: [] } as any, contentHash: name, buildId: "b" });
+    };
+    add("Log");
+    const v = registry.getVersion("log", 1)!;
+    assert.equal(registry.getVersion("log", 1), v, "the same object, not decoded again");
+    // A new tool under a purged id starts again at version 1: its own, not the old one's.
+    registry.purgeCapability("log");
+    assert.equal(registry.getVersion("log", 1), undefined);
+    add("Log again");
+    assert.equal(registry.getVersion("log", 1)!.manifest.name, "Log again");
+    sql.close?.();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

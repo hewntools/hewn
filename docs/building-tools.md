@@ -60,7 +60,7 @@ When it's live, the tool may still need you: **Allowed to** on its Info lists th
 
 ## Changing a tool
 
-**Change…** (in the tool's bar, its menu, or Info's **Change it** box) opens a panel next to the tool, so you can describe the change while you look at it; drag its left edge to make it wider. The tool keeps running its current version while the change builds. When the new version is live, **Reload** shows it, and **Undo** goes back to the one before.
+**Change…** (in the tool's bar, its menu, or Info's **Change it** box) opens a panel next to the tool, so you can describe the change while you look at it; drag its left edge to make it wider. The tool keeps running its current version while the change builds. When the new version is live, **Reload** shows it, and **Undo** goes back to the one before. With the panel closed (or the change made in another tab, or by an agent), a note at the foot of the tool's page says **v3 is ready**, with **Reload**: the page never reloads by itself.
 
 The proposal for a change is a short brief too: what changes, what must keep working (the operations agents and other tools call today, and the data), what you decided, what it needs and what should look or feel different. The card shows what changes and what's decided; **Show brief** has the whole brief. The builder designs any new operations from it and from your own words, and must keep the existing ones working: Hewn's checks refuse a version that breaks one. A change to a connection still lists the operations it adds.
 
@@ -100,7 +100,9 @@ The build says why: a failing test, an invalid manifest, an error on its screen 
 
 **Discard** puts a failed build aside, when you'd rather not try again: it leaves the Inbox, and Activity keeps it, marked discarded. Nothing about the tool changes (a failed new tool installed nothing; a failed change left your tool on its version), and the files the build left go with it.
 
-A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first.
+A build gets up to three attempts on its own (Settings › AI › Build attempts). A later attempt picks up where the builder left off, with the failure, instead of starting over, so it takes a fraction of the first. **Retry** and **Ask builder to fix** carry on from the files the failed build left, for a day after it failed: the builder starts again, told the work is there and what failed, fixes that first, and the build's log says "carrying on from its workspace". A Polish carries on the same way, and its passes run again once the fix passes the checks. A build you stopped carries on too when you start it again (**Retry**, **Start again**), told you stopped it, once its builder has finished stopping (up to 10 seconds), so its last changes come along; to start over instead, ask for it again. A change to a tool that has a newer version by then starts from that version instead, so nothing that went live since is undone. Once a build is retried, its card says by which build and how that one went ("Retried as … · live as v3"), instead of offering to retry it again.
+
+An attempt has no time limit. A builder on your machine is stopped only when it has done nothing for 15 minutes (no output, no file written), and then it carries on where it was, in the same attempt: the log says "no activity for 15 minutes; resuming". One that does nothing from the start fails the attempt. `builderIdleMinutes` in `platform.json` changes the 15. To end a build sooner, stop it.
 
 ![A failed build: 1 of 3 tests didn't pass, the test that failed, the Conversation and Spec agreed expanders, Ask builder to fix and Retry, and the log open below with what the test expected and what it got](images/build-failed.png)
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A build: its page, or the panel in the change drawer.
-import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
+import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, isOutdated, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
 import { AGENT_CATALOG, agentTile, catalogOf } from "./agents.js";
 import { shotUrl } from "./appearance.js";
 import { go, hues, moment, onLeave, put, sandboxNotice, topBar, view } from "./frame.js";
@@ -50,6 +50,12 @@ const submittedSteps = (b) => [
 const noBuilder = (b) => b.builder === "keep" || b.builder === "bundle" || b.builder === "submitted" || String(b.builder ?? "").startsWith("copy:");
 /** Retry runs the same builder again; an install from a file, a submission or your own edit had none (Hewn refuses), so it's done again instead. */
 const retryable = (b) => b.builder !== "bundle" && b.builder !== "keep" && b.builder !== "submitted";
+
+/** How the build that took a retried one over stands, in words, by its status. */
+const RETRY_STATE = { waiting: "waiting its turn", open: "building", building: "building", validating: "building", review: "waiting for your approval", failed: "failed too", cancelled: "stopped" };
+const retryState = (r) => (r.status === "promoted" ? (r.version ? `live as v${r.version}` : "live") : r.paused ? "paused" : (RETRY_STATE[r.status] ?? r.status));
+/** "Continued as b-…", "Retried as b-… · live as v3": the build that took this one over, one link away. */
+const takenOverLine = (label, id, tail = "") => h("div", { class: "small muted row tight wrap" }, `${label} `, h("a", { href: `#/b/${enc(id)}` }, id), tail);
 /** A Polish's steps: its builder writes no code, only sample data when the tool has none (else that step is done at once). */
 const POLISH_STEPS = STEPS.map(([k, label]) => [k, k === "code" ? "Sample data" : label]);
 /** The steps, with the passes the build runs (`passes`, from its step) right after its tests. */
@@ -334,7 +340,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         convoView,
         specView,
         // Continued already: the choice is made; the build that carries it on is one link away.
-        b.continuedAs ? h("div", { class: "small muted row tight wrap" }, "Continued as ", h("a", { href: `#/b/${enc(b.continuedAs)}` }, b.continuedAs)) : retryable(b) && h("div", { class: "row tight" }, cont, stop),
+        b.continuedAs ? takenOverLine("Continued as", b.continuedAs) : retryable(b) && h("div", { class: "row tight" }, cont, stop),
         logBlock(false),
       );
       requestAnimationFrame(keepScroll);
@@ -356,6 +362,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         } catch (e) {
           btn.disabled = false;
           fail(e);
+          // Retried meanwhile (elsewhere, or by Hewn): the card says by which build instead.
+          const now = await api(`/builds/${enc(id)}`).catch(() => null);
+          if (now?.retriedAs) (b = now), failed();
         }
       };
       if (fix) fix.addEventListener("click", again("fix", fix));
@@ -375,6 +384,14 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
             fail(e);
           }
         });
+      // What's left to do with it: nothing once it was retried (the build that took it over is one link away;
+      // Discard is refused then), else fix, retry or put aside, or (no builder ran) how to try once more.
+      const controls = () => {
+        if (b.retriedAs) return takenOverLine("Retried as", b.retriedAs.id, ` · ${retryState(b.retriedAs)}`);
+        if (retry) return h("div", { class: "row tight" }, fix, retry, discard);
+        const how = b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more.";
+        return [h("div", { class: "small muted" }, how), discard && h("div", { class: "row tight" }, discard)];
+      };
       if (!compact) setWallpaper([25, 250]);
       put(
         card,
@@ -384,7 +401,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" }),
         convoView,
         specView,
-        retry ? h("div", { class: "row tight" }, fix, retry, discard) : [h("div", { class: "small muted" }, b.builder === "bundle" ? "No builder ran: install the file again to try once more." : b.builder === "submitted" ? `No builder ran: ${b.submittedBy ?? actorLabel(b.requestedBy, all)} submits it again to try once more.` : "No builder ran: make the change again to try once more."), discard && h("div", { class: "row tight" }, discard)],
+        controls(),
         b.discardedAt && h("div", { class: "small muted" }, "Discarded: it's out of the Inbox, and stays in Activity."),
         logBlock(true),
       );
@@ -400,10 +417,13 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         } catch (e) {
           retry.disabled = false;
           fail(e);
+          // Started again meanwhile (elsewhere, or by Hewn): the card says by which build instead.
+          const now = await api(`/builds/${enc(id)}`).catch(() => null);
+          if (now?.retriedAs) (b = now), cancelled();
         }
       });
       // What it was asked to do stays, as on a failed build: the conversation and the spec, to start again from.
-      put(card, head(appIcon(cap(), { size: compact ? 36 : 56 }), "Build cancelled", `${cap().name} · nothing changed`), convoView, specView, h("div", { class: "row tight" }, retry, !compact && h("a", { class: "btn", href: "#/" }, "Home")), logBlock(false));
+      put(card, head(appIcon(cap(), { size: compact ? 36 : 56 }), "Build cancelled", `${cap().name} · nothing changed`), convoView, specView, b.retriedAs && takenOverLine("Started again as", b.retriedAs.id, ` · ${retryState(b.retriedAs)}`), h("div", { class: "row tight" }, !b.retriedAs && retry, !compact && h("a", { class: "btn", href: "#/" }, "Home")), logBlock(false));
     };
 
     const inReview = () => {
@@ -521,12 +541,12 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
     open();
     onLeave(() => es?.close());
     // A hidden tab makes no requests: the stream closes (else the browser reconnects it, hidden or not), and the page
-    // draws itself again once the tab is shown.
+    // draws itself again once the tab is shown (unless Hewn was updated under it: then the owner reloads).
     const hidden = () => {
       if (!document.hidden) return;
       es?.close();
       document.removeEventListener("visibilitychange", hidden);
-      shown().then(() => document.body.contains(card) && route());
+      shown().then(() => document.body.contains(card) && !isOutdated() && route());
     };
     document.addEventListener("visibilitychange", hidden);
     onLeave(() => document.removeEventListener("visibilitychange", hidden));

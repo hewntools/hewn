@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An opened tool (its own UI, or the Run view) and the change drawer beside it.
-import { api, appIcon, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf } from "../kit.js";
+import { api, appIcon, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, menuFrom, setWallpaper, skeleton, tintOf, toast } from "../kit.js";
 import { themeNow, withTheme } from "./appearance.js";
 import { buildPanel } from "./build.js";
 import { bar, glassBack, hues, onLeave, put, sandboxNotice, stillHere, view } from "./frame.js";
@@ -9,7 +9,7 @@ import { askFeedbackOnOpen, intakeView } from "./intake.js";
 import { route } from "./router.js";
 import { runFailure } from "./schedules.js";
 import { shareButton } from "./share.js";
-import { askFix, capabilityMenu, fixButton, inlineRename, rollbackTo } from "./tool-actions.js";
+import { askFix, capabilityMenu, fixButton, inlineRename, rollbackTo, wideOnly } from "./tool-actions.js";
 
 export { appPage, field, runnableOps, runPage, sidePill };
 
@@ -17,18 +17,21 @@ export { appPage, field, runnableOps, runPage, sidePill };
 
 /**
  * Bar for an opened tool (its own UI, or the Run view): back, icon + name + version, Change… (pressed
- * while the drawer is open), Share… and •••, as Info has.
+ * while the drawer is open), Share… and •••, as Info has. On a phone, ••• alone (it holds the other two).
  */
 function appBar(c, { onChange } = {}) {
   const name = h("span", {}, c.name);
-  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name) })) }, "•••");
-  const change = h("button", { "aria-pressed": "false", onclick: () => onChange?.() }, "Change…");
+  // Its Change… (the bar's, or •••'s on a phone) opens the drawer: the tool stays as it is.
+  const more = h("button", { "aria-label": "More", onclick: () => menuFrom(more, capabilityMenu(c, { rename: () => inlineRename(c, name), change: () => onChange?.() })) }, "•••");
+  const change = h("button", { class: "wide-only", "aria-pressed": "false", onclick: () => onChange?.() }, "Change…");
+  const version = h("span", { class: "pill", hidden: !c.version }, c.version ? `v${c.version}` : "");
   const el = bar({
     left: c.kind === "connection" ? glassBack(c.name, `#/c/${enc(c.id)}`) : glassBack("Home", "#/"),
-    center: h("div", { class: "app-title" }, appIcon(c, { size: 28 }), name, c.version && h("span", { class: "pill" }, `v${c.version}`)),
-    right: h("div", { class: "glass-bar" }, change, shareButton(c), more),
+    center: h("div", { class: "app-title" }, appIcon(c, { size: 28 }), name, version),
+    right: h("div", { class: "glass-bar tool-actions" }, change, wideOnly(shareButton(c)), more),
   });
-  return { el, change };
+  const setVersion = (v) => ((version.textContent = `v${v}`), (version.hidden = false));
+  return { el, change, setVersion };
 }
 
 const DRAWER_WIDTH = "hewn.drawer.width";
@@ -70,7 +73,7 @@ function resizable(el, grip) {
  * then "vN is ready" with Reload and Undo (P4). The tool stays live on the left. Closing it while
  * a build runs is fine: the tile and the Inbox take over.
  */
-function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
+function changeDrawer(c, q, { onReload, onClose, onPromoted, noUi = false }) {
   const body = h("div", { class: "drawer-body" });
   const close = h("button", { class: "ghost sm icon-only", "aria-label": "Close", onclick: () => onClose() }, "×");
   // Its left edge drags to make it wider or narrower; the width is kept (in this browser).
@@ -85,6 +88,7 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
     const panel = buildPanel(buildId, {
       compact: true,
       onPromoted: (b) => {
+        onPromoted?.();
         const v = `v${b.resultVersion ?? ""}`;
         const notice = h("div", { class: "notice ok drawer-ready" });
         const more = () => h("button", { class: "sm", onclick: showIntake }, "Change more");
@@ -107,7 +111,8 @@ function changeDrawer(c, q, { onReload, onClose, noUi = false }) {
   // A change already building: follow it here.
   if (c.building?.buildId) showBuild(c.building.buildId);
   else showIntake();
-  return { el, focus: () => intake?.focus(), setText: (t) => intake?.setText(t) };
+  // `following`: it shows a build (and says itself when it's ready), not the intake.
+  return { el, focus: () => intake?.focus(), setText: (t) => intake?.setText(t), following: () => intake === null };
 }
 
 /** Undo a change from the drawer: back to the version before it (as Versions does). */
@@ -117,9 +122,55 @@ async function undoChange(c, b) {
   await rollbackTo(c, from);
 }
 
+/**
+ * The note that a newer version of the open tool is live (#110): "v3 is ready", with Reload, on the page. The bar's
+ * version follows at once; the tool's own screen waits for Reload; the page never reloads itself. Said once per
+ * version, unless the drawer is following the build that made it (its own notice says it then; closing the drawer
+ * without Reload brings the note). `drawerSays()`: the drawer is open on a build it follows.
+ */
+function readyNote(c, { setVersion, reload, drawerSays }) {
+  // The version the tool's screen shows (until Reload), the newest live one, and the newest the note was shown for.
+  let onScreen = c.version ?? 0;
+  let live = onScreen;
+  let noted = onScreen;
+  let el = null;
+  const drop = () => (el?.remove(), (el = null));
+  const show = () => {
+    if (live <= onScreen || live <= noted || drawerSays()) return;
+    noted = live;
+    drop();
+    el = toast(`v${live} is ready`, { action: ["Reload", () => ((el = null), reload())], ms: Infinity, dismiss: true });
+  };
+  /** Read the tool's live version; `reloaded`: the screen shows it now. */
+  const refresh = async ({ reloaded = false } = {}) => {
+    invalidateCaps();
+    const now = (await caps(true).catch(() => new Map())).get(c.id);
+    if (!now?.version) return;
+    live = now.version;
+    setVersion(live);
+    if (reloaded) (onScreen = noted = live), drop();
+    else show();
+  };
+  // A build of this tool that was in flight ended (the Inbox's poll sees it go, `hewn:inbox`), or this tab is looked
+  // at again (a build in another tab, or by an agent): see whether a newer version went live.
+  let inFlight = new Set();
+  const onInbox = (e) => {
+    const now = new Set((e.detail?.building ?? []).filter((b) => b.capabilityId === c.id).map((b) => b.buildId));
+    const ended = [...inFlight].some((id) => !now.has(id));
+    inFlight = now;
+    if (ended) void refresh();
+  };
+  const onVisible = () => !document.hidden && void refresh();
+  window.addEventListener("hewn:inbox", onInbox);
+  document.addEventListener("visibilitychange", onVisible);
+  onLeave(() => (window.removeEventListener("hewn:inbox", onInbox), document.removeEventListener("visibilitychange", onVisible), drop()));
+  return { refresh, show };
+}
+
 /** Opened tool or Run view with the drawer when ?change=1. Toggling it keeps the tool where it is. */
 function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
-  const { el: barEl, change } = appBar(c, { onChange: () => toggle() });
+  const { el: barEl, change, setVersion } = appBar(c, { onChange: () => toggle() });
+  const note = readyNote(c, { setVersion, reload, drawerSays: () => shown() && !!drawer?.following() });
   const layout = h("div", { class: "with-drawer" }, h("div", { class: "drawer-main" }, main));
   let drawer = null;
   const setUrl = (open) => {
@@ -132,7 +183,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const shown = () => !!drawer && drawer.el.style.display !== "none";
   const open = () => {
     if (!drawer) {
-      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), noUi });
+      drawer = changeDrawer(c, q, { onReload: reload, onClose: () => toggle(false), onPromoted: () => void note.refresh(), noUi });
       layout.append(drawer.el);
     } else drawer.el.style.display = "";
     change.setAttribute("aria-pressed", "true");
@@ -145,12 +196,39 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
       change.setAttribute("aria-pressed", "false");
       for (const k of ["m", "send", "widget", "from", "fix", "polish"]) q.delete(k);
       setUrl(false);
+      // Closed without Reload on a version it said was ready: the page says it now.
+      note.show();
     } else drawer?.focus();
   };
   if (q.get("change") === "1") open();
   /** Open the drawer (if it isn't), with `text` in the composer when given; without, what's typed stays. */
   drawerApi.open = (text) => (toggle(true), text === undefined ? drawer?.focus() : drawer?.setText(text));
-  return [barEl, layout];
+  return [barEl, layout, note.refresh];
+}
+
+/**
+ * Open one of Hewn's own pages a tool's UI linked to (session.js posts it on the owner's click): in this tab, or a new
+ * one as the link asked. Only the web client's pages (this host's `/`, a `#/…` address), only while the owner is in
+ * the tool's frame and has just clicked (where the browser can tell), and never with words of the tool's in the box
+ * (`m`) or a send (`send`): what the owner sends is theirs to write and to send.
+ */
+function openFromTool(m, frame) {
+  let url;
+  try {
+    url = new URL(String(m.url), location.href);
+  } catch {
+    return;
+  }
+  if (url.origin !== location.origin || url.pathname !== "/" || url.search) return;
+  if (document.activeElement !== frame || navigator.userActivation?.isActive === false) return;
+  const [path, query] = url.hash.split("?");
+  if (query !== undefined) {
+    const p = new URLSearchParams(query);
+    for (const k of ["send", "m"]) p.delete(k);
+    url.hash = [...p].length ? `${path}?${p}` : path;
+  }
+  if (m.newTab === true) window.open(url.href, "_blank", "noopener");
+  else location.assign(url.href);
 }
 
 async function appPage(id, q) {
@@ -171,13 +249,11 @@ async function appPage(id, q) {
     invalidateCaps();
     frame.classList.add("loading");
     frame.src = withTheme(await openUrl());
-    // The bar's version follows (v1 → v2).
-    const now = (await caps(true).catch(() => new Map())).get(c.id);
-    const pill = barEl.querySelector(".app-title .pill");
-    if (now?.version && pill) pill.textContent = `v${now.version}`;
+    // The bar's version follows (v1 → v2), and the screen now shows it.
+    await refreshVersion({ reloaded: true });
   };
   const drawerApi = {};
-  const [barEl, layout] = withDrawer(c, q, frame, { reload, api: drawerApi });
+  const [barEl, layout, refreshVersion] = withDrawer(c, q, frame, { reload, api: drawerApi });
   barEl.querySelector(".app-title")?.append(subtitle);
   const feedbackSlot = h("div", { class: "feedback-slot" });
   askFeedbackOnOpen(c, drawerApi, feedbackSlot);
@@ -203,6 +279,8 @@ async function appPage(id, q) {
     if (m.type === "scroll") sessionStorage.setItem(scrollKey, String(Number(m.y) || 0));
     // An operation failed in the tool's own screen: what failed comes from Hewn's record, not the page.
     if (m.type === "failed") showFix();
+    // A link in the tool to one of Hewn's own pages (session.js): opened here, where the session cookie goes with it.
+    if (m.type === "open") openFromTool(m, frame);
     if (m.type === "ready") {
       frame.classList.remove("loading");
       // A page the tool loaded itself had no fragment: tell it again.

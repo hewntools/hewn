@@ -47,9 +47,27 @@
       return false;
     }
   };
+  // A link to Hewn's own pages (the web client: a tool's Info, Activity…) from a UI in the web client: the web client
+  // opens it, in its tab or a new one as the link asks. From this frame it would be a navigation from another site
+  // (the frame's origin is opaque), which the browser sends without the owner's session cookie: a sign-in page.
+  const hewnOrigin = new URL(location.href).origin;
+  const embedded = window.top !== window.self;
+  const hewnPage = (href) => {
+    try {
+      const u = new URL(href, location.href);
+      return u.origin === hewnOrigin && !u.pathname.startsWith(base) ? u : null;
+    } catch {
+      return null;
+    }
+  };
   addEventListener("click", (e) => {
     const a = e.target instanceof Element ? e.target.closest("a[href], area[href]") : null;
-    if (a && elsewhere(a.href)) {
+    const page = a && embedded && !e.defaultPrevented && hewnPage(a.href);
+    if (page) {
+      e.preventDefault();
+      const newTab = a.target === "_blank" || e.metaKey || e.ctrlKey || e.shiftKey;
+      window.parent.postMessage({ hewn: 1, type: "open", url: page.href, newTab }, "*");
+    } else if (a && elsewhere(a.href)) {
       a.target = "_blank";
       a.rel = "noopener noreferrer";
     }

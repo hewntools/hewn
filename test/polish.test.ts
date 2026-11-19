@@ -39,6 +39,8 @@ const countingVisual = (): VisualCheck => async (req) => {
 };
 /** A test case that can't pass: validation fails. */
 const breakTests = (ws: string) => writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "get", operation: "get", input: {}, expect: { count: 5 } }]));
+/** The tests as they were: what a retry carrying on from broken ones fixes. */
+const fixTests = (ws: string) => cpSync(join(FIXTURES, "ui-counter", "tests", "cases.json"), join(ws, "tests", "cases.json"));
 
 /** What a run of the builder was given. */
 type Seen = { attempt: number; pass?: string; request?: string; feedback?: string; brief: string; contract?: string; shot?: string; words?: string };
@@ -67,6 +69,8 @@ describe("Polish", () => {
   // The setting for new tools' passes is off: a Polish runs both whatever it says.
   beforeEach(() => (t = setup({ visualCheck: countingVisual(), attempts: 3, buildPasses: () => [] })));
   afterEach(() => t.cleanup());
+  /** The transcript's line where a build's workspace opened. */
+  const opened = async (buildId: string) => /\[platform\] (opened.*)/.exec((await t.platform.buildTranscript(USER, buildId)) ?? "")?.[1] ?? "";
 
   /** Start a Polish, follow its steps, and wait for it to end. */
   const polish = async (req: { note?: string; realData?: boolean } = {}, ...scripts: Script[]) => {
@@ -152,13 +156,16 @@ describe("Polish", () => {
     await assert.rejects(t.platform.retryBuild(t.claude, view.buildId), /owner/);
     const jobs: Seen[] = [];
     const record = recorder(jobs);
-    const fixed = await t.build(() => t.platform.retryBuild(USER, view.buildId, { fix: true }), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    // It carries on from the failed pass's workspace (#87): the builder fixes the tests first, then the passes run again.
+    const fixed = await t.build(() => t.platform.retryBuild(USER, view.buildId, { fix: true }), (ws, job) => (record(ws, job), fixTests(ws)), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
     assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
     assert.equal(fixed.request.polish, true);
     assert.equal(fixed.request.retryOf, view.buildId);
     assert.match(String(fixed.request.note), /^Bolder\n\n--- Fix request ---\nThe previous build failed/);
     assert.match(jobs[0].brief, /What the owner asks of this Polish: Bolder\n\n--- Fix request ---/);
-    assert.equal(jobs[0].pass, "critique");
+    assert.equal(jobs[0].pass, undefined, "first the builder fixes what failed");
+    assert.match(jobs[0].feedback!, /^The previous build failed/);
+    assert.equal(jobs[1].pass, "critique");
   });
 
   test("the owner's own data only when asked: off by default; on, the passes see a copy of it, the builder's checks still sample data, and the tool's data is untouched", async () => {
@@ -267,6 +274,27 @@ describe("Polish", () => {
     assert.doesNotMatch(jobs[0].brief, /led to this tool as it is/);
   });
 
+  test("a failed pass, then Retry: it carries on from the pass's workspace, the builder fixes the failing tests, the passes run again", async () => {
+    await installFrom(t.platform, join(FIXTURES, "ui-counter"));
+    // The critique pass leaves its UI change and tests that fail, both tries.
+    const { view } = await polish({ note: "Bolder" }, (ws) => (markUi(ws, "v:critique"), breakTests(ws)), breakTests);
+    assert.equal(view.status, "failed");
+    const jobs: Seen[] = [];
+    const record = recorder(jobs);
+    let carried = "";
+    const done = await t.build(
+      () => t.platform.retryBuild(USER, view.buildId),
+      (ws, job) => ((carried = readFileSync(join(ws, "ui", "index.html"), "utf8")), record(ws, job), fixTests(ws)),
+      (ws, job) => (record(ws, job), markUi(ws, "v:critique-2")),
+      (ws, job) => (record(ws, job), markUi(ws, "v:craft")),
+    );
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.match(carried, /<!-- v:critique -->/, "the failed pass's work was there");
+    assert.deepEqual(jobs.map((j) => j.pass ?? "fix"), ["fix", "critique", "craft"]);
+    assert.match(jobs[0].feedback!, /^The previous build failed: .*\nIts validation log ended with:\n[^]*FAILED/);
+    assert.match(await opened(done.buildId), new RegExp(`\\(retry of ${view.buildId}\\), carrying on from its workspace, builder: script$`));
+  });
+
   test("a change undone by a restore isn't in it, and neither is what Ask builder to fix adds to the note", async () => {
     await ownersCounter();
     await t.platform.rollback(USER, "ui-counter", 1);
@@ -274,7 +302,7 @@ describe("Polish", () => {
     assert.equal(failed.view.status, "failed");
     const jobs: Seen[] = [];
     const record = recorder(jobs);
-    const fixed = await t.build(() => t.platform.retryBuild(USER, failed.view.buildId, { fix: true }), (ws, job) => (record(ws, job), markUi(ws, "v:critique")), (ws) => markUi(ws, "v:craft"));
+    const fixed = await t.build(() => t.platform.retryBuild(USER, failed.view.buildId, { fix: true }), (ws, job) => (record(ws, job), fixTests(ws)), (ws) => markUi(ws, "v:critique"), (ws) => markUi(ws, "v:craft"));
     assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
     assert.match(jobs[0].words!, /## The tool as first asked for \(v1, /);
     assert.doesNotMatch(jobs[0].words!, /today's total|## A change/);
@@ -434,7 +462,8 @@ describe("Polish", () => {
       assert.equal(asked[0].messages[0].content, "Polish it. The count should lead.");
       await page.eval(`[...document.querySelectorAll(".drawer-intake .proposal button")].find((b) => b.textContent === "Build polish").click()`);
       const started = await until("the Polish to start", async () => t.platform.registry.recentBuilds(5).map((id) => t.platform.getBuild(USER, id)).find((x) => x.request.polish && x.step?.step === "critique"));
-      assert.deepEqual(started.request, { capabilityId: "ui-counter", request: "Polish: Bolder, the count first", note: "Bolder, the count first", polish: true });
+      // With the model on the drawer's chip (#111): the builder's own here.
+      assert.deepEqual(started.request, { capabilityId: "ui-counter", request: "Polish: Bolder, the count first", note: "Bolder, the count first", polish: true, model: "default" });
       const context = t.platform.buildContext(USER, started.buildId);
       assert.deepEqual(context.conversation?.map((m) => [m.role, m.content.split("\n")[0]]), [["user", "Polish it. The count should lead."], ["intake", "I'll give it a second look."]]);
       // The drawer follows the build: a Polish's steps.

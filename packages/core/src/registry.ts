@@ -514,6 +514,12 @@ const ADDED_COLUMNS: [string, string, string][] = [
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
 export class Registry {
   db: Sql;
+  /**
+   * Versions read so far, decoded, by tool: a version never changes once stored (purging its tool forgets them).
+   * Every reader shares the one object, so nothing may change it (cfworker's Validator marks the schemas it
+   * compiles, which is meant for schemas reused like this).
+   */
+  private versionRows = new Map<string, Map<number, VersionRow>>();
 
   constructor(db: Sql) {
     this.db = db;
@@ -684,10 +690,29 @@ export class Registry {
 
   /** The header lines of a capability's last `n` calls, newest first ("<at> <caller> <op> <outcome> <ms>ms"); the rest of each entry stays in the database. */
   capabilityLogHeaders(capabilityId: string, n: number): string[] {
+    return this.capabilityLogHeadersWithIds(capabilityId, n).map((h) => h.header);
+  }
+
+  /**
+   * The same with each entry's row id (for its lines, `capabilityLogEntriesByIds`) and how many lines follow it. A
+   * header is everything before the first indented line: one an error broke over lines (before 0.4.12) is joined.
+   */
+  capabilityLogHeadersWithIds(capabilityId: string, n: number): { id: number; header: string; lines: number }[] {
     return this.db
-      .prepare("SELECT CASE WHEN instr(entry, char(10)) > 0 THEN substr(entry, 1, instr(entry, char(10)) - 1) ELSE entry END AS header FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?")
+      .prepare(
+        "SELECT rowid AS id, CASE WHEN instr(entry, char(10) || '  ') > 0 THEN substr(entry, 1, instr(entry, char(10) || '  ') - 1) ELSE entry END AS header, (length(entry) - length(replace(entry, char(10) || '  ', ''))) / 3 AS lines FROM capability_logs WHERE capability_id = ? ORDER BY at DESC, rowid DESC LIMIT ?",
+      )
       .all(capabilityId, n)
-      .map((r) => String(r.header));
+      .map((r) => ({ id: Number(r.id), header: String(r.header).replace(/\s*\n\s*/g, " "), lines: Number(r.lines) }));
+  }
+
+  /** These call-log entries of a capability (by row id), newest first. */
+  capabilityLogEntriesByIds(capabilityId: string, ids: number[]): { id: number; entry: string }[] {
+    if (!ids.length) return [];
+    return this.db
+      .prepare(`SELECT rowid AS id, entry FROM capability_logs WHERE capability_id = ? AND rowid IN (${ids.map(() => "?").join(", ")}) ORDER BY at DESC, rowid DESC`)
+      .all(capabilityId, ...ids)
+      .map((r) => ({ id: Number(r.id), entry: String(r.entry) }));
   }
 
   /** The last `n` log lines of a capability, oldest first. */
@@ -752,10 +777,16 @@ export class Registry {
   }
 
   getVersion(capabilityId: string, version: number): VersionRow | undefined {
+    const kept = this.versionRows.get(capabilityId)?.get(version);
+    if (kept) return kept;
     const r = this.db
       .prepare("SELECT * FROM capability_versions WHERE capability_id = ? AND version = ?")
       .get(capabilityId, version);
-    return r ? toVersion(r) : undefined;
+    if (!r) return undefined;
+    const v = toVersion(r);
+    if (!this.versionRows.has(capabilityId)) this.versionRows.set(capabilityId, new Map());
+    this.versionRows.get(capabilityId)!.set(version, v);
+    return v;
   }
 
   latestVersionNumber(capabilityId: string): number {
@@ -1254,8 +1285,15 @@ export class Registry {
   }
 
   /** Lifecycle actions for the activity timeline: delete, restore, rollback, purge …, and Hewn's own (stalled, suspend). */
-  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "suspend" | "resume", detail: string, actor: string) {
+  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "held-up" | "suspend" | "resume" | "logs", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
+  }
+
+  /** An agent read a tool's call log: one row per agent and tool while it keeps reading (within an hour of its last), counting the reads. */
+  noteLogRead(capabilityId: string, actor: string) {
+    const last = this.db.prepare("SELECT rowid AS id, detail FROM lifecycle_events WHERE capability_id = ? AND action = 'logs' AND actor = ? AND at >= ? ORDER BY at DESC LIMIT 1").get(capabilityId, actor, new Date(Date.now() - 3600_000).toISOString());
+    if (last) this.db.prepare("UPDATE lifecycle_events SET detail = ?, at = ? WHERE rowid = ?").run(String((Number(last.detail) || 1) + 1), now(), last.id);
+    else this.addLifecycleEvent(capabilityId, "logs", "1", actor);
   }
 
   lifecycleEvents(limit = 500) {
@@ -1283,6 +1321,7 @@ export class Registry {
         this.db.prepare(`DELETE FROM ${table} WHERE capability_id = ?`).run(id);
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
+      this.versionRows.delete(id);
       // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
       this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`);
     });

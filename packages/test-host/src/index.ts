@@ -42,6 +42,10 @@ export interface NodePlatformOptions {
   maxRunningBuilds?: number;
   /** Each builder's model list, for the efforts agents may ask for (default: without asking a CLI). */
   models?: (agent: string) => Promise<ModelCatalog>;
+  /** No schedule runs (HEWN_SCHEDULES=off). */
+  schedulesOff?: boolean;
+  /** How long a carry-over waits for a stopped build's builder to exit (default 10 s). */
+  stopWaitMs?: number;
 }
 
 export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platform {
@@ -54,6 +58,7 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
       builders: opts.builders ?? {},
       confineTo: () => (opts.sandboxBuilders?.() ? home.root : undefined),
       visualCheck: opts.visualCheck,
+      ...(opts.stopWaitMs !== undefined ? { stopWaitMs: opts.stopWaitMs } : {}),
     }),
     secrets: opts.secrets,
     brief: BRIEF,
@@ -71,5 +76,6 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
     agentBuildModels: (builder) => agentModels(readConfig(home), builder),
     modelEfforts: async (builder, model) => (await (opts.models ?? offlineCatalog)(builder)).models.find((m) => m.id === model)?.efforts,
     maxRunningBuilds: opts.maxRunningBuilds,
+    schedulesOff: opts.schedulesOff,
   });
 }
