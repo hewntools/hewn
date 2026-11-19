@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Inbox (Needs you, Building, Recent), behind the bell in the top bar, and the banner for an
 // agent blocked on a destructive call.
-import { api, appIcon, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
+import { api, appIcon, BRAND, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
 import { activityRow, groupItems } from "./activity.js";
 import { agentRequestSheet, agentTile, confirmationSheet, providerTile } from "./agents.js";
 import { waitingPill } from "./build.js";
@@ -162,7 +162,11 @@ async function pollInbox(withRecent = false, { refresh = false } = {}) {
       inboxCount.classList.toggle("danger", next.needs.some((x) => x.severity === "danger"));
       inboxBuilding.hidden = !next.building.length;
       inboxBtn.setAttribute("aria-label", n ? `Inbox, ${n} need${n === 1 ? "s" : ""} you` : "Inbox");
-      showBanner(next.needs.filter((x) => x.kind === "confirmation"));
+      const waiting = next.needs.filter((x) => x.kind === "confirmation");
+      showBanner(waiting);
+      // Agents waiting on you, in the tab's title. Kept up to date only while the tab is visible: a hidden tab makes
+      // no requests, so its title keeps the count it had.
+      document.title = waiting.length ? `(${waiting.length}) ${BRAND}` : BRAND;
       renderInbox();
     }
   }
