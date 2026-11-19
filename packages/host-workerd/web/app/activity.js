@@ -6,7 +6,7 @@ import { askedBy, buildModelWords, chargeWords, kindWord, LIVE_BUILD, milestones
 import { go, hues, onLeave, page, put, stillHere } from "./frame.js";
 import { PROVIDERS, usd } from "./models.js";
 
-export { activityPage, activityRow, groupItems };
+export { activityPage, activityRow, byDay, groupItems };
 
 // ---------- C3 / H1: Activity (All · Builds · Calls · Access) ----------
 
@@ -38,6 +38,47 @@ function groupItems(items) {
   return out;
 }
 
+/** Items as Activity lists them: grouped, under each day's label. */
+function byDay(items, all, showCap) {
+  const days = new Map();
+  for (const g of groupItems(items)) {
+    const d = dayLabel(g.at);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(g);
+  }
+  return [...days].flatMap(([d, gs]) => [h("div", { class: "eyebrow" }, d), h("ul", { class: "list activity" }, gs.map((g) => activityRow(g, all, showCap)))]);
+}
+
+/** What an opened row shows, under it. */
+const rowDetail = (items) => h("div", { class: "row-detail", hidden: true }, items);
+
+/** A time inside an opened row, only where it isn't the row's own (another minute or day). */
+const otherTime = (at, rowAt) => (clock(at) === clock(rowAt) && dayLabel(at) === dayLabel(rowAt) ? null : h("span", { class: "mono faint small" }, clock(at)));
+
+/** A line in an opened row: a name and whether it failed, more after them, then its time (where it isn't the row's) and its figure, under the row's time. */
+const detailLine = ({ name, failed, more, at, rowAt, figure }) =>
+  h("div", { class: "row-detail-head" }, name && h("span", { class: "mono small" }, name), failed && h("span", { class: "small detail-failed" }, "failed"), more, h("span", { class: "grow" }), otherTime(at, rowAt), h("span", { class: "mono faint small" }, figure));
+
+/** Why a call failed, without what the row already says ("operation_failed: whoami@1 failed: "). */
+const failure = (c) => c.outcome.replace(/^ERROR [a-z_]+: /, "").replace(new RegExp(`^${c.operation.split("@")[0]}(@\\d+)? (failed: )?`), "");
+
+/** Whether opening a call shows more than its row: an error, lines, the tools it went through. */
+const hasDetail = (c) => c.outcome !== "ok" || c.lineCount > 0 || c.via?.length > 0;
+
+/** One call in an opened row; `load` reads what its code printed ("! " lines in the log's warning colour). */
+function callDetail(c, rowAt, alone) {
+  const failed = c.outcome !== "ok";
+  const pre = c.lineCount ? h("pre", { class: "log short", hidden: true }) : null;
+  const why = failed && h("span", { class: "sub row-detail-error" }, failure(c));
+  const via = c.via?.length > 0 && h("span", { class: "faint small" }, `via ${c.via.join(" → ")}`);
+  // The row's only call: its name and status are the row's, so its line starts with why it failed.
+  const line = alone ? detailLine({ more: [why, via], at: c.at, rowAt, figure: `${c.ms}ms` }) : [detailLine({ name: c.operation.split("@")[0], failed, more: via, at: c.at, rowAt, figure: `${c.ms}ms` }), why];
+  const el = h("div", { class: "row-detail-item" }, line, pre);
+  const show = (...lines) => (put(pre, ...lines), (pre.hidden = false));
+  const load = pre && (() => api(`/capabilities/${enc(c.capabilityId)}/calls/${c.logId}`).then((e) => show(...e.lines.map((l) => h("span", { class: l.startsWith("! ") ? "warn" : "" }, `${l}\n`))), () => show("This call is no longer in the log.")));
+  return { el, load };
+}
+
 function activityRow(g, all, showCap) {
   const who = actorLabel(g.actor, all);
   const ref = showCap && g.capabilityId ? capRef(all.get(g.capabilityId), g.capabilityId) : null;
@@ -45,6 +86,8 @@ function activityRow(g, all, showCap) {
   let dot = "";
   let text;
   let expand = null;
+  /** Runs the first time the row opens. */
+  let onOpen = null;
   if (g.kind === "calls") {
     const errors = g.items.filter((c) => c.outcome !== "ok");
     const spent = (g.models ?? []).reduce((n, x) => n + x.costUsd, 0);
@@ -52,17 +95,18 @@ function activityRow(g, all, showCap) {
     if (g.items.length === 1) {
       const c = g.items[0];
       dot = c.outcome === "ok" ? "ok" : "danger";
-      text = on(h("span", { class: "mono" }, c.operation.split("@")[0]), c.outcome === "ok" ? "" : /timed? ?out/i.test(c.outcome) ? "timed out" : "failed", modelNote, ref && ["on", ref]);
+      text = on(h("span", { class: "mono" }, c.operation.split("@")[0]), c.outcome === "ok" ? "" : /timed? ?out/i.test(c.outcome) ? "timed out" : "failed", c.lineCount ? h("span", { class: "faint" }, `${c.lineCount} ${c.lineCount === 1 ? "line" : "lines"}`) : "", modelNote, ref && ["on", ref]);
     } else {
       dot = errors.length === g.items.length ? "danger" : errors.length ? "warn" : "ok";
       text = on(`${who} made ${g.items.length} calls`, ref && ["to", ref], errors.length ? h("span", { class: "faint" }, `${errors.length} failed`) : "", modelNote);
     }
-    // One call or several, the row opens the same way: each call's version, error, time taken.
-    expand = h(
-      "ul",
-      { class: "list nested", hidden: true },
-      g.items.map((c) => h("li", {}, h("span", { class: `dot ${c.outcome === "ok" ? "" : "danger"}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, c.operation), c.outcome !== "ok" && h("span", { class: "sub" }, c.outcome.replace(/^ERROR /, ""))), h("span", { class: "mono faint small" }, `${c.ms}ms`), h("span", { class: "mono faint small time" }, clock(c.at)))),
-    );
+    // The row opens to each call: why it failed, how long it took and what its code printed (read when the row first
+    // opens). A lone call that went fine and printed nothing has nothing more to show.
+    if (g.items.length > 1 || hasDetail(g.items[0])) {
+      const calls = g.items.map((c) => callDetail(c, g.at, g.items.length === 1));
+      expand = rowDetail(calls.map((c) => c.el));
+      onOpen = () => calls.forEach((c) => c.load?.());
+    }
   } else if (g.kind === "models") {
     const failed = g.items.filter((x) => x.outcome === "failed");
     const cost = g.items.reduce((n, x) => n + x.costUsd, 0);
@@ -74,11 +118,7 @@ function activityRow(g, all, showCap) {
       text = on("Model", h("span", { class: "mono" }, model(x)), x.outcome === "failed" ? h("span", { class: "faint" }, `failed: ${x.error ?? ""}`) : h("span", { class: "faint" }, `${tokens(x)} · ${usd(x.costUsd)}`), ref && ["·", ref]);
     } else {
       text = on(`${g.items.length} model calls`, h("span", { class: "faint" }, usd(cost)), failed.length ? h("span", { class: "faint" }, `${failed.length} failed`) : "", ref && ["·", ref]);
-      expand = h(
-        "ul",
-        { class: "list nested", hidden: true },
-        g.items.map((x) => h("li", {}, h("span", { class: `dot ${x.outcome === "failed" ? "danger" : ""}` }), h("div", { class: "grow" }, h("span", { class: "mono small" }, model(x)), h("span", { class: "sub" }, x.outcome === "failed" ? x.error ?? "failed" : tokens(x))), h("span", { class: "mono faint small" }, usd(x.costUsd)), h("span", { class: "mono faint small time" }, clock(x.at)))),
-      );
+      expand = rowDetail(g.items.map((x) => h("div", { class: "row-detail-item" }, detailLine({ name: model(x), failed: x.outcome === "failed", at: x.at, rowAt: g.at, figure: usd(x.costUsd) }), h("span", { class: "sub" }, x.outcome === "failed" ? (x.error ?? "") : tokens(x)))));
     }
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
@@ -97,7 +137,7 @@ function activityRow(g, all, showCap) {
     // A stall's details read "spin@1", or "list_runs@1 — waiting on a fetch": what of the tool was there, and what it was doing.
     const [stallOp, stallState] = (g.detail ?? "").split(" — ");
     const op = h("span", { class: "mono" }, stallOp.split("@")[0]);
-    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`] };
+    const words = { delete: "Deleted", restore: "Restored", purge: "Permanently deleted", rollback: `Rolled back ${g.detail}`, schedule, "start-over": "Started over: data emptied, a backup kept", sample: g.detail, share: `Shared ${g.detail}`, suspend: `Suspended: ${g.detail}`, resume: "Resumed", stalled: [op, stallState ? `was ${stallState} when Hewn's tools stopped responding, and Hewn couldn't tell which tool held them: restarted` : "kept Hewn's tools from responding: restarted"], "held-up": [op, `was ${stallState ?? "waiting"} when another tool held up Hewn's tools: restarted, not its doing`], logs: [`${who} read the call log`, Number(g.detail) > 1 && h("span", { class: "faint" }, `${g.detail} times`)] };
     dot = g.outcome === "purge" || g.outcome === "delete" || g.outcome === "start-over" ? "warn" : g.outcome === "stalled" || g.outcome === "suspend" ? "danger" : "";
     text = on(words[g.outcome] ?? g.outcome, ref && ["·", ref]);
   } else if (g.kind === "authority") {
@@ -136,19 +176,26 @@ function activityRow(g, all, showCap) {
     else (dot = "warn"), (text = on("Asked for access", ref && ["for", ref]));
   }
   const href = g.kind === "build" ? `#/b/${g.buildId}` : null;
+  // What it opens to goes under the row, across it from the text's edge: the dot, who and when stay on the row's line.
   const li = h(
     "li",
-    { class: href || expand ? "link" : "", tabindex: href || expand ? 0 : undefined },
+    { class: href || expand ? "link" : "", tabindex: href || expand ? 0 : undefined, ...(expand ? { "aria-expanded": "false" } : {}) },
     h("span", { class: `dot ${dot}` }),
-    h("div", { class: "grow" }, text, expand),
+    h("div", { class: "grow" }, text),
     h("span", { class: "pill" }, who),
     h("span", { class: "mono faint small time" }, clock(g.at)),
+    expand,
   );
   const act = (e) => {
-    if (expand && !expand.contains(e.target)) expand.hidden = !expand.hidden;
-    else if (href) go(href);
+    // Selecting the row's text isn't a click on it.
+    if (e.type === "click" && getSelection()?.toString()) return;
+    if (expand && !expand.contains(e.target)) {
+      expand.hidden = !expand.hidden;
+      li.setAttribute("aria-expanded", String(!expand.hidden));
+      if (!expand.hidden && onOpen) onOpen(), (onOpen = null);
+    } else if (href) go(href);
   };
-  if (href || expand) li.addEventListener("click", act), li.addEventListener("keydown", (e) => e.key === "Enter" && act(e));
+  if (href || expand) li.addEventListener("click", act), li.addEventListener("keydown", (e) => e.target === li && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), act(e)));
   return li;
 }
 
@@ -202,13 +249,7 @@ async function activityPage(q) {
   };
   const render = () => {
     if (!items.length) return cardEl.replaceWith(empty("Nothing yet", capability || agent || kinds ? "Nothing matches these filters." : "Calls, builds and access changes show up here."));
-    const days = new Map();
-    for (const g of groupItems(items)) {
-      const d = dayLabel(g.at);
-      if (!days.has(d)) days.set(d, []);
-      days.get(d).push(g);
-    }
-    put(cardEl, ...[...days].map(([d, gs]) => [h("div", { class: "eyebrow" }, d), h("ul", { class: "list" }, gs.map((g) => activityRow(g, all, !capability)))]).flat());
+    put(cardEl, ...byDay(items, all, !capability));
   };
   page("", 760, head, cardEl, more);
   more.hidden = true;

@@ -107,6 +107,7 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
       },
       format: (r) => ({ content: [{ type: "text", text: viewText(r.title, r.view, r.size) }], structuredContent: r }),
     },
+    capabilities_logs: { handler: (a) => platform.callLog(agent, a.capabilityId, { n: a.n, operation: a.operation }) },
     capabilities_create: { handler: (a) => platform.create(agent, a as any) },
     capabilities_modify: { handler: (a) => platform.modify(agent, a as any) },
     capabilities_add_widgets: { handler: (a) => platform.addWidgets(agent, a as any) },
