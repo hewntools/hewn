@@ -56,7 +56,7 @@ Each row has one action. **Activity** in the Inbox shows what just happened, and
 
 ![The Inbox open over Home: a failed build to show, an agent that wants to connect, a tool that wants to reach a host, and a connection to sign in to again, each with one button, then the recent calls](images/inbox.png)
 
-One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it.
+One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it, and the tab's title counts the calls waiting ("(3) Hewn") while the tab is open on screen (a tab in the background asks Hewn nothing). When one agent has several calls of the same operation waiting, **Allow all** lets them all run; each is still its own call in Activity.
 
 ## A tool's page
 

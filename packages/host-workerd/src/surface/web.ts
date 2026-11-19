@@ -564,6 +564,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   if (resource === "confirmations") {
+    // Allow all N: the calls the owner saw (one agent, one operation).
+    if (id === "all" && method === "POST") {
+      const ids = (await readJson(req))?.ids;
+      if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === "string")) throw new PlatformError("invalid_request", "ids: the calls to allow, a list of their ids");
+      return platform.approveConfirmations(owner, ids);
+    }
     if (id && method === "POST") return platform.decideConfirmation(owner, id, !!(await readJson(req)).approve);
     return platform.confirmations(owner);
   }

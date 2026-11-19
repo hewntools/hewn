@@ -85,7 +85,7 @@ You can also limit it to **some tools**. Later, click the agent on **Agents** to
 
 **Its new tools and changes** (its approval mode, on the same sheet): a new tool an agent makes, or a change to one you have, waits for your approval once it passes its checks, whether Hewn's builder wrote it or the agent did. The Inbox shows it with what it adds, what else changes, the files it changes and the screen after the change, on a desktop and a phone, light and dark. So does opening the tool, whose tile says it needs you: **Later** opens the tool as it is. A new tool shows what agents can do with it, its screen and its files. **Go live after the checks** is shown but can't be chosen yet: it comes once Hewn's own tests guard your data. Whatever the mode, what a tool asks for (a host, a key, another tool, a model) waits for you, as it always has: it can't run, reach the network or start a schedule until you approve it.
 
-Whatever their scopes, agents can't approve grants or secrets, enable schedules, or manage other agents. Those are yours. When an agent calls an operation marked **destructive**, it waits until you allow it (once) in Hewn: a banner shows on every page until you answer.
+Whatever their scopes, agents can't approve grants or secrets, enable schedules, or manage other agents. Those are yours. When an agent calls an operation marked **destructive**, it waits until you allow it (once) in Hewn: a banner shows on every page until you answer. The agent waits for you up to about 25 seconds; if you haven't answered by then, it's told to ask you and call again with the same input once you've allowed it.
 
 ## What agents see
 
