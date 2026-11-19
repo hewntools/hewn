@@ -515,6 +515,48 @@ export const operations = {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  await step("an agent's calls of one operation, waiting together: the tab's title counts them, and Allow all 3 lets each run", async () => {
+    // A counter whose destructive reset takes a value, so each call is its own.
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-reset-to-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => {
+      Object.assign(m, { id: "set-counter", name: "Set Counter" });
+      m.operations.push({ name: "reset", description: "Set the count", version: 1, sideEffect: "destructive", inputSchema: { type: "object", additionalProperties: false, properties: { to: { type: "integer" } } }, outputSchema: { type: "object", required: ["count"], properties: { count: { type: "integer" } } } });
+    });
+    writeFileSync(join(dir, "src", "index.ts"), `const count = (db: any) => db.prepare("SELECT n FROM counter WHERE id = 1").get().n;
+export const operations = {
+  "increment@1": (_: unknown, { db }: any) => (db.prepare("UPDATE counter SET n = n + 1 WHERE id = 1").run(), { count: count(db) }),
+  "get@1": (_: unknown, { db }: any) => ({ count: count(db) }),
+  "reset@1": (i: { to?: number }, { db }: any) => (db.prepare("UPDATE counter SET n = ? WHERE id = 1").run(i.to ?? 0), { count: count(db) }),
+};
+`);
+    const installed = await sv.admin("install", { name: "Set Counter", purpose: "Counts", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
+    const calls = [7, 8, 9].map((to) => client.callTool({ name: "capabilities_invoke", arguments: { capabilityId: "set-counter", operation: "reset", input: { to } } }, undefined, { timeout: 120_000 }));
+    for (let i = 0; i < 20 && (await sv.admin("call", { method: "confirmations", args: [] }).catch(() => ({ result: [] }))).result?.length < 3; i++) await new Promise((r) => setTimeout(r, 250));
+    await page.goto(`${web}/#/activity`);
+    await page.waitForFunction(() => document.title === "(3) Hewn", undefined, { timeout: 20_000 });
+    const banner = page.locator(".blocking-banner:not([hidden])", { hasText: "is waiting for you" });
+    await banner.getByRole("button", { name: "Review" }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "wants to reset" });
+    await sheet.getByText("2 more calls like it waiting").waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-allow-all.png" });
+    await sheet.getByRole("button", { name: "Allow all 3" }).click();
+    const counts = (await Promise.all(calls)).map((r: any) => (r.isError ? r.content[0].text : JSON.parse(r.content[0].text).result.count));
+    if (counts.join() !== "7,8,9") throw new Error(`the calls answered ${counts.join(" · ")}`);
+    await page.waitForFunction(() => document.title === "Hewn", undefined, { timeout: 20_000 });
+    await client.close();
+    // Each is its own line in Activity (the page is on it already: drawn again).
+    await page.reload();
+    const allowed = page.locator("li", { hasText: "Let Claude Code run" }).filter({ hasText: "Set Counter" });
+    await allowed.first().waitFor();
+    if ((await allowed.count()) !== 3) throw new Error(`${await allowed.count()} lines in Activity, not 3`);
+  });
+
   await step("an agent's change waits for the owner: the tool's tile says so and opens it, Later opens the tool as it is, Allow puts it live", async () => {
     const client = new Client({ name: "e2e", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
@@ -621,7 +663,7 @@ export const operations = {
   await step("Activity shows who changed authority, and when, and an install from a file", async () => {
     await page.goto(`${web}/#/activity`);
     await page.getByText("Connected Claude Code").waitFor();
-    await page.getByText(/Let Claude Code run/).waitFor();
+    await page.getByText(/Let Claude Code run/).first().waitFor();
     await page.getByText("Installed from a file · v1").waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-activity.png", fullPage: true });
   });
@@ -824,6 +866,35 @@ export const operations = {
     const notes = await page.getByText("Stopped.").count();
     if (notes !== 1) throw new Error(`${notes} Stopped. notes`);
     await page.unroute("**/api/intake");
+  });
+  await step("on a phone, an open tool's bar keeps ••• alone, which holds Change… (the drawer) and Share…, and the tool's name has the room (#116)", async () => {
+    // What each tool bar shows (its items not hidden by the phone rule).
+    const shown = () => page.locator(".tool-actions").first().locator(":scope > *").evaluateAll((els: Element[]) => els.filter((e) => getComputedStyle(e).display !== "none").map((e) => (e.textContent ?? "").trim()));
+    await page.goto(`${web}/#/run/reading-list`);
+    await page.locator(".tool-actions").waitFor();
+    if ((await shown()).join("|") !== "Change…|Share…|•••") throw new Error(`desktop: ${await shown()}`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await page.goto(`${web}/#/run/reading-list`);
+      await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).waitFor();
+      if ((await shown()).join("|") !== "•••") throw new Error(`the bar shows ${(await shown()).join(", ")}`);
+      await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Share…" }).waitFor({ timeout: 3000 });
+      // •••'s Change… opens the drawer, as the bar's did: the tool stays where it is (no new page).
+      await page.locator(".with-drawer").evaluate((e: Element) => e.setAttribute("data-e2e", "same"));
+      await page.getByRole("menuitem", { name: "Change…" }).click();
+      await page.locator(".drawer").waitFor();
+      if (!(await page.locator(".with-drawer[data-e2e='same']").count())) throw new Error("•••'s Change… opened a new page");
+      // Info's bar is as it was (no name in it to make room for).
+      await page.goto(`${web}/#/c/reading-list`);
+      await page.getByRole("link", { name: "Change…" }).waitFor();
+      await page.goto(`${web}/#/run/reading-list`);
+      const name = page.locator(".app-title > span").first();
+      await name.waitFor();
+      if (await name.evaluate((e: Element) => e.scrollWidth > e.clientWidth)) throw new Error(`the name is cut: ${await name.evaluate((e: Element) => e.clientWidth)} px for "${await name.textContent()}"`);
+    } finally {
+      await page.setViewportSize({ width: 1000, height: 900 });
+    }
   });
   await step("a change goes live while the tool is open and its Change drawer closed: a toast says v… is ready, with Reload; the page waits for it (#110)", async () => {
     let release!: () => void;

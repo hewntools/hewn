@@ -63,7 +63,7 @@ export class Invocation extends Domain {
     if (origin.kind === "agent" || readChain) {
       const op = resolveOperation(manifest, req.operation, req.operationVersion);
       if (readChain && op.sideEffect !== "read") throw new PlatformError("forbidden", `widgets are read-only: ${cap.id}/${opKey(op.name, op.version)} is a ${op.sideEffect} operation`);
-      if (op.sideEffect === "destructive" && origin.kind === "agent") await this.d.grants.confirmDestructive(origin, cap.id, opKey(op.name, op.version), req.input ?? {}, trace.slice(1));
+      if (op.sideEffect === "destructive" && origin.kind === "agent") await this.d.grants.confirmDestructive(origin, cap.id, opKey(op.name, op.version), req.input ?? {}, trace.slice(1), deadline);
     }
     // Only what is declared, granted and stored reaches the capability.
     const declared = manifest.requires?.secrets?.map((s) => s.name) ?? [];
@@ -108,7 +108,7 @@ export class Invocation extends Domain {
     // error or a log line.
     const secretValues = Object.values(secrets).flatMap(secretNeedles);
     const leaks = (s: string) => secretValues.some((v) => s.includes(v));
-    const redact = (s: string) => secretValues.reduce((acc, v) => acc.split(v).join("[secret]"), s);
+    const redact = (s: string) => redacted(s, secretValues);
     let executed: Awaited<ReturnType<Invocation["execute"]>>;
     // The idle report: a call keeps Hewn awake while it runs, and a write wants a backup. A widget's reads don't count:
     // the page that asked for them does, unless it was the page's own refresh.
@@ -198,7 +198,8 @@ export class Invocation extends Domain {
     try {
       const now = new Date();
       const op = req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation;
-      this.registry.addCapabilityLog(id, now.toISOString(), `${now.toISOString()} ${caller} ${op} ${outcome} ${now.getTime() - started}ms`, lines);
+      // One line: an error's message may break over several.
+      this.registry.addCapabilityLog(id, now.toISOString(), `${now.toISOString()} ${caller} ${op} ${outcome.replace(/\s*\n\s*/g, " ")} ${now.getTime() - started}ms`, lines);
     } catch {
       // logging must never break a call
     }
@@ -232,6 +233,106 @@ export class Invocation extends Domain {
   logLines(capabilityId: string, n: number): string[] {
     return this.registry.capabilityLogLines(capabilityId, n);
   }
+
+  /**
+   * A tool's call log, for the owner or an agent that may see it (`capabilities_logs`): its last `n` calls (default
+   * 20, at most 100), newest first, an `operation`'s only if given ("name", or "name@2": the calls that asked for
+   * version 2), each with the lines its code printed. Stored secrets are redacted again, for one set after a line
+   * was kept. An agent's reads show in Activity, one row while it keeps reading: reading the log is reading the tool.
+   */
+  callLog(agent: Agent, capabilityId: string, { n, operation }: { n?: number; operation?: string } = {}): { capabilityId: string; entries: CallLogEntry[] } {
+    requireScope(agent, ...LOG_SCOPES);
+    const cap = this.visibleActive(agent, capabilityId);
+    const count = Math.min(Math.max(Math.trunc(Number(n ?? LOG_N)) || LOG_N, 1), LOG_MAX_N);
+    const matches = (op: string) => !operation || op === operation || (!operation.includes("@") && op.split("@")[0] === operation);
+    const heads = this.callLogHeads(cap.id, operation ? LOG_SCAN : count)
+      .filter((h) => matches(h.operation))
+      .slice(0, count);
+    const entries = this.callLogEntries(cap.id, heads.map((h) => h.id));
+    if (agent.kind !== "user") this.registry.noteLogRead(cap.id, agent.id);
+    return { capabilityId: cap.id, entries: heads.flatMap((h) => entries.get(h.id) ?? []) };
+  }
+
+  /** The owner's view of a tool's last `n` calls, for Activity: each header, redacted again, with its row id and how many lines it has. */
+  callLogHeadsFor(owner: Agent, capabilityId: string, n: number): (Omit<CallLogEntry, "lines"> & { id: number; lineCount: number })[] {
+    requireOwner(owner);
+    return this.callLogHeads(capabilityId, n);
+  }
+
+  /** One call's entry, for the owner (Activity opens a call to its lines). */
+  callLogEntryFor(owner: Agent, capabilityId: string, id: number): CallLogEntry {
+    requireOwner(owner);
+    this.visibleActive(owner, capabilityId);
+    const entry = this.callLogEntries(capabilityId, [id]).get(id);
+    if (!entry) throw new PlatformError("not_found", "that call is no longer in the log");
+    return entry;
+  }
+
+  private callLogHeads(capabilityId: string, n: number) {
+    const redact = this.storedSecretRedactor(capabilityId);
+    return this.registry.capabilityLogHeadersWithIds(capabilityId, n).flatMap((r) => {
+      const head = callLogHeader(redact(r.header));
+      return head ? [{ ...head, id: r.id, lineCount: r.lines }] : [];
+    });
+  }
+
+  private callLogEntries(capabilityId: string, ids: number[]): Map<number, CallLogEntry> {
+    const redact = this.storedSecretRedactor(capabilityId);
+    return new Map(
+      this.registry.capabilityLogEntriesByIds(capabilityId, ids).flatMap((r) => {
+        const e = callLogEntry(redact(r.entry));
+        return e ? [[r.id, e] as const] : [];
+      }),
+    );
+  }
+
+  /** Replaces the tool's stored secrets (those its live version declares) with [secret]. */
+  private storedSecretRedactor(capabilityId: string): (s: string) => string {
+    const cap = this.registry.getCapability(capabilityId);
+    const declared = cap?.activeVersion ? (this.activeManifest(capabilityId).requires?.secrets?.map((x) => x.name) ?? []) : [];
+    const needles = declared.flatMap((name) => {
+      const v = this.secrets.get(capabilityId, name);
+      return v === undefined ? [] : secretNeedles(v);
+    });
+    return (s) => redacted(s, needles);
+  }
+}
+
+/** The scopes an agent reads a tool's log with: any that lets it call, make or change tools. */
+const LOG_SCOPES = ["invoke", "create", "modify"] as const;
+/** How many calls a read of the log returns unless asked, and at most. */
+const LOG_N = 20;
+const LOG_MAX_N = 100;
+/** How many of the newest calls a read filtered by operation looks through. */
+const LOG_SCAN = 2000;
+
+/** One call in a tool's call log. `caller` is who started it; `via`, the tools it went through to this one. */
+export interface CallLogEntry {
+  at: string;
+  caller: string;
+  via: string[];
+  operation: string;
+  /** "ok", or "ERROR <code>: <message>". */
+  outcome: string;
+  ms: number;
+  /** What its code printed, in order: "| " for console.log, info and debug, "! " for warn and error. */
+  lines: string[];
+}
+
+/** A call-log header: "<at> <call path> <op> <outcome…> <ms>ms" (the call path may hold " → "). */
+function callLogHeader(header: string): Omit<CallLogEntry, "lines"> | undefined {
+  const m = /^(\S+) (.+?) ([a-z][a-z0-9_]*(?:@\d+)?) (ok|ERROR .*) (\d+)ms$/.exec(header);
+  if (!m) return undefined;
+  const path = m[2].split(" → ");
+  return { at: m[1], caller: path[0], via: path.slice(1), operation: m[3], outcome: m[4], ms: Number(m[5]) };
+}
+
+/** A whole entry: its header (one an error broke over lines, before 0.4.12, is joined), then its lines, indented by two spaces. */
+function callLogEntry(entry: string): CallLogEntry | undefined {
+  const all = entry.split("\n");
+  const first = all.findIndex((l, i) => i > 0 && l.startsWith("  "));
+  const head = callLogHeader(all.slice(0, first < 0 ? all.length : first).join(" ").replace(/\s+/g, " "));
+  return head && { ...head, lines: first < 0 ? [] : all.slice(first).map((l) => l.replace(/^ {2}/, "")) };
 }
 
 /** The operation's side effect, or "read" for one that doesn't resolve (execute reports that). */
@@ -271,6 +372,9 @@ export const MAX_CALL_DEPTH = 3;
  * token set) each long string in it, except email addresses (who is signed in isn't secret).
  * Short values would match by accident; real credentials aren't short.
  */
+/** `s` with each of `needles` replaced by [secret]. */
+const redacted = (s: string, needles: string[]) => needles.reduce((acc, v) => acc.split(v).join("[secret]"), s);
+
 function secretNeedles(value: string): string[] {
   let parsed: unknown;
   try {

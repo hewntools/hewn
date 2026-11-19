@@ -17,7 +17,9 @@ export default {
     await s.step("Home open: it refreshes itself (the Inbox's poll)", async () => {
       page = await s.page("#/");
       await page.route("**/api/**", async (r: any) => {
-        const res = await r.fetch();
+        // The copy may be gone by then (a later check restarts it): the request fails, as it would without the route.
+        const res = await r.fetch().catch(() => null);
+        if (!res) return r.abort().catch(() => {});
         await r.fulfill({ response: res, headers: { ...res.headers(), ...(updated ? { "x-hewn-web": "0123456789abcdef" } : {}) } });
       });
       page.on("request", (r: any) => r.url().includes("/api/") && (r.headers()["x-hewn-refresh"] === "1" ? refreshes : owners).push(r.url()));
@@ -59,6 +61,9 @@ export default {
       for (let i = 0; i < 20 && !refreshes.length; i++) await sleep(1000);
       if (!refreshes.length) throw new Error("no refresh within 20 s of Reload");
       if (await page.locator(".toast", { hasText: "Hewn was updated" }).count()) throw new Error("the toast is still there");
+      // Done with it: an open page goes on asking while later checks restart the copy.
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+      await page.context().close();
     });
   },
 } satisfies Scenario;

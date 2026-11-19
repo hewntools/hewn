@@ -69,7 +69,7 @@ Deleting a tool keeps its data. Settings › Data › Deleted tools brings it ba
 
 ## Call logs
 
-Every call to a tool is logged: who called it, when, and how it went, with up to 200 of the tool's own log lines (500 characters each) and, for a failed call, its error (1,000 characters). Settings › Data › Keep call logs sets how long (two weeks by default). Builds, grants and access changes are always kept. `hewn logs <id>` shows a tool's calls.
+Every call to a tool is logged: who called it, when, and how it went, with up to 200 of the tool's own log lines (500 characters each) and, for a failed call, its error (1,000 characters). Settings › Data › Keep call logs sets how long (two weeks by default). Builds, grants and access changes are always kept. `hewn logs <id>` shows a tool's calls. Activity and the tool's Info page open each call to its lines ([Activity](using-hewn.md#activity)). An agent that may see a tool and use, make or change tools can read its log too (`capabilities_logs`), which shows in Activity. Stored secrets are never in it, and a connection's sign-in step keeps no lines.
 
 ## Moving to a new machine
 
