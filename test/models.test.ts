@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -9,7 +11,7 @@ import { Deadline } from "@hewntools/core/deadline.ts";
 import { validateManifest } from "@hewntools/core/manifest.ts";
 import { CATALOG_URL, type HostModels, imageSize, imageTokens, inspectRequest, parseCatalog, parseReply, providerSchema, suggestTiers } from "@hewntools/core/models.ts";
 import { MODEL_KEYS } from "@hewntools/core/platform.ts";
-import { FIXTURES, installFrom, setup } from "./helpers.ts";
+import { FIXTURES, installFrom, serve, setup } from "./helpers.ts";
 
 const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const HAIKU = "anthropic/claude-haiku-5-5";
@@ -366,6 +368,73 @@ describe("model port: the platform", () => {
     await assert.rejects(t.platform.setModelKey(USER, "anthropic", "sk-ant-wrong-key"), /Anthropic refused that key/);
     assert.equal(t.platform.secrets.get(MODEL_KEYS, "anthropic"), undefined);
     assert.equal(t.platform.models(USER).provider, null);
+  });
+
+  test("Replace: a new key is stored only once its check passes; the one you had stays otherwise", async () => {
+    await setUp();
+    await t.platform.setModelKey(USER, "anthropic", "sk-ant-first-key");
+    net = fakeNet({ keyStatus: 401 });
+    await assert.rejects(t.platform.setModelKey(USER, "anthropic", "sk-ant-wrong-key"), /Anthropic refused that key: .*; the key you had stays/);
+    assert.equal(t.platform.secrets.get(MODEL_KEYS, "anthropic"), "sk-ant-first-key");
+    // Not refused, but not checked either (the provider answered 500): still not stored over a key that works.
+    net = fakeNet({ keyStatus: 500 });
+    await assert.rejects(t.platform.setModelKey(USER, "anthropic", "sk-ant-other-key"), /couldn't check the new Anthropic key .*; the key you had stays/);
+    assert.equal(t.platform.secrets.get(MODEL_KEYS, "anthropic"), "sk-ant-first-key");
+    net = fakeNet();
+    await t.platform.setModelKey(USER, "anthropic", "sk-ant-second-key");
+    assert.equal(t.platform.secrets.get(MODEL_KEYS, "anthropic"), "sk-ant-second-key");
+    assert.equal(t.platform.registry.authorityEvents().filter((e) => e.action === "model_key_set" && e.subject === "anthropic").length, 2);
+    // A first key that can't be checked is still stored, as before (nothing to keep).
+    net = fakeNet({ keyStatus: 500 });
+    const m = await t.platform.setModelKey(USER, "openai", "sk-openai-unchecked");
+    assert.equal(t.platform.secrets.get(MODEL_KEYS, "openai"), "sk-openai-unchecked");
+    assert.equal(m.providers.find((p) => p.id === "openai")!.check?.ok, false);
+  });
+
+  test("a key's expiry: given with the key or on its own, replaced with the key, gone with it; the Inbox tells a week before", async () => {
+    await setUp();
+    // Days from today in the owner's time zone, as the Inbox counts them.
+    const day = (n: number) => new Intl.DateTimeFormat("en-CA", { timeZone: t.platform.timezone(), year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() + n * 86_400_000));
+    const expiry = (m: { providers: { id: string; expiresOn: string | null }[] }) => m.providers.find((p) => p.id === "anthropic")!.expiresOn;
+    assert.equal(expiry(await t.platform.setModelKey(USER, "anthropic", "sk-ant-first-key", { expiresOn: day(30) })), day(30));
+    await assert.rejects(t.platform.setModelKey(USER, "anthropic", "sk-ant-first-key", { expiresOn: "2027-02-30" }), /expiresOn: a date, YYYY-MM-DD/);
+    assert.throws(() => t.platform.setModelKeyExpiry(USER, "anthropic", "next week"), /YYYY-MM-DD/);
+    assert.throws(() => t.platform.setModelKeyExpiry(USER, "openai", day(3)), /no OpenAI key is set/);
+    assert.throws(() => t.platform.setModelKeyExpiry(t.claude, "anthropic", day(3)), /owner/);
+
+    const server = await serve(t.platform, t.home);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const get = (path: string, cookie = "") =>
+        new Promise<{ status: number; headers: Record<string, any>; body: string }>((res, rej) => {
+          const r = request({ host: "127.0.0.1", port, path, headers: { host: `hewn.localhost:${port}`, "x-hewn-ui": "1", ...(cookie ? { cookie } : {}) } }, (m) => {
+            let body = "";
+            m.on("data", (d) => (body += d));
+            m.on("end", () => res({ status: m.statusCode!, headers: m.headers, body }));
+          });
+          r.on("error", rej);
+          r.end();
+        });
+      const cookie = String((await get(`/auth?ticket=${t.platform.createWebTicket(USER)}`)).headers["set-cookie"]).split(";")[0];
+      const notice = async () => JSON.parse((await get("/api/inbox", cookie)).body).needs.find((n: { kind: string }) => n.kind === "model-key");
+      assert.equal(await notice(), undefined, "a month away: nothing yet");
+      t.platform.setModelKeyExpiry(USER, "anthropic", day(5));
+      const soon = await notice();
+      assert.deepEqual([soon.id, soon.title, soon.severity, soon.action], ["anthropic", "Anthropic API key", "warn", "Replace…"]);
+      assert.match(soon.detail, /^expires on \d+ \w+ \d{4}, in 5 days$/);
+      t.platform.setModelKeyExpiry(USER, "anthropic", day(-1));
+      assert.match((await notice()).detail, /^expired on .*: tools that use it can't think$/);
+      assert.equal((await notice()).severity, "danger");
+      // A new key without a date: the old key's date goes with it.
+      assert.equal(expiry(await t.platform.setModelKey(USER, "anthropic", "sk-ant-second-key")), null);
+      assert.equal(await notice(), undefined);
+      t.platform.setModelKeyExpiry(USER, "anthropic", day(2));
+      assert.equal(expiry(await t.platform.setModelKey(USER, "anthropic", null)), null);
+      assert.equal(t.platform.registry.getKv("models.keyExpiry.anthropic"), null);
+      assert.equal(await notice(), undefined);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
   });
 
   test("settings are validated; keys are stored apart from capability secrets", async () => {

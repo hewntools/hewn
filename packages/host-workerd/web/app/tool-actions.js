@@ -27,7 +27,7 @@ import { route } from "./router.js";
 import { shareSheet } from "./share.js";
 import { toolWidgetsSheet } from "./widgets.js";
 
-export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, fixSuspended, resumeSuspended, rollbackTo, suspendedText, toolActions };
+export { askFix, askFixLatest, capabilityMenu, changeHref, download, fixButton, inlineRename, instructionsSheet, memoryNotice, openCapability, openChange, fixSuspended, resumeSuspended, rollbackTo, suspendedText, toolActions, wideOnly };
 
 // ---------- tool actions (menu, change, rename, delete, icon, versions) ----------
 
@@ -109,13 +109,19 @@ function toolActions(c, { rename, extra } = {}) {
   return h("div", { class: "glass-bar" }, h("a", { href: changeHref(c) }, "Change…"), extra, more);
 }
 
-/** The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools. */
-function capabilityMenu(c, { rename, editHome, hidden, show } = {}) {
+/** `el`, shown only where a tool's bar has room for it (not on a phone, where ••• holds it). */
+const wideOnly = (el) => (el.classList.add("wide-only"), el);
+
+/**
+ * The tool menu, grouped (F7): use · look closer · personalise · delete. The same on Home, Info and opened tools.
+ * `change`: what Change… does where it isn't a new page (an opened tool's drawer, which keeps the tool where it is).
+ */
+function capabilityMenu(c, { rename, editHome, hidden, show, change } = {}) {
   const id = enc(c.id);
   const connection = c.kind === "connection";
   return [
     ["Open", () => openCapability(c).catch(fail)],
-    ["Change…", () => openChange(c)],
+    ["Change…", change ?? (() => openChange(c))],
     // A tool with a screen: a second look at its design, in the Change drawer (the owner's, 2026-11-02: in this menu, under Change…).
     c.ui && !connection && ["Polish…", () => openChange(c, { polish: true })],
     ["Info", () => go(`#/c/${id}`)],

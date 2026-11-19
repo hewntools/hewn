@@ -26,7 +26,12 @@ export interface LocalWorkbenchOptions {
   visualCheck?: VisualCheck;
   /** How long a builder may go with no activity before it's stopped and resumed (ms), read for each build. Unset, or undefined: the builder's default. */
   builderIdleMs?: () => number | undefined;
+  /** How long a carry-over waits for a stopped build's builder to exit (ms; default STOP_WAIT_MS). */
+  stopWaitMs?: number;
 }
+
+/** How long a retry carrying on from a stopped build waits for that build's builder to exit. */
+export const STOP_WAIT_MS = 10_000;
 
 /** Files of a directory as a map, artefacts (node_modules …) excluded; `skip`: paths (files or folders) not to read either. */
 export function readTree(dir: string, skip: (rel: string) => boolean = () => false): Files {
@@ -239,6 +244,20 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
   const transcript = (buildId: string) => join(opts.root, `${buildId}.log`);
   const builders = () => (typeof opts.builders === "function" ? opts.builders() : opts.builders);
   mkdirSync(opts.root, { recursive: true });
+  /** Build → its builder's run here, settled once the builder has exited (a Stop doesn't wait for that). */
+  const runs = new Map<string, Promise<void>>();
+  /**
+   * A stopped build is marked cancelled at once and its builder told to stop, but the builder exits in its own time: a
+   * retry carrying on from it waits for that (up to `stopWaitMs`), so the workspace isn't copied while the builder still
+   * writes to it. After that it carries on from the workspace as it is.
+   */
+  const waitForExit = async (buildId: string) => {
+    const run = runs.get(buildId);
+    if (!run) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([run, new Promise<void>((r) => (timer = setTimeout(r, opts.stopWaitMs ?? STOP_WAIT_MS)))]);
+    clearTimeout(timer);
+  };
   /**
    * Copy a build's workspace into a new one (`to`), with `overlay` written over it: read with the builder's own
    * eyes when it's confined (a link it left can't reach out), into a fresh folder only Hewn writes (writeTree keeps
@@ -263,6 +282,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
     },
     snapshot: (buildId, to) => copyWorkspace(buildId, to),
     async carryOver(from, to, overlay) {
+      await waitForExit(from);
       if (!existsSync(ws(from))) return false;
       await copyWorkspace(from, to, overlay);
       return true;
@@ -293,7 +313,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
       if (job.builder === "keep" || job.builder === "bundle" || job.builder === "submitted") return;
       const builder = job.builder.startsWith("copy:") ? copyBuilder(job.builder.slice("copy:".length)) : builders()[job.builder];
       if (!builder) throw Object.assign(new Error(`unknown builder '${job.builder}'`), { unavailable: true });
-      await builder.build({
+      const run = builder.build({
         buildId: job.buildId,
         capabilityId: job.capabilityId,
         kind: job.kind,
@@ -315,6 +335,16 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         ...(opts.builderIdleMs?.() ? { idleMs: opts.builderIdleMs()! } : {}),
         ...(job.carriesOn ? { carriesOn: job.carriesOn } : {}),
       });
+      const ended = run.then(
+        () => {},
+        () => {},
+      );
+      runs.set(job.buildId, ended);
+      try {
+        await run;
+      } finally {
+        if (runs.get(job.buildId) === ended) runs.delete(job.buildId);
+      }
     },
     async bundle(buildId) {
       return bundleWorkspace(ws(buildId));
