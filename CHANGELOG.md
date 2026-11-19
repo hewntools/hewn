@@ -7,6 +7,9 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen chrome pixels now run together into one and part again, drawn in braille dots. With reduce motion it rests on the H; without WebGL 2 the H stands still. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
+- **Agents can read what a tool printed.** `capabilities_logs` gives an agent that may see a tool its last calls, each with the lines its code printed, so a client that submitted a tool can see what it does without waiting for a failure (the Skill "build a Hewn tool" says to). Stored secrets are never in it, and each read shows in Activity. See [the agent spec](spec/agents.md#invoking-operations).
+- **Activity opens a call to its lines,** and a tool's Info page lists its recent calls the same way. See [Activity](docs/using-hewn.md#activity).
+- **Allow all** of an agent's waiting calls: when one agent has several calls of the same destructive operation waiting, **Allow all** lets them run at once, each still its own call in Activity. The tab's title counts the calls waiting ("(3) Hewn") while it's on screen. See [The Inbox](docs/using-hewn.md#the-inbox).
 
 ### Changes
 
@@ -22,6 +25,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- An agent's destructive call that you allowed late could fail with "timed out (call chain deadline)". It now stops waiting before that deadline and tells the agent to call again once you've allowed it. See [What agents can do](docs/agents.md#what-agents-can-do).
 - An agent's `capabilities_submit` or `capabilities_check` of a tool near its 5 MB was refused before Hewn saw it once the request passed 4 MB (base64 files count a third more as they travel). Hewn now takes MCP requests up to 8 MB, and one over that is refused naming both limits. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
 - A page open from before an upgrade kept refreshing itself with its old code, and a page from an older version could keep a Hewn that suspends when idle awake. Now it stops refreshing once it says **Hewn was updated**, until you click **Reload**; it never reloads by itself. A page open from 0.4.11 or before still refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
 - **Authorize** on a tool's request stayed greyed out while one of its settings was empty, with no word why. It now grants what the tool asks for whatever its settings, and the line under the button and the Inbox name the settings still to set ("Set UPSTREAM_REPO and MAINTAINER before it runs"). See [Grants](docs/concepts.md#grants).

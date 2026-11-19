@@ -85,6 +85,7 @@ describe("Hewn over MCP", () => {
       "capabilities_get",
       "capabilities_invoke",
       "capabilities_list",
+      "capabilities_logs",
       "capabilities_modify",
       "capabilities_pack",
       "capabilities_request_access",
@@ -94,7 +95,7 @@ describe("Hewn over MCP", () => {
       "schedules_propose",
       "widgets_show",
     ]);
-    assert.deepEqual(await names(codex), ["capabilities_get", "capabilities_invoke", "capabilities_list", "capabilities_request_access", "hewn_docs", "schedules_list", "schedules_propose", "widgets_show"]);
+    assert.deepEqual(await names(codex), ["capabilities_get", "capabilities_invoke", "capabilities_list", "capabilities_logs", "capabilities_request_access", "hewn_docs", "schedules_list", "schedules_propose", "widgets_show"]);
     await claude.close();
     await codex.close();
   });
