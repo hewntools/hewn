@@ -22,6 +22,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **Authorize grants what a tool asks for whatever its settings,** and names the settings still to set, under the button and in the Inbox. Until now it stayed greyed out, with no word why. See [Grants](docs/concepts.md#grants).
 - **A page from before an upgrade stops refreshing** once it says Hewn was updated, until you click Reload; it never reloads by itself. A page open from 0.4.11 or before refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
 - **Hewn gives memory back when it's quiet,** half a minute after the last use: ten tools after a burst of Home's refreshes went from about 290 to 140 MB. An open Home's refresh also takes about half the time. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
+- **Builders get the design review's questions up front.** The brief has them plan the phone's first screen and answer the review's questions before they stop, and it spells out the widget views and test fakes that cost builds an attempt. See [the builder brief](spec/builder-brief.md).
 
 ### Safety and limits
 
