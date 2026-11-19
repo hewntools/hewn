@@ -2,6 +2,7 @@
 // A tool's Info page (W1–W3: everything on the page), and a connection's page.
 import { ago, api, appIcon, capRef, caps, chip, enc, fail, h, invalidateCaps, modal, setWallpaper, sheetActions, sheetHead, skeleton, tintOf, toast } from "../kit.js";
 import { HEALTH } from "./accounts.js";
+import { byDay } from "./activity.js";
 import { agentTile, catalogOf } from "./agents.js";
 import { retryable } from "./build.js";
 import { backBar, go, hues, put, sandboxNotice, stillHere, view } from "./frame.js";
@@ -19,6 +20,9 @@ import { madeBy, versionRow } from "./versions.js";
 import { addWidgetSheet, segmented, SIZE_LETTER, widgetPreview } from "./widgets.js";
 
 export { infoPage };
+
+/** The calls the Info page shows; the rest are in Activity. */
+const CALLS_SHOWN = 10;
 
 // ---------- W1–W3 Info / I2 connection page ----------
 
@@ -96,6 +100,13 @@ function startOverDialog(c, hasSample) {
 /** One section of Info: a card with its title (and an action on the right), then the thing itself. */
 const section = (title, body, { action, order } = {}) => h("section", { class: "card info-section", style: { order } }, h("div", { class: "info-section-head" }, h("span", { class: "eyebrow" }, title), action), body);
 
+/** A tool's last calls, each opening to what its code printed, as in Activity. */
+const recentCalls = (id, calls, all, order) =>
+  section("Recent calls", calls.length ? byDay(calls, all, false) : h("ul", { class: "list" }, h("li", {}, h("span", { class: "grow muted" }, "No calls yet."))), {
+    order,
+    action: calls.length > 0 && h("a", { class: "btn link sm", href: `#/activity?capability=${enc(id)}&view=calls` }, "All in Activity ›"),
+  });
+
 /**
  * Agents: each connected agent, switched on or off for this tool. That overrides its default (every
  * tool, or only some) for this one tool; switching it back undoes that. Each saves at once, with Undo.
@@ -125,12 +136,12 @@ function agentsSection(c, agents, order) {
 async function infoPage(id) {
   const here = stillHere();
   view(backBar("Home", "#/"), h("main", { class: "column", style: { "--w": "760px" } }, skeleton("50%", "30%", "90%", "70%")));
-  const [cap, all, agents] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true), api(`/capabilities/${enc(id)}/agents`).catch(() => [])]);
+  const [cap, all, agents, calls] = await Promise.all([api(`/capabilities/${enc(id)}`), caps(true), api(`/capabilities/${enc(id)}/agents`).catch(() => []), api(`/activity?capability=${enc(id)}&kinds=call&limit=${CALLS_SHOWN}`).catch(() => ({ items: [] }))]);
   if (!here()) return;
   const c = all.get(id) ?? { id, name: cap.name, ui: !!cap.ui?.available, ready: cap.status.ready, kind: cap.kind };
   setWallpaper(await hues([tintOf(c)]));
   if (!here()) return;
-  if (cap.kind === "connection") return connectionPage(c, cap, all, agents);
+  if (cap.kind === "connection") return connectionPage(c, cap, all, agents, calls.items);
   const req = cap.requires?.model;
   const [scheds, home, m, instr, data] = await Promise.all([
     api("/schedules").catch(() => []),
@@ -440,7 +451,7 @@ async function infoPage(id) {
   });
 
   // Every section, empty or not, each with its way to add one.
-  const columns = h("div", { class: "info-sections" }, h("div", { class: "info-col" }, operations, allowed, agentsSection(c, agents, 2), dataSection), h("div", { class: "info-col" }, widgetSection, schedules, instructions, versions));
+  const columns = h("div", { class: "info-sections" }, h("div", { class: "info-col" }, operations, allowed, agentsSection(c, agents, 2), dataSection), h("div", { class: "info-col" }, widgetSection, schedules, instructions, versions, recentCalls(id, calls.items, all, 7)));
 
   const connected = [...new Set([...uses, ...usedBy])];
   view(
@@ -474,7 +485,7 @@ async function infoPage(id) {
  * operation opens the Run view, health shows its last result); Used by and Settings (sign-in, its
  * config as one form, one Save) on the right.
  */
-async function connectionPage(c, cap, all, agents) {
+async function connectionPage(c, cap, all, agents, calls) {
   const id = c.id;
   const name = h("span", {}, cap.name);
   const ops = runnableOps(cap);
@@ -541,6 +552,7 @@ async function connectionPage(c, cap, all, agents) {
               ],
               { order: 3 },
             ),
+          recentCalls(id, calls, all, 5),
         ),
       ),
     ),

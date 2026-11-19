@@ -56,7 +56,7 @@ Each row has one action. **Activity** in the Inbox shows what just happened, and
 
 ![The Inbox open over Home: a failed build to show, an agent that wants to connect, a tool that wants to reach a host, and a connection to sign in to again, each with one button, then the recent calls](images/inbox.png)
 
-One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it.
+One thing doesn't wait in the Inbox: when an agent calls an operation marked *destructive* (deleting runs, say), the agent is stuck until you answer. A banner shows on every page until you allow it once or stop it, and the tab's title counts the calls waiting ("(3) Hewn") while the tab is open on screen (a tab in the background asks Hewn nothing). When one agent has several calls of the same operation waiting, **Allow all** lets them all run; each is still its own call in Activity.
 
 ## A tool's page
 
@@ -69,6 +69,7 @@ One thing doesn't wait in the Inbox: when an agent calls an operation marked *de
 - **Widgets:** the widgets themselves, at the size they have on Home (else their largest; **S M L** shows the others), and **Add to Home**
 - **Instructions:** standing rules for this tool's builds, removed or added in place ([Building tools](building-tools.md#instructions))
 - **Versions:** the last two, and **All versions**; a version's **Details** has its conversation, spec, log and code ([Building tools](building-tools.md#versions))
+- **Recent calls:** its last ten calls, each opening to the lines its code printed, as in [Activity](#activity); **All in Activity** for the rest
 
 Anything that needs you (something to authorize, a failed change, a model to set up, a paused schedule, **Resume** for a suspended tool) sits at the top with its one button. Every section shows, with a way to add one when it's empty. In a wide window the sections sit in two columns.
 
@@ -93,6 +94,8 @@ Everything that happened, newest first: builds, calls, and access changes (agent
 ![Activity: today's calls, builds and access changes, newest first, each with who did it and when](images/activity.png)
 
 Builds show their milestones (spec, code, tests, and for a new tool or a Polish the design review and fixing details) as they happen. Open one for its steps and its log ([A build](#a-build)).
+
+Click a call to open it: its operation, its error if it failed, how long it took, and the lines the tool's code printed during it (`| ` for a log line, `! ` for a warning or an error). An agent reading a tool's log shows here too, as "read the call log": one row while it keeps reading, with how many times.
 
 Call logs are kept for two weeks by default (Settings › Data).
 

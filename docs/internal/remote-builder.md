@@ -150,3 +150,20 @@ Only with `HEWN_HOSTED=1`: then a tool's `ctx.model.generate` goes to the host i
 `kind`: `default` (the service decides), `family` (follows the newest), or `pinned` (exactly that model; `upgrade` may name its successor). Settings › AI and the model menu in the intake's chat box list these; the owner ticks which ones agents may ask for.
 
 Hosted, `"tiers": { "light": "Haiku 5.5", "standard": "Sonnet 5.5", "strong": "Opus 5.5", "max": "Fable 5.1" }` says what each tier runs on for tools' model calls (labels for Settings › AI › Models; the service resolves the tier itself on `/v1/generate`).
+
+## The allowance: `GET /v1/allowance` (hosted)
+
+Since 0.4.12, optional. What the owner may use, as you count it, for Settings › AI and the Inbox:
+
+```json
+{ "allowance": { "unit": "Credits", "used": 2000, "of": 2000, "resetsAt": "2026-12-01T00:00:00Z", "perBuild": 250, "more": null } }
+```
+
+- `used`: whole units, your own count. Hewn shows it as given and doesn't reconcile it with the `charge`s it recorded (builds, the intake, tools' model calls); they may differ by a few.
+- `of`: the allowance, or null when it's unmetered or included.
+- `resetsAt`: an ISO instant, or null when it doesn't renew. Hewn shows the date in the owner's time zone (00:00Z on the 1st is still the 30th in the Americas).
+- `perBuild`: where a build pauses and asks before going on (the `paused` outcome), or null. Shown as "a build pauses at 250 Credits and asks before going on", not as a hard cap.
+- `more`: an https link where the owner gets more, or null when the allowance is fixed. Anything but https is ignored.
+
+Hewn asks at most every 10 minutes (the Inbox polls), and again when the owner opens Settings › AI › Models; these requests aren't Hewn being used, and Hewn sends nothing else. A 404 means you offer none: Settings shows the charges as before. Any other failure keeps the last good answer (none before one). Unknown fields are ignored. The Inbox says so at 80% (`used` ≥ 0.8 × `of`) and once `used` ≥ `of`, naming when it renews.
+
