@@ -39,6 +39,8 @@ hewn open              # connect an agent, build your first tool
 
 You need Node.js 24 and Claude Code, Codex or OpenCode, signed in. macOS, Linux and Windows (WSL). See the [quickstart](docs/quickstart.md).
 
+An agent can also write a tool itself and hand it to Hewn to check: `npx skills add hewntools/hewn` installs the Skill that shows it how, for any agent that reads Agent Skills. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
+
 ### Documentation
 
 - [Quickstart](docs/quickstart.md)
