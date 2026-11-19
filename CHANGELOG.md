@@ -2,16 +2,15 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
-## 0.4.12 (unreleased)
+## 0.4.12 (2026-11-19)
 
 ### New
 
 - **Agents can read what a tool printed.** `capabilities_logs` gives an agent a tool's last calls with the lines its code printed, so an agent that wrote a tool sees what it does without waiting for a failure. Stored secrets are never in it, it refuses a tool the agent can't see, and each read shows in Activity. See [A tool's log](docs/agents.md#a-tools-log).
 - **The Skill "build a Hewn tool" installs with `npx skills add hewntools/hewn`,** for any agent that reads Agent Skills (Claude Code, Codex, OpenCode and the rest), set up from Hewn or not. It's the same file Hewn gives the agents you set up from it. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
-- **Activity opens a call to its lines,** and a tool's Info lists its recent calls the same way. See [Activity](docs/using-hewn.md#activity).
+- **Activity opens a call to its log:** the lines the tool's code printed during it. A tool's Info lists its recent calls the same way. See [Activity](docs/using-hewn.md#activity).
 - **Allow all of an agent's waiting calls:** when one agent has several calls of the same destructive operation waiting, one click lets them run, each still its own call in Activity. The tab's title counts the calls waiting ("(3) Hewn"). See [The Inbox](docs/using-hewn.md#the-inbox).
 - **Replace a model key from Settings › AI › Models.** Until now only `hewn models key` could, and it stored the new key before checking it. Now both keep the old key unless the new one passes, and you can give a key's expiry date: the Inbox tells you a week before. See [Replacing a key](docs/models.md#replacing-a-key).
-- **Hewn's mark moves.** Behind the first run, a new tool, a build and sign-in, the H's thirteen pixels run together and part again, in braille dots. With reduce motion it rests on the H. See [Hewn's mark](docs/using-hewn.md#hewns-mark).
 - **Hosted: the allowance on Settings › AI and in the Inbox,** when the builder's service states it (`GET /v1/allowance`): used of how many, when it renews, where a build pauses, with notices at 80% and 100%. See [Running Hewn for someone else](docs/remote-access.md#running-hewn-for-someone-else-hewn_hosted).
 
 ### Changes
@@ -23,12 +22,13 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **A page from before an upgrade stops refreshing** once it says Hewn was updated, until you click Reload; it never reloads by itself. A page open from 0.4.11 or before refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
 - **Hewn gives memory back when it's quiet,** half a minute after the last use: ten tools after a burst of Home's refreshes went from about 290 to 140 MB. An open Home's refresh also takes about half the time. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
 - **Builders get the design review's questions up front.** The brief has them plan the phone's first screen and answer the review's questions before they stop, and it spells out the widget views and test fakes that cost builds an attempt. See [the builder brief](spec/builder-brief.md).
+- **Hewn's wordmark is updated.** See [Hewn's mark](docs/using-hewn.md#hewns-mark).
 
 ### Safety and limits
 
 - **A stall blames only the tool whose code was running.** A tool waiting on another tool, a model or the network gets no strike. A tool built to cheat can still shift the blame onto a busy one, so Activity lists every tool at each stall, and a suspension names its stalls. See [What isn't protected](docs/threat-model.md#what-isnt-protected).
 - **An agent's request may be up to 8 MB** (5 MB of files; base64 counts about a third more). One over that is refused naming both limits; until now it was refused at 4 MB, before Hewn saw it. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
-- **Try a backup in a second Hewn without it acting for you:** `HEWN_SCHEDULES=off` runs no schedule, `HEWN_NETWORK=off` sends nothing out (`get` lets tools read). See [Trying a backup without it acting for you](docs/data.md#trying-a-backup-without-it-acting-for-you).
+- **Try a backup in an isolated second Hewn:** with `HEWN_SCHEDULES=off` it runs no schedule, and with `HEWN_NETWORK=off` its tools reach no network (`get` lets them only read). See [Trying a backup](docs/data.md#trying-a-backup-without-it-acting-for-you).
 
 ### Fixes
 
