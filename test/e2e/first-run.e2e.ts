@@ -1019,24 +1019,25 @@ export const operations = {
 <a id="send" href="/#/new?m=Hello%20from%20a%20tool&send=1">Ask</a>
 <a id="api" href="/api/capabilities">API</a>
 <a id="own" href="#more">More</a></main>
-<script>setTimeout(() => parent.postMessage({ hewn: 1, type: "open", url: new URL("/#/settings", location.href).href }, "*"), 300)</script></body></html>`,
+<script>if (location.hash === "#unasked") setTimeout(() => ((document.body.dataset.asked = "1"), parent.postMessage({ hewn: 1, type: "open", url: new URL("/#/settings", location.href).href }, "*")), 300)</script></body></html>`,
     );
     const installed = await sv.admin("install", { name: "Link Counter", purpose: "Links", dir, wait: true });
     if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
     const frame = page.frameLocator("iframe.app-frame");
-    await page.goto(`${web}/#/app/link-counter`);
-    // An open the tool posts by itself (no click in it) goes nowhere.
-    await frame.locator("#own").waitFor();
-    await page.waitForTimeout(800);
-    if (!page.url().endsWith("#/app/link-counter")) throw new Error(`an open without a click went to ${page.url()}`);
+    // An open the tool posts by itself (no click in it) goes nowhere. Only at #unasked, so no later screen of the tool
+    // posts one while a click of the step's makes it look asked for (a click there gives the frame focus and activation).
+    await page.goto(`${web}/#/app/link-counter?at=unasked`);
+    await frame.locator("body[data-asked]").waitFor();
+    await page.waitForTimeout(500);
+    if (!page.url().endsWith("#/app/link-counter?at=unasked")) throw new Error(`an open without a click went to ${page.url()}`);
     // A link to something of Hewn's that isn't a page of the web client: nothing opens.
     await frame.locator("#api").click();
     await page.waitForTimeout(500);
-    if (!page.url().endsWith("#/app/link-counter") || page.context().pages().length !== 1) throw new Error(`the API link opened ${page.url()}`);
+    if (!page.url().endsWith("#/app/link-counter?at=unasked") || page.context().pages().length !== 1) throw new Error(`the API link opened ${page.url()}`);
     // Its own link stays in its frame.
     await frame.locator("#own").click();
     await page.waitForTimeout(300);
-    if (!page.url().endsWith("#/app/link-counter")) throw new Error(`its own link left the tool: ${page.url()}`);
+    if (!page.url().endsWith("#/app/link-counter?at=unasked")) throw new Error(`its own link left the tool: ${page.url()}`);
     // Here: the web client goes to the page, signed in (no sign-in page).
     await frame.locator("#here").click();
     await page.waitForURL(/#\/activity$/);
