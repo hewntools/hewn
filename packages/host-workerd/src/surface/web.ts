@@ -10,7 +10,7 @@ import { readSummary } from "@hewntools/core/bundle.ts";
 import { ABI, sourceWords, type ToolSource } from "@hewntools/core/manifest.ts";
 import { fromBase64 } from "@hewntools/core/files.ts";
 import { cellsFromRows, cellsFromSvg } from "@hewntools/core/glyph.ts";
-import type { Platform } from "@hewntools/core/platform.ts";
+import type { CallLogEntry, Platform } from "@hewntools/core/platform.ts";
 import { failureOf } from "@hewntools/core/platform/builds.ts";
 import type { CapabilityRow } from "@hewntools/core/registry.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
@@ -143,15 +143,13 @@ async function serveStatic(host: SurfaceHost, site: Site, path: string, setCooki
   });
 }
 
-/** Header lines of the call logs: "<iso> <caller> <op> <outcome…> <ms>ms". */
-function recentCalls(platform: Platform, owner: Agent, limit: number, perCapability = 400) {
-  const calls: { at: string; capabilityId: string; caller: string; via: string[]; operation: string; outcome: string; ms: number }[] = [];
+/** The newest calls in the call logs (one tool's, with `only`), from their header lines; `logId` opens one to its lines. */
+function recentCalls(platform: Platform, owner: Agent, limit: number, perCapability = 400, only?: string) {
+  const calls: (Omit<CallLogEntry, "lines"> & { capabilityId: string; logId: number; lineCount: number })[] = [];
   for (const c of platform.list(owner)) {
-    for (const line of platform.logLines(c.id, perCapability)) {
-      // The caller is the call path ("codex → weekly-review"); the origin is who made it.
-      const m = /^(\S+) (.+?) ([a-z][a-z0-9_]*(?:@\d+)?) (ok|ERROR .*) (\d+)ms$/.exec(line);
-      if (m) calls.push({ at: m[1], capabilityId: c.id, caller: m[2].split(" → ")[0], via: m[2].split(" → ").slice(1), operation: m[3], outcome: m[4], ms: Number(m[5]) });
-    }
+    if (only && c.id !== only) continue;
+    // The caller is who made the call; `via`, the tools on its way here ("codex → weekly-review").
+    for (const { id, ...call } of platform.callLogHeadsFor(owner, c.id, perCapability)) calls.push({ ...call, capabilityId: c.id, logId: id });
   }
   return calls.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
@@ -304,6 +302,9 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       }
       case "GET logs":
         return { lines: platform.logLines(id, n) };
+      case "GET calls":
+        // One call in the log, opened to its lines (Activity's logId).
+        return platform.callLogEntryFor(owner, id, Number(arg));
       case "GET icon": {
         platform.get(owner, id);
         // ?default=1: the builder's glyph, without the owner's (what Use default goes back to).
@@ -563,6 +564,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   }
 
   if (resource === "confirmations") {
+    // Allow all N: the calls the owner saw (one agent, one operation).
+    if (id === "all" && method === "POST") {
+      const ids = (await readJson(req))?.ids;
+      if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === "string")) throw new PlatformError("invalid_request", "ids: the calls to allow, a list of their ids");
+      return platform.approveConfirmations(owner, ids);
+    }
     if (id && method === "POST") return platform.decideConfirmation(owner, id, !!(await readJson(req)).approve);
     return platform.confirmations(owner);
   }
@@ -597,7 +604,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       return { ...m, host: { ...m.host, allowance } };
     }
     if (!id && method === "PUT") return platform.setModelSettings(owner, pick(await readJson(req), ["provider", "tiers", "monthlyCapUsd", "capabilityCapsHost", "capabilityCapsUsd", "prices"]));
-    if (id === "keys" && sub && method === "PUT") return platform.setModelKey(owner, sub, String((await readJson(req)).key ?? ""));
+    if (id === "keys" && sub && method === "PUT") {
+      // A key (with its expiry, if the owner gave one), or only the expiry of the key that's set.
+      const b = await readJson(req);
+      const expiresOn = typeof b.expiresOn === "string" ? b.expiresOn : null;
+      return b.key === undefined ? platform.setModelKeyExpiry(owner, sub, expiresOn) : platform.setModelKey(owner, sub, String(b.key ?? ""), { expiresOn });
+    }
     if (id === "keys" && sub && method === "DELETE") return platform.setModelKey(owner, sub, null);
     if (id === "check" && sub && method === "POST") return platform.checkModelProvider(owner, sub);
     if (id === "catalog" && method === "POST") {
@@ -981,8 +993,8 @@ export function unresolvedFailures<T extends { buildId: string; capabilityId: st
 export const failureReason = (f?: { title: string; detail: string }) => (!f ? "" : f.title === "The builder stopped" && f.detail ? f.detail : f.title);
 
 export interface InboxItem {
-  /** "builder-model": the model the owner picked for building has a successor. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "spend" | "connection" | "builder-model" | "suspended";
+  /** "builder-model": the model the owner picked for building has a successor. "model-key": a provider's key the owner said expires. */
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "model-key" | "spend" | "connection" | "builder-model" | "suspended";
   id: string;
   capabilityId?: string;
   agentId?: string;
@@ -1085,6 +1097,13 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
     needs.push({ kind: "connection", id: x.id, capabilityId: x.id, title: x.name, detail: x.health.detail ?? x.health.status, severity: x.health.status === "broken" ? "danger" : "warn", action: x.signIn ? "Sign in" : "Set up" });
   }
 
+  // A model key the owner said stops working: a week before, and once it has.
+  for (const k of platform.keyExpiries(owner).filter((x) => x.daysLeft <= 7)) {
+    const when = new Date(`${k.expiresOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+    const days = k.daysLeft;
+    needs.push({ kind: "model-key", id: k.provider, title: `${k.label} API key`, detail: days < 0 ? `expired on ${when}: tools that use it can't think` : days === 0 ? "expires today" : `expires on ${when}, in ${days} day${days === 1 ? "" : "s"}`, severity: days <= 0 ? "danger" : "warn", action: "Replace…" });
+  }
+
   // Model spend: 80% of the month's cap, and caps that refuse calls now.
   if (modelUsers) {
     const m = platform.models(owner);
@@ -1163,10 +1182,11 @@ function activity(platform: Platform, owner: Agent, q: { capability?: string; ag
       ...(b.discardedAt ? { discarded: true } : {}),
     });
   }
-  for (const c of recentCalls(platform, owner, 5000, 2000)) {
+  for (const c of recentCalls(platform, owner, 5000, 2000, q.capability)) {
     // Home's widgets refreshing themselves: kept in the tool's own call log, not in Activity.
     if (c.caller.startsWith("widget:")) continue;
-    items.push({ kind: "call", at: c.at, capabilityId: c.capabilityId, actor: c.caller, outcome: c.outcome, operation: c.operation, ms: c.ms, via: c.via });
+    // `lineCount`: how many lines its code printed; the call opens to them (GET …/calls/<logId>).
+    items.push({ kind: "call", at: c.at, capabilityId: c.capabilityId, actor: c.caller, outcome: c.outcome, operation: c.operation, ms: c.ms, via: c.via, logId: c.logId, lineCount: c.lineCount });
   }
   for (const m of platform.registry.recentModelCalls(2000)) {
     items.push({ kind: "model", at: m.at, capabilityId: m.capabilityId, actor: m.caller, outcome: m.status, model: m.model, costUsd: m.costUsd, inputTokens: m.inputTokens, outputTokens: m.outputTokens, ...(m.error ? { error: m.error } : {}) });
