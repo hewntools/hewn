@@ -93,11 +93,11 @@ Agents get a small set of MCP tools: list your tools and read their operations, 
 
 ### A tool's log
 
-An agent with **Use**, **Make** or **Change** can read what a tool printed (`capabilities_logs`): the tool's last calls, newest first (20, or up to 100 if it asks, or only one operation's), each with who called it, how it went, how long it took and the lines its code printed. It's the log you see in Activity and on the tool's Info ([Call logs](data.md#call-logs)), kept as long as you keep call logs. An agent that wrote a tool can call it and then read what it did, without waiting for it to fail.
+An agent with **Use**, **Make** or **Change** can read what a tool printed during its last calls (`capabilities_logs`). It's the log you see in Activity and on the tool's Info, kept as long as you keep call logs ([Call logs](data.md#call-logs)). An agent that wrote a tool can call it, then read what it did without waiting for it to fail. What each entry holds is in [the agent spec](../spec/agents.md#invoking-operations).
 
-- **Stored secrets are never in it.** Hewn takes them out when it keeps a line, and again when an agent reads it, so a key you set later is taken out of older lines too. A connection's sign-in step keeps no lines.
-- **Only tools the agent may see.** For any other, Hewn answers that there's no such tool, as it does for every call.
-- **Each read shows in Activity,** as a read of that tool: one row per agent and tool while it keeps reading, with how many reads.
+- **Stored secrets are never in it,** not even one you set after a line was kept.
+- **Only tools the agent may see.** For any other, Hewn answers that there's no such tool.
+- **Each read shows in Activity,** as a read of that tool.
 
 ## Tools an agent writes itself
 

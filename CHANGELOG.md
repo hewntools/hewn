@@ -15,17 +15,16 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Changes
 
-- **The platform and the tools run in separate processes.** Your tools get a workerd process and a sandbox of their own, without the secrets key, Hewn's database or its files. A tool stuck in a loop restarts only the tools, while the web client and your agents' connections keep answering; `hewn doctor` and `hewn status` count the tools' restarts apart. Nothing to migrate. See [What's protected](docs/threat-model.md#whats-protected).
-- **No time limit on a build's attempt.** Until now every attempt stopped at 15 minutes, and big builds used up their attempts on it. Now a builder is stopped only after 15 minutes of doing nothing (no output, no file written), and carries on; `builderIdleMinutes` in `platform.json` changes the 15. See [When a build fails](docs/building-tools.md#when-a-build-fails).
+- **The platform and the tools run in separate processes.** Your tools get a workerd process and a sandbox of their own, without the secrets key, Hewn's database or its files. A tool stuck in a loop restarts only the tools; the web client and agents keep answering, and `hewn doctor` says how often. Nothing to migrate. See [What's protected](docs/threat-model.md#whats-protected).
+- **No time limit on a build's attempt.** Until now every attempt stopped at 15 minutes, and big builds used up their attempts on it. Now a builder on your machine is stopped only after 15 minutes of doing nothing (no output, no file written), and carries on; `builderIdleMinutes` in `platform.json` changes the 15. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 - **Retry and Ask builder to fix carry on** from the files the failed or stopped build left, a Polish's too, instead of starting over. See [When a build fails](docs/building-tools.md#when-a-build-fails).
 - **Authorize grants what a tool asks for whatever its settings,** and names the settings still to set, under the button and in the Inbox. Until now it stayed greyed out, with no word why. See [Grants](docs/concepts.md#grants).
 - **A page from before an upgrade stops refreshing** once it says Hewn was updated, until you click Reload; it never reloads by itself. A page open from 0.4.11 or before refreshes until you reload it once. See [Upgrade](docs/quickstart.md#upgrade).
-- **Hewn gives memory back when it's quiet,** half a minute after the last use: ten tools after a burst of Home's refreshes went from about 290 to 140 MB. Home's tool list makes a third of the garbage it did. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
+- **Hewn gives memory back when it's quiet,** half a minute after the last use: ten tools after a burst of Home's refreshes went from about 290 to 140 MB. An open Home's refresh also takes about half the time. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
 
 ### Safety and limits
 
 - **A stall blames only the tool whose code was running.** A tool waiting on another tool, a model or the network gets no strike. A tool built to cheat can still shift the blame onto a busy one, so Activity lists every tool at each stall, and a suspension names its stalls. See [What isn't protected](docs/threat-model.md#what-isnt-protected).
-- **Reading a tool's data never stops its call.** The Data page and an export share the tool's one isolate, with its granted hosts and nothing more, and a build's code is let go once the build is done. See [What's protected](docs/threat-model.md#whats-protected).
 - **An agent's request may be up to 8 MB** (5 MB of files; base64 counts about a third more). One over that is refused naming both limits; until now it was refused at 4 MB, before Hewn saw it. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
 - **Try a backup in a second Hewn without it acting for you:** `HEWN_SCHEDULES=off` runs no schedule, `HEWN_NETWORK=off` sends nothing out (`get` lets tools read). See [Trying a backup without it acting for you](docs/data.md#trying-a-backup-without-it-acting-for-you).
 
@@ -40,7 +39,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - Retry right after Stop could miss what the stopped builder wrote last.
 - A retried build still offered Retry; its card now says "Retried as …".
 - The version at the top of a tool's page stayed old after a change from the Change panel.
-- Opening a suspended tool showed what it may do, not why it was suspended (since 0.4.11).
+- Since 0.4.11, opening a suspended tool from Home showed its grants sheet, not why it was suspended.
 - A tool's call could stop with "new version" when you opened or exported its data.
 - A build's code stayed in memory until Hewn restarted, and a tool with hosts took twice the memory.
 
