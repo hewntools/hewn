@@ -168,6 +168,8 @@ async function pollInbox(withRecent = false, { refresh = false } = {}) {
       // no requests, so its title keeps the count it had.
       document.title = waiting.length ? `(${waiting.length}) ${BRAND}` : BRAND;
       renderInbox();
+      // For a page that follows builds (a tool's page: one of its builds ended).
+      dispatchEvent(new CustomEvent("hewn:inbox", { detail: next }));
     }
   }
   inboxTimer = setTimeout(() => pollInbox(false, { refresh: true }), inboxData.building?.length ? 4000 : 15000);
