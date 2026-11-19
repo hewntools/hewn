@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Inbox (Needs you, Building, Recent), behind the bell in the top bar, and the banner for an
 // agent blocked on a destructive call.
-import { api, appIcon, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
+import { api, appIcon, BRAND, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
 import { activityRow, groupItems } from "./activity.js";
-import { agentRequestSheet, agentTile, confirmationSheet } from "./agents.js";
+import { agentRequestSheet, agentTile, confirmationSheet, providerTile } from "./agents.js";
 import { waitingPill } from "./build.js";
 import { go, put } from "./frame.js";
 import { BELL } from "./glyphs.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { buildingLabel } from "./home.js";
+import { keySheet } from "./models.js";
 import { route } from "./router.js";
 import { proposalSheet, schedulesSheet } from "./schedules.js";
 import { toolModelSheet } from "./tool-model.js";
@@ -49,6 +50,7 @@ window.addEventListener("hashchange", () => closeInbox());
 function needIcon(n, all, size = 36) {
   if (n.capabilityId) return appIcon(all.get(n.capabilityId) ?? { id: n.capabilityId, name: n.title }, { size });
   if (n.kind === "agent") return agentTile(n.title, n.title, size);
+  if (n.kind === "model-key") return providerTile(n.id, size);
   return h("span", { class: "app-icon", style: { "--size": `${size}px`, "--s": 0 } }, n.kind === "spend" ? "$" : "·");
 }
 
@@ -78,6 +80,9 @@ async function openNeed(n) {
     } else if (n.kind === "builder-model") go("#/settings/ai");
     // Suspended: the tool's page says why, with Resume.
     else if (n.kind === "suspended") go(`#/c/${enc(n.capabilityId)}`);
+    else if (n.kind === "model-key") {
+      await keySheet(await api("/models"), n.id);
+    }
     else if (n.kind === "spend") {
       const c = n.capabilityId && (await caps()).get(n.capabilityId);
       if (c) await toolModelSheet(c);
@@ -157,8 +162,14 @@ async function pollInbox(withRecent = false, { refresh = false } = {}) {
       inboxCount.classList.toggle("danger", next.needs.some((x) => x.severity === "danger"));
       inboxBuilding.hidden = !next.building.length;
       inboxBtn.setAttribute("aria-label", n ? `Inbox, ${n} need${n === 1 ? "s" : ""} you` : "Inbox");
-      showBanner(next.needs.filter((x) => x.kind === "confirmation"));
+      const waiting = next.needs.filter((x) => x.kind === "confirmation");
+      showBanner(waiting);
+      // Agents waiting on you, in the tab's title. Kept up to date only while the tab is visible: a hidden tab makes
+      // no requests, so its title keeps the count it had.
+      document.title = waiting.length ? `(${waiting.length}) ${BRAND}` : BRAND;
       renderInbox();
+      // For a page that follows builds (a tool's page: one of its builds ended).
+      dispatchEvent(new CustomEvent("hewn:inbox", { detail: next }));
     }
   }
   inboxTimer = setTimeout(() => pollInbox(false, { refresh: true }), inboxData.building?.length ? 4000 : 15000);

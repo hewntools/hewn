@@ -3,6 +3,7 @@
 // Node implements these in-process; the workerd host forwards the machine-bound ones
 // (intake, connecting local agents, backups) to the supervisor.
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
+import type { HostAllowance } from "@hewntools/core/models.ts";
 import { type Pass, PASSES } from "@hewntools/core/passes.ts";
 import type { ShelfTool } from "@hewntools/core/bundle.ts";
 import type { IntakeReply, IntakeRequest } from "./intake-types.ts";
@@ -151,6 +152,8 @@ export interface SurfaceHost {
   /** The models an agent offers (its CLI's list, or the host's builder's). Absent: only Default. */
   /** `fresh`: read the agent's CLI now instead of the kept list (the sheet in Settings › AI). */
   modelCatalog?: (agent: string, fresh?: boolean) => Promise<ModelCatalog>;
+  /** Hosted: the owner's allowance as the host's builder states it (kept 10 minutes; `fresh` asks now). Null: none. */
+  allowance?: (fresh?: boolean) => Promise<HostAllowance | null>;
   /** Backup and version status (Settings). */
   status?: () => Promise<{ machine?: string; version: string; dataFormat: number; lastBackup: string | null; backupDir: string; latest?: string | null; notes?: { version: string; date?: string; items: string[] }[] }>;
   /**

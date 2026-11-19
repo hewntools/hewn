@@ -2,13 +2,13 @@
 // Settings › AI › Models: providers and keys, tiers, prices, this month's spend and its cap.
 import { ago, api, appIcon, capRef, caps, fail, formSheet, h, kindTag, modal, sheetActions, sheetHead, toast } from "../kit.js";
 import { providerTile } from "./agents.js";
-import { put, stillHere } from "./frame.js";
+import { browserZone, put, settings, stillHere } from "./frame.js";
 import { pollInbox } from "./inbox.js";
 import { route } from "./router.js";
 import { settingsFrame } from "./settings.js";
 import { toolModelSheet } from "./tool-model.js";
 
-export { creditWords, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
+export { allowanceWords, creditWords, keySheet, modelPicker, modelsPage, PROVIDERS, TIER_TEXT, titleCase, usd };
 
 // ---------- J1 Settings › AI › Models ----------
 
@@ -22,22 +22,33 @@ const usd = (n) => (n >= 0.01 ? `$${n.toFixed(2)}` : n > 0 ? `$${n.toFixed(4)}` 
 const perM = (p) => `${usd(p.input * 1e6)} / ${usd(p.output * 1e6)}`;
 const titleCase = (t) => t[0].toUpperCase() + t.slice(1);
 const modelLabel = (prov, id) => prov.models.find((x) => x.id === id)?.name ?? id;
+/** "2027-01-31" → "31 Jan 2027". */
+const dayText = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
-/** O8 A provider's key: a Form that checks it (no tokens spent). Resolves the new /models, or null. */
+/**
+ * O8 A provider's key: a Form that checks it (no tokens spent), with an optional date it stops working (providers don't
+ * say; the Inbox tells a week before). With a key set, it replaces it: the new one is stored only once it passes, else
+ * the old one stays; left empty, only the date changes. Resolves the new /models, or null.
+ */
 function keySheet(m, providerId, { use = false } = {}) {
+  const prov = m.providers.find((p) => p.id === providerId);
+  const replace = !!prov?.keySet;
   return formSheet({
-    title: `${PROVIDERS[providerId].label} API key`,
-    sub: "Tools call models with it, metered; they never see it.",
+    title: `${replace ? "Replace the " : ""}${PROVIDERS[providerId].label} API key`,
+    sub: replace ? "The new key is checked first: if it doesn't work, the one you have stays." : "Tools call models with it, metered; they never see it.",
     build: (close) => {
-      const key = h("input", { type: "password", autocomplete: "off", placeholder: "Paste API key", "aria-label": "API key" });
-      const save = h("button", { class: "primary" }, "Check and save");
+      const key = h("input", { type: "password", autocomplete: "off", placeholder: replace ? "Paste the new key" : "Paste API key", "aria-label": "API key" });
+      const expires = h("input", { type: "date", value: prov?.expiresOn ?? "", "aria-label": "Expires on" });
+      const save = h("button", { class: "primary" }, replace ? "Check and replace" : "Check and save");
       const submit = async () => {
-        if (!key.value.trim()) return key.focus();
+        const dateOnly = replace && !key.value.trim();
+        if (!key.value.trim() && !dateOnly) return key.focus();
+        if (dateOnly && expires.value === (prov.expiresOn ?? "")) return key.focus();
         save.disabled = true;
         try {
-          let next = await api(`/models/keys/${providerId}`, { method: "PUT", body: { key: key.value.trim() } });
+          let next = await api(`/models/keys/${providerId}`, { method: "PUT", body: dateOnly ? { expiresOn: expires.value || null } : { key: key.value.trim(), expiresOn: expires.value || null } });
           if (use && next.provider !== providerId) next = await api("/models", { method: "PUT", body: { provider: providerId } });
-          toast(`${PROVIDERS[providerId].label} key works`);
+          toast(dateOnly ? (expires.value ? `${PROVIDERS[providerId].label} key: expires on ${dayText(expires.value)}` : `${PROVIDERS[providerId].label} key: no expiry date`) : `${PROVIDERS[providerId].label} key works`);
           close(next);
         } catch (e) {
           save.disabled = false;
@@ -46,9 +57,11 @@ function keySheet(m, providerId, { use = false } = {}) {
       };
       save.addEventListener("click", submit);
       key.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+      expires.addEventListener("keydown", (e) => e.key === "Enter" && submit());
       setTimeout(() => key.focus());
       return [
-        h("label", { class: "field" }, h("span", { class: "label" }, "Key"), key, h("span", { class: "hint" }, "Get one at ", h("a", { href: PROVIDERS[providerId].keys, target: "_blank", rel: "noopener noreferrer" }, PROVIDERS[providerId].keys.replace(/^https:\/\//, "")))),
+        h("label", { class: "field" }, h("span", { class: "label" }, replace ? "New key" : "Key"), key, h("span", { class: "hint" }, "Get one at ", h("a", { href: PROVIDERS[providerId].keys, target: "_blank", rel: "noopener noreferrer" }, PROVIDERS[providerId].keys.replace(/^https:\/\//, "")))),
+        h("label", { class: "field" }, h("span", { class: "label" }, "Expires on (optional)"), expires, h("span", { class: "hint" }, replace ? "If the new key has an expiry date, or to change the date of the one you have. The Inbox tells you a week before." : "If the key has an expiry date. The Inbox tells you a week before.")),
         sheetActions(h("button", { onclick: () => close(null) }, "Cancel"), save),
       ];
     },
@@ -165,6 +178,13 @@ const meter = (n, on, warn) => h("div", { class: `blocks ${warn ? "warn" : ""}`,
  */
 /** "12.37 Credits": a host's charge as given (2 decimals at most). */
 const creditWords = (t) => `${Math.round(t.amount * 100) / 100} ${t.unit}`;
+/** When the allowance renews, in the owner's time zone (Settings › Time zone, as the Inbox says it): "1 Dec". */
+const renewsOn = (a) => a.resetsAt && new Date(a.resetsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: settings?.timeZone ?? browserZone() });
+/** Hosted: the allowance as stated, for Settings › AI's row: "2014 of 2500 Credits used · they renew on 1 Dec". */
+const allowanceWords = (a) => {
+  const on = renewsOn(a);
+  return a.of === null ? `${a.used} ${a.unit} used · included` : `${a.used} of ${a.of} ${a.unit} used${on ? ` · they renew on ${on}` : ""}`;
+};
 const CHARGE_KINDS = { build: "builds", intake: "talking requests through", model: "tools that think" };
 
 /**
@@ -176,6 +196,10 @@ async function hostedModelsPage(m, all) {
   const catalog = await api(`/tools/remote/models`).catch(() => null);
   const back = h("a", { class: "link back-inline", href: "#/settings/ai" }, "‹ AI");
   const { totals, rows } = m.host.charges;
+  const a = m.host.allowance;
+  const on = a && renewsOn(a);
+  // What each kind took this month, in Hewn's own records (not reconciled with the allowance's count).
+  const byKind = rows.length > 0 && h("div", { class: "small muted" }, `This month: ${rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")}`);
   const tierRow = (tier) => {
     const users = m.usage[tier] ?? [];
     return h(
@@ -189,13 +213,26 @@ async function hostedModelsPage(m, all) {
   settingsFrame(
     "ai",
     h("div", { class: "row tight baseline" }, back, h("h1", { class: "flush" }, "Models")),
-    h(
-      "div",
-      { class: "card stack-sm month-card" },
-      h("span", { class: "eyebrow" }, "This month"),
-      totals.length ? totals.map((t) => h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, creditWords(t)), h("span", { class: "muted" }, "used"))) : h("div", { class: "muted" }, "Nothing used yet"),
-      rows.length > 0 && h("div", { class: "small muted" }, rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")),
-    ),
+    a
+      ? h(
+          "div",
+          { class: "card stack-sm month-card" },
+          // As stated: the count may differ by a few from what each build and call shows (it's rounded up there).
+          h("span", { class: "eyebrow" }, a.unit),
+          h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, String(a.used)), h("span", { class: "muted" }, a.of === null ? "used · included" : `of ${a.of} used`)),
+          a.of !== null && meter(40, Math.round(Math.min(1, a.used / a.of) * 40), a.used >= 0.8 * a.of),
+          h("div", { class: "small muted" }, [on ? `They renew on ${on}.` : a.of !== null && "They don't renew.", a.perBuild !== null && `A build pauses at ${a.perBuild} ${a.unit} and asks before going on.`].filter(Boolean).join(" ")),
+          byKind,
+          // Checked again here, as it goes into an href.
+          a.of !== null && (a.more?.startsWith("https://") ? h("a", { class: "link", href: a.more, target: "_blank", rel: "noopener noreferrer" }, `More ${a.unit} ›`) : h("div", { class: "small faint" }, "The allowance is fixed.")),
+        )
+      : h(
+          "div",
+          { class: "card stack-sm month-card" },
+          h("span", { class: "eyebrow" }, "This month"),
+          totals.length ? totals.map((t) => h("div", { class: "row tight baseline" }, h("span", { class: "big-figure" }, creditWords(t)), h("span", { class: "muted" }, "used"))) : h("div", { class: "muted" }, "Nothing used yet"),
+          rows.length > 0 && h("div", { class: "small muted" }, rows.map((r) => `${creditWords(r)} on ${CHARGE_KINDS[r.kind] ?? r.kind}`).join(" · ")),
+        ),
     h("div", { class: "card settings-card" }, h("div", { class: "eyebrow card-eyebrow" }, "Tiers"), m.tierNames.map(tierRow)),
     m.pinned.length > 0 &&
       h(
@@ -209,7 +246,8 @@ async function hostedModelsPage(m, all) {
 
 async function modelsPage() {
   const here = stillHere();
-  const [m, all] = await Promise.all([api("/models"), caps().catch(() => new Map())]);
+  // Hosted: the allowance read now, not the last 10 minutes'.
+  const [m, all] = await Promise.all([api("/models?fresh=1"), caps().catch(() => new Map())]);
   if (!here()) return;
   if (m.host) return hostedModelsPage(m, all);
   const reload = (next) => next && route();
@@ -219,7 +257,7 @@ async function modelsPage() {
   const prov = m.providers.find((p) => p.id === m.provider);
   const providerRow = (p) => {
     const inUse = p.id === m.provider;
-    const status = !p.keySet ? "No key" : p.check?.ok ? `${inUse ? "In use · " : ""}key works` : p.check?.error ?? "Key saved";
+    const status = (!p.keySet ? "No key" : p.check?.ok ? `${inUse ? "In use · " : ""}key works` : (p.check?.error ?? "Key saved")) + (p.keySet && p.expiresOn ? ` · expires ${dayText(p.expiresOn)}` : "");
     const checkBtn = p.keySet && p.check && !p.check.ok && h("button", { class: "sm ghost", onclick: () => api(`/models/check/${p.id}`, { method: "POST" }).then(() => route(), fail) }, "Check again");
     return h(
       "div",
@@ -227,6 +265,7 @@ async function modelsPage() {
       providerTile(p.id, 32),
       h("div", { class: "grow" }, h("span", { class: inUse ? "strong" : "" }, PROVIDERS[p.id].label), h("span", { class: `sub ${p.keySet && p.check && !p.check.ok ? "danger-text" : ""}` }, inUse && p.check?.ok && h("span", { class: "dot ok" }), ` ${status}`)),
       checkBtn,
+      p.keySet && h("button", { class: "sm ghost", onclick: () => keySheet(m, p.id).then(reload) }, "Replace…"),
       inUse
         ? kindTag("in use", "ok")
         : p.keySet

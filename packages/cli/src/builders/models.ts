@@ -4,6 +4,7 @@
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { EFFORT } from "@hewntools/core/build-models.ts";
+import { type HostAllowance, saneAllowance } from "@hewntools/core/models.ts";
 import type { ModelCatalog, ModelChoice } from "@hewntools/host-workerd/surface/host.ts";
 import { OPENCODE_NO_UPDATE } from "./opencode-dirs.ts";
 
@@ -122,15 +123,51 @@ export const codexCatalog = async (): Promise<ModelCatalog> => codexCatalogFrom(
 /** OpenCode's list, read from your own OpenCode (the descriptor's `catalog`). */
 export const opencodeCatalog = async (): Promise<ModelCatalog> => opencodeCatalogFrom(await opencodeModels());
 
+/** How long a remote builder's model list and allowance are kept before they're read again. */
+const KEPT_MS = 10 * 60_000;
+
+/** A GET on the remote builder's service, with its token, given up after 10 s. */
+const remoteGet = (url: string, path: string, token: string, fetchImpl: typeof fetch) => fetchImpl(new URL(path, url.endsWith("/") ? url : `${url}/`), { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+
 /** A remote builder's catalog: `GET <url>/v1/models` (see docs/internal/remote-builder.md). */
 export async function remoteCatalog(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<ModelCatalog> {
-  const res = await fetchImpl(new URL("v1/models", url.endsWith("/") ? url : `${url}/`), { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+  const res = await remoteGet(url, "v1/models", token, fetchImpl);
   if (!res.ok) throw new Error(`models: HTTP ${res.status}`);
   const body = (await res.json()) as { models?: ModelChoice[]; tiers?: Record<string, unknown> };
   const models = (body.models ?? []).filter((m) => m && typeof m.id === "string" && typeof m.label === "string").map((m) => ({ ...m, efforts: Array.isArray(m.efforts) ? m.efforts : [] }));
   // What each tier runs on for tools' model calls (hosted), as the host labels it.
   const tiers = Object.fromEntries(["light", "standard", "strong", "max"].flatMap((t) => (typeof body.tiers?.[t] === "string" ? [[t, (body.tiers[t] as string).slice(0, 60)]] : [])));
   return { agent: "remote", models: models.some((m) => m.id === "default") ? models : [defaultChoice([]), ...models], ...(Object.keys(tiers).length ? { tiers } : {}) };
+}
+
+/** A remote builder's allowance: `GET <url>/v1/allowance`. Null when it offers none (404); throws on anything else. */
+export async function remoteAllowance(url: string, token: string, fetchImpl: typeof fetch = fetch): Promise<HostAllowance | null> {
+  const res = await remoteGet(url, "v1/allowance", token, fetchImpl);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`allowance: HTTP ${res.status}`);
+  const a = saneAllowance(await res.json());
+  if (!a) throw new Error("allowance: an answer that doesn't make sense");
+  return a;
+}
+
+/**
+ * The allowance, read at most every 10 minutes (the Inbox asks on every poll), or now with `fresh` (the Models page).
+ * Once there's an answer, the Inbox gets it at once and a stale one is read again behind it, so a slow service never
+ * holds a poll; one read at a time. A 404 means none; any other failure keeps the last good answer (none before one).
+ */
+export function hostAllowance(remote: { url: string; token: string }, fetchImpl: typeof fetch = fetch) {
+  let last: { at: number; value: HostAllowance | null } | undefined;
+  let reading: Promise<HostAllowance | null> | undefined;
+  const read = () =>
+    (reading ??= remoteAllowance(remote.url, remote.token, fetchImpl)
+      .catch(() => last?.value ?? null)
+      .then((value) => ((last = { at: Date.now(), value }), value))
+      .finally(() => (reading = undefined)));
+  return async (fresh = false): Promise<HostAllowance | null> => {
+    if (fresh || !last) return read();
+    if (Date.now() - last.at >= KEPT_MS) void read();
+    return last.value;
+  };
 }
 
 /**
@@ -149,7 +186,7 @@ export function modelCatalogs(o: { remote?: { url: string; token: string }; cata
   // `fresh`: read now (Settings › AI's sheet, so a provider just signed in to shows at once).
   return async (agent: string, fresh = false): Promise<ModelCatalog> => {
     const hit = cache.get(agent);
-    if (hit && !fresh && Date.now() - hit.at < 10 * 60_000) return withFailures(hit.catalog);
+    if (hit && !fresh && Date.now() - hit.at < KEPT_MS) return withFailures(hit.catalog);
     try {
       const catalog = await read(agent);
       cache.set(agent, { at: Date.now(), catalog });

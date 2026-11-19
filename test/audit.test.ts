@@ -200,3 +200,63 @@ describe("a destructive call reached through another capability", () => {
     assert.equal(await count(), 3);
   });
 });
+
+describe("waiting calls: the chain's deadline, and Allow all", () => {
+  let t: ReturnType<typeof setup>;
+  const dirs: string[] = [];
+  before(async () => {
+    t = setup();
+    dirs.push(counterWithReset(), counterProxy());
+    for (const d of dirs) await installFrom(t.platform, d);
+    t.platform.approveGrants(USER, "counter-proxy");
+  });
+  after(() => {
+    t.cleanup();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+  const count = async () => ((await t.platform.invoke(USER, { capabilityId: "ui-counter", operation: "get" })).result as { count: number }).count;
+  const reset = (to: number, agent = t.claude) => t.platform.invoke(agent, { capabilityId: "ui-counter", operation: "reset", input: { to } });
+
+  test("the wait ends before the chain's deadline: the agent gets awaiting_confirmation, not a timeout", async () => {
+    t.platform.confirmWaitMs = 60_000;
+    // A chain with 6.5 s left waits about 1.5 s (5 s are kept for the call itself).
+    for (const [what, call] of [
+      ["called directly", () => t.platform.invoke(t.claude, { capabilityId: "ui-counter", operation: "reset", input: { to: 1 } }, ["claude-code"], Date.now() + 6500)],
+      ["reached through another tool", () => t.platform.invoke(t.claude, { capabilityId: "counter-proxy", operation: "run", input: { to: 2 } }, ["claude-code"], Date.now() + 6500)],
+    ] as const) {
+      const t0 = Date.now();
+      await assert.rejects(call(), (e: any) => e.code === "awaiting_confirmation" && /call it again with the same input/.test(e.message), what);
+      const took = Date.now() - t0;
+      assert.ok(took >= 1000 && took < 4000, `${what}: waited ${took} ms`);
+    }
+    // With less than that left, it doesn't wait at all.
+    const t0 = Date.now();
+    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "ui-counter", operation: "reset", input: { to: 3 } }, ["claude-code"], Date.now() + 4000), (e: any) => e.code === "awaiting_confirmation");
+    assert.ok(Date.now() - t0 < 1000);
+    for (const c of t.platform.confirmations(USER)) t.platform.decideConfirmation(WEB_USER, c.id, false);
+  });
+
+  test("Allow all: one agent's waiting calls of one operation, each its own confirmation and trail line", async () => {
+    t.platform.confirmWaitMs = 0;
+    for (const to of [4, 5, 6]) await assert.rejects(reset(to), (e: any) => e.code === "awaiting_confirmation");
+    await assert.rejects(reset(7, t.codex), (e: any) => e.code === "awaiting_confirmation");
+    await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "counter-proxy", operation: "run", input: { to: 8 } }), (e: any) => e.code === "awaiting_confirmation");
+    const waiting = t.platform.confirmations(USER);
+    const claudes = waiting.filter((c) => c.agentId === "claude-code" && c.operation === "reset@1" && [4, 5, 6].includes((c.input as { to: number }).to));
+    const codexs = waiting.find((c) => c.agentId === "codex")!;
+    assert.equal(claudes.length, 3);
+    // Never across agents, and only the owner.
+    assert.throws(() => t.platform.approveConfirmations(WEB_USER, [claudes[0].id, codexs.id]), /one agent's calls of one operation/);
+    assert.throws(() => t.platform.approveConfirmations(t.claude, claudes.map((c) => c.id)), /owner/);
+    const trail = () => t.platform.registry.authorityEvents().filter((x) => x.action === "destructive_confirmed").length;
+    const before = trail();
+    assert.deepEqual(t.platform.approveConfirmations(WEB_USER, claudes.map((c) => c.id)), { ok: true, approved: 3 });
+    assert.equal(trail() - before, 3);
+    // Each goes through once, with its own input; the others still wait.
+    for (const to of [4, 5, 6]) assert.equal(((await reset(to)).result as { count: number }).count, to);
+    assert.equal(await count(), 6);
+    assert.deepEqual(t.platform.confirmations(USER).map((c) => c.agentId).sort(), ["claude-code", "codex"]);
+    // Something already decided isn't decided again.
+    assert.throws(() => t.platform.approveConfirmations(WEB_USER, [claudes[0].id]), /no such call/);
+  });
+});

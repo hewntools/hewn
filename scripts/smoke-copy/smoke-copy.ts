@@ -297,8 +297,8 @@ try {
 
   if (o.scenarios) {
     for (const file of scenarioFiles(o.scenarios)) {
+      let watched: Awaited<ReturnType<Browser["signedIn"]>> | undefined;
       const res = await runScenario(file, (steps, shots): ScenarioContext => {
-        let watched: Awaited<ReturnType<Browser["signedIn"]>> | undefined;
         let seen = 0;
         return {
           copy: c,
@@ -336,6 +336,9 @@ try {
           },
         };
       });
+      // Its pages go when it ends: a page left open (a tool's own screen calling its operations every second) is the
+      // owner using Hewn, and the next scenario would run beside it.
+      await watched?.page.context().close().catch(() => {});
       facts.scenarios.push(res.title.replace(/^Scenario: /, ""));
       say(`${res.status.padEnd(4)} ${res.title}: ${res.summary}`);
       results.push(res);

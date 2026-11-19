@@ -216,7 +216,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     const files = [...(e.clipboardData?.files ?? [])];
     if (files.length) (e.preventDefault(), addFiles(files));
   });
-  const composer = h("form", { class: "composer boxed" }, chips, input, h("div", { class: "composer-tools" }, attach, picker, draftNow, modelChip(), send));
+  // A build started from this box goes with the model on its chip.
+  const chip = modelChip();
+  const composer = h("form", { class: "composer boxed" }, chips, input, h("div", { class: "composer-tools" }, attach, picker, draftNow, chip.el, send));
   composer.addEventListener("dragover", (e) => (e.preventDefault(), composer.classList.add("drop")));
   composer.addEventListener("dragleave", () => composer.classList.remove("drop"));
   composer.addEventListener("drop", (e) => (e.preventDefault(), composer.classList.remove("drop"), addFiles([...(e.dataTransfer?.files ?? [])])));
@@ -280,7 +282,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     // again on return, nor for a reply that came while no view was looking (the rules are saved all the same).
     if (live) for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
     // Schedules set here (the drawer stays on the conversation) or from the page: done, not kept any more.
-    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
+    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
     if (reply.kind === "questions") {
       messages.push(turnOf(reply));
       say("them", chatText(reply.message, reply.questions));
@@ -428,7 +430,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     keep();
     thread.append(errorBox(result.error));
     // Widgets don't need the intake: the builder can still make what was asked (or pick itself).
-    if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, messages).then(onBuilt, fail) }, "Build without suggestions")));
+    if (widgetsMode) thread.append(h("div", { class: "row tight" }, h("button", { onclick: async () => buildWidgets(cap, /^suggest some widgets\.?$/i.test(text) ? "" : text, messages, await chip.choice()).then(onBuilt, fail) }, "Build without suggestions")));
   };
 
   /** A new conversation, in a new session: this one and anything typed or attached go; the page is as new. */
@@ -506,13 +508,14 @@ const chatText = (message, questions) => [message, ...(questions ?? []).filter(B
 /** The intake's side of the chat: its text as light Markdown (bold, lists, code); the owner's stays as typed. */
 const themBubble = (text, attachments) => h("div", { class: "bubble them md" }, markdown(text), attachmentsView(attachments));
 
-/** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build. */
-const buildWidgets = (cap, request, conversation) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}) } });
+/** Start a widgets build (only widgets change). `conversation`: the chat that led to it, kept with the build; `ask`: the chip's model. */
+const buildWidgets = (cap, request, conversation, ask = {}) => api(`/capabilities/${enc(cap.id)}/widgets`, { method: "POST", body: { ...(request ? { request } : {}), ...(conversation?.length ? { conversation } : {}), ...ask } });
 
 /**
  * In the intake's chat box: the model building runs on, and its menu, like a chat app's. It is the
  * Settings › AI choice, changed right here: the current model, an effort slider, then the other
- * models (and a full name).
+ * models (and a full name). `choice()`: what it shows, which a build started from its box asks for
+ * (so another tab's pick in between doesn't change it); looked at again, it shows what's set now.
  */
 function modelChip() {
   const name = h("span", {}, "Model");
@@ -535,6 +538,29 @@ function modelChip() {
     effortEl.textContent = m.effort ? `· ${m.effort}` : "";
   };
   load().then(paint).catch(() => (chip.hidden = true));
+  // The setting may have changed in another tab: when this one is looked at again, the chip reads it again.
+  const onVisible = () => {
+    if (!chip.isConnected) return document.removeEventListener("visibilitychange", onVisible);
+    if (!document.hidden && ctx) load().then(() => (paint(), render())).catch(() => {});
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  onLeave(() => document.removeEventListener("visibilitychange", onVisible));
+  /**
+   * The model and effort on the chip ("default": the builder's own), for a build about to start; none before it's read
+   * (Hewn's setting goes then). Its model names one builder's: when another tab switched the builder, the chip reads
+   * the setting again and asks for none (the new builder's own setting goes).
+   */
+  const choice = async () => {
+    if (!ctx) return {};
+    const now = await api("/settings").catch(() => null);
+    if (now && now.builder !== ctx.s.builder) {
+      ctx.s = now;
+      load().then(() => (paint(), render())).catch(() => {});
+      return {};
+    }
+    const m = jobModelOf(ctx.s, "builder");
+    return { model: m.model ?? "default", ...(m.effort ? { effort: m.effort } : {}) };
+  };
 
   /** Save the builder's model and effort. In order: a slider moved right after a model pick must not write over it. */
   let saving = Promise.resolve();
@@ -633,7 +659,7 @@ function modelChip() {
     addEventListener("blur", close);
   });
   onLeave(close);
-  return chip;
+  return { el: chip, choice };
 }
 
 const scheduleText = (list) => list.map((x) => `- ${x.operation} ${x.cadence}${x.why ? ` (${x.why})` : ""}`).join("\n");
@@ -831,8 +857,9 @@ function scheduleTicks(list = []) {
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
  * set up once the draft's build promotes. `conversation`: the chat that led here, kept with each build.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation } = {}) {
-  const keep = conversation?.length ? { conversation } : {};
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {} } = {}) {
+  // What every build it starts carries (a connection first, then the tool): the conversation, and the chip's model.
+  const carried = { ...(conversation?.length ? { conversation } : {}), ...ask };
   const conn = d.connection;
   let first = null;
   if (conn) {
@@ -841,12 +868,12 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
     const wait = after ?? prev?.buildId;
     first =
       conn.mode === "create"
-        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}), ...keep } }))
-        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}), ...keep } });
+        ? prev ?? (await api("/capabilities", { method: "POST", body: { name: conn.name, purpose: conn.purpose, requirements: conn.requirements, kind: "connection", ...(after ? { after } : {}), ...carried } }))
+        : await api(`/capabilities/${enc(conn.capabilityId)}/modify`, { method: "POST", body: { request: conn.request, ...(wait ? { after: wait } : {}), ...carried } });
     connections.set(key, first);
   }
   const wait = first?.buildId ?? after;
-  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...keep };
+  const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...carried };
   return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w } });
 }
 
@@ -1022,14 +1049,16 @@ function proposalCard(kind, list, ctx) {
     rows.forEach((r) => ((r.box.disabled = true), r.real && (r.real.disabled = true)));
     const reenable = () => (rows.forEach((r) => ((r.box.disabled = false), r.real && (r.real.disabled = r.real.dataset.none === "1"))), count());
     try {
+      // The model on the box's chip, for every build this starts.
+      const ask = (await ctx.modelAsk?.()) ?? {};
       if (kind === "widgets") {
         const picked = chosen().map((r) => r.d);
         // A replacement keeps its widget's name, so it stays where it is on Home.
-        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`, messages);
+        const b = await buildWidgets(cap, `Build exactly ${picked.length === 1 ? "this widget" : "these widgets"}:\n${picked.map((p, i) => `${i + 1}. ${p.replaces ? `Change the existing widget "${p.replaces}" (keep its name, give it a new operation version) into ` : ""}"${p.title}" (${p.template}; ${p.sizes.join(", ")}): ${p.shows}`).join("\n")}`, messages, ask);
         return onBuilt(b);
       }
       if (kind === "polish") {
-        const b = await api(`/capabilities/${enc(cap.id)}/polish`, { method: "POST", body: { note: list[0].note ?? "", realData: !!rows[0].real?.checked, ...(messages?.length ? { conversation: messages } : {}) } });
+        const b = await api(`/capabilities/${enc(cap.id)}/polish`, { method: "POST", body: { note: list[0].note ?? "", realData: !!rows[0].real?.checked, ...(messages?.length ? { conversation: messages } : {}), ...ask } });
         invalidateCaps();
         return onBuilt(b);
       }
@@ -1051,12 +1080,12 @@ function proposalCard(kind, list, ctx) {
         // Only the connection: the intake may have drafted a tool around it.
         const d = list[0];
         const c = d.connection?.mode === "create" ? d.connection : d;
-        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection", ...(messages?.length ? { conversation: messages } : {}) } });
+        const b = await api("/capabilities", { method: "POST", body: { name: c.name, purpose: c.purpose, requirements: c.requirements, kind: "connection", ...(messages?.length ? { conversation: messages } : {}), ...ask } });
         invalidateCaps();
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask });
         invalidateCaps();
         return onBuilt(b);
       }
@@ -1074,7 +1103,7 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages });
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {

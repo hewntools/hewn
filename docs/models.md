@@ -19,7 +19,7 @@ Building uses the model you pick for it in Settings › AI (**Builds tools › M
 
 **OpenCode** lists whatever it's signed in to (`opencode auth login`), the providers in your `~/.config/opencode/opencode.json` and its free tier, as `provider/model`; its efforts are the model's own reasoning levels (`--variant`). Its free tier changes which models it serves, and its list can lag behind (a model it has pulled answers "Model is unavailable" for a while): a build on one stops with that reason, the model is marked in the lists for an hour, and Default lets OpenCode choose. A local model server you configured there (Ollama, LM Studio) works for building too: Hewn lets the builder reach that server's port and nothing else on your machine.
 
-Switching agent means choosing its model; Hewn remembers your last choice for each agent. You can also change it in the box where you describe a tool: the model it shows (e.g. **Fable High ⌄**) opens a menu with the current model, an effort slider, and the other models (and a full name). It's the same setting as in Settings › AI, so it stays for what you build next.
+Switching agent means choosing its model; Hewn remembers your last choice for each agent. You can also change it in the box where you describe a tool: the model it shows (e.g. **Fable High ⌄**) opens a menu with the current model, an effort slider, and the other models (and a full name). It's the same setting as in Settings › AI, so it stays for what you build next. What you build from a box goes with the model that box shows, even if you picked another in a second tab meanwhile; a tab shows the setting again when you come back to it.
 
 Agents that ask for a build (`capabilities_create`, `capabilities_modify`, `capabilities_add_widgets`) can name a model too, but only one you allow: **Agents may ask for** in Settings › AI (to start with: Default, and Claude Code's families when it builds). Asking for another is an error that names the allowed ones, and an effort the model doesn't take is one that names its levels; nothing is built. Each build says what it ran on, on its page and in Activity.
 
@@ -32,6 +32,12 @@ The first time a tool asks for a model, its **Allowed to** sheet asks for a prov
 - **OpenRouter:** many vendors with one key
 
 Paste the key; Hewn checks it before saving. Tools never see the key. You can also add keys under Settings › AI › Models.
+
+### Replacing a key
+
+To rotate a key, **Replace…** on the provider's row under Settings › AI › Models opens the same sheet: paste the new key. Hewn checks it first and stores it only if it works; if it doesn't, or can't be checked, the key you had stays. From the terminal, running `hewn models key <provider>` again does the same.
+
+Providers don't tell Hewn when a key expires. If yours has an expiry date, put it in **Expires on** on the same sheet: the row shows it, and the Inbox tells you a week before (by your time zone), and again once it has expired. On the sheet, the date in the field goes with the new key (clear it if the new key doesn't expire), and to change only the date, leave the key empty. From the terminal, `--expires YYYY-MM-DD` gives the new key its date; without it, the new key has none.
 
 ## Tiers
 
@@ -60,7 +66,8 @@ When a provider retires a model a tool was pinned to, the Inbox says so.
 
 ```
 hewn models                          provider, tiers, budget and this month's spend
-hewn models key <provider> [--from <path> | --remove]
+hewn models key <provider> [--from <path>] [--expires <date>] | --remove
+                                     set or replace a key (checked first)
 hewn models use <provider>
 hewn models tier <tier> <model-id> | --suggested
 hewn models cap [<tool>] <usd> | none

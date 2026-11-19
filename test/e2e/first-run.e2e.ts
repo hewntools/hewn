@@ -515,6 +515,48 @@ export const operations = {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  await step("an agent's calls of one operation, waiting together: the tab's title counts them, and Allow all 3 lets each run", async () => {
+    // A counter whose destructive reset takes a value, so each call is its own.
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-reset-to-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => {
+      Object.assign(m, { id: "set-counter", name: "Set Counter" });
+      m.operations.push({ name: "reset", description: "Set the count", version: 1, sideEffect: "destructive", inputSchema: { type: "object", additionalProperties: false, properties: { to: { type: "integer" } } }, outputSchema: { type: "object", required: ["count"], properties: { count: { type: "integer" } } } });
+    });
+    writeFileSync(join(dir, "src", "index.ts"), `const count = (db: any) => db.prepare("SELECT n FROM counter WHERE id = 1").get().n;
+export const operations = {
+  "increment@1": (_: unknown, { db }: any) => (db.prepare("UPDATE counter SET n = n + 1 WHERE id = 1").run(), { count: count(db) }),
+  "get@1": (_: unknown, { db }: any) => ({ count: count(db) }),
+  "reset@1": (i: { to?: number }, { db }: any) => (db.prepare("UPDATE counter SET n = ? WHERE id = 1").run(i.to ?? 0), { count: count(db) }),
+};
+`);
+    const installed = await sv.admin("install", { name: "Set Counter", purpose: "Counts", dir, wait: true });
+    rmSync(dir, { recursive: true, force: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
+    const calls = [7, 8, 9].map((to) => client.callTool({ name: "capabilities_invoke", arguments: { capabilityId: "set-counter", operation: "reset", input: { to } } }, undefined, { timeout: 120_000 }));
+    for (let i = 0; i < 20 && (await sv.admin("call", { method: "confirmations", args: [] }).catch(() => ({ result: [] }))).result?.length < 3; i++) await new Promise((r) => setTimeout(r, 250));
+    await page.goto(`${web}/#/activity`);
+    await page.waitForFunction(() => document.title === "(3) Hewn", undefined, { timeout: 20_000 });
+    const banner = page.locator(".blocking-banner:not([hidden])", { hasText: "is waiting for you" });
+    await banner.getByRole("button", { name: "Review" }).click();
+    const sheet = page.locator("dialog[open]", { hasText: "wants to reset" });
+    await sheet.getByText("2 more calls like it waiting").waitFor();
+    await page.screenshot({ path: "/tmp/e2e-fr-allow-all.png" });
+    await sheet.getByRole("button", { name: "Allow all 3" }).click();
+    const counts = (await Promise.all(calls)).map((r: any) => (r.isError ? r.content[0].text : JSON.parse(r.content[0].text).result.count));
+    if (counts.join() !== "7,8,9") throw new Error(`the calls answered ${counts.join(" · ")}`);
+    await page.waitForFunction(() => document.title === "Hewn", undefined, { timeout: 20_000 });
+    await client.close();
+    // Each is its own line in Activity (the page is on it already: drawn again).
+    await page.reload();
+    const allowed = page.locator("li", { hasText: "Let Claude Code run" }).filter({ hasText: "Set Counter" });
+    await allowed.first().waitFor();
+    if ((await allowed.count()) !== 3) throw new Error(`${await allowed.count()} lines in Activity, not 3`);
+  });
+
   await step("an agent's change waits for the owner: the tool's tile says so and opens it, Later opens the tool as it is, Allow puts it live", async () => {
     const client = new Client({ name: "e2e", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
@@ -621,7 +663,7 @@ export const operations = {
   await step("Activity shows who changed authority, and when, and an install from a file", async () => {
     await page.goto(`${web}/#/activity`);
     await page.getByText("Connected Claude Code").waitFor();
-    await page.getByText(/Let Claude Code run/).waitFor();
+    await page.getByText(/Let Claude Code run/).first().waitFor();
     await page.getByText("Installed from a file · v1").waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-activity.png", fullPage: true });
   });
@@ -824,6 +866,145 @@ export const operations = {
     const notes = await page.getByText("Stopped.").count();
     if (notes !== 1) throw new Error(`${notes} Stopped. notes`);
     await page.unroute("**/api/intake");
+  });
+  await step("on a phone, an open tool's bar keeps ••• alone, which holds Change… (the drawer) and Share…, and the tool's name has the room (#116)", async () => {
+    // What each tool bar shows (its items not hidden by the phone rule).
+    const shown = () => page.locator(".tool-actions").first().locator(":scope > *").evaluateAll((els: Element[]) => els.filter((e) => getComputedStyle(e).display !== "none").map((e) => (e.textContent ?? "").trim()));
+    await page.goto(`${web}/#/run/reading-list`);
+    await page.locator(".tool-actions").waitFor();
+    if ((await shown()).join("|") !== "Change…|Share…|•••") throw new Error(`desktop: ${await shown()}`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    try {
+      await page.goto(`${web}/#/run/reading-list`);
+      await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).waitFor();
+      if ((await shown()).join("|") !== "•••") throw new Error(`the bar shows ${(await shown()).join(", ")}`);
+      await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).click();
+      await page.getByRole("menuitem", { name: "Share…" }).waitFor({ timeout: 3000 });
+      // •••'s Change… opens the drawer, as the bar's did: the tool stays where it is (no new page).
+      await page.locator(".with-drawer").evaluate((e: Element) => e.setAttribute("data-e2e", "same"));
+      await page.getByRole("menuitem", { name: "Change…" }).click();
+      await page.locator(".drawer").waitFor();
+      if (!(await page.locator(".with-drawer[data-e2e='same']").count())) throw new Error("•••'s Change… opened a new page");
+      // Info's bar is as it was (no name in it to make room for).
+      await page.goto(`${web}/#/c/reading-list`);
+      await page.getByRole("link", { name: "Change…" }).waitFor();
+      await page.goto(`${web}/#/run/reading-list`);
+      const name = page.locator(".app-title > span").first();
+      await name.waitFor();
+      if (await name.evaluate((e: Element) => e.scrollWidth > e.clientWidth)) throw new Error(`the name is cut: ${await name.evaluate((e: Element) => e.clientWidth)} px for "${await name.textContent()}"`);
+    } finally {
+      await page.setViewportSize({ width: 1000, height: 900 });
+    }
+  });
+  await step("a change goes live while the tool is open and its Change drawer closed: a toast says v… is ready, with Reload; the page waits for it (#110)", async () => {
+    let release!: () => void;
+    hold = new Promise<void>((r) => (release = r));
+    const started = await sv.admin("modify", { capabilityId: "reading-list", request: "a version while the tool is open" });
+    // The Inbox's poll (every 4 s while something builds) sees the build in flight: opening the Inbox polls at once.
+    await page.goto(`${web}/#/`);
+    await page.locator(".inbox-btn").click();
+    await page.locator(".inbox-panel", { hasText: "Building" }).waitFor({ timeout: 10_000 });
+    await page.keyboard.press("Escape");
+    await page.goto(`${web}/#/run/reading-list`);
+    const pill = page.locator(".app-title .pill");
+    await pill.waitFor();
+    const before = Number((await pill.textContent())!.slice(1));
+    // Marked: a reload of the page would lose the mark.
+    await page.locator(".with-drawer").evaluate((e: Element) => e.setAttribute("data-e2e", "same"));
+    // A poll on this page while it builds, then the build ends: the next poll sees it gone.
+    await page.waitForTimeout(4500);
+    release();
+    const toast = page.locator(".toast", { hasText: `v${before + 1} is ready` });
+    await toast.waitFor({ timeout: 20_000 });
+    if ((await pill.textContent()) !== `v${before + 1}`) throw new Error(`the bar says ${await pill.textContent()}`);
+    if (!(await page.locator(".with-drawer[data-e2e='same']").count())) throw new Error("the page reloaded itself");
+    // Said once: a look at the tab again doesn't say it twice.
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.waitForTimeout(800);
+    if ((await page.locator(".toast", { hasText: "is ready" }).count()) !== 1) throw new Error("the toast came twice");
+    await toast.getByRole("button", { name: "Reload" }).click();
+    await page.locator(".with-drawer:not([data-e2e])").waitFor();
+    if (await page.locator(".toast", { hasText: "is ready" }).count()) throw new Error("the toast stayed after Reload");
+    // A build that ends while the tab isn't looked at: the tab says so when it's looked at again.
+    await sv.admin("modify", { capabilityId: "reading-list", request: "another one", wait: true });
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.locator(".toast", { hasText: `v${before + 2} is ready` }).getByRole("button", { name: "Dismiss" }).click();
+    // With the drawer open on its box (it follows no build, so it says nothing), the page says it.
+    await page.goto(`${web}/#/run/reading-list?change=1`);
+    await page.locator(".drawer").waitFor();
+    await sv.admin("modify", { capabilityId: "reading-list", request: "a third one", wait: true });
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.locator(".toast", { hasText: `v${before + 3} is ready` }).waitFor({ timeout: 10_000 });
+    // Change… with the note up keeps it (the drawer's box says nothing of it).
+    await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "Change…" }).click();
+    await page.locator(".drawer").waitFor();
+    if (!(await page.locator(".toast", { hasText: `v${before + 3} is ready` }).count())) throw new Error("the note went when the drawer opened");
+    await page.locator(".toast", { hasText: "is ready" }).getByRole("button", { name: "Dismiss" }).click();
+    // A change built from the drawer: the drawer says it's ready, the page doesn't; closed without Reload, the page does.
+    const draft = { kind: "draft", message: "A line more.", draft: { request: "One more line." } };
+    await page.route("**/api/intake", (r: any) => r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: reply\ndata: ${JSON.stringify(draft)}\n\n` }));
+    try {
+      await page.goto(`${web}/#/run/reading-list?change=1`);
+      const box = page.locator(".drawer").getByRole("textbox", { name: "Message" });
+      await box.fill("One more line");
+      await box.press("Enter");
+      await page.locator(".drawer").getByRole("button", { name: /^Build/ }).click();
+      await page.locator(".drawer .drawer-ready", { hasText: `v${before + 4} is ready` }).waitFor({ timeout: 20_000 });
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForTimeout(800);
+      if (await page.locator(".toast", { hasText: "is ready" }).count()) throw new Error("a note on the page while the drawer says it");
+      await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+      await page.locator(".toast", { hasText: `v${before + 4} is ready` }).waitFor({ timeout: 5000 });
+    } finally {
+      await page.unroute("**/api/intake");
+    }
+    if (!started.buildId) throw new Error("no build");
+  });
+  const waitBuildDone = async (id: string) => {
+    for (let i = 0; i < 120; i++, await page.waitForTimeout(250)) if (!["waiting", "open", "building", "validating"].includes((await sv.admin("call", { method: "getBuild", args: [id] })).result.status)) return;
+    throw new Error(`build ${id} still running`);
+  };
+  await step("a change goes with the model on its box's chip, even if another tab changed the setting; looked at again, the chip shows the setting (#111)", async () => {
+    const models = (m: Record<string, string>) => ({ builder: { claude: m }, intake: { claude: m } });
+    await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
+    // The intake answers with a change to build (it's stubbed here).
+    const draft = { kind: "draft", message: "A line more.", draft: { request: "Add a line to each run." } };
+    await page.route("**/api/intake", (r: any) => r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: reply\ndata: ${JSON.stringify(draft)}\n\n` }));
+    try {
+      // Looked at again, a box's chip shows what's set now (another tab may have changed it).
+      await page.goto(`${web}/#/new`);
+      const newChip = page.locator(".model-chip");
+      await newChip.getByText(/Fable/).waitFor();
+      await sv.admin("settings", { jobModels: models({ model: "opus" }) });
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await newChip.getByText(/Opus/).waitFor({ timeout: 5000 });
+      if (await newChip.getByText(/high/).count()) throw new Error("the chip kept the old effort");
+      await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
+      await page.goto(`${web}/#/run/reading-list?change=1`);
+      const chip = page.locator(".drawer .model-chip");
+      await chip.getByText(/Fable/).waitFor();
+      await chip.getByText(/high/).waitFor();
+      // Another tab picks another model: the setting changes, this tab's chip doesn't know yet.
+      await sv.admin("settings", { jobModels: models({ model: "opus" }) });
+      const box = page.locator(".drawer").getByRole("textbox", { name: "Message" });
+      await box.fill("Add a line to each run");
+      await box.press("Enter");
+      await page.locator(".drawer").getByRole("button", { name: /^Build/ }).click();
+      const b = await (async () => {
+        for (let i = 0; i < 40; i++, await page.waitForTimeout(250)) {
+          const st = await sv.admin("status");
+          const x = st.builds.find((y: any) => y.capabilityId === "reading-list" && y.request?.request === "Add a line to each run.");
+          if (x) return x;
+        }
+        throw new Error("no build");
+      })();
+      if (b.model?.model !== "fable" || b.model?.effort !== "high") throw new Error(`the build asked for ${JSON.stringify(b.model)}, not the chip's fable · high`);
+      await waitBuildDone(b.buildId);
+    } finally {
+      await page.unroute("**/api/intake");
+      await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
+    }
   });
   await step("a link in a tool's own screen to one of Hewn's pages opens it signed in, here or in a new tab as it asks, and never sends for the owner (#114)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-links-"));

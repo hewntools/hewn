@@ -7,6 +7,7 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Agent } from "@hewntools/core/auth.ts";
+import { MAX_BUNDLE_BYTES } from "@hewntools/core/bundle.ts";
 import { type DocPage, docsReader } from "@hewntools/core/docs.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { randomToken } from "@hewntools/core/sha256.ts";
@@ -85,6 +86,14 @@ export class McpSessions {
   }
 
   async handle(req: Request, agent: Agent, origin: string | undefined): Promise<Response> {
+    const declared = Number(req.headers.get("content-length"));
+    if (declared > MCP_MAX_BODY_BYTES) return (await drain(req), tooLarge(declared));
+    const res = await this.answer(req, agent, origin);
+    // The transport's own refusal (a body sent without its length): in Hewn's words.
+    return res.status === 413 ? (await drain(req), tooLarge()) : res;
+  }
+
+  private async answer(req: Request, agent: Agent, origin: string | undefined): Promise<Response> {
     const id = req.headers.get("mcp-session-id");
     if (id) {
       const s = this.sessions.get(id);
@@ -101,6 +110,7 @@ export class McpSessions {
     this.evict(agent.id);
     const session = { agent, origin } as Session;
     const transport = new WebStandardStreamableHTTPServerTransport({
+      maxRequestBodySize: MCP_MAX_BODY_BYTES,
       sessionIdGenerator: () => randomToken(24),
       onsessioninitialized: (sid) => {
         session.id = sid;
@@ -142,4 +152,40 @@ export class McpSessions {
     if (this.pending) clearTimeout(this.pending);
     for (const id of [...this.sessions.keys()]) this.close(id);
   }
+}
+
+/**
+ * The most an MCP request may carry: a submission's 5 MB of files (MAX_BUNDLE_BYTES, counted as files) as it travels,
+ * with base64's third and JSON's quoting on top. The SDK's own default is 4 MiB, under what a submission may be.
+ */
+const MCP_MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+/** Bytes as MB to a tenth, rounded up: a request just over the limit doesn't read as the limit. */
+const mb = (n: number) => `${Math.ceil((n / (1024 * 1024)) * 10) / 10} MB`;
+
+/**
+ * Read what's left of a refused body and drop it, up to DRAIN_MAX_BYTES: answered while the client is still sending,
+ * the connection can be reset under it, and the agent gets "fetch failed" instead of the refusal.
+ */
+async function drain(req: Request) {
+  if (!req.body || req.body.locked) return;
+  const reader = req.body.getReader();
+  try {
+    for (let n = 0; n <= DRAIN_MAX_BYTES; ) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      n += value.byteLength;
+    }
+    await reader.cancel();
+  } catch {
+    // Gone already: nothing to drain.
+  }
+}
+const DRAIN_MAX_BYTES = 64 * 1024 * 1024;
+
+/** Refused before Hewn reads it, naming both limits (what the request was, when it said). */
+function tooLarge(bytes?: number): Response {
+  const what = bytes ? `This request is ${mb(bytes)}` : "This request is too large";
+  const message = `${what}: Hewn takes MCP requests of at most ${mb(MCP_MAX_BODY_BYTES)}. A tool's files may come to ${mb(MAX_BUNDLE_BYTES)} in all; as they travel, base64 makes a file about a third bigger, so send text files as UTF-8 (encoding "utf-8").`;
+  return json(413, { jsonrpc: "2.0", error: { code: -32000, message }, id: null });
 }

@@ -194,7 +194,8 @@ export interface Workbench {
   /**
    * Open a retry's workspace (`to`) from the failed build's (`from`) as it was left, with `overlay` (the
    * request and the rest a builder reads) written over it. False when nothing of `from` is kept (its
-   * workspace is gone): open it afresh instead.
+   * workspace is gone): open it afresh instead. If `from`'s builder is still running here (stopped, not yet
+   * exited), it waits for it first, bounded: the copy must not miss what it writes last.
    */
   carryOver(from: string, to: string, overlay: Files): Promise<boolean>;
   /** One workspace file, if present (e.g. the icon a builder writes first). */
