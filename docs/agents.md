@@ -89,7 +89,15 @@ Whatever their scopes, agents can't approve grants or secrets, enable schedules,
 
 ## What agents see
 
-Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, write one itself (below), follow a build, propose a schedule, ask for access, read what a tool printed during its last calls (its call log, which you see in Activity as a read), and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, write one itself (below), follow a build, propose a schedule, ask for access, read what a tool printed during its last calls ([below](#a-tools-log)), and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+
+### A tool's log
+
+An agent with **Use**, **Make** or **Change** can read what a tool printed during its last calls (`capabilities_logs`). It's the log you see in Activity and on the tool's Info, kept as long as you keep call logs ([Call logs](data.md#call-logs)). An agent that wrote a tool can call it, then read what it did without waiting for it to fail. What each entry holds is in [the agent spec](../spec/agents.md#invoking-operations).
+
+- **Stored secrets are never in it,** not even one you set after a line was kept.
+- **Only tools the agent may see.** For any other, Hewn answers that there's no such tool.
+- **Each read shows in Activity,** as a read of that tool.
 
 ## Tools an agent writes itself
 
@@ -99,7 +107,7 @@ An agent with **Make** or **Change** can write a tool in its own folder instead 
 2. **The check** (`capabilities_check`), as often as it likes while it works, up to 30 an hour: the checks a build gets, with what failed and pictures of its screen at 1280 and 390 px, light and dark (the top of a long page, the rest if it asks). Nothing goes live. Its migrations run on a copy of your data only once it submits.
 3. **The submission** (`capabilities_submit`): a build like any other, with "submitted by" and the agent's name on its page, in Activity and on the version. Once it passes, a new tool or a change waits for your approval (above).
 
-Agents learn how from the Skill **build a Hewn tool**: the brief Hewn's own builder works from, with these three steps in place of its folder. An agent you set up from Hewn has it in its skills folder (above); any agent connected to Hewn finds it through `hewn_docs`; another that loads skills from files can take it from `<your Hewn>/_platform/skills/build-a-hewn-tool/SKILL.md`, or from the npm package (`dist/skills/`).
+Agents learn how from the Skill **build a Hewn tool**: the brief Hewn's own builder works from, with these three steps in place of its folder. An agent you set up from Hewn has it in its skills folder (above); any agent connected to Hewn finds it through `hewn_docs`; another that loads skills from files can take it from `<your Hewn>/_platform/skills/build-a-hewn-tool/SKILL.md`, or from the npm package (`dist/skills/`). Any agent that reads Agent Skills (Claude Code, Codex, OpenCode and the rest) can install it from Hewn's repository with `npx skills add hewntools/hewn`.
 
 A submission carries the tool's own files only. Files Hewn never keeps in a tool (a builder's settings such as `.claude/` or `CLAUDE.md`, `AGENTS.md`, other dotfiles, the pack's own files, screenshots) are refused with the rule named, never dropped quietly, and so is anything over 5 MB of files. As it travels, a submission may be at most 8 MB; files sent as base64 come to about a third more than their size, so an agent sends text files as text. A change is refused while another change to the tool is on its way, or when the tool has moved on since the agent's pack.
 
