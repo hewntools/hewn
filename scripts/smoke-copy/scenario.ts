@@ -26,6 +26,8 @@ export interface StubEvent {
   attempt?: number;
   carriesOn?: "failed" | "stopped" | null;
   foundProgress?: boolean;
+  /** `[smoke:slow-exit]`: the note the stopped build wrote after its Stop was there too. */
+  foundLate?: boolean;
 }
 
 export interface ScenarioContext {
