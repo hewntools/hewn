@@ -89,7 +89,15 @@ Whatever their scopes, agents can't approve grants or secrets, enable schedules,
 
 ## What agents see
 
-Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, write one itself (below), follow a build, propose a schedule, ask for access, read what a tool printed during its last calls (its call log, which you see in Activity as a read), and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+Agents get a small set of MCP tools: list your tools and read their operations, call an operation, ask for a new tool or a change, write one itself (below), follow a build, propose a schedule, ask for access, read what a tool printed during its last calls ([below](#a-tools-log)), and show a tool's widget right in the chat (in clients that support MCP Apps). Every agent can also read Hewn's own docs (`hewn_docs`): ask one how something in Hewn works, and it answers from these pages instead of guessing. The full list is in [the agent spec](../spec/agents.md).
+
+### A tool's log
+
+An agent with **Use**, **Make** or **Change** can read what a tool printed during its last calls (`capabilities_logs`). It's the log you see in Activity and on the tool's Info, kept as long as you keep call logs ([Call logs](data.md#call-logs)). An agent that wrote a tool can call it, then read what it did without waiting for it to fail. What each entry holds is in [the agent spec](../spec/agents.md#invoking-operations).
+
+- **Stored secrets are never in it,** not even one you set after a line was kept.
+- **Only tools the agent may see.** For any other, Hewn answers that there's no such tool.
+- **Each read shows in Activity,** as a read of that tool.
 
 ## Tools an agent writes itself
 
