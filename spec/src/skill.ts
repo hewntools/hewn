@@ -28,6 +28,7 @@ Hewn holds the user's tools: durable capabilities with their own state, typed op
 2. **Write the tool** by the contract below. What to build comes from the person you're talking to.
 3. **Check it** with \`capabilities_check\` while you work, until it passes (the end of this file says how).
 4. **Submit it** with \`capabilities_submit\`: the tool's own files only, a \`request\` saying what it is or what the change does, and for a change \`capabilityId\` and the pack's \`baseVersion\`. Not the pack's files, \`screenshots/\`, dotfiles or a builder's instructions (\`CLAUDE.md\` and the like): Hewn refuses them, naming the rule. Follow the build with \`builds_wait\`. Once it passes, a new tool waits for the owner's approval, and so does a change (status \`review\`): tell them. What a new tool needs from the owner, a host or a key, they approve in Hewn too.
+5. **See it run.** Once it's live, call it (\`capabilities_invoke\`) and read what its code printed with \`capabilities_logs\`: its last calls, newest first, each with its outcome and what its \`console\` wrote (\`log\`, \`info\` and \`debug\` lines start \`| \`, \`warn\` and \`error\` lines \`! \`; \`operation\` narrows it to one operation). A line you log while you test shows there without waiting for a failure. The secrets the owner stored for the tool show as \`[secret]\`, and the owner sees your reads in Activity.
 
 `;
 

@@ -71,7 +71,7 @@ Every authority check happens in the core, not in the MCP or HTTP layer, so ever
 | `connections.ts` | Accounts: a connection's sign-in step and health |
 | `sessions.ts` | tool UI tickets and sessions, web sessions, the public URL, passkeys |
 | `models.ts` | the owner's providers, tiers, budget and prices, and the model port |
-| `invocation.ts` | `invoke` through the contract, and the call log |
+| `invocation.ts` | `invoke` through the contract, and the call log: kept per call, read back with stored secrets redacted again (`callLog` for `capabilities_logs`, an agent's reads one `logs` lifecycle row while it keeps reading; Activity's heads and one call's lines) |
 | `widgets.ts` | running widgets, and Home's layout |
 | `schedules.ts` | schedules, and the ones the owner approves with a build |
 | `builds.ts` | builds: requests, the order they run in, the builder's attempts, retries, cancels, the owner's review (an agent's new tool or change held while its approval mode is wait; the card's diff and renders), what a build keeps; `submit`, the one gate for files handed in (a client's, an install's) |
