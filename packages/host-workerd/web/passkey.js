@@ -90,8 +90,10 @@ if (button) {
     error.hidden = true;
     try {
       await signIn();
-      // Back to where the sign-in was needed (an agent's approval), else Home.
-      location.replace(location.pathname === "/approve" ? location.href : "/");
+      // The page that asked, again, now signed in: an agent's approval, or the web client at the page a link went to
+      // (`/#/c/…`). Anywhere else (an address that isn't a page), Home.
+      if (location.pathname === "/" || location.pathname === "/approve") location.reload();
+      else location.replace("/");
     } catch (e) {
       show(passkeyError(e));
       button.disabled = false;

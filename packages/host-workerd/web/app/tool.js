@@ -206,6 +206,31 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   return [barEl, layout, note.refresh];
 }
 
+/**
+ * Open one of Hewn's own pages a tool's UI linked to (session.js posts it on the owner's click): in this tab, or a new
+ * one as the link asked. Only the web client's pages (this host's `/`, a `#/…` address), only while the owner is in
+ * the tool's frame and has just clicked (where the browser can tell), and never with words of the tool's in the box
+ * (`m`) or a send (`send`): what the owner sends is theirs to write and to send.
+ */
+function openFromTool(m, frame) {
+  let url;
+  try {
+    url = new URL(String(m.url), location.href);
+  } catch {
+    return;
+  }
+  if (url.origin !== location.origin || url.pathname !== "/" || url.search) return;
+  if (document.activeElement !== frame || navigator.userActivation?.isActive === false) return;
+  const [path, query] = url.hash.split("?");
+  if (query !== undefined) {
+    const p = new URLSearchParams(query);
+    for (const k of ["send", "m"]) p.delete(k);
+    url.hash = [...p].length ? `${path}?${p}` : path;
+  }
+  if (m.newTab === true) window.open(url.href, "_blank", "noopener");
+  else location.assign(url.href);
+}
+
 async function appPage(id, q) {
   const here = stillHere();
   document.body.classList.add("app-mode");
@@ -254,6 +279,8 @@ async function appPage(id, q) {
     if (m.type === "scroll") sessionStorage.setItem(scrollKey, String(Number(m.y) || 0));
     // An operation failed in the tool's own screen: what failed comes from Hewn's record, not the page.
     if (m.type === "failed") showFix();
+    // A link in the tool to one of Hewn's own pages (session.js): opened here, where the session cookie goes with it.
+    if (m.type === "open") openFromTool(m, frame);
     if (m.type === "ready") {
       frame.classList.remove("loading");
       // A page the tool loaded itself had no fragment: tell it again.

@@ -1006,6 +1006,89 @@ export const operations = {
       await sv.admin("settings", { jobModels: models({ model: "fable", effort: "high" }) });
     }
   });
+  await step("a link in a tool's own screen to one of Hewn's pages opens it signed in, here or in a new tab as it asks, and never sends for the owner (#114)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hewn-e2e-links-"));
+    cpSync(join(FIX, "ui-counter"), dir, { recursive: true });
+    editJson(join(dir, "capability.json"), (m) => Object.assign(m, { id: "link-counter", name: "Link Counter" }));
+    writeFileSync(
+      join(dir, "ui", "index.html"),
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Links</title><link rel="stylesheet" href="/_platform/ui.css"></head>
+<body><main class="page stack"><h1>Links</h1>
+<a id="here" href="/#/activity">Activity</a>
+<a id="tab" href="/#/c/link-counter" target="_blank">Info</a>
+<a id="send" href="/#/new?m=Hello%20from%20a%20tool&send=1">Ask</a>
+<a id="api" href="/api/capabilities">API</a>
+<a id="own" href="#more">More</a></main>
+<script>setTimeout(() => parent.postMessage({ hewn: 1, type: "open", url: new URL("/#/settings", location.href).href }, "*"), 300)</script></body></html>`,
+    );
+    const installed = await sv.admin("install", { name: "Link Counter", purpose: "Links", dir, wait: true });
+    if (installed.status !== "promoted") throw new Error(installed.log?.join("\n"));
+    const frame = page.frameLocator("iframe.app-frame");
+    await page.goto(`${web}/#/app/link-counter`);
+    // An open the tool posts by itself (no click in it) goes nowhere.
+    await frame.locator("#own").waitFor();
+    await page.waitForTimeout(800);
+    if (!page.url().endsWith("#/app/link-counter")) throw new Error(`an open without a click went to ${page.url()}`);
+    // A link to something of Hewn's that isn't a page of the web client: nothing opens.
+    await frame.locator("#api").click();
+    await page.waitForTimeout(500);
+    if (!page.url().endsWith("#/app/link-counter") || page.context().pages().length !== 1) throw new Error(`the API link opened ${page.url()}`);
+    // Its own link stays in its frame.
+    await frame.locator("#own").click();
+    await page.waitForTimeout(300);
+    if (!page.url().endsWith("#/app/link-counter")) throw new Error(`its own link left the tool: ${page.url()}`);
+    // Here: the web client goes to the page, signed in (no sign-in page).
+    await frame.locator("#here").click();
+    await page.waitForURL(/#\/activity$/);
+    await page.locator("main").getByText("Activity").first().waitFor();
+    if (await page.getByText(/Signed out|Sign in/).count()) throw new Error("a sign-in page");
+    // A new tab, as the link asks: signed in there too.
+    await page.goto(`${web}/#/app/link-counter`);
+    const [tab] = await Promise.all([page.context().waitForEvent("page"), frame.locator("#tab").click()]);
+    await tab.waitForLoadState();
+    if (!tab.url().endsWith("#/c/link-counter")) throw new Error(`the new tab is at ${tab.url()}`);
+    await tab.getByRole("heading", { name: "Link Counter" }).first().waitFor({ timeout: 10_000 });
+    if (await tab.getByText(/Signed out|Sign in/).count()) throw new Error("the new tab has a sign-in page");
+    await tab.close();
+    // A link that would write in the owner's box and send it: the page opens, the box is the owner's.
+    await page.goto(`${web}/#/app/link-counter`);
+    await frame.locator("#send").click();
+    await page.waitForURL(/#\/new$/);
+    const box = page.getByRole("textbox", { name: "Message" });
+    await box.waitFor();
+    await page.waitForTimeout(500);
+    if ((await box.inputValue()).includes("Hello from a tool")) throw new Error(`the tool wrote in the box: ${await box.inputValue()}`);
+    if (await page.locator(".bubble.me").count()) throw new Error("a message was sent for the owner");
+  });
+
+  await step("a passkey sign-in goes back to the page it was asked on; from an address that isn't a page, Home (#114)", async () => {
+    // The signed-out page with passkey sign-in (the public URL's), its server and the device stubbed.
+    const ctx = await browser.newContext();
+    const p = await ctx.newPage();
+    const loads: string[] = [];
+    const signedOut = `<!doctype html><html><body><button id="passkey">Sign in with a passkey</button><p id="passkey-error" hidden></p><script type="module" src="/passkey.js"></script></body></html>`;
+    await p.route(/\/(nowhere)?$/, (r: any) => (loads.push(new URL(r.request().url()).pathname), r.fulfill({ status: 401, contentType: "text/html", body: signedOut })));
+    await p.route("**/passkey/options", (r: any) => r.fulfill({ json: { challenge: "AAAA", rpId: "hewn.localhost", userVerification: "preferred", timeout: 1000 } }));
+    await p.route("**/passkey/signin", (r: any) => r.fulfill({ json: { ok: true } }));
+    await p.addInitScript(() => {
+      const fake = { id: "x", response: { clientDataJSON: new ArrayBuffer(1), authenticatorData: new ArrayBuffer(1), signature: new ArrayBuffer(1) } };
+      (window as any).PublicKeyCredential ??= function () {};
+      Object.defineProperty(navigator, "credentials", { value: { get: async () => fake, create: async () => fake } });
+    });
+    try {
+      await p.goto(`${web}/#/c/reading-list`);
+      await p.locator("#passkey").click();
+      for (let i = 0; i < 40 && loads.length < 2; i++) await p.waitForTimeout(100);
+      if (loads.join(" ") !== "/ /" || !p.url().endsWith("/#/c/reading-list")) throw new Error(`loads ${loads.join(" ")}, at ${p.url()}`);
+      loads.length = 0;
+      await p.goto(`${web}/nowhere`);
+      await p.locator("#passkey").click();
+      for (let i = 0; i < 40 && loads.length < 2; i++) await p.waitForTimeout(100);
+      if (loads.join(" ") !== "/nowhere /") throw new Error(`loads ${loads.join(" ")}, at ${p.url()}`);
+    } finally {
+      await ctx.close();
+    }
+  });
 } finally {
   await browser.close();
   await sv.stop();
