@@ -273,6 +273,8 @@ dialog.wide-sheet .code-body { max-height: 56vh; }
   .app-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .app-subtitle { display: none; }
   .glass-bar > a, .glass-bar > button { padding: 0 10px; }
+  /* An opened tool's bar keeps ••• alone, which holds Change… and Share… too: the tool's name gets the room. */
+  .tool-actions > .wide-only { display: none; }
   .home { padding-top: var(--s5); }
   .home-inner { width: 100%; }
   .home-grid { grid-template-columns: repeat(3, 1fr); row-gap: var(--s5); width: 100%; }

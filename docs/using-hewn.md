@@ -130,7 +130,7 @@ Each step shows how long it took, by Hewn's clock, so it's the same whenever you
 
 ## On a phone
 
-On a narrow screen, Home is a four-column grid, the menu folds into ☰ (the Inbox stays), and tools open full screen. The other pages work on a phone, but are laid out for a computer. To reach Hewn from your phone at all, see [Using Hewn from anywhere](remote-access.md).
+On a narrow screen, Home is a four-column grid, the menu folds into ☰ (the Inbox stays), and tools open full screen, with **•••** alone in the top bar so the tool's name has the room (**Change…** and **Share…** are in it). The other pages work on a phone, but are laid out for a computer. To reach Hewn from your phone at all, see [Using Hewn from anywhere](remote-access.md).
 
 ![Home on a phone: tools in a four-column grid, the menu folded into ☰ next to the Inbox, and widgets full width below](images/phone-home.png)
 
