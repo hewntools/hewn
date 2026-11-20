@@ -125,6 +125,8 @@ export function registrySpec(spec: unknown): boolean {
 }
 
 const ONLY_REGISTRY = 'only versions from the npm registry are allowed (like "^1.2.0")';
+/** npm's lockfiles: what it installs, written by npm. */
+export const LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
 
 /**
  * Why npm, which runs on the machine itself and not in the builder's sandbox, mustn't install a
@@ -160,7 +162,7 @@ export function dependencyProblems(files: Files): string[] {
     };
     overrides(pkg.overrides, "");
   }
-  for (const path of ["package-lock.json", "npm-shrinkwrap.json"]) {
+  for (const path of LOCKFILES) {
     const lock = files[path] ? json(path) : null;
     if (!lock) continue;
     // lockfileVersion 2 and 3 list `packages` by path; 1 nests `dependencies`.
@@ -403,6 +405,11 @@ const KEYS: [string, RegExp][] = [
 ];
 /** Long runs of base64/hex-ish characters: hashes in fixtures make false positives, so they only warn. */
 const LONG = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
+/** A long run's label: a key or a hash, nobody can tell, so it only ever warns. */
+export const LONG_RANDOM = "Long random string";
+/** A file written as base64 (PNG, JPEG, GIF, WebP, PDF, SVG, XML, WOFF, WOFF2): an image in a test isn't a key. */
+const BASE64_FILE = /^(?:iVBORw0KGgo|\/9j\/|R0lGOD|UklGR|JVBERi0|PHN2Zy|PD94bW|d09GR|d09GM)/;
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /** The patterns look at a line this much at a time (overlapping by OVERLAP), however long it is (minified code). */
 const SCAN_PIECE = 4096;
 const OVERLAP = 256;
@@ -413,6 +420,17 @@ function entropy(s: string): number {
   let h = 0;
   for (const n of counts.values()) h -= (n / s.length) * Math.log2(n / s.length);
   return h;
+}
+
+/**
+ * Whether a long run (`before`: what comes just before it on its line) looks like a key: varied
+ * enough, with digits all through. Not a word, a name or a path (a version number at most), an
+ * alphabet or a count ("abcdef…", "23456789"), a UUID, or a file written as base64.
+ */
+function randomLooking(s: string, before: string): boolean {
+  if (entropy(s) <= 3.5 || (s.match(/\d/g)?.length ?? 0) < 2 || before.endsWith("base64,") || BASE64_FILE.test(s) || UUID.test(s)) return false;
+  for (let i = 1, run = 1; i < s.length; i++) if ((run = s.charCodeAt(i) === s.charCodeAt(i - 1) + 1 ? run + 1 : 1) >= 6) return false;
+  return true;
 }
 
 /** "a••••@g••••.com", "sk-a••••", "Tod••••": enough to recognise, not enough to use. */
@@ -473,7 +491,7 @@ export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
       for (let at = 0; at === 0 || at + OVERLAP < text.length; at += SCAN_PIECE - OVERLAP) {
         const piece = text.slice(at, at + SCAN_PIECE);
         for (const [label, re] of KEYS) for (const m of piece.matchAll(re)) add("key", label, m[0]);
-        for (const m of piece.matchAll(LONG)) if (!seen.has(m[0]) && !/^[a-z_]+$/i.test(m[0]) && entropy(m[0]) > 3.5) add("key", "Long random string", m[0]);
+        for (const m of piece.matchAll(LONG)) if (!seen.has(m[0]) && randomLooking(m[0], piece.slice(Math.max(0, m.index - 7), m.index))) add("key", LONG_RANDOM, m[0]);
         const words = blankDrawings(piece);
         for (const [label, re, keep] of PII) for (const m of words.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());
       }

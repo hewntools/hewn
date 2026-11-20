@@ -113,7 +113,7 @@ A capability that needs the network declares its hosts:
 **Only connections hold credentials (ABI 2.1).** A service needing a key, token or login is wrapped by a *connection* (`"kind": "connection"`, see "Connections"); ordinary capabilities can't declare `secrets` and call its operations instead. A public keyless API (e.g. weather) is a plain host.
 
 - `fetch` reaches declared, owner-approved `hosts` only; anything else gets `403`.
-- Builders never see production credentials. At runtime a connection reads its secrets as `ctx.secrets.API_TOKEN` and saves a refreshed one with `ctx.updateSecret(name, value)`. Test cases pass fakes: `"secrets": { "API_TOKEN": "fake" }`.
+- Builders never see production credentials. At runtime a connection reads its secrets as `ctx.secrets.API_TOKEN` and saves a refreshed one with `ctx.updateSecret(name, value)`. Test cases pass fakes: `"secrets": { "API_TOKEN": "fake" }`. Never write anything shaped like a key into a tool's files, fakes included (`sk-…`, `ghp_…`, `AKIA…`, `xoxb-…`, a JWT, a private key block): validation fails it, naming the file and line. A long random string is a warning the owner sees on the build (a hash or an id can stay).
 - Operations that don't need the network work offline; network operations fail with a clear error when offline or missing secrets. Put pure logic (parsing, aggregation) in functions test cases can exercise.
 - **Readiness:** until every declared grant (hosts, other operations, model), secret and config value is in place, ordinary calls fail with `not_ready`, even for operations that don't use them. The owner approves new authority after promotion, so request the minimum and prefer other capabilities' read operations.
 

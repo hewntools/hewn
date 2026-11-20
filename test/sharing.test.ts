@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { USER } from "@hewntools/core/auth.ts";
-import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
+import { crc32, dependencyProblems, LONG_RANDOM, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { readShelf } from "@hewntools/cli/shelf.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
@@ -144,6 +144,20 @@ describe("bundles: the zip and the scan", () => {
     assert.deepEqual(found.filter((f) => f.label === "Looks like an API key").map((f) => f.text), ["sk-abcdefghijklmnopqrstuvwxyz"]);
     const digits = scanFiles({ "src/n.js": bytes("1".repeat(300_000) + ".") });
     assert.deepEqual(digits.filter((f) => f.kind === "pii"), []);
+  });
+
+  test("the scan: what only looks random isn't a long random string (an alphabet, a path, a UUID, an image as base64); a key and a hash are", () => {
+    const quiet = [
+      'const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";',
+      'const ids = "abcdefghijkmnpqrstuvwxyz23456789";',
+      'const url = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json";',
+      "const met = `https://api.met.no/weatherapi/locationforecast/2.0/compact`;",
+      '{ "id": "550e8400-e29b-41d4-a716-446655440000", "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }',
+      "src: url(data:font/woff2;base64,AAEAAAAKAIAAAwAgT1MvMg8SBfQAAAEoAAAAYGNtYXAAAQ7AAAAA4AAAAFhnYXNw) format('woff2');",
+    ];
+    assert.deepEqual(scanFiles({ "src/index.ts": bytes(quiet.join("\n")) }).filter((f) => f.label === LONG_RANDOM), []);
+    const loud = ['const key = "q8Zk3vN0pL2xR7tY9wB4mC6dF1hJ5sA0e";', '{ "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }'];
+    assert.deepEqual(scanFiles({ "src/index.ts": bytes(loud.join("\n")) }).filter((f) => f.label === LONG_RANDOM).map((f) => f.line), [1, 2]);
   });
 
   test("the scan: personal data and key shapes warn, the owner's own values block, everyday text passes", () => {

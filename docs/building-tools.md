@@ -34,7 +34,7 @@ As it works, the builder checks its own work: its `check` tool runs what Hewn ru
 
 Then Hewn:
 
-1. checks the manifest and the contracts
+1. checks the manifest and the contracts, and looks for keys in its files (not its npm packages): anything shaped like a key (an API key, a GitHub, Slack or AWS token, a JWT, a private key) fails it, and a long random string is a [warning](#changing-a-tool), since a hash looks the same. Each is named by its file and line, never by what it says
 2. runs the tool's tests, and its database migrations on a copy of your data
 3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
 4. for a new tool with a screen (or a [Polish](#polishing-a-tool)), has the builder look at its screen again, twice (below)

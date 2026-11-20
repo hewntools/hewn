@@ -4,7 +4,7 @@
 // review. The check and the promotion are separate steps: a candidate can be checked and never promoted.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
+import { dependencyProblems, LOCKFILES, LONG_RANDOM, readSample, SAMPLE_FILE, scanFiles } from "../bundle.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -179,6 +179,21 @@ export class Validation extends Domain {
     const migrations = migrationsOf(files);
     const migrationErrors = migrationProblems(migrations, base ? migrationsOf(base.files) : []);
     if (migrationErrors.length) softFail("migrations rejected", migrationErrors);
+
+    // 4b. the secret scan, of its own files (not npm's lockfile: what it installs, with hashes that look
+    // random): a known key shape fails; a long random string warns, since a hash looks the same. Each
+    // named by its file and line, never its value.
+    const keys = scanFiles(Object.fromEntries(Object.entries(files).filter(([p]) => !LOCKFILES.includes(p)))).filter((f) => f.kind === "key");
+    const shapes = keys.filter((f) => f.label !== LONG_RANDOM);
+    if (shapes.length) softFail(`a key in its files (a tool gets its keys from its connection's secrets, never from its files; a test's fake is a word like "fake")`, shapes.map((f) => `${f.file}:${f.line}: ${f.label[0].toLowerCase()}${f.label.slice(1)}`));
+    // One warning a file, at its first: a fixture full of hashes is one thing to look at.
+    const random = keys.filter((f) => f.label === LONG_RANDOM);
+    for (const file of new Set(random.map((f) => f.file))) {
+      const here = random.filter((f) => f.file === file);
+      const what = here.length === 1 ? "a long random string" : `${here.length} long random strings, the first here`;
+      warnings.push({ check: "secret-scan", message: `${what}: if it's a key, it belongs in a connection's secrets, not in the tool's files (a hash or an id can stay)`, file, line: here[0].line });
+    }
+    if (!shapes.length) step(`secret scan: no keys in its files${random.length ? ` (${counted(random.length, "long random string")} to look at)` : ""}`);
 
     // 5. candidate test cases against fresh state
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };

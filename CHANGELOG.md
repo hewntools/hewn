@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **A scan for keys.** Validation looks for keys in a tool's own files. Anything shaped like a key (an API key, a GitHub, Slack or AWS token, a JWT, a private key) fails the tool, named by its file and line and never by what it says; a long random string is a warning, since a hash looks the same. The share scan reads long random strings the same way now, so an alphabet, a path, a UUID or an image written into a file no longer looks like a key there either. See [The build](docs/building-tools.md#the-build).
 
 ### Safety and limits
 
