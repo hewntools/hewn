@@ -22,7 +22,7 @@ import { attachmentRefs } from "./attachments.ts";
 import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import { type Candidate, reviewShotKey } from "./validation.ts";
+import { buildStates, type Candidate, reviewShotKey } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
@@ -254,6 +254,8 @@ export class Builds extends Domain {
     for (const id of this.registry.failInterruptedBuilds()) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
+      // What its validation left (and the isolate the tools process may still hold for it) goes.
+      for (const s of buildStates(b.capabilityId, id)) await this.runtime.dropState(s).catch(() => {});
       // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
       if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";

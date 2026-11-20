@@ -42,6 +42,9 @@ export interface Candidate {
 }
 
 /** The four renders of a candidate's screen a held build's review card shows (and a check returns): 1280 and 390 px, light and dark. */
+/** The scratch states a build's validation makes on its tool: dropped when it's done, or when Hewn finds it interrupted. */
+export const buildStates = (capabilityId: string, buildId: string): StateRef[] => ["test", "visual", "dryrun", "sample", "real"].map((k) => ({ capabilityId, scratch: `${k}:${buildId}` }));
+
 export const REVIEW_SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
 /** Where a held build keeps one of them. */
 export const reviewShotKey = (buildId: string, name: string) => `screenshots/${buildId}/${name}.png`;
@@ -372,7 +375,7 @@ export class Validation extends Domain {
         }
       }
     } finally {
-      for (const s of [testState, visualState, dryRun, sampleState, realState]) await this.runtime.dropState(s).catch(() => {});
+      for (const s of buildStates(id, build.id)) await this.runtime.dropState(s).catch(() => {});
     }
     return {
       manifest,

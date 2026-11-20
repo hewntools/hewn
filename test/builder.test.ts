@@ -381,6 +381,19 @@ describe("platform-assigned builder", () => {
     restarted.close();
   });
 
+  test("the scratch states an interrupted build's validation left go at the restart", async () => {
+    await installSeed(t.platform);
+    useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
+    const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index" });
+    // As a crash mid-validation leaves them (and, on workerd, the isolate they run).
+    for (const k of ["test", "dryrun"]) await platform.runtime.copyState({ capabilityId: "running-log" }, { capabilityId: "running-log", scratch: `${k}:${opened.buildId}` });
+    assert.equal((await platform.runtime.listStates("running-log", "")).filter((s) => s.endsWith(opened.buildId)).length, 2);
+    const restarted = nodePlatform(t.home);
+    await restarted.recoverInterruptedBuilds();
+    assert.deepEqual((await restarted.runtime.listStates("running-log", "")).filter((s) => s.endsWith(opened.buildId)), []);
+    restarted.close();
+  });
+
   test("an interrupted platform build is retried once after the restart", async () => {
     useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
     const opened = await platform.create(t.claude, { name: "Running Log", purpose: "p", requirements: "r" });

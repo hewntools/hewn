@@ -149,6 +149,8 @@ const limitBytes = (limit: number) => (Number.isSafeInteger(limit) && limit > 0 
 export class CapabilityHost extends DurableObject<Env> {
   /** Which loaded code each running facet was started with. */
   private running = new Map<string, string>();
+  /** The live tool's isolate: replaced when its version, its calls' hosts or its limit change (see `worker`). */
+  private liveIsolate?: { key: string; stub: WorkerStub };
   /** The isolates a build's states run, by code: each kept until every state that ran it is dropped (the build is done with them). */
   private buildIsolates = new Map<string, { stub: WorkerStub; states: Set<string> }>();
   /** Calls (and other work) in progress on each facet. */
@@ -212,16 +214,20 @@ export class CapabilityHost extends DurableObject<Env> {
   }
 
   /**
-   * The isolate a state runs `code` in. workerd keeps a named isolate until it restarts, so only the
-   * live tool's own (`named`: its active version, with its calls' hosts) is named: one per tool
-   * version, its calls and data ops alike. Anything else gets an unnamed one, which goes once nothing
-   * holds it: a build's states share one per code until they're dropped; on the live state (code
-   * going live, sample data replayed) it's held only while it runs.
+   * The isolate a state runs `code` in. Every one is unnamed, so workerd lets it go once nothing holds it
+   * (at the main isolate's next GC); a named one (`LOADER.get`) it would keep until it restarts. The live
+   * tool's own (`named`: its active version, with its calls' hosts and its limit) is held here, one per
+   * tool, its calls and data ops alike; another version, hosts or limit replaces it, and the old one goes
+   * once the last call on it ends. A build's states share one per code until they're dropped; on the
+   * live state (code going live, sample data replayed) one is held only while it runs.
    */
   private worker(name: string, code: CodeRef, hosts: string[], named: boolean, limit: number) {
     const bytes = limitBytes(limit);
     const key = isolateKey(code.hash, hosts, limit, named);
-    if (named) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes, key)) };
+    if (named) {
+      if (this.liveIsolate?.key !== key) this.liveIsolate = { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)) };
+      return { key, stub: this.liveIsolate.stub };
+    }
     if (name === LIVE) return { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)) };
     let entry = this.buildIsolates.get(key);
     if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)), states: new Set() }));
@@ -285,6 +291,7 @@ export class CapabilityHost extends DurableObject<Env> {
 
   private drop(name: string) {
     this.halt(name, "dropped");
+    if (name === LIVE) this.liveIsolate = undefined;
     for (const [key, entry] of this.buildIsolates) if (entry.states.delete(name) && !entry.states.size) this.buildIsolates.delete(key);
     this.ctx.facets.delete(name);
     this.ctx.storage.sql.exec("DELETE FROM states WHERE name = ?", name);
