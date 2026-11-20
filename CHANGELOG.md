@@ -6,7 +6,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### New
 
-- **A check can warn.** Besides passing or failing, a check can now find something worth your look that doesn't fail the tool. A change that waits for you shows each warning on its card; its file and line open the file at that line, and **Ask builder to fix** has Hewn's builder fix the warnings in that change's own files, then brings the fix back to the card for you to allow. Every build's log keeps its warnings, and an agent's check says them (`structuredContent.warnings`). This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **A check can warn.** Besides passing or failing, a check can now find something worth your look that doesn't fail the tool. A change that waits for you shows each warning on its card; its file and line open the file at that line, and **Ask builder to fix** opens the Change drawer with the warnings in the box. What you build from there is made on that change's own files and comes back to the card for you to allow. Every build's log keeps its warnings, and an agent's check says them (`structuredContent.warnings`). This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
 
 ### Fixes
 

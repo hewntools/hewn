@@ -97,27 +97,24 @@ describe("agents' changes wait for the owner's review", () => {
     assert.ok(said(own.log), own.log.join("\n"));
   });
 
-  test("Ask builder to fix on a held change's warnings: the builder works on that change's own files, and the fix is held for the owner again", async () => {
+  test("Ask builder to fix on a held change's warnings: the owner's change to it carries on from its files, and is held for the owner again", async () => {
     const validation = (t.platform as any).d.validation as Validation;
     const validate = validation.validate.bind(validation);
-    let warn = true;
     validation.validate = async (...a) => {
       const c = await validate(...a);
-      if (warn) c.warnings.push({ check: "test", message: "a string that looks like a key", file: "src/index.ts", line: 3 });
+      c.warnings.push({ check: "test", message: "a string that looks like a key", file: "src/index.ts", line: 3 });
       return c;
     };
     const before = active();
     const held = await modify(t.claude, addDump);
     assert.equal(held.status, "review", held.log.join("\n"));
     const blob = `versions/${held.review!.contentHash}.json`;
-    // Only the owner, and only with warnings.
-    await assert.rejects(t.platform.retryBuild(t.claude, held.buildId, { fix: true }), code("forbidden"));
-    warn = false;
-    const clean = await modify(t.claude, reword);
-    await assert.rejects(t.platform.retryBuild(WEB_USER, clean.buildId, { fix: true }), code("conflict"));
-    await t.platform.rejectBuild(WEB_USER, clean.buildId);
+    const ask = { capabilityId: "running-log", request: "Fix the warnings", held: held.buildId };
+    // The owner's only (sent from the Change drawer); a change to the tool, not some other build.
+    await assert.rejects(t.platform.modify(t.claude, ask), code("forbidden"));
+    await assert.rejects(t.platform.modify(WEB_USER, { ...ask, held: "nope" }), code("conflict"));
 
-    // The fix's first attempt breaks the tests (it fails); asked to fix again, it carries on and repairs them.
+    // Its first attempt breaks the tests (it fails); asked to fix that, it carries on and repairs them.
     let cases = "";
     let brief = "";
     t.queue((ws) => {
@@ -126,11 +123,11 @@ describe("agents' changes wait for the owner's review", () => {
       cases = readFileSync(join(ws, "tests", "cases.json"), "utf8");
       writeFileSync(join(ws, "tests", "cases.json"), "[");
     });
-    const fixing = await t.platform.retryBuild(WEB_USER, held.buildId, { fix: true });
-    assert.match(brief, /Fix what Hewn's checks warned about, and change nothing else:\n- test: a string that looks like a key \(src\/index\.ts:3\)/);
+    const fixing = await t.platform.modify(WEB_USER, ask);
+    assert.match(brief, /Requested change: Fix the warnings\n\nThe workspace holds a change that waits for the owner's review, not the live version/);
     const replaced = t.platform.getBuild(USER, held.buildId);
     assert.equal(replaced.status, "cancelled");
-    assert.match(replaced.log.at(-1)!, new RegExp(`^REPLACED by web: the builder fixes its warnings in build ${fixing.buildId}`));
+    assert.equal(replaced.log.at(-1), `REPLACED by web: build ${fixing.buildId} carries on from it`);
     assert.equal(await t.platform.blobs.get(blob), undefined, "the held candidate is in the fix's workspace now");
     assert.equal((await t.platform.settle(fixing.buildId)).status, "failed");
     t.queue((ws) => writeFileSync(join(ws, "tests", "cases.json"), cases));
@@ -138,6 +135,7 @@ describe("agents' changes wait for the owner's review", () => {
     assert.equal(again.status, "review", "held for the owner again, though the owner asked for it");
     assert.equal(again.review!.approval, "wait");
     assert.deepEqual(again.review!.newOperations.map((o) => o.key), ["dump_runs@1"], "the agent's change, fixed");
+    assert.match(again.instructions!, /the owner asked for this fix and allows it before it goes live/);
     assert.equal(active(), before, "nothing live until the owner allows it");
     assert.equal((await t.platform.approveBuild(WEB_USER, again.buildId)).status, "promoted");
     await t.platform.invoke(t.claude, { capabilityId: "running-log", operation: "dump_runs" });

@@ -11,8 +11,8 @@ import { codeBrowser } from "./files.js";
 import { route } from "./router.js";
 import { conversationThread } from "./intake.js";
 import { titleCase } from "./models.js";
-import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, reviewWarnings, warnedWords } from "./review.js";
-import { openCapability } from "./tool-actions.js";
+import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, reviewWarnings, warnedWords, warningsAsk } from "./review.js";
+import { openCapability, openChange } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
 export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, installedFrom, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
@@ -460,21 +460,18 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         files.open = true;
         files.scrollIntoView({ block: "start", behavior: "smooth" });
       };
-      // With warnings: Hewn's builder fixes them in this change's own files, and the fix comes back here for you to allow.
-      const fix = b.review.warnings?.length > 0 && h("button", {}, "Ask builder to fix");
-      if (fix)
-        fix.addEventListener("click", async () => {
-          fix.disabled = true;
-          try {
-            const next = await api(`/builds/${enc(id)}/fix`, { method: "POST" });
-            invalidateCaps();
-            pollInbox();
-            compact ? (put(card), card.replaceWith(buildPanel(next.buildId, { compact, onPromoted }).el)) : go(`#/b/${next.buildId}`);
-          } catch (e) {
-            fix.disabled = false;
-            fail(e);
-          }
-        });
+      // With warnings, a change to a live tool: the Change drawer with them in its box (nothing goes until Send). What it
+      // builds carries on from this change's own files, and comes back here for you to allow. Not a held new tool: it has no page yet.
+      const fix =
+        b.review.warnings?.length > 0 &&
+        !create &&
+        h("button", {
+          onclick: () => {
+            // The box picks it up (once) from here, as "Ask builder to fix this" does: too long for the address.
+            sessionStorage.setItem(`hewn.fix.${b.capabilityId}`, JSON.stringify({ text: warningsAsk(b, all) }));
+            openChange(cap(), { fix: "1", held: id });
+          },
+        }, "Ask builder to fix");
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), warnedWords(b.review.warnings)),

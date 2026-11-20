@@ -74,10 +74,10 @@ const suspendedSheet = (c) =>
 /**
  * Change… always opens the tool with the change drawer beside it (P1): its own UI, or the Run view
  * for a tool without one (P5). `m`: text to put in the composer; `send`: send it at once; `from`: the
- * build whose conversation the intake continues from.
+ * build whose conversation the intake continues from; `held`: a held change the change is made to.
  */
-function changeHref(c, { m, send, widget, from, fix, polish } = {}) {
-  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}), ...(polish ? { polish: "1" } : {}) });
+function changeHref(c, { m, send, widget, from, fix, polish, held } = {}) {
+  const q = new URLSearchParams({ change: "1", ...(m ? { m } : {}), ...(send ? { send: "1" } : {}), ...(widget ? { widget } : {}), ...(from ? { from } : {}), ...(fix ? { fix } : {}), ...(polish ? { polish: "1" } : {}), ...(held ? { held } : {}) });
   return `#/${c.ui ? "app" : "run"}/${enc(c.id)}?${q}`;
 }
 const openChange = (c, o) => go(changeHref(c, o));

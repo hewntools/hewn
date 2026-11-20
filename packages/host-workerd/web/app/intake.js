@@ -106,6 +106,8 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const keepable = !widgetsMode && !polishMode && !connection;
   // "Ask builder to fix this" left what failed here (too long for the address); it goes in the box below.
   const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
+  // A change to a held change (its card's "Ask builder to fix"): the intake sees what it is, the build carries on from it.
+  const held = (mode === "modify" && q?.get("held")) || null;
   const prefilled = !!(q?.get("m") || failure);
   // Whether this view keeps its conversation now: one put in, from its first send; not once it's built from.
   let keeps = keepable && !from && !prefilled;
@@ -282,7 +284,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     // again on return, nor for a reply that came while no view was looking (the rules are saved all the same).
     if (live) for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
     // Schedules set here (the drawer stays on the conversation) or from the page: done, not kept any more.
-    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
+    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, held, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
     if (reply.kind === "questions") {
       messages.push(turnOf(reply));
       say("them", chatText(reply.message, reply.questions));
@@ -357,7 +359,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       let reply = null;
       let failure = null;
       const progress = (data) => ((flight.last = { ...flight.last, ...data }), flight.listeners.forEach((f) => f(data)));
-      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from || held ? { earlier: { buildId: from ?? held } } : {}) }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       result = { reply };
     } catch (err) {
@@ -857,7 +859,7 @@ function scheduleTicks(list = []) {
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
  * set up once the draft's build promotes. `conversation`: the chat that led here, kept with each build.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {} } = {}) {
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {}, held } = {}) {
   // What every build it starts carries (a connection first, then the tool): the conversation, and the chip's model.
   const carried = { ...(conversation?.length ? { conversation } : {}), ...ask };
   const conn = d.connection;
@@ -874,7 +876,7 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
   }
   const wait = first?.buildId ?? after;
   const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...carried };
-  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w } });
+  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w, ...(held ? { held } : {}) } });
 }
 
 /** The id the platform gives a new tool with this name (the intake names ideas it builds on this way). */
@@ -909,7 +911,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  */
 function proposalCard(kind, list, ctx) {
   // `readOnly`: a card from a kept conversation: as it was, nothing to tick or build.
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done, finished, readOnly = false } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, held, done, finished, readOnly = false } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -1085,7 +1087,7 @@ function proposalCard(kind, list, ctx) {
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask, held });
         invalidateCaps();
         return onBuilt(b);
       }

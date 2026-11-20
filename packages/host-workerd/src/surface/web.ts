@@ -281,7 +281,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         return { lines: platform.setInstructions(owner, id, (await readJson(req)).text) };
       case "POST modify": {
         const body = await readJson(req);
-        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
+        // `held`: a change to the held change with that build id (its card's "Ask builder to fix"), not to the live version.
+        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...(body.held !== undefined ? { held: body.held } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
       // Polish: the passes on a tool already live (owner only). `realData`: the builder sees a copy of the tool's own data.
       case "POST polish": {
@@ -852,7 +853,11 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
 function earlierConversation(platform: Platform, owner: Agent, buildId: unknown): NonNullable<IntakeRequest["earlier"]> {
   if (typeof buildId !== "string") throw new PlatformError("invalid_request", "earlier.buildId must be a build id");
   const b = platform.getBuild(owner, buildId);
-  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages: platform.buildContext(owner, buildId).conversation ?? [] };
+  // An agent's build has no conversation with the intake: what it asked for stands in (a held change being fixed).
+  const conversation = platform.buildContext(owner, buildId).conversation ?? [];
+  const asked = typeof b.request?.request === "string" ? b.request.request : "";
+  const messages = conversation.length || !asked ? conversation : [{ role: "user" as const, content: `What ${b.requestedBy} asked for: ${asked}` }];
+  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages };
 }
 
 /** Server-sent events: replay the build transcript, then follow live until promoted/failed. */
