@@ -110,6 +110,13 @@ describe("workerd host (integration)", () => {
     assert.match(r.log.join("\n"), /test 'empty summary'/);
   });
 
+  test("a migration with a comment after its last statement fails with the lint's message, not workerd's", async () => {
+    const r = await modify("running-log", (ws) => writeFileSync(join(ws, "migrations", "003_size.sql"), "ALTER TABLE runs ADD COLUMN size TEXT;\n-- sizes\n"));
+    assert.equal(r.status, "failed");
+    assert.match(r.log.join("\n"), /migration 003_size\.sql: nothing may follow the last statement; end it with `;`/);
+    assert.doesNotMatch(r.log.join("\n"), /did not contain a statement/);
+  });
+
   test("a build its builder's host pauses comes through the supervisor as paused, even without a note", async () => {
     const pause = (note: string) => () => {
       throw Object.assign(new Error(note), { paused: true });

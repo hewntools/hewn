@@ -8,6 +8,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 - **A check can warn.** Besides passing or failing, a check can now find something worth your look that doesn't fail the tool. A change that waits for you shows each warning on its card; its file and line open the file at that line, and **Ask builder to fix** has Hewn's builder fix the warnings in that change's own files, then brings the fix back to the card for you to allow. Every build's log keeps its warnings, and an agent's check says them (`structuredContent.warnings`). This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
 
+### Fixes
+
+- A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
+
 ## 0.4.12 (2026-11-19)
 
 ### New
