@@ -14,7 +14,7 @@ import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, regis
 import { bytes, text } from "@hewntools/core/files.ts";
 import { readShelf } from "@hewntools/cli/shelf.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
-import { bundleWorkspace } from "@hewntools/cli/workbench.ts";
+import { auditOf, bundleWorkspace } from "@hewntools/cli/workbench.ts";
 import { editJson, editText, installFrom, installSeed, platformWith, SEED, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([
@@ -820,6 +820,94 @@ describe("npm, which runs outside the builder's sandbox, gets registry versions 
       await assert.rejects(bundleWorkspace(ws), /npm took far \(file:[^)]*far-1\.0\.0\.tgz\) from this machine's disk/);
       assert.ok(!existsSync(join(ws, "node_modules")));
     });
+  });
+});
+
+describe("npm's advisories on a tool's dependencies", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(async () => {
+    t = setup();
+    await installSeed(t.platform);
+  });
+  afterEach(() => t.cleanup());
+
+  const HIGH = { id: 1001, url: "https://github.com/advisories/GHSA-high", title: "Prototype pollution in tiny-dep", severity: "high", vulnerable_versions: "<1.0.1" };
+  const MODERATE = { id: 1002, url: "https://github.com/advisories/GHSA-moderate", title: "ReDoS in tiny-dep", severity: "moderate", vulnerable_versions: "<2.0.0" };
+  /**
+   * A change that uses tiny-dep 1.0.0, from a registry of one package on this machine whose advisory data answers
+   * `advisories` (a status: it fails). What the registry was asked comes back with the build.
+   */
+  const changeWith = async (advisories: object[] | number, deps = true) => {
+    const tgz = gzipSync(tar({ "package/package.json": JSON.stringify({ name: "tiny-dep", version: "1.0.0", main: "index.js" }), "package/index.js": "module.exports = 42;\n" }));
+    const asked: string[] = [];
+    const server = createServer((req, res) => {
+      asked.push(req.url ?? "");
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const dist = { tarball: `${base}/tiny-dep/-/tiny-dep-1.0.0.tgz`, integrity: `sha512-${createHash("sha512").update(tgz).digest("base64")}` };
+      if (req.url === "/tiny-dep") res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ name: "tiny-dep", "dist-tags": { latest: "1.0.0" }, versions: { "1.0.0": { name: "tiny-dep", version: "1.0.0", main: "index.js", dist } } }));
+      else if (req.url === "/tiny-dep/-/tiny-dep-1.0.0.tgz") res.writeHead(200, { "content-type": "application/octet-stream" }).end(tgz);
+      else if (req.url?.startsWith("/-/npm/v1/security/advisories/bulk")) {
+        if (typeof advisories === "number") res.writeHead(advisories).end("down");
+        else res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(advisories.length ? { "tiny-dep": advisories } : {}));
+      } else res.writeHead(404).end("{}");
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const env = { registry: process.env.npm_config_registry, cache: process.env.npm_config_cache };
+    process.env.npm_config_registry = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    process.env.npm_config_cache = join(t.home.root, "npm-cache");
+    try {
+      const b = await t.build(
+        () => t.platform.modify(USER, { capabilityId: "running-log", request: "use a package" }),
+        (ws) => {
+          if (!deps) return editText(join(ws, "src/index.ts"), (src) => `// no packages\n${src}`);
+          writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": "^1.0.0" } }));
+          editText(join(ws, "src/index.ts"), (src) => `import tiny from "tiny-dep";\nvoid tiny;\n${src}`);
+        },
+      );
+      return { b, log: b.log.join("\n"), asked };
+    } finally {
+      for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
+      server.close();
+    }
+  };
+
+  test("an advisory at high fails the build, naming the package, the versions it's in, the advisory and its link", async () => {
+    const { b, log } = await changeWith([HIGH, MODERATE]);
+    assert.equal(b.status, "failed", log);
+    assert.match(log, /a known vulnerability in its dependencies, high or critical[^\n]*\n\s+- tiny-dep \(<1\.0\.1\): Prototype pollution in tiny-dep \(high, https:\/\/github\.com\/advisories\/GHSA-high\)/);
+    assert.equal(t.platform.registry.getCapability("running-log")!.activeVersion, 1);
+  });
+
+  test("one below high warns, and the build goes live; so does a registry that couldn't be asked", async () => {
+    const moderate = await changeWith([MODERATE]);
+    assert.equal(moderate.b.status, "promoted", moderate.log);
+    assert.match(moderate.log, /warning: npm-advisories: a known vulnerability in a dependency: tiny-dep \(<2\.0\.0\): ReDoS in tiny-dep \(moderate, https:\/\/github\.com\/advisories\/GHSA-moderate\)/);
+    const down = await changeWith(503);
+    assert.equal(down.b.status, "promoted", down.log);
+    assert.match(down.log, /warning: npm-advisories: its dependencies weren't checked for known vulnerabilities: npm's registry couldn't be reached/);
+  });
+
+  test("no dependencies: npm isn't asked; none known: said in the log", async () => {
+    const none = await changeWith([HIGH], false);
+    assert.equal(none.b.status, "promoted", none.log);
+    assert.ok(!none.asked.some((u) => u.includes("advisories")), none.asked.join(", "));
+    const clean = await changeWith([]);
+    assert.equal(clean.b.status, "promoted", clean.log);
+    assert.match(clean.log, /npm advisories: none known for its dependencies/);
+    assert.doesNotMatch(clean.log, /warning: npm-advisories/);
+  });
+
+  test("npm's report read: each advisory once, from the package it's in; no report is not checked", () => {
+    const via = (source: number, name: string, severity: string) => ({ source, name, dependency: name, title: `Advisory ${source}`, url: `https://github.com/advisories/${source}`, severity, range: "<2.0.0" });
+    const report = { auditReportVersion: 2, vulnerabilities: { a: { name: "a", severity: "high", via: [via(1, "a", "high"), via(2, "a", "low")] }, b: { name: "b", severity: "high", via: ["a", via(1, "a", "high")] } } };
+    assert.deepEqual(auditOf(JSON.stringify(report)), {
+      found: [
+        { name: "a", severity: "high", title: "Advisory 1", url: "https://github.com/advisories/1", range: "<2.0.0" },
+        { name: "a", severity: "low", title: "Advisory 2", url: "https://github.com/advisories/2", range: "<2.0.0" },
+      ],
+    });
+    assert.deepEqual(auditOf(JSON.stringify({ message: "request to http://127.0.0.1:1/-/npm/v1/security/advisories/bulk failed", error: { summary: "" } })), { unchecked: "npm's registry couldn't be reached" });
+    assert.deepEqual(auditOf("npm ERR!"), { unchecked: "npm's answer couldn't be read" });
   });
 });
 

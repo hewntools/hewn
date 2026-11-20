@@ -35,10 +35,11 @@ As it works, the builder checks its own work: its `check` tool runs what Hewn ru
 Then Hewn:
 
 1. checks the manifest and the contracts
-2. runs the tool's tests, and its database migrations on a copy of your data
-3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
-4. for a new tool with a screen (or a [Polish](#polishing-a-tool)), has the builder look at its screen again, twice (below)
-5. makes it live if all of that passes
+2. checks the npm packages it uses, if any, against the npm registry's advisories: a known vulnerability at high or critical fails it, naming the package; one below that, or advisories the registry couldn't be asked for, is a [warning](#changing-a-tool)
+3. runs the tool's tests, and its database migrations on a copy of your data
+4. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
+5. for a new tool with a screen (or a [Polish](#polishing-a-tool)), has the builder look at its screen again, twice (below)
+6. makes it live if all of that passes
 
 **A second look, for a new tool.** Once a new tool passes its checks, the builder carries on with screenshots of it filled with its sample data, on a desktop and a phone, light and dark, the whole page (a long one in parts it can read):
 

@@ -10,7 +10,7 @@ import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
-import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
+import type { Advisory, Audit, CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
@@ -129,13 +129,23 @@ export class Validation extends Domain {
     const npmProblems = dependencyProblems(workspace);
     if (npmProblems.length) fail("npm won't install this tool's dependencies", npmProblems);
     const files = versionFiles(workspace);
-    let bundled: { js: string; log: string[] };
+    let bundled: { js: string; log: string[]; audit?: Audit };
     try {
       bundled = await this.workbench.bundle(build.id);
     } catch (e) {
       return fail(`bundling failed: ${(e as Error).message}`);
     }
     for (const line of bundled.log) step(line);
+    // 2a. npm's advisories on its dependencies: one at high or critical fails it, one below warns, and so do
+    // advisories that couldn't be checked (the registry out of reach). No dependencies, nothing to check.
+    const audit = bundled.audit;
+    if (audit && "unchecked" in audit) warnings.push({ check: "npm-advisories", message: `its dependencies weren't checked for known vulnerabilities: ${audit.unchecked}` });
+    else if (audit) {
+      const serious = audit.found.filter((a) => a.severity === "high" || a.severity === "critical");
+      if (serious.length) softFail("a known vulnerability in its dependencies, high or critical (update the package to a version without it, or use another)", serious.map(advisoryWords));
+      for (const a of audit.found.filter((a) => !serious.includes(a))) warnings.push({ check: "npm-advisories", message: `a known vulnerability in a dependency: ${advisoryWords(a)}` });
+      if (!audit.found.length) step("npm advisories: none known for its dependencies");
+    }
     const code: CodeRef = { hash: contentHash(files, bundled.js), js: bundled.js };
     let exportedKeys: string[];
     try {
@@ -789,6 +799,9 @@ function shotsText(images: string[], parts: string[], shown: ShotsShown): string
         : ` A long page shows its top part; the rest (${parts.join(", ")}, top to bottom) is left out: check again with screenshots: "all" to see it.`;
   return `${where}${rest} Open every one and fix what looks broken, cramped, cut off or unreadable.`;
 }
+
+/** An advisory in a line: "tiny-dep (<1.0.1): Prototype pollution (high, https://…)". */
+const advisoryWords = (a: Advisory) => `${a.name}${a.range ? ` (${a.range})` : ""}: ${a.title} (${a.severity}${a.url ? `, ${a.url}` : ""})`;
 
 /** A warning in one line: "secret-scan: a long random string (src/data.ts:12)". */
 export const warningText = (w: CheckWarning) => `${w.check}: ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`;

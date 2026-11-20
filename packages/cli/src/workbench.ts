@@ -13,7 +13,7 @@ import { CHECK_DIR, writeInside } from "./builders/check.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { dependencyProblems } from "@hewntools/core/bundle.ts";
 import { ARTEFACTS, isArtefact } from "@hewntools/core/files.ts";
-import type { BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
+import type { Advisory, Audit, BuildJob, Files, VisualCheckArgs, VisualCheckResult, Workbench } from "@hewntools/core/ports.ts";
 import type { VisualCheck } from "./visual.ts";
 
 export interface LocalWorkbenchOptions {
@@ -130,9 +130,7 @@ const NPM_READS = [".npmrc", "package.json", "package-lock.json", "npm-shrinkwra
  * into the folder the bundle reads), and a package npm took from this machine's disk fails the install.
  */
 function npmInstall(cwd: string): Promise<string[]> {
-  const files: Files = {};
-  for (const p of NPM_READS) if (existsSync(join(cwd, p))) files[p] = new Uint8Array(readFileSync(join(cwd, p)));
-  const problems = dependencyProblems(files);
+  const problems = npmProblems(cwd);
   if (problems.length) return Promise.reject(new Error(`npm won't run for this tool: ${problems.join("; ")}`));
   return new Promise((resolve, reject) => {
     const out: string[] = [];
@@ -148,6 +146,75 @@ function npmInstall(cwd: string): Promise<string[]> {
       reject(new Error(`npm took ${local.join(", ")} from this machine's disk; a tool's dependencies (and theirs) come from the npm registry only`));
     });
   });
+}
+
+/** How long npm's advisory lookup may take before the advisories count as not checked. */
+export const AUDIT_MS = 30_000;
+const SEVERITIES: Advisory["severity"][] = ["info", "low", "moderate", "high", "critical"];
+
+/** Why npm mustn't run in a folder: what it reads there breaks the rules (dependencyProblems). */
+function npmProblems(cwd: string): string[] {
+  const files: Files = {};
+  for (const p of NPM_READS) if (existsSync(join(cwd, p))) files[p] = new Uint8Array(readFileSync(join(cwd, p)));
+  return dependencyProblems(files);
+}
+
+/**
+ * npm's advisories on a tool's dependencies, as `npm audit` reads them from the registry (not its
+ * devDependencies: they aren't bundled). It runs nothing of the packages'.
+ */
+export function npmAudit(cwd: string, ms = AUDIT_MS): Promise<Audit> {
+  return new Promise((resolve) => {
+    const out: string[] = [];
+    const child = spawn("npm", ["audit", "--json", "--omit=dev", "--loglevel=error"], { cwd, stdio: ["ignore", "pipe", "ignore"] });
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve({ unchecked: "npm's registry didn't answer in time" });
+    }, ms);
+    child.stdout.on("data", (d) => out.push(String(d)));
+    child.once("error", () => {
+      clearTimeout(timer);
+      resolve({ unchecked: "npm didn't run" });
+    });
+    // It exits 1 when it found something: the report says what.
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolve(auditOf(out.join("")));
+    });
+  });
+}
+
+/**
+ * `npm audit --json`'s report as advisories, each once (a package listed only for depending on
+ * another names that one's). No report (an error instead): the registry couldn't be reached.
+ */
+export function auditOf(json: string): Audit {
+  let report: { vulnerabilities?: Record<string, { name?: string; via?: unknown[] }> };
+  try {
+    report = JSON.parse(json);
+  } catch {
+    return { unchecked: "npm's answer couldn't be read" };
+  }
+  if (!report?.vulnerabilities || typeof report.vulnerabilities !== "object") return { unchecked: "npm's registry couldn't be reached" };
+  const seen = new Set<unknown>();
+  const found: Advisory[] = [];
+  for (const [name, v] of Object.entries(report.vulnerabilities)) {
+    for (const via of v?.via ?? []) {
+      if (!via || typeof via !== "object") continue;
+      const a = via as { source?: unknown; name?: unknown; title?: unknown; url?: unknown; severity?: unknown; range?: unknown };
+      const key = a.source ?? a.url ?? `${String(a.name)}:${String(a.title)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push({
+        name: typeof a.name === "string" ? a.name : name,
+        severity: SEVERITIES.includes(a.severity as Advisory["severity"]) ? (a.severity as Advisory["severity"]) : "moderate",
+        title: typeof a.title === "string" && a.title ? a.title : "a known vulnerability",
+        ...(typeof a.url === "string" ? { url: a.url } : {}),
+        ...(typeof a.range === "string" && a.range ? { range: a.range } : {}),
+      });
+    }
+  }
+  return { found };
 }
 
 /**
@@ -209,14 +276,21 @@ function insideWorkspace(ws: string): Plugin {
 }
 
 /** Bundle a workspace's src/index.ts (+ npm dependencies) into one ESM module for the isolate runtime. */
-export async function bundleWorkspace(ws: string): Promise<{ js: string; log: string[] }> {
+export async function bundleWorkspace(ws: string): Promise<{ js: string; log: string[]; audit?: Audit }> {
   const log: string[] = [];
   const entry = ["src/index.ts", "src/index.js"].map((p) => join(ws, p)).find(existsSync);
   if (!entry) throw new Error("src/index.ts is missing");
   const pkgPath = join(ws, "package.json");
+  let audit: Audit | undefined;
   if (existsSync(pkgPath)) {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-    if (Object.keys(pkg.dependencies ?? {}).length && !existsSync(join(ws, "node_modules"))) log.push(...(await npmInstall(ws)));
+    if (Object.keys(pkg.dependencies ?? {}).length) {
+      // Whoever installed them (npm here, or the builder in its sandbox), what's bundled is what's audited; npm runs
+      // here only on what passed its rules (npmInstall checks them before npm writes its lockfile).
+      if (!existsSync(join(ws, "node_modules"))) log.push(...(await npmInstall(ws)));
+      else if (npmProblems(ws).length) audit = { unchecked: "npm won't run for this tool" };
+      audit ??= await npmAudit(ws);
+    }
   }
   const result = await esbuild({
     entryPoints: [entry],
@@ -236,7 +310,7 @@ export async function bundleWorkspace(ws: string): Promise<{ js: string; log: st
   });
   const js = result.outputFiles[0].text;
   log.push(`bundled src/index.ts (${Math.round(js.length / 1024)} KB)`);
-  return { js, log };
+  return { js, log, ...(audit ? { audit } : {}) };
 }
 
 export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {

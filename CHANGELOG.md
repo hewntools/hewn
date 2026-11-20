@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **npm advisories.** A tool's npm packages are checked against the npm registry's advisories as it's bundled (what `npm audit` reads). A known vulnerability at high or critical fails the tool, naming the package and the advisory; one below that is a warning, and so is a registry that couldn't be asked. A tool without packages costs nothing. See [The build](docs/building-tools.md#the-build).
 
 ### Safety and limits
 
