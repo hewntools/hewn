@@ -6,6 +6,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- Hewn notices a sleep by the gap between its looks at the clock, so a Mac that sleeps catches up on its schedules when it wakes. `hewn.log` says what a catch-up ran.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
 
 ## 0.4.12 (2026-11-19)

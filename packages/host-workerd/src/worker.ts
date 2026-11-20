@@ -675,13 +675,19 @@ export class HewnDO extends DurableObject<Env> {
   private catchingUp: Promise<void> = Promise.resolve();
 
   async alarm() {
+    await this.runDue();
+  }
+
+  /** Run what's due and re-arm the alarm, one pass at a time: what it ran. */
+  private runDue() {
     this.idleGc.work();
     const pass = this.catchingUp.then(async () => {
-      await this.platform.runDueSchedules();
+      const ran = await this.platform.runDueSchedules();
       await this.secrets.flush();
       await this.armAlarm();
+      return ran;
     });
-    this.catchingUp = pass.catch(() => {});
+    this.catchingUp = pass.then(() => {}, () => {});
     return pass;
   }
 
@@ -816,8 +822,8 @@ export class HewnDO extends DurableObject<Env> {
         case "/_admin/resumed":
           // The supervisor saw the wall clock jump (a suspended machine woke), or a schedule's time come by it: run
           // what became due, re-arm the alarm.
-          await this.alarm();
-          return Response.json({ ok: true, nextAlarmAt: this.platform.nextScheduleAt() });
+          const ran = await this.runDue();
+          return Response.json({ ok: true, nextAlarmAt: this.platform.nextScheduleAt(), ran });
         case "/_admin/changed":
           // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });

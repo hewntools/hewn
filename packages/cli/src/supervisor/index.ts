@@ -41,6 +41,12 @@ import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
 
+/** A gap between the resume check's ticks longer than this goes in hewn.log (a sleep, a DarkWake, a stalled process). */
+const TICK_GAP_LOGGED_MS = 15_000;
+/** What a catch-up ran: a schedule's id, its tool and operation, and how it went. */
+type Ran = { id: string; ok: boolean; what?: string };
+const ranWords = (ran: Ran[]) => ran.map((r) => `${r.what ?? r.id} (${r.ok ? "ok" : "failed"})`).join(", ");
+
 export interface SupervisorOptions {
   home: Home;
   port: number;
@@ -75,7 +81,7 @@ export interface SupervisorOptions {
    * and the next schedule's time coming by the wall clock runs what's due (workerd's alarm can be late after a sleep).
    * Tests move `wall`.
    */
-  resume?: { intervalMs?: number; jumpMs?: number; recheckMs?: number; wall?: () => number } | false;
+  resume?: { intervalMs?: number; jumpMs?: number; recheckMs?: number; wall?: () => number; mono?: () => number } | false;
   /** Where the secrets master key lives (default: Keychain on macOS, libsecret or a file on Linux). */
   keySource?: KeySource;
   /** Builder / intake CLI status (default: checked on this machine). Tests stub it. */
@@ -907,7 +913,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   let resumedAt: number | null = null;
   const recheckTimers = new Set<ReturnType<typeof setTimeout>>();
   if (o.resume !== false) {
-    const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now } = o.resume ?? {};
+    const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now, mono = () => performance.now() } = o.resume ?? {};
     /** When the next schedule is due (ms), as the platform last said: at start, and in every catch-up's reply. */
     let nextAlarmAt: number | null = null;
     /** Whether a catch-up has replied (the start's read then says nothing newer). */
@@ -924,7 +930,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         const r = await admin("resumed", {});
         nextAlarmAt = r.nextAlarmAt ?? null;
         replied = true;
-        return r as { nextAlarmAt: number | null };
+        return r as { nextAlarmAt: number | null; ran?: Ran[] };
       } finally {
         catchingUp--;
       }
@@ -933,7 +939,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const caughtUp = async () => {
       try {
         const r = await catchUp();
-        log(`caught up after a resume${r.nextAlarmAt ? `; next alarm ${new Date(r.nextAlarmAt).toISOString()}` : ""}`);
+        log(`caught up after a resume${r.ran?.length ? `: ${ranWords(r.ran)}` : ""}${r.nextAlarmAt ? `; next alarm ${new Date(r.nextAlarmAt).toISOString()}` : ""}`);
       } catch (e) {
         log(`catching up after a resume failed: ${(e as Error).message}`);
       }
@@ -942,7 +948,10 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     /** The next schedule's time came by the wall clock: catch up, once for that time (tried again if it fails). */
     const scheduleTime = (at: number) => {
       caughtUpFor = at;
-      void catchUp().catch((e) => {
+      void catchUp().then((r) => {
+        // The alarm was late (it waits on a clock that stops while the machine sleeps): what this look ran instead.
+        if (r.ran?.length) log(`the schedule due ${new Date(at).toISOString()} ran by the wall clock (its alarm was late): ${ranWords(r.ran)}`);
+      }, (e) => {
         caughtUpFor = null;
         if (failedFor !== at) log(`running the schedule due ${new Date(at).toISOString()} failed: ${(e as Error).message}; trying again`);
         failedFor = at;
@@ -956,17 +965,22 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       },
       (e) => log(`couldn't read the next schedule's time at start: ${(e as Error).message}`),
     );
-    let last = { wall: wall(), mono: performance.now() };
+    let last = { wall: wall(), mono: mono() };
     resumeTimer = setInterval(() => {
-      const now = { wall: wall(), mono: performance.now() };
-      const jump = now.wall - last.wall - (now.mono - last.mono);
+      const now = { wall: wall(), mono: mono() };
+      // A sleep shows as the ticks' gap by the wall clock: the process didn't run meanwhile. The monotonic clock
+      // can't tell it: on macOS it may run on through a sleep (and a DarkWake runs the process for moments).
+      const gap = now.wall - last.wall;
+      const monoGap = now.mono - last.mono;
       last = now;
-      if (jump <= jumpMs) {
+      // What the owner's sleep test reads in hewn.log: each long gap, by both clocks.
+      if (gap > Math.max(TICK_GAP_LOGGED_MS, 3 * intervalMs)) log(`tick gap: ${Math.round(gap / 1000)}s by the wall clock, ${Math.round(monoGap / 1000)}s by the monotonic one`);
+      if (gap <= jumpMs) {
         // The next schedule's time came by the wall clock (and a little more: the alarm, when it fires, comes first).
         if (!catchingUp && nextAlarmAt !== null && nextAlarmAt !== caughtUpFor && now.wall >= nextAlarmAt + ALARM_GRACE_MS) scheduleTime(nextAlarmAt);
         return;
       }
-      log(`the clock jumped ${Math.round(jump / 1000)}s ahead (resumed); catching up`);
+      log(`${Math.round(gap / 1000)}s passed between two looks (the machine slept, or Hewn was suspended): resumed; catching up`);
       resumedAt = Date.now();
       void caughtUp();
       const t = setTimeout(() => (recheckTimers.delete(t), void caughtUp()), recheckMs);

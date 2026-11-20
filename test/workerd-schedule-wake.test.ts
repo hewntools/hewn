@@ -24,10 +24,12 @@ async function until(fn: () => Promise<boolean>, ms: number): Promise<boolean> {
 describe("a schedule after the machine wakes from sleep (workerd host)", () => {
   let h: TestHost;
   let offset = 0;
-  // A look every 50 ms; a jump is a resume past 10 minutes (the wall clock is walked in smaller steps).
+  // A look every 50 ms; a jump is a resume past 10 minutes (the wall clock is walked in smaller steps). The monotonic
+  // clock runs on with the wall clock, as macOS's may through a sleep: only the gap between looks shows one.
   const JUMP = 600_000;
+  const log: string[] = [];
   before(async () => {
-    h = await startTestHost({ resume: { intervalMs: 50, jumpMs: JUMP, recheckMs: HOUR, wall: () => Date.now() + offset } });
+    h = await startTestHost({ resume: { intervalMs: 50, jumpMs: JUMP, recheckMs: HOUR, wall: () => Date.now() + offset, mono: () => performance.now() + offset }, log: (l) => void log.push(l) });
     const r = await h.sv.admin("install", { name: "Runaway", purpose: "runs on", dir: join(FIXTURES, "runaway"), wait: true });
     assert.equal(r.status, "promoted", r.log.join("\n"));
   });
@@ -60,6 +62,10 @@ describe("a schedule after the machine wakes from sleep (workerd host)", () => {
       assert.equal(await rows("on-time"), 0, "not before its time");
       await walk(at + ALARM_GRACE_MS);
       assert.ok(await until(async () => (await rows("on-time")) === 1, 1000), "run within a look of its time and the grace");
+      // hewn.log: the wake (a gap between looks, by the wall clock and the monotonic one alike), and what the late alarm's look ran.
+      assert.ok(log.some((l) => /^tick gap: \d+s by the wall clock, \d+s by the monotonic one$/.test(l)), log.join("\n"));
+      assert.ok(log.some((l) => /^\d+s passed between two looks \(the machine slept, or Hewn was suspended\): resumed; catching up$/.test(l)), log.join("\n"));
+      assert.ok(await until(async () => log.some((l) => l === `the schedule due ${new Date(at).toISOString()} ran by the wall clock (its alarm was late): runaway/tick (ok)`), 1000), log.join("\n"));
       // Due again (the platform's clock hasn't moved), while the next time the supervisor knows is that same time: no second run for it.
       await h.sv.admin("schedules/fire", { id: s.id, arm: false });
       await walk(at + 2 * HOUR);
