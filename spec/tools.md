@@ -175,6 +175,7 @@ The database schema is `migrations/NNN_name.sql` (`001_init.sql`, `002_add_notes
 - **Append-only.** A new version adds files. It never edits or removes one that a previous version shipped.
 - **Never destroy data.** `DROP TABLE`, `DROP COLUMN`, `DELETE FROM` and `TRUNCATE` are refused.
 - **No transaction statements** (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`): each file already runs atomically.
+- **End with the last statement's `;`.** Nothing may follow it, not a comment or a second `;`: workerd refuses the file ("SQL code did not contain a statement"), so validation does too. Comments before, between or inside statements are fine.
 - Before a version is promoted, its new migrations are dry-run on a copy of the live database, and the live database is backed up before they're applied.
 - Rolling back to an older version runs the older code on the newer schema. The host refuses a rollback past a migration that would break that code: a `NOT NULL` column without a default, a rename, or a new unique index.
 

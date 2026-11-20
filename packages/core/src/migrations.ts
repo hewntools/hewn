@@ -26,6 +26,8 @@ export function migrationProblems(migrations: Migration[], base: Migration[]): s
     if (DESTRUCTIVE.test(m.sql)) out.push(`migration ${m.name}: destructive statements are not allowed`);
     // Durable Object SQL manages transactions itself (each migration is applied atomically).
     if (/^\s*(begin|commit|rollback|savepoint|release)\b/im.test(m.sql)) out.push(`migration ${m.name}: transaction statements (BEGIN/COMMIT) are not allowed; each migration already runs atomically`);
+    // A shipped one ran already; it can't be edited, so it isn't held to a rule added after it.
+    if (!endsWithStatement(m.sql) && !base.some((b) => b.name === m.name && b.sql === m.sql)) out.push(`migration ${m.name}: nothing may follow the last statement; end it with \`;\``);
   }
   for (const b of base) {
     const cur = migrations.find((m) => m.name === b.name);
@@ -33,6 +35,36 @@ export function migrationProblems(migrations: Migration[], base: Migration[]): s
     else if (cur.sql !== b.sql) out.push(`migration ${b.name}: modified (migrations are append-only)`);
   }
   return out;
+}
+
+/**
+ * Whether the file ends with its last statement's `;`, followed only by whitespace. Durable Object SQL
+ * refuses a comment or a second `;` after it ("SQL code did not contain a statement"); node:sqlite doesn't.
+ * Comments and quoted text elsewhere are skipped, so a `;` inside them doesn't count.
+ */
+function endsWithStatement(sql: string): boolean {
+  let last = -1;
+  let code = false; // code since the previous `;`
+  let lastHadCode = false;
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (c === "-" && sql[i + 1] === "-") {
+      const nl = sql.indexOf("\n", i);
+      i = nl < 0 ? sql.length : nl;
+    } else if (c === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      i = end < 0 ? sql.length : end + 1;
+    } else if (c === "'" || c === '"' || c === "`" || c === "[") {
+      const end = sql.indexOf(c === "[" ? "]" : c, i + 1);
+      i = end < 0 ? sql.length : end;
+      code = true;
+    } else if (c === ";") {
+      last = i;
+      lastHadCode = code;
+      code = false;
+    } else if (!/\s/.test(c)) code = true;
+  }
+  return last >= 0 && lastHadCode && sql.slice(last + 1).trim() === "";
 }
 
 /**
