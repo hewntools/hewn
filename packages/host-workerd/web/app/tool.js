@@ -194,7 +194,10 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else if (!want && shown()) {
       drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
+      // Opened on held work and closed unsent: the next Change is an ordinary one, not built on it.
+      const onHeld = q.has("held");
       for (const k of ["m", "send", "widget", "from", "fix", "polish", "held"]) q.delete(k);
+      if (onHeld) (drawer.el.remove(), (drawer = null));
       setUrl(false);
       // Closed without Reload on a version it said was ready: the page says it now.
       note.show();

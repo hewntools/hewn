@@ -107,7 +107,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // "Ask builder to fix this" left what failed here (too long for the address); it goes in the box below.
   // A build on held work (its card's "Ask builder to fix"): the intake sees what it is, the build carries on from it.
   // A held new tool's text waits under the build's id (the New page has no tool yet).
-  const held = q?.get("held") || null;
+  let held = q?.get("held") || null;
   const fixKey = capId ? `hewn.fix.${capId}` : held ? `hewn.fix.${held}` : null;
   const failure = fixKey && q?.get("fix") ? sessionStorage.getItem(fixKey) : null;
   const prefilled = !!(q?.get("m") || failure);
@@ -130,7 +130,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const stopKeeping = () => (finish(), (keeps = false));
   // Built from: the page goes to the build, the drawer shows it. A reply still on its way (Build was pressed
   // while one was) is dropped, not kept again.
-  const built = (b) => (stopKeeping(), shownViews.get(keepKey) === me && shownViews.delete(keepKey), onBuilt(b));
+  const built = (b) => (stopKeeping(), shownViews.get(keepKey) === me && shownViews.delete(keepKey), held && doneWithHeld(), onBuilt(b));
   if (from) continueFrom(from).catch(fail);
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
   const offer = h("div", { class: "card continue-card", hidden: true });
@@ -248,6 +248,17 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
         heldRow.hidden = false;
       })
       .catch(() => {});
+  // Built from the held work: this view and the address forget it, so the next change ("Change more") is an ordinary one.
+  const doneWithHeld = () => {
+    held = null;
+    for (const k of ["held", "fix"]) q?.delete?.(k);
+    heldRow?.remove();
+    const [path, query = ""] = location.hash.split("?");
+    const p = new URLSearchParams(query);
+    if (!p.has("held") && !p.has("fix")) return;
+    for (const k of ["held", "fix"]) p.delete(k);
+    history.replaceState(null, "", `${path}${[...p].length ? `?${p}` : ""}`);
+  };
   // Q1 New: or install one: one of Hewn's tools, or a file or link someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
   const installOptions =
@@ -1110,6 +1121,8 @@ function proposalCard(kind, list, ctx) {
       }
       // New tools: side by side, or after the ones they build on.
       const p = buildPlan(chosen().map((r) => r.d));
+      // Made on a held new tool: one tool takes its place, never several.
+      if (held && p.order.length > 1) throw new Error("This continues one held tool: tick just that one here, and ask for the others from New.");
       const connections = new Map();
       const builds = new Map();
       const started = [];
@@ -1122,8 +1135,8 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          // Made on a held new tool: one tool, which takes the held one's place.
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask, ...(held && p.order.length === 1 ? { held } : {}) });
+          // Made on a held new tool: it takes the held one's place.
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask, held });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {

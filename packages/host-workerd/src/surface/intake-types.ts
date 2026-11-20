@@ -52,7 +52,7 @@ export interface IntakeRequest {
    * Continue from an earlier build's conversation ("Continue from here" on a version): the client
    * names the build; the platform fills in the version it made and its turns.
    */
-  earlier?: { buildId: string; version?: number; messages?: IntakeMessage[] };
+  earlier?: { buildId: string; version?: number; messages?: IntakeMessage[]; asked?: { by: string; text: string } };
   /** The owner's standing rules for building (the platform fills these in): for every tool, and for this one when modifying. */
   instructions?: { global: string[]; tool?: string[] };
   /** Summarizing: the tool's manifest and its text files (each line numbered), cut to a size; `cut` names what was left out or shortened. */

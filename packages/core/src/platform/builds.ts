@@ -476,10 +476,18 @@ export class Builds extends Domain {
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
     // The owner's new tool made on a held one (its card's "Ask builder to fix", sent from the New page): it takes
     // the held tool's id over, carries on from its files, and is held in turn.
+    // It keeps the held tool's name and purpose: what changes is what the owner asks for.
     if (req.held !== undefined) {
+      if (typeof req.requirements !== "string" || !req.requirements.trim()) throw new PlatformError("invalid_request", "requirements: what to change in the held tool");
       const { held, marks } = await this.heldFix(agent, req.held, { kind: "create" });
-      const r: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements, ...(held.request.kind === "connection" ? { kind: "connection" as const } : {}), ...(req.schedules !== undefined ? { schedules: req.schedules } : {}), ...pickAsk(req), ...marks };
-      return this.openCreateBuild(agent, held.capabilityId, r, false, undefined, undefined, undefined, conversation);
+      const cap = this.registry.getCapability(held.capabilityId)!;
+      this.oneCreateAtATime(agent, cap.id, held.id);
+      const dependsOn = this.dependency(agent, req.after);
+      const r: CreateRequest = { name: cap.name, purpose: cap.purpose, requirements: req.requirements, ...(held.request.kind === "connection" ? { kind: "connection" as const } : {}), ...(req.schedules !== undefined ? { schedules: req.schedules } : {}), ...pickAsk(req), ...(dependsOn ? { after: dependsOn } : {}), ...marks };
+      const b = await this.openCreateBuild(agent, cap.id, r, false, undefined, undefined, dependsOn, conversation);
+      if (!req.widgets || held.request.kind === "connection") return b;
+      const w = await this.addWidgets(agent, { capabilityId: b.capabilityId, after: b.buildId, ...pickAsk(req), ...(conversation ? { conversation } : {}) });
+      return { ...b, widgetsBuildId: w.buildId };
     }
     if (req.widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
     const b = await this.createBuild(agent, req, conversation);
@@ -560,10 +568,11 @@ export class Builds extends Domain {
    * owner, or paused with its work kept (taking the id over would strand it). Not a widgets build chained after it (create
    * with widgets): that one waits for it.
    */
-  private oneCreateAtATime(agent: Agent, id: string) {
+  private oneCreateAtATime(agent: Agent, id: string, fixing?: string) {
     const building = this.registry.unfinishedBuild(id, { kind: "create" });
     if (building) throw new PlatformError("conflict", `'${id}' is already being built${this.buildRef(agent, building)}; wait for it, or cancel it`);
-    this.notHeld(agent, id);
+    // `fixing`: the held one is what this build carries on from (its card's "Ask builder to fix").
+    if (!fixing) this.notHeld(agent, id);
     const paused = this.pausedBuild(id, "create");
     if (paused) throw this.pausedFirst(agent, `'${id}'`, paused);
   }
@@ -762,6 +771,7 @@ export class Builds extends Domain {
     const buildId = newBuildId();
     this.registry.transaction(() => {
       const reservation = { id, name: req.name, purpose: req.purpose, createdBy: agent.id };
+      if (req.fixOf) this.fixOnce(req.fixOf, id);
       if (reserve) this.registry.insertCapability(reservation);
       else this.registry.takeOverCapability(reservation);
       this.registry.insertBuild({ id: buildId, capabilityId: id, kind: "create", request: req, requestedBy: agent.id, baseVersion: null, builder, dependsOn });
@@ -769,7 +779,7 @@ export class Builds extends Domain {
       this.recordContext(buildId, undefined, conversation);
     });
     if (dependsOn) this.waitFor(buildId, id, dependsOn, `build ${buildId} [create ${id} by ${agent.id}]`);
-    else await this.startCreate(buildId, seed);
+    else await this.startCreate(buildId, seed).catch((e) => this.failBuild(buildId, `couldn't start: ${(e as Error).message}`));
     return this.buildView(this.registry.getBuild(buildId)!);
   }
 
@@ -940,13 +950,15 @@ export class Builds extends Domain {
     const request = { capabilityId: cap.id, request: req.request, ...(req.schedules !== undefined ? { schedules: req.schedules } : {}), ...pickAsk(req), ...(after ? { after } : {}), ...marks };
     const buildId = newBuildId();
     this.registry.transaction(() => {
+      if (marks.fixOf) this.fixOnce(marks.fixOf, cap.id);
       this.registry.insertBuild({ id: buildId, capabilityId: cap.id, kind: "modify", request, requestedBy: agent.id, baseVersion: dependsOn ? null : cap.activeVersion, builder, dependsOn });
       this.registry.setBuildModel(buildId, model);
       this.recordContext(buildId, cap.id, conversation);
       this.takePlace(buildId, marks);
     });
     if (dependsOn) this.waitFor(buildId, cap.id, dependsOn, `build ${buildId} [modify ${cap.id} by ${agent.id}]`, !after);
-    else await this.startModify(buildId);
+    // A start that fails (the tool archived meanwhile, a fix whose held work moved on) fails the build, never leaves it open.
+    else await this.startModify(buildId).catch((e) => this.failBuild(buildId, `couldn't start: ${(e as Error).message}`));
     return this.buildView(this.registry.getBuild(buildId)!);
   }
 
@@ -1122,6 +1134,7 @@ export class Builds extends Domain {
     const held = typeof heldId === "string" ? this.registry.getBuild(heldId) : undefined;
     const fits = !!held && held.status === "review" && !!held.review && (want.kind === "create" ? held.kind === "create" : held.kind !== "create" && held.capabilityId === want.cap.id);
     if (!fits || !held?.review) throw new PlatformError("conflict", `${String(heldId)} isn't ${want.kind === "create" ? "a new tool" : `a change to ${want.cap.id}`} waiting for your review`);
+    if (!held.review.warnings?.length) throw new PlatformError("conflict", `${held.id} has no warnings to fix: allow it, or don't`);
     const live = this.registry.getCapability(held.capabilityId)?.activeVersion ?? null;
     if (want.kind === "modify" ? want.cap.activeVersion !== held.baseVersion : live !== null) throw new PlatformError("conflict", `${held.capabilityId} changed since that was built: don't allow it, and ask for it again`);
     await this.loadCandidate(held.review.contentHash);
@@ -1130,10 +1143,10 @@ export class Builds extends Domain {
 
   /**
    * Once a change to a held one has opened on its files: the held one leaves the review card, replaced
-   * (its renders go, and its candidate, now in this build's workspace; a retry carries on from there).
+   * (its renders go). Its candidate stays until the fix is decided (`dropFixSource`): a retry may open on it again.
    */
   private async replaceHeld(b: BuildRow) {
-    const { fixOf, fixFrom } = b.request as RetryMarks;
+    const { fixOf } = b.request as RetryMarks;
     const held = fixOf ? this.registry.getBuild(fixOf) : undefined;
     if (held?.status === "review") {
       const line = `REPLACED by ${b.requestedBy}: build ${b.id} carries on from it`;
@@ -1143,7 +1156,18 @@ export class Builds extends Domain {
       await this.keepTranscript(held.id);
       this.buildEnded(held.id);
     }
-    if (fixFrom && !this.registry.versionWithHash(fixFrom)) await this.blobs.delete(`versions/${fixFrom}.json`).catch(() => {});
+  }
+
+  /** One build on held work at a time: a second "Ask builder to fix" sent meanwhile (or a retry while one runs) is refused. */
+  private fixOnce(heldId: string, capabilityId: string) {
+    const other = this.registry.unfinishedBuilds(capabilityId).find((x) => (x.request as RetryMarks).fixOf === heldId);
+    if (other) throw new PlatformError("conflict", `${heldId} is already being fixed in build ${other.id}; wait for it, or cancel it`);
+  }
+
+  /** The held work a fix carried on from goes once the fix is decided (allowed, turned down, put aside): no retry opens on it after that. */
+  private async dropFixSource(b: BuildRow) {
+    const hash = (b.request as RetryMarks).fixFrom;
+    if (hash && !this.registry.versionWithHash(hash)) await this.blobs.delete(`versions/${hash}.json`).catch(() => {});
   }
 
   /**
@@ -1194,7 +1218,9 @@ export class Builds extends Domain {
     const req: Record<string, any> = { ...old.request };
     delete req.retryOf;
     delete req.autoRetryOf;
-    // A fix of a held change stays one: held for the owner again, whatever its retries make.
+    // A fix of held work stays one: held for the owner again, whatever its retries make, and only the owner's to retry
+    // (it opens on work the owner hasn't allowed, and replaces it).
+    if (req.fixOf) requireOwner(agent);
     const marks: RetryMarks = { retryOf: old.id, ...(opts.auto ? { autoRetryOf: old.id } : {}), ...(req.fixOf ? { fixOf: req.fixOf, fixFrom: req.fixFrom } : {}) };
     // An automatic retry (after a restart) runs on what was asked; an agent's own retry is checked
     // again, so a model the owner has unticked since isn't used.
@@ -1274,6 +1300,7 @@ export class Builds extends Domain {
     if (!build.discardedAt) {
       this.registry.discardBuild(buildId);
       await this.workbench.remove(buildId).catch(() => {});
+      await this.dropFixSource(build);
       this.logger(`build ${buildId} [${build.kind} ${build.capabilityId}] discarded by ${owner.id}`);
     }
     return this.buildView(this.mustBuild(buildId));
@@ -1796,8 +1823,9 @@ export class Builds extends Domain {
       step(`FAILED: ${(e as Error).message}`);
       this.registry.updateBuild(buildId, { status: "failed", review: null, log });
     }
-    // Decided either way: the card's renders go.
+    // Decided either way: the card's renders go, and the held work a fix carried on from.
     await this.dropReviewShots(build);
+    await this.dropFixSource(build);
     await this.keepTranscript(buildId);
     this.buildEnded(buildId);
     return this.buildView(this.mustBuild(buildId));
@@ -1817,6 +1845,7 @@ export class Builds extends Domain {
       await this.blobs.delete(`versions/${build.review.contentHash}.json`);
     }
     await this.dropReviewShots(build);
+    await this.dropFixSource(build);
     await this.keepTranscript(buildId);
     this.buildEnded(buildId);
     return this.buildView(this.mustBuild(buildId));

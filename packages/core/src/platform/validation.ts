@@ -76,6 +76,18 @@ export class Validation extends Domain {
    * client's check, whose migrations run there only once submitted.
    */
   async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean; liveData?: boolean } = {}): Promise<Candidate> {
+    // What a check finds that doesn't fail the candidate. Every build's log keeps them, however validation ends (a
+    // builder's check has them in its text instead).
+    const warnings: CheckWarning[] = [];
+    try {
+      return await this.validateSteps(build, step, opts, warnings);
+    } finally {
+      if (!opts.check) for (const w of warnings) step(`warning: ${warningText(w)}`);
+    }
+  }
+
+  /** `validate`'s steps; the checks add what they find that doesn't fail the candidate to `warnings`. */
+  private async validateSteps(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean; liveData?: boolean }, warnings: CheckWarning[]): Promise<Candidate> {
     const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
@@ -88,8 +100,6 @@ export class Validation extends Domain {
       if (!opts.check) fail(msg, problems);
       failures.push(listed(msg, problems));
     };
-    // What a check finds that doesn't fail the candidate, in a check and in validation alike.
-    const warnings: CheckWarning[] = [];
     const workspace = await this.workbench.read(build.id);
 
     // 1. manifest
@@ -483,9 +493,8 @@ export class Validation extends Domain {
     const id = build.capabilityId;
     const { manifest, files, code, base, views } = candidate;
     if (candidate.failures?.length) throw new Error("a candidate that failed its check isn't promoted");
-    // Every build keeps its warnings in its log; a held one's card shows them too.
+    // A held one's card shows its warnings (its log has them from validation).
     const warnings = candidate.warnings ?? [];
-    for (const w of warnings) step(`warning: ${warningText(w)}`);
     // A later check of the same build (another pass) may have drawn over the build page's screenshot.
     await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));

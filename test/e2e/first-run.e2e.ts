@@ -586,6 +586,66 @@ export const operations = {
     if (!/, and again$/.test(now?.purpose)) throw new Error(`purpose ${now?.purpose}`);
   });
 
+  await step("a held change with a warning: its file and line open the code at that line; Ask builder to fix opens the Change drawer with it in the box, says what it continues and sends nothing; closed unsent, the next Change is an ordinary one", async () => {
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
+    const parse = (r: any) => JSON.parse(r.content[0].text);
+    const pack = parse(await client.callTool({ name: "capabilities_pack", arguments: { kind: "modify", capabilityId: "ui-counter" } }));
+    const files = pack.files
+      .filter((f: { path: string }) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path))
+      .map((f: { path: string; content: string }) => (f.path === "capability.json" ? { ...f, content: f.content.replace(/"purpose": "([^"]*)"/, '"purpose": "$1, once more"') } : f));
+    const b = parse(await client.callTool({ name: "capabilities_submit", arguments: { files, capabilityId: "ui-counter", request: "Reword its purpose once more", baseVersion: pack.baseVersion } }));
+    const held = parse(await client.callTool({ name: "builds_wait", arguments: { buildId: b.buildId, timeoutSeconds: 120 } }, undefined, { timeout: 150_000 }));
+    if (held.status !== "review") throw new Error(held.log?.join("\n") ?? JSON.stringify(held));
+    await client.close();
+    // Nothing warns yet (0.4.13's checks bring the warnings): the card's build is given one, on a line of its code, and
+    // its stream is cut so the page keeps that view.
+    const warning = { check: "secret-scan", message: "A long random string: a key, or a hash that looks like one.", file: "src/index.ts", line: 3 };
+    const own = new RegExp(`/api/builds/${held.buildId}(\\?.*)?$`);
+    const events = new RegExp(`/api/builds/${held.buildId}/events`);
+    await page.route(own, async (r: any) => {
+      const res = await r.fetch();
+      const j = await res.json();
+      if (j.review) j.review.warnings = [warning];
+      await r.fulfill({ response: res, json: j });
+    });
+    await page.route(events, (r: any) => r.abort());
+    let sent = 0;
+    const count = (r: any) => void (/\/api\/intake/.test(r.url()) && sent++);
+    page.on("request", count);
+    try {
+      await page.goto(`${web}/#/b/${held.buildId}`);
+      const card = page.locator(".card", { hasText: "It passed its checks with a warning." });
+      await card.waitFor();
+      await card.locator(".review-warning-at", { hasText: "src/index.ts:3" }).click();
+      const line = card.locator(".review-files .code-line.hl");
+      await line.waitFor();
+      if ((await line.locator(".no").last().innerText()).trim() !== "3") throw new Error(`highlighted: ${await line.innerText()}`);
+      await page.screenshot({ path: "/tmp/e2e-fr-held-warning.png" });
+      await card.getByRole("button", { name: "Ask builder to fix" }).click();
+      await page.waitForURL(new RegExp(`#/app/ui-counter\\?.*held=${held.buildId}`));
+      await page.waitForFunction(() => /A long random string/.test((document.querySelector(".drawer textarea") as HTMLTextAreaElement | null)?.value ?? ""));
+      const text = await page.locator(".drawer textarea").first().inputValue();
+      if (!text.includes("(src/index.ts:3)")) throw new Error(text);
+      await page.locator(".drawer .held-context", { hasText: "waiting for you" }).waitFor();
+      await page.waitForTimeout(500);
+      if (sent) throw new Error(`${sent} intake request(s) before Send`);
+      // Closed unsent: the next Change is an ordinary one, not built on the held change.
+      await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+      await page.getByRole("button", { name: /^Change/ }).first().click();
+      await page.locator(".drawer textarea").first().waitFor();
+      if (await page.locator(".drawer .held-context").count()) throw new Error("the held row came back");
+      if ((await page.locator(".drawer textarea").first().inputValue()).trim()) throw new Error("the box kept the fix");
+      if (/held=/.test(page.url())) throw new Error(page.url());
+    } finally {
+      page.off("request", count);
+      await page.unroute(own);
+      await page.unroute(events);
+    }
+    // Put aside.
+    await page.evaluate(async (id: string) => void (await fetch(`/api/builds/${id}/reject`, { method: "POST", headers: { "x-hewn-ui": "1" } })), held.buildId);
+  });
+
   await step("a tool from a file: Share… shows its sample data, and opens on the version on screen", async () => {
     const files = { ...readTree(SEED), "sample/calls.json": Buffer.from(JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }])) };
     const zip = packBundle(files, { format: 1, hewn: "e2e", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 1, hash: "d".repeat(64) } });

@@ -853,11 +853,13 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
 function earlierConversation(platform: Platform, owner: Agent, buildId: unknown): NonNullable<IntakeRequest["earlier"]> {
   if (typeof buildId !== "string") throw new PlatformError("invalid_request", "earlier.buildId must be a build id");
   const b = platform.getBuild(owner, buildId);
-  // An agent's build has no conversation with the intake: what it asked for stands in (a held change being fixed).
+  // An agent's build has no conversation with the intake (held work being fixed): what it asked for goes alongside,
+  // labelled as the agent's words; a new tool's is its name, purpose and requirements.
   const conversation = platform.buildContext(owner, buildId).conversation ?? [];
-  const asked = typeof b.request?.request === "string" ? b.request.request : "";
-  const messages = conversation.length || !asked ? conversation : [{ role: "user" as const, content: `What ${b.requestedBy} asked for: ${asked}` }];
-  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages };
+  const r = (b.request ?? {}) as Record<string, unknown>;
+  const said = (k: string) => (typeof r[k] === "string" && (r[k] as string).trim() ? (r[k] as string) : "");
+  const asked = conversation.length ? "" : said("request") || [said("name"), said("purpose"), said("requirements")].filter(Boolean).join("\n");
+  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages: conversation, ...(asked ? { asked: { by: b.requestedBy, text: asked } } : {}) };
 }
 
 /** Server-sent events: replay the build transcript, then follow live until promoted/failed. */
