@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
-import { ago, api, appIcon, builderLabel, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
+import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
 import { briefParts } from "./brief.js";
 import { brandTile, go, HEWNS_TOOLS, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
 import { installFromFileOrLink } from "./install.js";
@@ -233,12 +233,27 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, "+ New");
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : polishMode ? `Polish ${cap?.name ?? "it"}` : "What should change?")
-    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : held ? "New tool · fix" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : held ? "What should change?" : "What should it do?"));
+  // Built on held work ("Ask builder to fix" on its card): what it continues, above the box, with the way back to its card.
+  const heldRow = held && h("div", { class: "notice info held-context", hidden: true });
+  if (heldRow)
+    Promise.all([api(`/builds/${enc(held)}`), caps().catch(() => all)])
+      .then(([b, m]) => {
+        const c = m.get(b.capabilityId);
+        const what = b.kind === "create" ? `${actorLabel(b.requestedBy, m)}'s new tool, ` : `${actorLabel(b.requestedBy, m)}'s change to `;
+        const waiting = b.status === "review";
+        heldRow.classList.toggle("warn", !waiting);
+        heldRow.classList.toggle("info", waiting);
+        put(heldRow, h("span", { class: "grow" }, `Continues ${what}`, capRef(c, b.capabilityId), waiting ? " · waiting for you" : " · no longer waiting for you"), h("a", { href: `#/b/${enc(held)}` }, "View ›"));
+        heldRow.hidden = false;
+      })
+      .catch(() => {});
   // Q1 New: or install one: one of Hewn's tools, or a file or link someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
   const installOptions =
     mode === "create" &&
     !connection &&
+    !held &&
     h(
       "div",
       { class: "start-from" },
@@ -251,7 +266,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       ),
     );
   // Continue the last conversation? sits above the box, not in it.
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, installOptions));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, heldRow, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, heldRow, thread, offer, composer, installOptions));
   const say = (who, text, attachments) => (installOptions && (installOptions.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
