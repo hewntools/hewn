@@ -47,7 +47,7 @@ describe("share links: one version, until it expires or is revoked", () => {
     assert.ok(files["sample/calls.json"] && files["src/index.ts"]);
     await t.platform.sharedBundle(token);
     assert.equal(t.platform.shareLinks(USER, "running-log")[0].downloads, 2);
-    assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.action === "share" && e.detail === "v1 as a link (7 days)"));
+    assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.action === "share" && e.detail === "v1 as a link (7 days), MIT"));
     // A link to the newer version is its own link.
     const v2 = await t.platform.createShareLink(USER, "running-log", { version: 2, expires: "1d" });
     assert.equal(unpackBundle((await t.platform.sharedBundle(v2.token)).bundle).sidecar.tool.version, 2);
@@ -72,7 +72,7 @@ describe("share links: one version, until it expires or is revoked", () => {
     }
     const never = await t.platform.createShareLink(USER, "running-log", { expires: "never" });
     assert.equal(never.link.expiresAt, null);
-    assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.detail === "v1 as a link (until revoked)"));
+    assert.ok(t.platform.registry.lifecycleEvents().some((e) => e.detail === "v1 as a link (until revoked), MIT"));
     for (const expires of ["2d", "", "toString", "__proto__"]) await assert.rejects(t.platform.createShareLink(USER, "running-log", { expires }), /expires must be 1d, 7d, 30d, never/, expires);
     t.platform.registry.db.prepare("UPDATE share_links SET expires_at = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), never.link.id);
     await assert.rejects(t.platform.sharedBundle(never.token), (e: any) => e.code === "not_found");

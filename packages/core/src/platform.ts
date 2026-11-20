@@ -23,7 +23,7 @@ import { Models } from "./platform/models.ts";
 import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
 import type { BundleSummary, ShelfTool } from "./bundle.ts";
-import { type BundleOrigin, type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
+import { type BundleOrigin, type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck, type ShareLicense } from "./platform/sharing.ts";
 import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
 import { CHECKS_PER_HOUR, type ClientCheck, type Pack, PACK_LINK_MS, PACK_PAGE_BYTES, Submissions } from "./platform/submissions.ts";
 import type { CodeFile, CodeText } from "./code.ts";
@@ -259,6 +259,7 @@ export class Platform {
   shareCheck(owner: Agent, capabilityId: string, version?: number): Promise<ShareCheck> { return this.d.sharing.shareCheck(owner, capabilityId, version); }
   shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> { return this.d.sharing.shareBundle(owner, capabilityId, version); }
   createShareLink(owner: Agent, capabilityId: string, req: { version?: number; expires?: string }): Promise<{ token: string; link: ShareLink }> { return this.d.sharing.createShareLink(owner, capabilityId, req); }
+  setShareLicense(owner: Agent, capabilityId: string, req: { license?: string; holder?: string | null }): ShareLicense { return this.d.sharing.setShareLicense(owner, capabilityId, req); }
   shareLinks(owner: Agent, capabilityId: string): ShareLink[] { return this.d.sharing.shareLinks(owner, capabilityId); }
   revokeShareLink(owner: Agent, capabilityId: string, id: string) { return this.d.sharing.revokeShareLink(owner, capabilityId, id); }
   shareLinkWorks(token: string): boolean { return this.d.sharing.shareLinkWorks(token); }

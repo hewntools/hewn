@@ -40,7 +40,7 @@ Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g
 
 `"saturation"` (ABI 2.4; integer 0–150, default 100) is how colourful the tile is. Set it only for a brand, with the brand's hue: `0` for a black-and-white service (Ghost, Notion, the BBC: black or white on grey), 30–60 for a muted brand, up to 150 for a loud one (Todoist red).
 
-Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them.
+Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them. Leave `"license"` (ABI 2.7) as you found it, and a `LICENSE` file too: the owner picks the license when they share the tool.
 
 Read `capability.json` back whole after each edit: a trailing comma or unquoted key fails the first step.
 

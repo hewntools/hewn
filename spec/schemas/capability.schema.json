@@ -75,6 +75,12 @@
       "minimum": 0,
       "maximum": 150
     },
+    "license": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]*( (AND|OR|WITH) [A-Za-z0-9][A-Za-z0-9.+-]*)*$"
+    },
     "source": {
       "type": "object",
       "required": [

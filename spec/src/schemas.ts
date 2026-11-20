@@ -30,6 +30,7 @@ export const MANIFEST_SCHEMA: JSONSchema = {
     runtime: { enum: [...RUNTIME_PROFILES] },
     hue: { type: "integer", minimum: 0, maximum: 359 },
     saturation: { type: "integer", minimum: 0, maximum: 150 },
+    license: { type: "string", minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9][A-Za-z0-9.+-]*( (AND|OR|WITH) [A-Za-z0-9][A-Za-z0-9.+-]*)*$" },
     source: {
       type: "object",
       required: ["id", "version", "hash", "from"],

@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **A shared tool carries a license.** Share… has a License row: MIT (a tool built on your Hewn starts there), Apache 2.0, GPL 3.0 or later, CC0 or all rights reserved, each in a line of plain words. Hewn writes it into the file as the manifest's `license` (ABI 2.7) and a `LICENSE` file with a copyright line, never as a new version, and the install sheet shows it. See [License](docs/sharing.md#license).
 
 ### Safety and limits
 

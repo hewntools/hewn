@@ -9,7 +9,11 @@ import { plural } from "./intake.js";
 import { download, openChange } from "./tool-actions.js";
 import { segmented } from "./widgets.js";
 
-export { samplePage, shareButton, shareIcon, shareSheet };
+export { licenseWords, samplePage, shareButton, shareIcon, shareSheet };
+
+/** A license as the sheets say it: its name, or "All rights reserved" (none). */
+const LICENSE_NAMES = { MIT: "MIT", "Apache-2.0": "Apache 2.0", "GPL-3.0-or-later": "GPL 3.0 or later", "CC0-1.0": "CC0 (public domain)", none: "All rights reserved" };
+const licenseWords = (id) => (id ? LICENSE_NAMES[id] ?? id : LICENSE_NAMES.none);
 
 /** The share mark everyone knows: a box with an arrow out of it. */
 const shareIcon = () =>
@@ -63,6 +67,34 @@ async function shareSheet(c, { version } = {}) {
         await api(`/capabilities/${enc(c.id)}/links/${enc(l.id)}`, { method: "DELETE" });
         await reload();
       };
+      // Share… › License: one row, the five choices, each with its line; the copyright line under it, with an optional name. Remembered, no new version.
+      const setLicense = async (change) => {
+        try {
+          check = { ...check, license: await api(`/capabilities/${enc(c.id)}/share/license`, { method: "PUT", body: change }) };
+          draw();
+        } catch (e) {
+          fail(e);
+        }
+      };
+      const licenseSection = () => {
+        const l = check.license;
+        const chosen = l.choices.find((x) => x.id === l.id) ?? { id: l.id, label: l.id, line: "" };
+        const select = h("select", { class: "license-select", "aria-label": "License", onchange: (e) => setLicense({ license: e.target.value }) }, l.choices.map((x) => h("option", { value: x.id, selected: x.id === l.id }, x.label)));
+        const holder = h("input", { type: "text", class: "grow", value: l.holder ?? "", placeholder: `the ${check.name} authors`, maxLength: 80, "aria-label": "Copyright holder" });
+        holder.addEventListener("change", () => setLicense({ holder: holder.value }));
+        const why = l.why === "arrived-without" ? "It arrived without a license. " : "";
+        return h(
+          "div",
+          {},
+          h("div", { class: "eyebrow share-eyebrow" }, "License"),
+          h(
+            "ul",
+            { class: "list" },
+            h("li", {}, h("div", { class: "grow" }, h("span", {}, chosen.label), h("span", { class: "sub" }, `${why}${chosen.line}`)), select),
+            l.id !== "none" && h("li", {}, h("div", { class: "grow stack-xs" }, h("span", { class: "sub mono" }, l.copyright), h("label", { class: "row tight" }, h("span", { class: "small faint" }, "Your name, optional"), holder))),
+          ),
+        );
+      };
       const draw = () => {
         put(pick, check.versions.map((v) => h("option", { value: v, selected: v === check.version }, `v${v}`)));
         const keys = check.findings.filter((f) => f.kind === "secret");
@@ -98,6 +130,7 @@ async function shareSheet(c, { version } = {}) {
             h("ul", { class: "list" }, keys.map(finding), warnings.map(finding), sampleRow),
             h("div", { class: "small faint share-never" }, "Never in it: your data, keys, settings, conversations, logs."),
           ),
+          licenseSection(),
           h(
             "div",
             { class: blocked ? "share-ways off" : "share-ways" },
@@ -107,7 +140,7 @@ async function shareSheet(c, { version } = {}) {
               { class: "list" },
               h("li", {}, h("div", { class: "grow" }, h("span", {}, "Download"), h("span", { class: "sub mono" }, name)), h("button", { class: "sm primary", disabled: blocked, onclick: () => download(`/api/capabilities/${enc(c.id)}/share/download?version=${check.version}`) }, "Download")),
               check.address
-                ? h("li", {}, h("div", { class: "grow" }, h("span", {}, "Link"), h("span", { class: "sub" }, "Anyone with it can install this version")), h("button", { class: "sm", disabled: blocked, onclick: () => linkSheet(c, check.version).then(reload).catch(fail) }, "Create…"))
+                ? h("li", {}, h("div", { class: "grow" }, h("span", {}, "Link"), h("span", { class: "sub" }, "Anyone with it can install this version")), h("button", { class: "sm", disabled: blocked, onclick: () => linkSheet(c, check.version, check.license).then(reload).catch(fail) }, "Create…"))
                 : h("li", {}, h("div", { class: "grow" }, h("span", {}, "Link"), h("span", { class: "sub" }, "Links need a public address")), h("button", { class: "link sm", onclick: () => (close(), go("#/settings/remote")) }, "Set up remote access ›")),
             ),
           ),
@@ -148,7 +181,7 @@ const EXPIRES = [
  * S3 a link to one version: pick how long it works (7 days unless you pick another), Create link,
  * then the link with Copy. Shown once: Hewn keeps only a fingerprint of it.
  */
-function linkSheet(c, version) {
+function linkSheet(c, version, license) {
   return modal(
     (close) => {
       let expires = "7d";
@@ -183,6 +216,7 @@ function linkSheet(c, version) {
       return [
         h("div", { class: "sheet-title" }, `Link to ${c.name} v${version}`),
         h("div", { class: "small muted" }, "A newer version needs a new link, so it's checked again."),
+        license && h("div", { class: "small faint" }, license.id === "none" ? "All rights reserved: no license goes with it." : `Under ${licenseWords(license.id)} · ${license.copyright}`),
         h("div", { class: "stack-sm" }, h("div", { class: "eyebrow" }, "Expires"), pick, line),
         result,
         status,
