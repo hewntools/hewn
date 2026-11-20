@@ -534,6 +534,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
+    // Check it yourself, on a held submission: your builder reads its code now, whatever Settings › AI says, and it's kept.
+    if (sub === "read" && method === "POST") return platform.readHeldBuild(owner, id);
     // A held build's review card: its files against the version it was built on (or one file, ?path=), and its four renders.
     if (sub === "code" && method === "GET") {
       const path = url.searchParams.get("path");

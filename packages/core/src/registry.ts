@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import type { BundleSummary } from "./bundle.ts";
 import type { CapabilityManifest, ToolSource } from "./manifest.ts";
 import type { CheckWarning, Sql } from "./ports.ts";
 
@@ -131,7 +132,12 @@ export interface BuildContext {
   ownerInstructions?: OwnerInstructions;
   /** Which brief it ran on: the spec's version and a short hash of spec/builder-brief.md, e.g. "2.3.2+a1b2c3d4e5f6". */
   brief?: string;
+  /** A client's submission as the owner's reader read it, or why the code wasn't read. The owner's only: never on the build an agent sees. */
+  reading?: BuildReading;
 }
+
+/** What the reader said of a build's code (`summary`), or why the code wasn't read (`unread`), and when. */
+export type BuildReading = ({ summary: BundleSummary } | { unread: string }) & { at: string };
 
 export interface BuildRow {
   id: string;
@@ -342,12 +348,14 @@ CREATE TABLE IF NOT EXISTS build_charges (
 -- What led to a build, kept for the capability's life: the owner's conversation with the intake
 -- (the web client's turns), the owner's instructions it ran with (owner_instructions, the lines as
 -- JSON; a build from before 0.4.11 has BUILDER.md's section in instructions instead, not read), and
--- which brief it ran on (the spec's version and a short hash of spec/builder-brief.md as this Hewn had it).
+-- which brief it ran on (the spec's version and a short hash of spec/builder-brief.md as this Hewn had it);
+-- and a client's submission as the owner's reader read it, or why it wasn't (reading, JSON).
 CREATE TABLE IF NOT EXISTS build_context (
   build_id       TEXT PRIMARY KEY,
   conversation   TEXT,
   instructions   TEXT,
-  brief          TEXT
+  brief          TEXT,
+  reading        TEXT
 );
 -- Images and files the owner attached in the intake's box: the bytes are blobs (attachments/<ref>);
 -- these rows say what they are, which conversation (session) they came with, and which build they
@@ -511,6 +519,7 @@ const ADDED_COLUMNS: [string, string, string][] = [
   ["capabilities", "source", "TEXT"],
   ["builds", "discarded_at", "TEXT"],
   ["build_context", "owner_instructions", "TEXT"],
+  ["build_context", "reading", "TEXT"],
 ];
 
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
@@ -827,14 +836,14 @@ export class Registry {
   setBuildContext(buildId: string, c: BuildContext) {
     const next = { ...this.buildContext(buildId), ...c };
     this.db
-      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, owner_instructions, brief) VALUES (?, ?, ?, ?)")
-      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.ownerInstructions ? JSON.stringify(next.ownerInstructions) : null, next.brief ?? null);
+      .prepare("INSERT OR REPLACE INTO build_context (build_id, conversation, owner_instructions, brief, reading) VALUES (?, ?, ?, ?, ?)")
+      .run(buildId, next.conversation ? JSON.stringify(next.conversation) : null, next.ownerInstructions ? JSON.stringify(next.ownerInstructions) : null, next.brief ?? null, next.reading ? JSON.stringify(next.reading) : null);
   }
 
   buildContext(buildId: string): BuildContext | undefined {
-    const r = this.db.prepare("SELECT conversation, owner_instructions, brief FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
+    const r = this.db.prepare("SELECT conversation, owner_instructions, brief, reading FROM build_context WHERE build_id = ?").get(buildId) as Row | undefined;
     if (!r) return undefined;
-    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.owner_instructions ? { ownerInstructions: JSON.parse(r.owner_instructions) } : {}), ...(r.brief ? { brief: r.brief } : {}) };
+    return { ...(r.conversation ? { conversation: JSON.parse(r.conversation) } : {}), ...(r.owner_instructions ? { ownerInstructions: JSON.parse(r.owner_instructions) } : {}), ...(r.brief ? { brief: r.brief } : {}), ...(r.reading ? { reading: JSON.parse(r.reading) } : {}) };
   }
 
   insertAttachment(a: AttachmentRef & { session: string }) {

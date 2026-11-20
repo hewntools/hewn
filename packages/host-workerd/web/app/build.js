@@ -11,7 +11,7 @@ import { codeBrowser } from "./files.js";
 import { route } from "./router.js";
 import { conversationThread } from "./intake.js";
 import { titleCase } from "./models.js";
-import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, reviewWarnings, warnedWords, warningsAsk } from "./review.js";
+import { changeList, reviewChanges, reviewOp, reviewReading, reviewRequest, reviewTitle, reviewWarnings, warnedWords, warningsAsk } from "./review.js";
 import { openCapability, openChange } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
@@ -471,10 +471,33 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
             create ? go(`#/new?${new URLSearchParams({ fix: "1", held: id })}`) : openChange(cap(), { fix: "1", held: id });
           },
         }, "Ask builder to fix");
+      // A client's own code: what your builder read in it, or why it wasn't read and Check it yourself, which reads it now.
+      const reading = b.builder === "submitted" && h("div", {});
+      if (reading) {
+        const tried = (b.review.warnings ?? []).filter((w) => w.check === "hosts").map((w) => /^tried to reach (\S+),/.exec(w.message)?.[1]).filter(Boolean);
+        let read;
+        const draw = (busy = false) => {
+          const check = !read?.summary && h("button", { class: "link sm", disabled: busy, onclick: () => readNow() }, busy ? "Reading the code…" : "Check it yourself");
+          put(reading, reviewReading(read, { ...(shownFiles ? { openAt } : {}), check, tried }));
+        };
+        const readNow = async () => {
+          draw(true);
+          try {
+            read = await api(`/builds/${enc(id)}/read`, { method: "POST" });
+          } catch (e) {
+            fail(e);
+          }
+          draw();
+        };
+        api(`/builds/${enc(id)}/context`)
+          .then((c) => ((read = c.reading), draw()))
+          .catch(() => draw());
+      }
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), warnedWords(b.review.warnings)),
         reviewWarnings(b.review.warnings, shownFiles ? { openAt } : {}),
+        reading,
         b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, create ? "What agents can do with it" : "New"),
         ...b.review.newOperations.map((o) => reviewOp(o, { full: true })),
         changes && [h("div", { class: "eyebrow" }, changes.every(([ok]) => ok) ? "Nothing else changes" : "Also"), changeList(changes)],

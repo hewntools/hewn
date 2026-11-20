@@ -8,14 +8,14 @@ import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, CONTRACTS_DIR, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
-import type { BundleSummary } from "../bundle.ts";
+import { type BundleSummary, readSummary } from "../bundle.ts";
 import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, stampSource, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { BuildPass, Files } from "../ports.ts";
 import { isPolish, type Pass, PASS_TRIES, PASSES, POLISH_KEEPS, passRequest } from "../passes.ts";
 import { SAMPLE_FILE } from "../bundle.ts";
-import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReview, BuildRow, BuildTurn } from "../registry.ts";
+import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReading, BuildReview, BuildRow, BuildTurn } from "../registry.ts";
 import { sha256 } from "../sha256.ts";
 import { MAX_SATURATION } from "./presentation.ts";
 import { attachmentRefs } from "./attachments.ts";
@@ -24,6 +24,7 @@ import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
 import { type Candidate, reviewShotKey, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
+import { placed, readable } from "./sharing.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
 import spec from "@hewntools/spec/package.json" with { type: "json" };
@@ -53,6 +54,8 @@ export interface BuildView {
   screenshot?: boolean;
   /** Where the build is in its pipeline, while in flight. */
   step?: BuildStepState;
+  /** The owner's review list only: what the reader said of a held submission's code, or why it wasn't read. */
+  reading?: BuildReading;
   /** Test cases of the latest validation. */
   tests?: { passed: number; total: number };
   /** Plain-language reason, when failed. */
@@ -159,6 +162,8 @@ type RetryMarks = { retryOf?: string; autoRetryOf?: string; fixOf?: string; fixF
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
+/** The most a submission's read may take (usually under a minute): past it, the code wasn't read. */
+export const READ_MS = 5 * 60_000;
 
 /** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
 export type ModelAsk = {
@@ -1480,6 +1485,8 @@ export class Builds extends Domain {
     const log: string[] = [];
     const step = this.stepLog(build, submitter, log);
     try {
+      // A client's submission is read before it's held or goes live; the read never holds it.
+      if (build.builder === "submitted") await this.readSubmission(build, candidate, step);
       const r = await this.d.validation.promote(build, candidate, step);
       if ("review" in r) {
         step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review, build.kind, !!(build.request as RetryMarks).fixOf)})`);
@@ -1808,10 +1815,53 @@ export class Builds extends Domain {
     return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
   }
 
-  /** Builds waiting for the owner's review (owner only). */
+  /** Builds waiting for the owner's review (owner only), each with what the reader said of its code. */
   buildsInReview(owner: Agent): BuildView[] {
     requireOwner(owner);
-    return this.registry.buildsInReview().map((b) => this.buildView(b));
+    return this.registry.buildsInReview().map((b) => {
+      const reading = this.registry.buildContext(b.id)?.reading;
+      return { ...this.buildView(b), ...(reading ? { reading } : {}) };
+    });
+  }
+
+  /**
+   * A client's submission read by the owner's reader before it's held or goes live, as a tool from a file is before
+   * it's installed: what it does with the owner's data and what it found. Kept for the owner only
+   * (`build_context`): shown to the agent, it could write its code to the reader. It describes and warns, never
+   * gates: a read that's off, refused or failed is kept as why the code wasn't read, and the build carries on.
+   */
+  private async readSubmission(build: BuildRow, candidate: Candidate, step: (message: string) => void) {
+    const reading = await this.readCode(candidate.manifest, candidate.files, false);
+    this.registry.setBuildContext(build.id, { reading });
+    step("summary" in reading ? "code read by the owner's reader" : "the code wasn't read");
+  }
+
+  /**
+   * The owner's reader on a held build's code, asked for (*Check it yourself*): whatever the setting, read once and
+   * kept. A read that fails leaves an earlier one as it was. Owner only.
+   */
+  async readHeldBuild(owner: Agent, buildId: string): Promise<BuildReading> {
+    const b = this.heldBuild(owner, buildId);
+    const { files } = await this.loadCandidate(b.review.contentHash);
+    const reading = await this.readCode(JSON.parse(text(files["capability.json"])) as CapabilityManifest, files, true);
+    const before = this.registry.buildContext(b.id)?.reading;
+    if ("summary" in reading || !before || !("summary" in before)) this.registry.setBuildContext(b.id, { reading });
+    return reading;
+  }
+
+  /** The reader on a tool's files: its reading, placed in them, or why the code wasn't read. `asked`: the owner asked, whatever the setting. */
+  private async readCode(manifest: CapabilityManifest, files: Files, asked: boolean): Promise<BuildReading> {
+    const at = new Date().toISOString();
+    const unread = (why: string): BuildReading => ({ unread: why, at });
+    if (!asked && !this.platform.readsCode()) return unread("Hewn reads code only when you ask (Settings › AI)");
+    const read = this.platform.readCode;
+    if (!read) return unread("no builder is set up to read it (Settings › AI)");
+    try {
+      const summary = readSummary(await read({ manifest, ...readable(versionFiles(files)) }, AbortSignal.timeout(READ_MS)));
+      return summary ? { summary: placed(summary, files), at } : unread("the reading came back empty");
+    } catch (e) {
+      return unread(`the read didn't finish: ${(e as Error).message.slice(0, 200)}`);
+    }
   }
 
   /**

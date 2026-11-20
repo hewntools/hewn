@@ -13,7 +13,8 @@ import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { DOC_NAME } from "@hewntools/core/docs.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { GenerateRequest, GenerateResult, HostAllowance, HostGenerateResult } from "@hewntools/core/models.ts";
-import type { ShelfTool } from "@hewntools/core/bundle.ts";
+import { readSummary, type ShelfTool } from "@hewntools/core/bundle.ts";
+import type { IntakeProgress } from "./surface/intake-types.ts";
 import { fromBase64, toBase64 } from "@hewntools/core/files.ts";
 import { checkToJson } from "@hewntools/core/checks.ts";
 import { Platform } from "@hewntools/core/platform.ts";
@@ -588,6 +589,19 @@ export class HewnDO extends DurableObject<Env> {
         timezone: () => this.settings().timeZone || env.TIMEZONE || "UTC",
         onSchedulesChanged: () => void this.armAlarm(),
         schedulesOff: env.SCHEDULES === "off",
+        // The reader on an agent's submission: the intake's "summarize", as for a file the owner installs (hosted, a charge).
+        readCode: async (bundle, signal) => {
+          const intake = this.surfaceHost().intake;
+          if (!intake) throw new Error("no builder is set up to read it");
+          const reply = await intake({ mode: "summarize", messages: [], bundle }, (p) => {
+            const charge = (p as IntakeProgress).charge;
+            if (charge !== undefined) this.platform.recordHostCharge(USER, "intake", charge);
+          }, signal);
+          const summary = reply.kind === "summary" ? readSummary(reply) : null;
+          if (!summary) throw new Error("the reading didn't come back as a summary");
+          return summary;
+        },
+        readsCode: () => this.settings().codeReading !== "asked",
         // Model providers are called from here (host-side), never from capability code.
         modelFetch: (url, init) => fetch(url, init),
         // Hosted: tools' model calls go to the host, through the supervisor (it holds the host's token).
@@ -700,7 +714,7 @@ export class HewnDO extends DurableObject<Env> {
     const next = { ...this.settings(), ...change } as Settings;
     const bad = settingsProblems(next as unknown as Record<string, unknown>, { remote: this.env.REMOTE_JOBS === "1", changed: Object.keys(change) });
     if (bad.length) throw new PlatformError("invalid_request", bad.join("; "));
-    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB"] as const)
+    for (const k of ["builder", "intake", "maxBuildAttempts", "sandbox", "firstRunDone", "logRetentionDays", "timeZone", "jobsChosen", "jobModels", "agentModels", "buildPasses", "toolDataLimitMB", "toolDataLimitsMB", "codeReading"] as const)
       if (k in change && next[k] !== undefined) this.sql.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(k, JSON.stringify(next[k]));
     return next;
   }
