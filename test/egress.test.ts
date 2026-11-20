@@ -81,4 +81,23 @@ describe("egress gate", () => {
     const looped = await gatedFetch(new Request("https://api.example.com/loop"), ["api.example.com"], n.fetchFn);
     assert.equal(looped.status, 508);
   });
+
+  test("each refused host is told before the refusal is answered: outside the grant, a redirect's, with the network off or GET only; an allowed one isn't", async () => {
+    const n = net({ "https://api.example.com/go": redirect(302, "https://evil.example/c"), "https://api.example.com/ok": () => new Response("ok") });
+    const told: string[] = [];
+    const refused = async (host: string) => {
+      await new Promise((r) => setTimeout(r, 5));
+      told.push(host);
+    };
+    const ask = async (url: string, init: RequestInit = {}, network?: "off" | "get") => {
+      const before = told.length;
+      const r = await gatedFetch(new Request(url, init), ["api.example.com"], n.fetchFn, network, refused);
+      return { status: r.status, told: told.slice(before) };
+    };
+    assert.deepEqual(await ask("https://other.example/a"), { status: 403, told: ["other.example"] });
+    assert.deepEqual(await ask("https://api.example.com/go"), { status: 403, told: ["evil.example"] });
+    assert.deepEqual(await ask("https://api.example.com/ok", {}, "off"), { status: 403, told: ["api.example.com"] });
+    assert.deepEqual(await ask("https://api.example.com/ok", { method: "POST", body: "x" }, "get"), { status: 403, told: ["api.example.com"] });
+    assert.deepEqual(await ask("https://api.example.com/ok"), { status: 200, told: [] });
+  });
 });

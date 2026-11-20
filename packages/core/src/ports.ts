@@ -66,6 +66,11 @@ export interface ExecutionTarget {
   deadline?: Deadline;
   /** A widget's call: statements that would write the state are refused and secret updates dropped. */
   readOnly?: boolean;
+  /**
+   * Told, once the call is over, the hosts its fetches were refused (validation's report of the hosts a
+   * candidate tried). Only a runtime that gates the network can tell: workerd's.
+   */
+  onRefusedHosts?: (hosts: string[]) => void;
 }
 
 /** A capability → capability call made by running code, routed by the platform. */

@@ -50,9 +50,12 @@ export type CallbackKind = keyof Callbacks;
 /** Bundles the tools process keeps by hash. */
 export const CODES_KEPT = 200;
 
-/** Egress's mark to the platform (POST `/egress`): a fetch out of `isolate` went out (1) or is over (-1). */
+/**
+ * Egress's mark to the platform (POST `/egress`): a fetch out of `isolate` went out (1) or is over (-1);
+ * or one was refused, and to which host (`denied`).
+ */
 export const EGRESS_PATH = "/egress";
-export type EgressMark = { isolate: string; delta: 1 | -1 };
+export type EgressMark = { isolate: string; delta: 1 | -1 } | { isolate: string; denied: string };
 
 /** How a call to the tools process is sent: a bound on its answer, and `started` (an invoke started there, in this isolate). */
 export type SendOptions = { timeoutMs?: number; started?: (isolate: string) => void };

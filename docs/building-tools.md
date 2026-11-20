@@ -35,7 +35,7 @@ As it works, the builder checks its own work: its `check` tool runs what Hewn ru
 Then Hewn:
 
 1. checks the manifest and the contracts
-2. runs the tool's tests, and its database migrations on a copy of your data
+2. runs the tool's tests, and its database migrations on a copy of your data. Nothing goes out to the internet while it does: a site its code tries to reach that it doesn't name among its hosts is a [warning](#changing-a-tool), naming the site and what tried it (it's never a failure; when the tool runs, a site it isn't allowed is refused anyway)
 3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
 4. for a new tool with a screen (or a [Polish](#polishing-a-tool)), has the builder look at its screen again, twice (below)
 5. makes it live if all of that passes

@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **The hosts a tool tried.** Validation runs a tool with nothing going out to the internet, and now notes the sites its code tried to reach: one it doesn't name among its hosts is a warning, naming the site and the operation that tried it. It never fails the tool, since a site it isn't allowed is refused when it runs anyway. See [The build](docs/building-tools.md#the-build).
 
 ### Safety and limits
 

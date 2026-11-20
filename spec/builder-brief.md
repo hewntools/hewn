@@ -351,7 +351,7 @@ At least one case; cover every operation. `expect` matches object subsets; array
 
 Cases run on the real clock: give inputs fixed ISO dates (a month end, a DST change), never "today", and `expect` only what holds on any day (2020 is always past).
 
-**Validation is offline:** no network, no real secrets, no other capabilities, no model. Cases supply fakes via `secrets`, `config`, `calls`, `model` keys (examples in each section).
+**Validation is offline:** no network, no real secrets, no other capabilities, no model. Cases supply fakes via `secrets`, `config`, `calls`, `model` keys (examples in each section). Every fetch is refused here, and a host your code tries that `requires.hosts` doesn't declare is a warning the owner sees on the build.
 
 ### sample/calls.json (ABI 2.5)
 

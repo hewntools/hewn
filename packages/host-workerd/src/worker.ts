@@ -350,8 +350,12 @@ interface ToolsSide {
   away(): boolean;
   /** The tools process won't stop a call (code that never yields): have the supervisor restart it. */
   stuck(reason: string): Promise<void>;
+  /** The hosts fetches out of `isolate` were refused since this was last asked (Egress's marks), forgotten once told. */
+  refused(isolate: string): string[];
 }
 
+/** The most refused hosts kept per isolate, and isolates with some, until a call collects them. */
+const REFUSED_KEPT = 32;
 /** How long a stop may take before the tools process counts as stuck. */
 const STOP_TIMEOUT_MS = 1000;
 /** How long a call waits for the tools to answer again after they stopped responding. */
@@ -476,6 +480,9 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
       } finally {
         timer.clear();
         tools.calls.delete(token);
+        // Each refusal is marked before it's answered, so a call's own are in by the time it's over (a build's calls run one at a time).
+        const refused = running.isolate ? tools.refused(running.isolate) : [];
+        if (refused.length) target.onRefusedHosts?.(refused);
       }
     },
     // Describing only loads code (in an isolate of its own, gone once described); any capability id's host can do it.
@@ -539,6 +546,8 @@ export class HewnDO extends DurableObject<Env> {
   private toolsOtherWork = { running: 0 };
   /** Fetches out of each tool isolate in the tools process (Egress's marks), by isolate key. */
   private fetchesOut = new Map<string, number>();
+  /** The hosts fetches out of each tool isolate were refused (Egress's marks), until its calls are told (at most REFUSED_KEPT of each). */
+  private refusedHosts = new Map<string, Set<string>>();
   /** When the supervisor last said the tools process went away (stalled or exited), and when one answered again (ms). */
   private toolsGoneAt = 0;
   private toolsBackAt = 0;
@@ -566,6 +575,11 @@ export class HewnDO extends DurableObject<Env> {
             away: () => this.toolsGoneAt > this.toolsBackAt,
             // The supervisor tells this DO what's stalled (/_admin/tools-stalled), then restarts the tools process.
             stuck: async (reason) => void (await supervisor(env).json("/tools/stalled", { reason })),
+            refused: (isolate) => {
+              const hosts = this.refusedHosts.get(isolate);
+              this.refusedHosts.delete(isolate);
+              return hosts ? [...hosts] : [];
+            },
           },
         ),
         workbench: remoteWorkbench(env, this.visualInvokers),
@@ -634,8 +648,17 @@ export class HewnDO extends DurableObject<Env> {
     }
   }
 
-  /** Egress's mark (ToolCalls): a fetch out of a tool isolate went out (1) or is over (-1). */
+  /** Egress's mark (ToolCalls): a fetch out of a tool isolate went out (1) or is over (-1), or was refused. */
   async toolsFetch(mark: EgressMark): Promise<void> {
+    if ("denied" in mark) {
+      // Kept for the call to be told; what a call never collects (code still fetching after it ended) is bounded.
+      const hosts = this.refusedHosts.get(mark.isolate) ?? new Set<string>();
+      if (hosts.size < REFUSED_KEPT) hosts.add(mark.denied);
+      this.refusedHosts.delete(mark.isolate);
+      this.refusedHosts.set(mark.isolate, hosts);
+      if (this.refusedHosts.size > REFUSED_KEPT) this.refusedHosts.delete(this.refusedHosts.keys().next().value!);
+      return;
+    }
     const n = (this.fetchesOut.get(mark.isolate) ?? 0) + (mark.delta > 0 ? 1 : -1);
     if (n > 0) this.fetchesOut.set(mark.isolate, n);
     else this.fetchesOut.delete(mark.isolate);
@@ -846,6 +869,7 @@ export class HewnDO extends DurableObject<Env> {
           // The supervisor: a new tools process answers. Nothing of the old one's fetches is out any more.
           this.toolsBackAt = Date.now();
           this.fetchesOut.clear();
+          this.refusedHosts.clear();
           return Response.json({ ok: true });
         case "/_admin/visual-invoke": {
           // The supervisor's headless browser calling the candidate UI's API.

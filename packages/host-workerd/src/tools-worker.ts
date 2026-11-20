@@ -99,9 +99,9 @@ export default {
 /** The key of the isolate that runs `hash` with these hosts and limit (CapabilityHost.worker); `named`: the live tool's own. */
 const isolateKey = (hash: string, hosts: string[], limit: number, named: boolean) => `${hash}|${hosts.join(",")}|${limitBytes(limit)}${named ? "" : "|unnamed"}`;
 
-/** Tell the platform a fetch out of `isolate` went out (1) or is over (-1): its code waits on the network meanwhile. */
-const egressMark = (env: Env, isolate: string, delta: EgressMark["delta"]) =>
-  env.PLATFORM.fetch(`http://platform${EGRESS_PATH}`, { method: "POST", headers: { [TOOLS_TOKEN_HEADER]: env.TOOLS_TOKEN, "content-type": "application/json" }, body: JSON.stringify({ isolate, delta } satisfies EgressMark) }).then(
+/** Tell the platform a fetch out of `isolate` went out (1) or is over (-1), its code waiting on the network meanwhile; or was refused (`denied`: its host). */
+const egressMark = (env: Env, mark: EgressMark) =>
+  env.PLATFORM.fetch(`http://platform${EGRESS_PATH}`, { method: "POST", headers: { [TOOLS_TOKEN_HEADER]: env.TOOLS_TOKEN, "content-type": "application/json" }, body: JSON.stringify(mark) }).then(
     (r) => r.body?.cancel(),
     () => {},
   );
@@ -308,14 +308,15 @@ export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: st
     // responding. Each mark is awaited (a loop that follows can't lose it), and kept alive past a stopped call.
     const { hosts, isolate } = this.ctx.props;
     const over = () => {
-      const mark = egressMark(this.env, isolate, -1);
+      const mark = egressMark(this.env, { isolate, delta: -1 });
       this.ctx.waitUntil(mark);
       return mark;
     };
-    await egressMark(this.env, isolate, 1);
+    await egressMark(this.env, { isolate, delta: 1 });
     let res: Response;
     try {
-      res = await gatedFetch(request, hosts ?? [], fetch, networkMode(this.env.NETWORK));
+      // A refused host is told before the refusal is answered, so the call that tried it is still running.
+      res = await gatedFetch(request, hosts ?? [], fetch, networkMode(this.env.NETWORK), (host) => egressMark(this.env, { isolate, denied: host }));
     } catch (e) {
       await over();
       throw e;
