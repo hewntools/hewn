@@ -17,6 +17,8 @@ const opLabel = (key) => {
 function reviewTitle(b, all) {
   const who = actorLabel(b.requestedBy, all);
   const ref = capRef(all.get(b.capabilityId), b.capabilityId);
+  // A fix you asked for of a held change's warnings: held again, for you to allow.
+  if (b.request?.fixOf) return h("span", { class: "title-ref" }, b.kind === "create" ? "The builder fixed the warnings in a new tool, " : "The builder fixed the warnings in ", ref);
   const ops = b.review.newOperations.map((o) => `“${opLabel(o.key)}”`);
   // A new tool: everything in it is new.
   if (b.kind === "create") return h("span", { class: "title-ref" }, b.builder === "submitted" ? `${who} wrote a new tool, ` : `${who} asked for a new tool, `, ref);
@@ -64,15 +66,26 @@ function reviewChanges(r) {
     c.removedOperations.length && [false, `Removes ${andList(c.removedOperations.map(opLabel))} (unused)`],
   ].filter(Boolean);
 }
-/** What its checks found that didn't fail it, each a notice: the sentence, then the check and where. Nothing when there's none. */
-const reviewWarnings = (ws = []) =>
+/**
+ * What its checks found that didn't fail it, each a notice: the sentence, then the check and where.
+ * `openAt(w)`: where it is opens in the card's files, at its line. Nothing when there's none.
+ */
+const reviewWarnings = (ws = [], { openAt } = {}) =>
   ws.length > 0 && [
     h("div", { class: "eyebrow" }, ws.length === 1 ? "Warning" : "Warnings"),
-    h("div", { class: "stack-sm" }, ws.map((w) => h("div", { class: "notice warn review-warning" }, h("span", { class: "stack-sm" }, h("span", {}, w.message), h("span", { class: "small faint mono" }, [w.check, w.file && `${w.file}${w.line ? `:${w.line}` : ""}`].filter(Boolean).join(" · ")))))),
+    h(
+      "div",
+      { class: "stack-sm" },
+      ws.map((w) => {
+        const where = w.file && `${w.file}${w.line ? `:${w.line}` : ""}`;
+        const at = where && openAt ? h("button", { class: "link mono review-warning-at", type: "button", title: `Open ${w.file}${w.line ? ` at line ${w.line}` : ""}`, onclick: () => openAt(w) }, where) : where;
+        return h("div", { class: "notice warn review-warning" }, h("span", { class: "stack-sm" }, h("span", {}, w.message), h("span", { class: "small faint mono" }, w.check, at && [" · ", at])));
+      }),
+    ),
   ];
 /** The card's line under its title: "It passed its checks" (with 2 warnings). */
 const warnedWords = (ws = []) => `It passed its checks${ws.length ? ` with ${ws.length === 1 ? "a warning" : `${ws.length} warnings`}` : ""}. It goes live only if you allow it.`;
 const changeList = (items) => h("ul", { class: "small stack-sm change-list" }, items.map(([ok, text]) => h("li", { class: ok ? "muted" : "strong" }, `${ok ? "✓" : "•"} ${text}`)));
 
 /** The agent's own words, folded: written for the builder, so not the first thing to read. */
-const reviewRequest = (b, all) => b.request?.request && h("details", { class: "small" }, h("summary", {}, b.builder === "submitted" ? `What ${b.submittedBy ?? actorLabel(b.requestedBy, all)} says it changes` : `What ${actorLabel(b.requestedBy, all)} asked for`), h("p", { class: "muted" }, String(b.request.request)));
+const reviewRequest = (b, all) => b.request?.request && h("details", { class: "small" }, h("summary", {}, b.request.fixOf ? "What the builder was asked to fix" : b.builder === "submitted" ? `What ${b.submittedBy ?? actorLabel(b.requestedBy, all)} says it changes` : `What ${actorLabel(b.requestedBy, all)} asked for`), h("p", { class: "muted" }, String(b.request.request)));

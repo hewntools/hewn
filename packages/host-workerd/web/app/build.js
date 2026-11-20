@@ -450,19 +450,43 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       // The files against the version it's built on, opened on demand (the code browser).
       const create = b.kind === "create";
       const files = h("details", { class: "small review-files" }, h("summary", {}, create ? "Its files" : "The files it changes"));
-      files.addEventListener("toggle", () => files.open && !files.querySelector(".code-browser") && files.append(codeBrowser({ label: "the change", list: () => api(`/builds/${enc(id)}/code`), file: (p) => api(`/builds/${enc(id)}/code?path=${enc(p)}`) })), { once: false });
+      const code = { label: "the change", list: () => api(`/builds/${enc(id)}/code`), file: (p) => api(`/builds/${enc(id)}/code?path=${enc(p)}`) };
+      const showCode = (at) => (files.querySelector(".code-browser")?.remove(), files.append(codeBrowser(code, at ? { at } : {})));
+      files.addEventListener("toggle", () => files.open && !files.querySelector(".code-browser") && showCode(), { once: false });
+      const shownFiles = !!(b.review.changes || create);
+      // A warning's file and line: opened in the files below, at that line.
+      const openAt = (w) => {
+        showCode({ path: w.file, ...(w.line ? { line: w.line } : {}) });
+        files.open = true;
+        files.scrollIntoView({ block: "start", behavior: "smooth" });
+      };
+      // With warnings: Hewn's builder fixes them in this change's own files, and the fix comes back here for you to allow.
+      const fix = b.review.warnings?.length > 0 && h("button", {}, "Ask builder to fix");
+      if (fix)
+        fix.addEventListener("click", async () => {
+          fix.disabled = true;
+          try {
+            const next = await api(`/builds/${enc(id)}/fix`, { method: "POST" });
+            invalidateCaps();
+            pollInbox();
+            compact ? (put(card), card.replaceWith(buildPanel(next.buildId, { compact, onPromoted }).el)) : go(`#/b/${next.buildId}`);
+          } catch (e) {
+            fix.disabled = false;
+            fail(e);
+          }
+        });
       put(
         card,
         head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), warnedWords(b.review.warnings)),
-        reviewWarnings(b.review.warnings),
+        reviewWarnings(b.review.warnings, shownFiles ? { openAt } : {}),
         b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, create ? "What agents can do with it" : "New"),
         ...b.review.newOperations.map((o) => reviewOp(o, { full: true })),
         changes && [h("div", { class: "eyebrow" }, changes.every(([ok]) => ok) ? "Nothing else changes" : "Also"), changeList(changes)],
         shots.length > 0 && [h("div", { class: "eyebrow" }, create ? "Its screen" : "The screen after the change"), h("div", { class: "review-shots" }, shots.map((n) => h("a", { href: `/api/builds/${enc(id)}/shots/${enc(n)}`, target: "_blank", rel: "noopener" }, h("img", { class: "build-shot", src: `/api/builds/${enc(id)}/shots/${enc(n)}`, alt: `${create ? "Its screen" : "The screen after the change"}: ${n.replace("-", ", ")}`, loading: "lazy" }))))],
         shot && [h("div", { class: "eyebrow" }, "The screen after the change (rendered with no data)"), h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" })],
-        (b.review.changes || create) && files,
+        shownFiles && files,
         reviewRequest(b, all),
-        h("div", { class: "row tight" }, yes, no, cap().version && h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
+        h("div", { class: "row tight wrap" }, yes, fix, no, cap().version && h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
         logBlock(false),
       );
     };

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -95,6 +95,52 @@ describe("agents' changes wait for the owner's review", () => {
     const own = await modify(USER, reword);
     assert.equal(own.status, "promoted", own.log.join("\n"));
     assert.ok(said(own.log), own.log.join("\n"));
+  });
+
+  test("Ask builder to fix on a held change's warnings: the builder works on that change's own files, and the fix is held for the owner again", async () => {
+    const validation = (t.platform as any).d.validation as Validation;
+    const validate = validation.validate.bind(validation);
+    let warn = true;
+    validation.validate = async (...a) => {
+      const c = await validate(...a);
+      if (warn) c.warnings.push({ check: "test", message: "a string that looks like a key", file: "src/index.ts", line: 3 });
+      return c;
+    };
+    const before = active();
+    const held = await modify(t.claude, addDump);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    const blob = `versions/${held.review!.contentHash}.json`;
+    // Only the owner, and only with warnings.
+    await assert.rejects(t.platform.retryBuild(t.claude, held.buildId, { fix: true }), code("forbidden"));
+    warn = false;
+    const clean = await modify(t.claude, reword);
+    await assert.rejects(t.platform.retryBuild(WEB_USER, clean.buildId, { fix: true }), code("conflict"));
+    await t.platform.rejectBuild(WEB_USER, clean.buildId);
+
+    // The fix's first attempt breaks the tests (it fails); asked to fix again, it carries on and repairs them.
+    let cases = "";
+    let brief = "";
+    t.queue((ws) => {
+      assert.ok(readFileSync(join(ws, "capability.json"), "utf8").includes("dump_runs"), "the held change's files, not the live version's");
+      brief = readFileSync(join(ws, "BUILDER.md"), "utf8");
+      cases = readFileSync(join(ws, "tests", "cases.json"), "utf8");
+      writeFileSync(join(ws, "tests", "cases.json"), "[");
+    });
+    const fixing = await t.platform.retryBuild(WEB_USER, held.buildId, { fix: true });
+    assert.match(brief, /Fix what Hewn's checks warned about, and change nothing else:\n- test: a string that looks like a key \(src\/index\.ts:3\)/);
+    const replaced = t.platform.getBuild(USER, held.buildId);
+    assert.equal(replaced.status, "cancelled");
+    assert.match(replaced.log.at(-1)!, new RegExp(`^REPLACED by web: the builder fixes its warnings in build ${fixing.buildId}`));
+    assert.equal(await t.platform.blobs.get(blob), undefined, "the held candidate is in the fix's workspace now");
+    assert.equal((await t.platform.settle(fixing.buildId)).status, "failed");
+    t.queue((ws) => writeFileSync(join(ws, "tests", "cases.json"), cases));
+    const again = await t.platform.settle((await t.platform.retryBuild(WEB_USER, fixing.buildId, { fix: true })).buildId);
+    assert.equal(again.status, "review", "held for the owner again, though the owner asked for it");
+    assert.equal(again.review!.approval, "wait");
+    assert.deepEqual(again.review!.newOperations.map((o) => o.key), ["dump_runs@1"], "the agent's change, fixed");
+    assert.equal(active(), before, "nothing live until the owner allows it");
+    assert.equal((await t.platform.approveBuild(WEB_USER, again.buildId)).status, "promoted");
+    await t.platform.invoke(t.claude, { capabilityId: "running-log", operation: "dump_runs" });
   });
 
   test("rejected: nothing changes, the candidate is gone, the agent sees it was turned down", async () => {

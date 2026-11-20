@@ -495,7 +495,8 @@ export class Validation extends Domain {
     // an agent's waits for the owner all the same while its approval mode says so.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id && dep.requestedBy === build.requestedBy;
-    const held = !byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait";
+    // A fix of a held change the owner asked for ("Ask builder to fix") is held again: they haven't allowed it yet.
+    const held = !!(build.request as { fixOf?: string }).fixOf || (!byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait");
     const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? newToolReview(manifest, code.hash, views) : undefined;
     if (review) {
       const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
@@ -692,7 +693,7 @@ function reviewOps(ops: OperationManifest[], views: Map<string, unknown>): Build
  * new tool waits while its mode says to: `promote`.)
  */
 function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>, held: boolean): BuildReview | undefined {
-  if (byOwner(build)) return undefined;
+  if (byOwner(build) && !held) return undefined;
   const key = (o: OperationManifest) => opKey(o.name, o.version);
   const had = new Map(base.manifest.operations.map((o) => [key(o), o]));
   const newOperations = reviewOps(candidate.manifest.operations.filter((o) => !had.has(key(o))), views);

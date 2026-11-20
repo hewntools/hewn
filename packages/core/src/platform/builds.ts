@@ -22,7 +22,7 @@ import { attachmentRefs } from "./attachments.ts";
 import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import { type Candidate, reviewShotKey } from "./validation.ts";
+import { type Candidate, reviewShotKey, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
@@ -154,7 +154,8 @@ export interface SubmitEntry {
 const MAX_SUBMIT_REQUEST = 20_000;
 
 /** What only Hewn writes on a build's request, never its requester: the build it retries. */
-type RetryMarks = { retryOf?: string; autoRetryOf?: string };
+/** `fixOf`, `fixFrom`: a fix of a held change ("Ask builder to fix" on its warnings), and the held candidate's hash it opens on. */
+type RetryMarks = { retryOf?: string; autoRetryOf?: string; fixOf?: string; fixFrom?: string };
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
@@ -1092,8 +1093,60 @@ export class Builds extends Domain {
       this.carriedOn.set(b.id, this.mustBuild(from).status === "cancelled" ? "stopped" : "failed");
       return true;
     }
-    await this.workbench.open(b.id, { ...files, ...readFiles });
+    const held = await this.fixSource(b, activeVersion);
+    await this.workbench.open(b.id, { ...(held ?? files), ...readFiles });
+    // In the workspace now (a retry of this build carries on from there): the held candidate goes.
+    const hash = (b.request as RetryMarks).fixFrom;
+    if (held && hash && !this.registry.versionWithHash(hash)) await this.blobs.delete(`versions/${hash}.json`).catch(() => {});
     return false;
+  }
+
+  /**
+   * The files a fix of a held change opens on: that change's own (its candidate), never the live
+   * version's, which would drop it. Fails when they're gone, or when the tool changed since the held
+   * change was built (it would undo the newer version).
+   */
+  private async fixSource(b: BuildRow, activeVersion?: number): Promise<Files | undefined> {
+    const { fixOf, fixFrom } = b.request as RetryMarks;
+    if (!fixFrom) return undefined;
+    const held = fixOf ? this.registry.getBuild(fixOf) : undefined;
+    if (b.kind !== "create" && (held?.baseVersion ?? undefined) !== activeVersion) throw new PlatformError("conflict", `${b.capabilityId} changed since the held change was built on v${held?.baseVersion}: ask for the change again`);
+    const candidate = await this.loadCandidate(fixFrom).catch(() => {
+      throw new PlatformError("not_found", "the held change's files are gone: ask for the change again");
+    });
+    return versionFiles(candidate.files);
+  }
+
+  /**
+   * "Ask builder to fix" on a held change with warnings (the owner's): Hewn's builder carries on from
+   * the held candidate's own files, told what the checks warned about and to change nothing else.
+   * The fix replaces the held one on the review card, and is held for the owner in turn, whoever
+   * wrote the first.
+   */
+  private async fixHeld(owner: Agent, held: BuildRow): Promise<BuildView> {
+    requireOwner(owner);
+    const review = held.review;
+    if (!review?.warnings?.length) throw new PlatformError("conflict", `build ${held.id} has no warnings to fix; allow it or don't`);
+    const cap = this.registry.getCapability(held.capabilityId);
+    if (!cap || cap.archivedAt) throw new PlatformError("not_found", `no capability ${held.capabilityId}`);
+    // As a retry carries on: only on the version it was built on, or it would undo a newer one.
+    if (held.kind !== "create" && cap.activeVersion !== held.baseVersion) throw new PlatformError("conflict", `${cap.id} changed since this was built on v${held.baseVersion}: don't allow it, and ask for the change again`);
+    await this.loadCandidate(review.contentHash);
+    const asked = String(held.request.request ?? held.request.requirements ?? "").split(FIX_MARK)[0].split(WARNINGS_MARK)[0].trim();
+    const task = `${WARNINGS_MARK}\nThe workspace holds this ${held.kind === "create" ? "new tool" : "change"} as it waited for the owner's review. Fix what Hewn's checks warned about, and change nothing else:\n${review.warnings.map((w) => `- ${warningText(w)}`).join("\n")}`;
+    const marks: RetryMarks = { fixOf: held.id, fixFrom: review.contentHash };
+    const next =
+      held.kind === "create"
+        ? await this.openCreateBuild(owner, cap.id, { name: cap.name, purpose: cap.purpose, requirements: `${asked}\n\n${task}`.trim(), ...(held.request.kind === "connection" ? { kind: "connection" as const } : {}), ...marks }, false)
+        : await this.modify(owner, { capabilityId: cap.id, request: `${asked}\n\n${task}`.trim() }, marks);
+    // The held one is replaced: off the review card, its renders gone (the fix's own come with it).
+    const line = `REPLACED by ${owner.id}: the builder fixes its warnings in build ${next.buildId}`;
+    this.registry.updateBuild(held.id, { status: "cancelled", review: null, log: [...held.log, line] });
+    this.buildEvent(held.id, line, `build ${held.id} [${held.kind} ${held.capabilityId}]`);
+    await this.dropReviewShots(held);
+    await this.keepTranscript(held.id);
+    this.buildEnded(held.id);
+    return next;
   }
 
   /** Cancelled while its workspace was being opened (nothing to abort yet): don't start it. */
@@ -1111,6 +1164,7 @@ export class Builds extends Domain {
   async retryBuild(agent: Agent, buildId: string, opts: { fix?: boolean; auto?: boolean } = {}): Promise<BuildView> {
     const old = this.visibleBuild(agent, buildId);
     requireScope(agent, scopeOf(old.kind));
+    if (opts.fix && old.status === "review") return this.fixHeld(agent, old);
     if (old.status !== "failed" && old.status !== "cancelled") throw new PlatformError("conflict", `only failed or cancelled builds can be retried (this one is ${old.status})`);
     if (opts.fix && old.status !== "failed") throw new PlatformError("conflict", "only failed builds can be fixed; retry it instead");
     // Retried already (by hand, or by Hewn after a restart): one retry at a time, or two builds of the same request run at once.
@@ -1128,7 +1182,8 @@ export class Builds extends Domain {
     const req: Record<string, any> = { ...old.request };
     delete req.retryOf;
     delete req.autoRetryOf;
-    const marks: RetryMarks = { retryOf: old.id, ...(opts.auto ? { autoRetryOf: old.id } : {}) };
+    // A fix of a held change stays one: held for the owner again, whatever its retries make.
+    const marks: RetryMarks = { retryOf: old.id, ...(opts.auto ? { autoRetryOf: old.id } : {}), ...(req.fixOf ? { fixOf: req.fixOf, fixFrom: req.fixFrom } : {}) };
     // An automatic retry (after a restart) runs on what was asked; an agent's own retry is checked
     // again, so a model the owner has unticked since isn't used.
     if (opts.auto) this.trustedAsks.add(req);
@@ -1371,7 +1426,7 @@ export class Builds extends Domain {
     try {
       const r = await this.d.validation.promote(build, candidate, step);
       if ("review" in r) {
-        step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review, build.kind)})`);
+        step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review, build.kind, !!(build.request as RetryMarks).fixOf)})`);
         return { review: r.review, log };
       }
       step(`promoted: implementation v${r.version} is now active`);
@@ -1523,7 +1578,7 @@ export class Builds extends Domain {
     run.history.push(...log.map((l) => `${best.label}: ${l}`));
     if (review) {
       this.registry.updateBuild(build.id, { status: "review", review, log: run.history });
-      this.logger(`${run.tag} waits for the owner's review (${reviewReason(review, build.kind)})`);
+      this.logger(`${run.tag} waits for the owner's review (${reviewReason(review, build.kind, !!(build.request as RetryMarks).fixOf)})`);
       return undefined;
     }
     if (version) {
@@ -2014,7 +2069,7 @@ export class Builds extends Domain {
     }
     if (b.status === "review" && b.review) {
       view.review = b.review;
-      view.instructions = `The ${b.kind === "create" ? "new tool" : "change"} passed validation and waits for the owner's review in Hewn before it goes live (${reviewReason(b.review, b.kind)}). Tell the owner; once they approve, it is promoted. Call builds_get later to see the outcome.`;
+      view.instructions = `The ${b.kind === "create" ? "new tool" : "change"} passed validation and waits for the owner's review in Hewn before it goes live (${reviewReason(b.review, b.kind, !!(b.request as RetryMarks).fixOf)}). Tell the owner; once they approve, it is promoted. Call builds_get later to see the outcome.`;
     }
     if (b.status === "building" || b.status === "validating") {
       view.progress = this.progressOf(b.id);
@@ -2469,8 +2524,12 @@ const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKin
 
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";
+/** Where a fix of a held change says what the checks warned about (kept when that fix is itself fixed). */
+const WARNINGS_MARK = "--- Warnings to fix ---";
 
-const reviewReason = (r: BuildReview, kind: BuildKind) =>
-  kind === "create"
+const reviewReason = (r: BuildReview, kind: BuildKind, fix = false) =>
+  fix
+    ? "the owner asked for this fix and allows it before it goes live"
+    : kind === "create"
     ? "the agent's new tools wait for the owner's approval"
     : [r.approval === "wait" && "the agent's changes wait for the owner's approval", r.connection && "it changes a connection", r.newOperations.length && `it adds ${r.newOperations.map((o) => `${o.key} (${o.sideEffect})`).join(", ")}`].filter(Boolean).join("; ");
