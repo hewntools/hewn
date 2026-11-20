@@ -23,6 +23,8 @@ export interface BuildJob {
   platformRoot?: string;
   /** Aborted when the owner (or requester) cancels the build: stop and return/throw promptly. */
   signal?: AbortSignal;
+  /** An API key the run uses instead of the builder's sign-in: an unattended build's, from Settings › AI (Claude Code: Anthropic's; Codex: OpenAI's). */
+  apiKey?: string;
   /** The model to build with, as the CLI takes it (an alias or a full name). Unset: the CLI's default. */
   model?: string;
   /** Reasoning effort, as the CLI names it. Unset: the model's default. */

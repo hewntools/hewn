@@ -3,16 +3,13 @@
 // setup, doctor, the workbench and Settings › AI need to know about each. Another agent is one more entry here, with
 // its run functions in cli.ts and intake.ts. (The sandbox profile and the activity formatters still name agents
 // themselves: a later pass.)
-import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
 import type { JobModel, ModelCatalog } from "@hewntools/host-workerd/surface/host.ts";
 import type { Intake } from "@hewntools/host-workerd/surface/intake-types.ts";
 import { claudeIntake, codexIntake, opencodeIntake } from "../intake.ts";
-import { claudeBuildHome, claudeBuilder, codexBuildHome, codexBuilder, modelUnavailableText, opencodeBuildHome, opencodeBuilder } from "./cli.ts";
+import { join } from "node:path";
+import { claudeBuilder, codexBuilder, modelUnavailableText, OPENCODE_READER_RULES, opencodeBuilder, opencodeHome } from "./cli.ts";
 import { claudeCatalog, codexCatalog, MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan, opencodeCatalog } from "./models.ts";
-import { OPENCODE_NO_UPDATE } from "./opencode-dirs.ts";
+import { builderHome, codexEnv, signedIn } from "./sign-in.ts";
 import type { CapabilityBuilder } from "./types.ts";
 
 export type CliAgentName = "claude" | "codex" | "opencode";
@@ -27,14 +24,8 @@ export interface CliAgent {
   bin: string;
   /** How to install it, for the first run and `hewn doctor`. */
   install: string;
-  /** How to sign in, for the same. */
-  login: string;
-  /** Signed in? `undefined`: can't tell. */
-  loggedIn(): boolean | undefined;
-  /** Its models, for Settings › AI and the model menu in the chat box. */
-  catalog(): Promise<ModelCatalog>;
-  /** Where a build's home lives: one per build, removed with the workspace. */
-  buildHome(platformHome: string, buildId: string): string;
+  /** Its models, for Settings › AI and the model menu in the chat box: as its builder home on this Hewn sees them, once signed in. */
+  catalog(platformHome: string): Promise<ModelCatalog>;
   builder: CapabilityBuilder;
   /**
    * The intake on it (one request, one reply), confined like a build, on the owner's model for building: the run
@@ -51,15 +42,7 @@ export const CLI_AGENTS: Record<CliAgentName, CliAgent> = {
     label: "Claude Code",
     bin: "claude",
     install: "npm install -g @anthropic-ai/claude-code",
-    login: "run claude once and sign in",
-    // Its login: the credentials file where there is one, else (macOS) the Keychain item.
-    loggedIn: () => {
-      if (existsSync(join(homedir(), ".claude", ".credentials.json"))) return true;
-      if (platform() === "darwin") return spawnSync("/usr/bin/security", ["find-generic-password", "-s", "Claude Code-credentials"]).status === 0;
-      return false;
-    },
     catalog: async () => claudeCatalog(),
-    buildHome: claudeBuildHome,
     builder: claudeBuilder,
     intake: claudeIntake,
   },
@@ -69,13 +52,7 @@ export const CLI_AGENTS: Record<CliAgentName, CliAgent> = {
     label: "Codex",
     bin: "codex",
     install: "npm install -g @openai/codex",
-    login: "run codex login",
-    loggedIn: () => {
-      const r = spawnSync("codex", ["login", "status"], { encoding: "utf8" });
-      return r.status === 0 && /logged in/i.test(r.stdout + r.stderr);
-    },
-    catalog: codexCatalog,
-    buildHome: codexBuildHome,
+    catalog: async (platformHome) => codexCatalog((await signedIn("codex", platformHome)) ? codexEnv(builderHome(platformHome, "codex"), process.env) : undefined),
     builder: codexBuilder,
     intake: codexIntake,
   },
@@ -85,15 +62,17 @@ export const CLI_AGENTS: Record<CliAgentName, CliAgent> = {
     label: "OpenCode",
     bin: "opencode",
     install: "curl -fsSL https://opencode.ai/install | bash",
-    login: "run opencode auth login",
-    // Signed in to a provider, or not: it also runs on keys from the environment, on local models and on its free tier, so "no" can't be told.
-    loggedIn: () => {
-      const r = spawnSync("opencode", ["auth", "list"], { encoding: "utf8", timeout: 15_000, env: { ...process.env, ...OPENCODE_NO_UPDATE } });
-      const n = /(\d+)\s+credentials?/i.exec(r.stdout + r.stderr)?.[1];
-      return n && Number(n) > 0 ? true : undefined;
+    // Its logins and providers in its builder home are what a build runs on; before its sign-in, your own OpenCode's.
+    catalog: async (platformHome) => {
+      if (!(await signedIn("opencode", platformHome))) return opencodeCatalog();
+      const home = builderHome(platformHome, "opencode");
+      const run = await opencodeHome(home, { rules: OPENCODE_READER_RULES, db: join(home, "models.db") });
+      try {
+        return await opencodeCatalog(run.env);
+      } finally {
+        run.done();
+      }
     },
-    catalog: opencodeCatalog,
-    buildHome: opencodeBuildHome,
     builder: opencodeBuilder,
     intake: opencodeIntake,
   },
@@ -106,7 +85,7 @@ export const isCliAgent = (name: string): name is CliAgentName => Object.hasOwn(
 export const BUILDERS: Record<string, CapabilityBuilder> = Object.fromEntries(CLI_AGENT_NAMES.map((n) => [n, CLI_AGENTS[n].builder]));
 
 /** Each agent's model list, for the catalogs Settings › AI, the intake and the Inbox read (`modelCatalogs`). */
-export const cliCatalogs = (): Record<string, () => Promise<ModelCatalog>> => Object.fromEntries(CLI_AGENT_NAMES.map((n) => [n, CLI_AGENTS[n].catalog]));
+export const cliCatalogs = (platformHome: string): Record<string, () => Promise<ModelCatalog>> => Object.fromEntries(CLI_AGENT_NAMES.map((n) => [n, () => CLI_AGENTS[n].catalog(platformHome)]));
 
 /**
  * The intake on one of the CLIs, on the owner's model for building (`run`, Settings › AI): one the CLI won't run

@@ -263,7 +263,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
     carryOver: async (from, to, overlay) => (await sv.json<{ carried: boolean }>("/workbench/carry-over", { from, to, overlay: encodeFiles(overlay) })).carried,
     writeFolder: async (buildId, folder, files) => void (await sv.json("/workbench/write-folder", { buildId, folder, files: encodeFiles(files) })),
     build: async (job: BuildJob, hooks) => {
-      let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean } | undefined;
+      let failure: { error: string; unavailable?: boolean; refused?: boolean; paused?: boolean; modelUnavailable?: boolean; notSignedIn?: boolean } | undefined;
       // The builder's checks, run here (the core) and answered to the supervisor, where the builder waits.
       const answer = (id: string) =>
         hooks.onCheck!(id)
@@ -284,7 +284,7 @@ function remoteWorkbench(env: Env, visualInvokers: Map<string, VisualInvoke>): W
         if (!hooks.signal.aborted && !(e as { unavailable?: boolean }).unavailable && !/supervisor .*HTTP/.test((e as Error).message)) throw Object.assign(e as Error, { interrupted: true });
         throw e;
       }
-      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, paused: failure.paused, modelUnavailable: failure.modelUnavailable });
+      if (failure) throw Object.assign(new Error(failure.error), { unavailable: failure.unavailable, refused: failure.refused, paused: failure.paused, modelUnavailable: failure.modelUnavailable, notSignedIn: failure.notSignedIn });
     },
     bundle: (buildId) => sv.json("/workbench/bundle", { buildId }),
     note: async (buildId, line) => void (await sv.json("/workbench/note", { buildId, line })),

@@ -123,7 +123,9 @@ function activityRow(g, all, showCap) {
   } else if (g.kind === "build") {
     const what = g.buildKind === "create" ? "Built" : "Changed to";
     // What it ran on: "· Fable · high effort" (the model the builder reported, once it did).
-    const ran = [buildModelWords({ model: g.buildModel }), chargeWords(g.charge)].filter(Boolean).join(" · ");
+    // An agent's build, nobody watching: whose account it ran on (the API key from Settings › AI, else the builder's sign-in).
+    const account = g.buildModel?.ranOn === "key" ? "on your API key" : g.buildModel?.ranOn === "sign-in" ? "on your sign-in (no API key set)" : "";
+    const ran = [buildModelWords({ model: g.buildModel }), account, chargeWords(g.charge)].filter(Boolean).join(" · ");
     if (g.outcome === "promoted") text = on(g.installed ? `Installed ${g.installed} · v${g.version}` : `${what} v${g.version}`, ref && ["·", ref], g.submittedBy ? h("span", { class: "faint" }, `· submitted by ${g.submittedBy}`) : ran && h("span", { class: "faint" }, `· ${ran}`));
     else if (g.outcome === "review") (dot = "warn"), (text = on(g.submittedBy ? `Submitted by ${g.submittedBy}: waits for you` : "Waits for your review", ref && ["·", ref]));
     else if (g.outcome === "failed" && g.failure?.paused) (dot = "warn"), (text = on("Build paused", ref && ["·", ref], g.charge && h("span", { class: "faint" }, `· ${chargeWords(g.charge)}`)));

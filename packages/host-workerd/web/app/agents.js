@@ -48,8 +48,10 @@ export {
   buildJobs,
   catalogOf,
   confirmationSheet,
+  hewnAgentsSheet,
   jobPicker,
   modelSheet,
+  notReadyWords,
   providerTile,
   setJobs,
 };
@@ -145,6 +147,12 @@ async function buildJobs() {
   return { tools, settings: s, ready, label };
 }
 
+/**
+ * Why an agent can't build yet: not installed (how to install it), or not signed in on this Hewn, where to go in
+ * words (it signs in once, in the terminal, by its own sign-in; the command is the terminal's to name).
+ */
+const notReadyWords = (t, machine) => (!t?.found ? t?.fix ?? "Not installed" : t.loggedIn === false ? `Not signed in · sign in from the terminal on ${machine.word}` : t.fix ?? "Not ready");
+
 /** Save who does these jobs (and that the owner chose them). */
 async function setJobs(keys, tool) {
   const s = await api("/settings");
@@ -168,7 +176,7 @@ async function jobPicker({ thenModel = false } = {}) {
       label: t.label,
       tile: agentTileOf(t, 28),
       disabled: !ready(t),
-      sub: !ready(t) ? t.fix ?? "Not installed" : t.remote ? "" : `On ${machine.word} · signed in`,
+      sub: !ready(t) ? notReadyWords(t, machine) : t.remote ? "" : `On ${machine.word} · signed in`,
     })),
     ...AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => ({ value: c.id, label: c.label, tile: agentTile(c.id, c.label, 28), disabled: true, sub: "Coming soon" })),
   ];
@@ -567,10 +575,13 @@ function hewnAgentsSheet() {
               "li",
               {},
               agentTile(t.harnessId ?? t.name, t.label),
-              h("div", { class: "grow" }, h("span", {}, t.label), h("span", { class: "sub" }, !t.found ? "Not installed" : ready(t) ? ["Installed · signed in", ...does(t)].join(" · ") : "Installed · not signed in")),
+              h("div", { class: "grow" }, h("span", {}, t.label), h("span", { class: "sub" }, !t.found ? "Not installed" : ready(t) ? ["Installed · signed in", ...does(t)].join(" · ") : "Installed · not signed in on this Hewn")),
               ready(t)
                 ? h("button", { class: "primary sm", onclick: () => pickJob(t) }, "Use")
-                : h("button", { class: "sm", onclick: () => put(detail, h("div", { class: "stack-sm" }, h("div", { class: "small" }, `${t.label}, in a terminal on ${machine.word}:`), commandBlock(t.fix?.replace(/^(Install it|Sign in): (run )?/, "") ?? t.name)) ) }, "How"),
+                : h("button", { class: "sm", onclick: () => put(detail, !t.found
+                    ? h("div", { class: "stack-sm" }, h("div", { class: "small" }, `${t.label}, in a terminal on ${machine.word}:`), commandBlock(t.fix?.replace(/^Install it: /, "") ?? t.name))
+                    // Signing in is the terminal's: the builder signs in once for Hewn, by its own sign-in, and Hewn keeps no copy of it.
+                    : h("div", { class: "small" }, `${t.label} isn't signed in on this Hewn. Sign in from the terminal on ${machine.word}: it signs in once for Hewn's builds, by ${t.label}'s own sign-in.`)) }, "How"),
             ),
           ),
           AGENT_CATALOG.filter((c) => c.buildSoon).map((c) => h("li", { class: "soon" }, agentTile(c.id, c.label), h("div", { class: "grow" }, h("span", {}, c.label), h("span", { class: "sub" }, "Coming soon")))),

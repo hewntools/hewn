@@ -4,6 +4,12 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.13 (unreleased)
 
+### Changes
+
+- **The builder signs in once for Hewn, in a home of its own.** `hewn builder sign-in claude` (or `codex`, `opencode`) runs the agent's own sign-in; Hewn never reads, copies or writes the login, and your own sign-in stays as it is. Settings › AI shows each builder's state, and a build without the sign-in stops and says where to go. Coming from 0.4.12, run it once. See [Signing the builder in](docs/models.md#signing-the-builder-in).
+- **An agent's builds run on your API key when you've set one** (Anthropic's for Claude Code, OpenAI's for Codex), and on the sign-in otherwise; the build's log and Activity say which. See [Builds nobody is watching](docs/models.md#builds-nobody-is-watching).
+- **`hewn doctor` watches for `claude -p` dropping the sign-in,** a change Anthropic has announced, and a build that hits it says so. See [The `claude -p` line](docs/models.md#the-claude--p-line-in-hewn-doctor).
+
 ### Fixes
 
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).

@@ -81,6 +81,8 @@ function explainLog(log: string[]): BuildFailure {
   if (noModel) return say("Model not available", noModel[1].trim());
   const refused = /^refused: ([\s\S]*)$/.exec(msg);
   if (refused) return say("Not built", refused[1].trim() || "The builder declined it.");
+  const signIn = /^not signed in: ([\s\S]*)$/.exec(msg);
+  if (signIn) return say("The builder isn't signed in", signIn[1].trim());
   if (/is unavailable/.test(msg)) {
     const name = /builder (\S+) is unavailable/.exec(msg)?.[1] ?? "The builder";
     return say("The builder isn't available", `${name} couldn't start. Check that it's installed and signed in.`);

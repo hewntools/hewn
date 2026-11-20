@@ -4,10 +4,38 @@ Some tools think: they suggest tags, explain a word, summarise your week. Those 
 
 | Hewn's job | Who does it | Paid by |
 | --- | --- | --- |
-| Builds tools (talks it through, then builds) | Claude Code, Codex or OpenCode on your machine | however it's signed in |
+| Builds tools (talks it through, then builds) | Claude Code, Codex or OpenCode on your machine | its [sign-in for Hewn](#signing-the-builder-in) (an agent's builds: your API key, when you've set one) |
 | Thinks inside tools | a model provider's API | your API key, metered |
 
 Tools call models directly, not through an agent, so your Claude Code, Codex or OpenCode login doesn't cover them, nor does a Claude or ChatGPT subscription. Settings › AI shows both jobs and who does each.
+
+## Signing the builder in
+
+The agent that builds your tools signs in once for Hewn, in a home of its own. In a terminal on the machine that runs Hewn:
+
+```sh
+hewn builder sign-in claude      # or codex, or opencode
+```
+
+It runs the agent's own sign-in (`claude auth login`, `codex login`, `opencode auth login`) with Hewn's builder home in place of yours. The login is made there by that flow and stays there: Hewn never reads, copies or writes it. Your own Claude Code, Codex or OpenCode stays signed in as it is, and your settings, sessions, MCP servers and skills never reach a build. Every build and every talk with the intake on that agent runs in its builder home, each build in a session of its own.
+
+- **Claude Code** asks once whether you accept Anthropic's [Commercial Terms](https://www.anthropic.com/legal/commercial-terms), which cover running Claude Code in a product such as Hewn; `--yes` accepts. The answer is kept in `platform.json` (`claudeTermsAccepted`).
+- **Codex** on a machine without a browser: `hewn builder sign-in codex --device-auth`.
+- **OpenCode** is ready once its sign-in has run, with or without a provider: it also runs on its free tier, local models and keys from the environment.
+
+**Settings › AI › Builders on this Mac** shows each one: signed in, not signed in, or not installed. A build or a talk on a builder that isn't signed in stops at once and says so; `hewn doctor` and `hewn builder status` name the command. Coming from 0.4.12, run the sign-in once for the builder you use: until then its builds stop with that message.
+
+An API key in the environment Hewn runs in (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) still goes to the builder, as before, and Claude Code and Codex use it over the sign-in.
+
+### Builds nobody is watching
+
+A build an agent asked for (not you, from Hewn or the terminal) may run with nobody at the keyboard. It runs on your API key for the builder's vendor when Settings › AI › Models has one: Anthropic's for Claude Code, OpenAI's for Codex. Without one it runs on the sign-in. The build's log and its line in Activity say which ("on your API key", "on your sign-in (no API key set)"), and the key is billed by the provider. Your own builds use the sign-in, and OpenCode's builds always run on its own sign-in.
+
+Why: the vendors' terms allow your own subscription for your own use through their agents, and an API key is the account they offer for work that runs unattended. Hewn prefers the key and doesn't refuse without one, so your agents' builds keep working.
+
+### The `claude -p` line in `hewn doctor`
+
+Hewn runs Claude Code as `claude -p`. Anthropic has said `--bare`, which never reads the sign-in, will become the default for `-p`. `hewn doctor` reads Claude Code's own help for that change, and a build that fails to sign in while Claude Code says it is signed in says so too. If the line fails, keep the Claude Code version you had until a Hewn release handles it.
 
 ## Building tools
 
@@ -17,7 +45,7 @@ Building uses the model you pick for it in Settings › AI (**Builds tools › M
 - **A family** (Claude Code's Fable, Opus, Sonnet, Haiku): the newest of it. Picked on Fable 5.1, the next build after Fable 5.5 ships uses Fable 5.5.
 - **A pinned model** (a full name such as `claude-fable-5-1`, any Codex model, whose names carry a version, or an OpenCode `provider/model`): stays on that one. When it's gone, or the agent won't run it, nothing is built: the build (or the chat) stops at once with "… isn't available (why, in the agent's words). Pick another model", and you pick another. The lists mark a model that failed in the last hour, since a list can't tell on its own.
 
-**OpenCode** lists whatever it's signed in to (`opencode auth login`), the providers in your `~/.config/opencode/opencode.json` and its free tier, as `provider/model`; its efforts are the model's own reasoning levels (`--variant`). Its free tier changes which models it serves, and its list can lag behind (a model it has pulled answers "Model is unavailable" for a while): a build on one stops with that reason, the model is marked in the lists for an hour, and Default lets OpenCode choose. A local model server you configured there (Ollama, LM Studio) works for building too: Hewn lets the builder reach that server's port and nothing else on your machine.
+**OpenCode** lists whatever its builder home is signed in to (`hewn builder sign-in opencode`), the providers in your `~/.config/opencode/opencode.json` and its free tier, as `provider/model`; its efforts are the model's own reasoning levels (`--variant`). Its free tier changes which models it serves, and its list can lag behind (a model it has pulled answers "Model is unavailable" for a while): a build on one stops with that reason, the model is marked in the lists for an hour, and Default lets OpenCode choose. A local model server you configured there (Ollama, LM Studio) works for building too: Hewn lets the builder reach that server's port and nothing else on your machine.
 
 Switching agent means choosing its model; Hewn remembers your last choice for each agent. You can also change it in the box where you describe a tool: the model it shows (e.g. **Fable High ⌄**) opens a menu with the current model, an effort slider, and the other models (and a full name). It's the same setting as in Settings › AI, so it stays for what you build next. What you build from a box goes with the model that box shows, even if you picked another in a second tab meanwhile; a tab shows the setting again when you come back to it.
 

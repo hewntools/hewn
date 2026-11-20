@@ -24,6 +24,10 @@ npm run bench -- hide first current,design-forward      # out of the gallery, vo
 npm run bench -- show first current
 ```
 
+- **Signing in, once:** every result's builds run in one builder home, `builder-home/` beside the results
+  (`$HEWN_BUILDER_HOME` to put it elsewhere). Sign Claude Code in there before the first run:
+  `HEWN_BUILDER_HOME=~/hewn-bench/builder-home hewn builder sign-in claude`. The judge runs your own
+  `claude`, with none of your settings and nothing kept in your sessions.
 - **Where results go:** `~/hewn-bench/<name>/`, or `--out` / `$HEWN_BENCH_DIR`. It can't be inside a
   `.claude` directory: Claude Code won't write there, so every build would fail.
 - **Restarting:** a run started again with the same name keeps the results that are done and redoes the

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Home: the first run, the grid of tools and widgets, and Edit Home; and who builds tools.
 import { api, appIcon, caps, enc, fail, glyphCells, h, invalidateCaps, menuFrom, openMenu, setWallpaper, skeleton, tintOf, withContextMenu } from "../kit.js";
-import { agentTile, agentTileOf, buildJobs, jobPicker } from "./agents.js";
+import { agentTile, agentTileOf, buildJobs, jobPicker, notReadyWords } from "./agents.js";
 import { connectDialog } from "./connect.js";
 import { bar, brand, go, hewnMachine, leaving, loadSettings, moment, onKey, onLeave, put, sandboxNotice, setSettings, settings, stillHere, topBar, view } from "./frame.js";
 import { hubCard } from "./hub.js";
@@ -331,7 +331,7 @@ async function firstRun() {
       jobsCard.hidden = true;
       return renderMake();
     }
-    const [{ tools, ready }, s] = await Promise.all([buildJobs(), loadSettings()]);
+    const [{ tools, ready }, s, machine] = await Promise.all([buildJobs(), loadSettings(), hewnMachine()]);
     builderOk = buildsChosen(s) && ready(tools.find((t) => t.name === s.builder));
     const t = tools.find((x) => x.name === s?.builder);
     const chosen = buildsChosen(s);
@@ -345,7 +345,7 @@ async function firstRun() {
           "li",
           {},
           chosen && t ? agentTileOf(t, 28) : null,
-          h("div", { class: "grow" }, h("span", {}, "Builds tools"), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}` : "Not chosen")),
+          h("div", { class: "grow" }, h("span", {}, "Builds tools"), h("span", { class: "sub" }, chosen && t ? `${t.label} · ${ready(t) ? "signed in" : notReadyWords(t, machine)}` : "Not chosen")),
           h("button", { class: "sm", onclick: () => jobPicker().then(renderAll) }, "Choose…"),
         ),
       ),

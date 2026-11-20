@@ -7,8 +7,8 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { dirname, join, relative, sep } from "node:path";
 import { build as esbuild, type Plugin } from "esbuild";
 import type { CapabilityBuilder } from "./builders/types.ts";
-import { CLI_AGENTS } from "./builders/cli-agents.ts";
-import { forgetSession } from "./builders/cli.ts";
+import { forgetBuild } from "./builders/cli.ts";
+import { removeOldBuilderHomes } from "./builders/sign-in.ts";
 import { CHECK_DIR, writeInside } from "./builders/check.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { dependencyProblems } from "@hewntools/core/bundle.ts";
@@ -244,6 +244,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
   const transcript = (buildId: string) => join(opts.root, `${buildId}.log`);
   const builders = () => (typeof opts.builders === "function" ? opts.builders() : opts.builders);
   mkdirSync(opts.root, { recursive: true });
+  removeOldBuilderHomes(dirname(opts.root));
   /** Build → its builder's run here, settled once the builder has exited (a Stop doesn't wait for that). */
   const runs = new Map<string, Promise<void>>();
   /**
@@ -303,10 +304,9 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
       return new Uint8Array(readFileSync(p));
     },
     async remove(buildId) {
+      // What its builder kept between attempts in its builder home (the session), then the workspace.
+      forgetBuild(dirname(opts.root), buildId, ws(buildId));
       rmSync(ws(buildId), { recursive: true, force: true });
-      // What its builder kept between attempts: its home per build (Claude Code's config dir, Codex's and OpenCode's HOME: the session).
-      for (const a of Object.values(CLI_AGENTS)) rmSync(a.buildHome(dirname(opts.root), buildId), { recursive: true, force: true });
-      forgetSession(buildId);
     },
     async build(job: BuildJob, hooks) {
       // "keep": the workspace is already the candidate (an install from given files, an owner's edit); "bundle": a tool installed from a file; "submitted": files a client handed over.
@@ -328,6 +328,7 @@ export function localWorkbench(opts: LocalWorkbenchOptions): Workbench {
         onActivity: hooks.onActivity,
         ...(job.model ? { model: job.model } : {}),
         ...(job.effort ? { effort: job.effort } : {}),
+        ...(job.apiKey ? { apiKey: job.apiKey } : {}),
         onModel: hooks.onModel,
         onCharge: hooks.onCharge,
         ...(hooks.onCheck ? { check: hooks.onCheck } : {}),

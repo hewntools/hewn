@@ -87,7 +87,9 @@ Then `hewn service restart` and `hewn doctor`. The blunt alternative allows user
 
 ## Building
 
-**"Builder isn't logged in"**: run `claude` once and sign in, or `codex login`, or `opencode auth login`. Then check Settings › AI, or run `hewn doctor`.
+**"Claude Code isn't signed in on this Hewn"** (or Codex, or OpenCode): the builder signs in once for Hewn, in a home of its own. In a terminal on the machine that runs Hewn: `hewn builder sign-in claude` (or `codex`, or `opencode`). Then check Settings › AI, or run `hewn doctor`. See [Signing the builder in](models.md#signing-the-builder-in).
+
+**"Claude Code is signed in on this Hewn, but didn't use the sign-in"**: Claude Code may have made `claude -p` run without the sign-in. `hewn doctor`'s "Claude -p" line says more; keep the Claude Code version you had until a Hewn release handles it.
 
 **"opencode said nothing for 3 minutes, so Hewn stopped it (it never started)"**
 OpenCode sometimes never gets going (seen with 1.18.18, mostly when a model it can't resolve is involved). Hewn stops it after three silent minutes instead of waiting the whole build out. Retry the build; if it keeps happening, check that the model in Settings › AI is one `opencode models` lists.
@@ -148,11 +150,8 @@ Add the Hewn pointer to its instructions (see [Connecting agents](agents.md)).
 **claude.ai stopped working after a restart**
 A quick tunnel gets a new address when it starts. Check `hewn tunnel status`, and update the connector. Use a named tunnel for a stable address.
 
-**Codex asks you to log in again after a Codex build**
-Hewn keeps the builder's own copy of your Codex login and syncs it back after a build. If you used Codex yourself during a build and both refreshed it, one copy loses. `codex login` fixes it. The same goes for OpenCode's provider logins (`opencode auth login`).
-
 **OpenCode doesn't offer the model you expect**
-Hewn lists what `opencode models` lists: the providers you're signed in to (`opencode auth list`), those in `~/.config/opencode/opencode.json`, and its free tier. A model from your own `opencode.json` under a project folder isn't there: Hewn runs OpenCode with your global config only.
+Hewn lists what `opencode models` lists in OpenCode's builder home: the providers you signed in to there (`hewn builder sign-in opencode`), those in your `~/.config/opencode/opencode.json`, and its free tier. A model from your own `opencode.json` under a project folder isn't there: Hewn runs OpenCode with your global config only.
 
 ## Data
 

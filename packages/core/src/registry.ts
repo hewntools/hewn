@@ -84,6 +84,8 @@ export interface BuildModel {
   effort?: string;
   /** What the builder reported running on (a full name). */
   ran?: string;
+  /** An unattended build's account: the owner's API key from Settings › AI, or the builder's sign-in (no key set). Unset: the owner's own build, on the sign-in. */
+  ranOn?: "key" | "sign-in";
 }
 
 /** An image or file the owner attached in the intake's box; the bytes are a blob (`attachments/<ref>`). */
@@ -509,6 +511,7 @@ const ADDED_COLUMNS: [string, string, string][] = [
   ["capabilities", "source", "TEXT"],
   ["builds", "discarded_at", "TEXT"],
   ["build_context", "owner_instructions", "TEXT"],
+  ["build_models", "ran_on", "TEXT"],
 ];
 
 /** Platform metadata store. Capability state lives elsewhere (one DB per capability). */
@@ -821,6 +824,12 @@ export class Registry {
     this.db.prepare("UPDATE build_models SET ran_model = ? WHERE build_id = ?").run(model, buildId);
   }
 
+  /** What an unattended build runs on: the owner's API key, or the builder's sign-in. */
+  setRanOn(buildId: string, on: "key" | "sign-in") {
+    this.db.prepare("INSERT OR IGNORE INTO build_models (build_id) VALUES (?)").run(buildId);
+    this.db.prepare("UPDATE build_models SET ran_on = ? WHERE build_id = ?").run(on, buildId);
+  }
+
   /** What led to a build; a later call adds to (or replaces) only the parts it gives. */
   setBuildContext(buildId: string, c: BuildContext) {
     const next = { ...this.buildContext(buildId), ...c };
@@ -1003,6 +1012,7 @@ export class Registry {
       ...(r.model ? { model: r.model as string } : {}),
       ...(r.effort ? { effort: r.effort as string } : {}),
       ...(r.ran_model ? { ran: r.ran_model as string } : {}),
+      ...(r.ran_on === "key" || r.ran_on === "sign-in" ? { ranOn: r.ran_on } : {}),
     };
   }
 

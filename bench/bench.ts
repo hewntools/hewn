@@ -46,6 +46,8 @@ const { values: o, positionals } = parseArgs({
 });
 
 const [command, arg] = positionals;
+// Every result is a throwaway Hewn; its builds run in one builder home, signed in once (see README.md).
+process.env.HEWN_BUILDER_HOME ??= join(resolve(o.out!), "builder-home");
 const list = (s?: string) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : undefined);
 const runDir = (name?: string) => {
   if (!name) throw new Error("which run? (its name or directory)");

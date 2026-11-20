@@ -116,12 +116,13 @@ export function opencodeCatalogFrom(raw: string): ModelCatalog {
 }
 
 const run = (cmd: string, args: string[], env?: NodeJS.ProcessEnv) => new Promise<string>((resolve, reject) => execFile(cmd, args, { timeout: 15_000, encoding: "utf8", maxBuffer: 8 << 20, ...(env ? { env, cwd: tmpdir() } : {}) }, (e, out) => (e ? reject(e) : resolve(out))));
-/** `opencode models`, in your own OpenCode (its logins and providers), with plugins and the update check off. */
-const opencodeModels = () => run("opencode", ["models", "--verbose", "--pure"], { ...process.env, ...OPENCODE_NO_UPDATE });
-/** Codex's list, read from its CLI (the descriptor's `catalog`). */
-export const codexCatalog = async (): Promise<ModelCatalog> => codexCatalogFrom(await run("codex", ["debug", "models"]));
-/** OpenCode's list, read from your own OpenCode (the descriptor's `catalog`). */
-export const opencodeCatalog = async (): Promise<ModelCatalog> => opencodeCatalogFrom(await opencodeModels());
+/** Codex's list, read from its CLI (the descriptor's `catalog`), in its builder home when `env` points there. */
+export const codexCatalog = async (env?: NodeJS.ProcessEnv): Promise<ModelCatalog> => codexCatalogFrom(await run("codex", ["debug", "models"], env));
+/**
+ * OpenCode's list (`opencode models`, plugins and the update check off), read where `env` points: its builder home
+ * (the logins builds run on), else your own OpenCode. The descriptor's `catalog`.
+ */
+export const opencodeCatalog = async (env: NodeJS.ProcessEnv = process.env): Promise<ModelCatalog> => opencodeCatalogFrom(await run("opencode", ["models", "--verbose", "--pure"], { ...env, ...OPENCODE_NO_UPDATE }));
 
 /** How long a remote builder's model list and allowance are kept before they're read again. */
 const KEPT_MS = 10 * 60_000;

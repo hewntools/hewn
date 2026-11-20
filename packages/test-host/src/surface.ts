@@ -35,7 +35,7 @@ export function nodeSurfaceHost(home: Home, opts: { port: number; log?: (line: s
       mkdirSync(dir, { recursive: true });
       appendFileSync(join(dir, `${new Date().toISOString().slice(0, 10)}.log`), JSON.stringify(entry) + "\n");
     },
-    tools: async () => toolStatus(),
+    tools: async () => toolStatus(home.root),
     modelCatalog: opts.models ?? offlineCatalog,
     ...(opts.allowance ? { allowance: opts.allowance } : {}),
     status: async () => {

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, constants, copyFileSync, createWriteStream, existsSync, type FSWatcher, mkdirSync, readdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
-import { cp } from "node:fs/promises";
+import { appendFileSync, createWriteStream, existsSync, type FSWatcher, mkdirSync, readdirSync, realpathSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,8 +11,12 @@ import { claudeActivity, codexActivity, opencodeActivity, USED_TOOL } from "./ac
 import { MODEL_REJECTED, modelRejectReason, noteModelFailure, noteModelRan } from "./models.ts";
 import { OPENCODE_NO_UPDATE, opencodeUserDirs } from "./opencode-dirs.ts";
 import { wrapBuilder } from "./sandbox.ts";
+import { builderEnv, OPENCODE_PROVIDER_ENV } from "./env.ts";
+import { type AskCli, type BuilderVendor, builderHome, claudeEnv, claudeSignInIgnored, CODEX_FILE_LOGIN, codexEnv, notSignedIn, notSignedInWords, opencodeEnv, signedIn, signInCommand } from "./sign-in.ts";
 import { CHECK_CLIENT_TIMEOUT_MS, CHECK_SERVER_NAME, type CheckServer, openCheck } from "./check.ts";
 import type { BuildJob, CapabilityBuilder } from "./types.ts";
+
+export { builderEnv, OPENCODE_PROVIDER_ENV };
 
 export function builderPrompt(job: BuildJob): string {
   const lines = [
@@ -76,16 +79,6 @@ interface Confine {
   /** Ports on this machine the builder may reach (a local model server's). */
   allowLoopback?: number[];
 }
-
-/**
- * What a builder's environment keeps: the basics, its own model and login settings (the providers'
- * API keys OpenCode reads from the environment among them), proxies and CAs. Not the rest of yours
- * (tokens), and not OpenCode's own config variables: the run gets its own.
- */
-const BUILDER_ENV = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|LANG|TZ|TMPDIR|LC_\w+|(ANTHROPIC|CLAUDE|OPENAI|CODEX)_\w+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|NODE_EXTRA_CA_CERTS|SSL_CERT_(FILE|DIR))$/;
-/** The other providers' keys OpenCode reads from the environment: its run only, no other builder's. */
-export const OPENCODE_PROVIDER_ENV = /^((OPENROUTER|GEMINI|GOOGLE_GENERATIVE_AI|XAI|GROQ|MISTRAL|DEEPSEEK|OPENCODE)_API_KEY|OLLAMA_HOST)$/;
-export const builderEnv = (env: NodeJS.ProcessEnv = process.env, also?: RegExp): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(env).filter(([k]) => BUILDER_ENV.test(k) || (also?.test(k) ?? false)));
 
 /** How long a builder may go with no activity (no output, no file change in its workspace) before it's stopped, unless platform.json says otherwise. */
 export const BUILDER_IDLE_MS = 15 * 60_000;
@@ -358,170 +351,89 @@ export const opencodeModelRejected = (model: string) => Object.assign(new Error(
 export interface OpencodeHomeOptions {
   /** What the run may do (OPENCODE_BUILDER_RULES or OPENCODE_INTAKE_RULES). */
   rules: OpencodeRules;
-  /** Your OpenCode directories (defaults: XDG under your home). */
-  yours?: { config: string; data: string; cache: string };
   /** Your custom providers (`provider` in your config), carried over. Default: read from OpenCode. */
   providers?: () => Record<string, unknown> | undefined;
   /** MCP servers the run gets (a build's `check`), with the rules (above a project config). */
   mcp?: Record<string, unknown>;
+  /** Where the run keeps its sessions (OpenCode's database): a build's own, so its later attempts resume them and no other build reads them. */
+  db: string;
 }
 
 /**
- * OpenCode runs with a HOME of its own (`dir`, one per build or for the intake) and its config, data,
- * cache and state directories under it: none of your config, plugins, skills (~/.agents/skills,
- * ~/.claude/skills), sessions or MCP logins reach it, and nothing it writes reaches yours. It gets
- * your provider logins (auth.json) for the run, copied back if it refreshed them and removed after;
- * your custom providers (a local model server among them) are written into its config, with updates
- * and session sharing off, and the permissions on top as `OPENCODE_CONFIG_CONTENT` (above a project
- * config the builder could write). Its plugin SDK install is copied from yours when it's there (else
- * OpenCode installs it from npm, once per home), with your model list cache. The run can't read
- * ~/.claude's instructions or a project config (`OPENCODE_DISABLE_*`). What else it writes (a
- * build's session, for a later attempt to resume) stays until the dir goes.
+ * An OpenCode run in OpenCode's builder home (`home`: its HOME, its XDG directories, the login its sign-in made), which
+ * Hewn never reads or writes the login in. Its sessions go in a database of the run's own (`db`). Your custom
+ * providers (a local model server among them) come in a config file for this run alone (`OPENCODE_CONFIG`, gone after:
+ * it may carry keys), with updates and session sharing off; the permissions on top as `OPENCODE_CONFIG_CONTENT`
+ * (above a project config the builder could write). The run can't read ~/.claude's instructions or a project config.
  */
-export async function opencodeHome(dir: string, o: OpencodeHomeOptions): Promise<{ env: NodeJS.ProcessEnv; dir: string; loopback: number[]; done: () => void }> {
-  const yours = o.yours ?? opencodeUserDirs();
-  const config = join(dir, "config", "opencode");
-  const data = join(dir, "data", "opencode");
-  const cache = join(dir, "cache", "opencode");
-  for (const d of [dir, config, data, cache, join(dir, "state")]) mkdirSync(d, { recursive: true, mode: 0o700 });
-  // Copies that may be big (the SDK is 60 MB in thousands of files): cloned where the file system can (APFS), and never a
-  // synchronous wait, which once froze Hewn long enough for its watchdog to restart workerd under a running build.
-  const clone = (from: string, to: string) => cp(from, to, { recursive: true, mode: constants.COPYFILE_FICLONE });
-  // The plugin SDK OpenCode installs into its config dir on every start when missing (from npm, minutes on a slow registry): yours instead.
-  if (!existsSync(join(config, "node_modules")) && existsSync(join(yours.config, "node_modules", "@opencode-ai", "plugin"))) {
-    for (const f of ["package.json", "package-lock.json", "node_modules"]) if (existsSync(join(yours.config, f))) await clone(join(yours.config, f), join(config, f));
-  }
-  for (const f of ["models.json", "bin"]) if (!existsSync(join(cache, f)) && existsSync(join(yours.cache, f))) await clone(join(yours.cache, f), join(cache, f));
+export async function opencodeHome(home: string, o: OpencodeHomeOptions): Promise<{ env: NodeJS.ProcessEnv; dir: string; loopback: number[]; done: () => void }> {
   const providers = await (o.providers ?? opencodeProviders)();
-  writeFileSync(join(config, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json", autoupdate: false, share: "disabled", ...(providers ? { provider: providers } : {}), ...o.rules }, null, 2));
-  // Your provider logins for the run: copied in, back if the run refreshed them, gone after (as is the run's copy of your
-  // provider config, which may carry keys too; the next attempt writes both again).
-  const yourAuth = join(yours.data, "auth.json");
-  const runAuth = join(data, "auth.json");
-  if (existsSync(yourAuth)) copyFileSync(yourAuth, runAuth);
-  const copied = existsSync(runAuth) ? statSync(runAuth).mtimeMs : 0;
+  const runs = join(home, "runs");
+  mkdirSync(runs, { recursive: true, mode: 0o700 });
+  mkdirSync(dirname(o.db), { recursive: true, mode: 0o700 });
+  const config = join(runs, `${randomUUID()}.json`);
+  writeFileSync(config, JSON.stringify({ $schema: "https://opencode.ai/config.json", autoupdate: false, share: "disabled", ...(providers ? { provider: providers } : {}) }, null, 2), { mode: 0o600 });
   return {
-    dir,
+    dir: home,
     loopback: loopbackPorts(providers),
     env: {
-      ...builderEnv(process.env, OPENCODE_PROVIDER_ENV),
-      HOME: dir,
-      XDG_CONFIG_HOME: join(dir, "config"),
-      XDG_DATA_HOME: join(dir, "data"),
-      XDG_CACHE_HOME: join(dir, "cache"),
-      XDG_STATE_HOME: join(dir, "state"),
+      ...opencodeEnv(home),
+      OPENCODE_CONFIG: config,
+      OPENCODE_DB: o.db,
       OPENCODE_CONFIG_CONTENT: JSON.stringify({ autoupdate: false, share: "disabled", ...o.rules, ...(o.mcp ? { mcp: o.mcp } : {}) }),
-      OPENCODE_DISABLE_CLAUDE_CODE: "1",
-      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
     },
-    done: () => {
-      if (existsSync(runAuth) && statSync(runAuth).mtimeMs > copied && existsSync(dirname(yourAuth))) copyFileSync(runAuth, yourAuth);
-      rmSync(runAuth, { force: true });
-      if (providers) writeFileSync(join(config, "opencode.json"), JSON.stringify({ $schema: "https://opencode.ai/config.json", autoupdate: false, share: "disabled", ...o.rules }, null, 2));
-    },
+    done: () => rmSync(config, { force: true }),
   };
 }
 
-/**
- * Codex runs with its own HOME and CODEX_HOME (`dir`, one per build or per intake) holding your
- * auth.json for the run: none of your skills (~/.agents/skills), global AGENTS.md or config reach
- * it. auth.json is copied in before each run and, when done, copied back if Codex refreshed it
- * (your own Codex login and the builder's stay one and the same) and removed; what else Codex
- * wrote there (a build's thread, for a later attempt to resume) stays until the dir goes.
- */
-export function codexHome(dir: string): { env: NodeJS.ProcessEnv; dir: string; done: () => void } {
-  const codexDir = join(dir, ".codex");
-  mkdirSync(codexDir, { recursive: true, mode: 0o700 });
-  const yours = join(homedir(), ".codex", "auth.json");
-  const theirs = join(codexDir, "auth.json");
-  if (existsSync(yours)) copyFileSync(yours, theirs);
-  const copied = existsSync(theirs) ? statSync(theirs).mtimeMs : 0;
-  return {
-    dir,
-    env: { ...builderEnv(), HOME: dir, CODEX_HOME: codexDir },
-    done: () => {
-      if (existsSync(theirs) && statSync(theirs).mtimeMs > copied && existsSync(dirname(yours))) copyFileSync(theirs, yours);
-      rmSync(theirs, { force: true });
-    },
-  };
-}
+/** Where a build keeps its OpenCode sessions, in OpenCode's builder home: removed with the build's workspace. */
+export const opencodeBuildDb = (home: string, buildId: string) => join(home, "builds", `${buildId}.db`);
 
 /**
- * Your Claude Code login: on macOS the Keychain item "Claude Code-credentials", elsewhere
- * ~/.claude/.credentials.json. It holds the model login (claudeAiOauth) and your MCP servers'
- * tokens (mcpOAuth), Hewn's among them.
+ * What Codex would load from its home besides the login: instructions (AGENTS.md) and skills. Codex has a shell, and its
+ * home is the one every build shares, so a build could leave them for the next; they go before each run.
  */
-export interface ClaudeLogin {
-  blob: { claudeAiOauth?: unknown; [k: string]: unknown };
-  /** macOS: the Keychain item's account; else the file. */
-  account?: string;
-  file?: string;
+export function clearCodexInstructions(home: string) {
+  for (const p of [join(home, ".codex", "AGENTS.md"), join(home, ".codex", "AGENTS.override.md"), join(home, ".codex", "skills"), join(home, ".agents")]) rmSync(p, { recursive: true, force: true });
 }
-const KEYCHAIN_SERVICE = "Claude Code-credentials";
-function readClaudeLogin(): ClaudeLogin | undefined {
+
+/** The platform home a build runs under (its log is in `<home>/builds/`). */
+const platformHomeOf = (job: BuildJob) => dirname(dirname(job.logPath));
+
+/** Builder output meaning the sign-in (or a key) didn't work: then the vendor's own status says whether it's signed in. */
+const SIGNED_OUT = /failed to authenticate|not logged in|please (run \/login|log in)|oauth token|invalid api key|unauthorized|\b401\b|not authenticated|no (api key|credentials?) (found|configured|set)/i;
+
+/** A line in hewn.log (the supervisor's log): where the terminal's commands go, never a build's log, which the web shows. */
+const hewnLog = (line: string) => console.error(`[${new Date().toISOString()}] ${line}`);
+
+/**
+ * A run in the vendor's builder home, signed in by the vendor's own flow. Not signed in (no home yet, or the run's
+ * login failed and the vendor's status says it's signed out): it stops with the owner's words, in `note` (the build's
+ * log, which the web shows) too, and hewn.log (`log`) names the command. A login failure while Claude Code says it is
+ * signed in is the `claude -p` tripwire. A run on an API key (`apiKey`) needs no sign-in.
+ */
+export async function inBuilderHome<T>(vendor: BuilderVendor, platformHome: string, o: { apiKey?: string; note?: (line: string) => void; log?: (line: string) => void; ask?: AskCli }, run: (home: string) => Promise<T>): Promise<T> {
+  const home = builderHome(platformHome, vendor);
+  const log = o.log ?? hewnLog;
+  const stop = () => (o.note?.(notSignedInWords(vendor)), log(`${notSignedInWords(vendor)} In a terminal there: ${signInCommand(vendor)}`), notSignedIn(vendor));
+  if (!existsSync(home)) {
+    if (!o.apiKey) throw stop();
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+  }
   try {
-    if (platform() === "darwin") {
-      const attrs = execFileSync("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-      const account = /"acct"<blob>="([^"]*)"/.exec(attrs)?.[1];
-      const blob = JSON.parse(execFileSync("security", ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-      return account ? { blob, account } : undefined;
+    return await run(home);
+  } catch (e) {
+    const err = e as Error & { unavailable?: boolean; notSignedIn?: boolean };
+    if (o.apiKey || err.notSignedIn || !SIGNED_OUT.test(err.message)) throw e;
+    const now = await signedIn(vendor, platformHome, o.ask);
+    if (now === false) throw stop();
+    if (now === true && vendor === "claude") {
+      log(`Claude Code says it is signed in (claude auth status), but \`claude -p\` didn't use the sign-in: see hewn doctor's "Claude -p" line. It said: ${err.message}`);
+      throw claudeSignInIgnored();
     }
-    const file = join(homedir(), ".claude", ".credentials.json");
-    return existsSync(file) ? { blob: JSON.parse(readFileSync(file, "utf8")), file } : undefined;
-  } catch {
-    return undefined;
+    throw e;
   }
 }
-function writeClaudeLogin(login: ClaudeLogin, blob: ClaudeLogin["blob"]) {
-  const json = JSON.stringify(blob);
-  if (login.file) return writeFileSync(login.file, json, { mode: 0o600 });
-  // Through security's own prompt (stdin), so the token never shows in a process list.
-  const hex = Buffer.from(json, "utf8").toString("hex");
-  execFileSync("security", ["-i"], { input: `add-generic-password -U -a "${login.account}" -s "${KEYCHAIN_SERVICE}" -X ${hex}\n`, stdio: ["pipe", "ignore", "ignore"] });
-}
-
-/**
- * Claude runs with a config dir of its own for each run (`dir`, as CLAUDE_CONFIG_DIR): none of
- * your settings, sessions, history or MCP tokens, and nothing it writes reaches your own
- * ~/.claude. It gets your model login only (claudeAiOauth, as a file), never the MCP tokens kept
- * next to it; if Claude refreshed the login, the new one is copied back (unless yours changed
- * meanwhile). The dir, login included, is deleted after the run; with `keepSessions` only the login
- * goes, so a build's later attempt can resume the session (the workbench removes the dir with the
- * workspace).
- */
-export function claudeHome(dir: string, store: { read: () => ClaudeLogin | undefined; write: (login: ClaudeLogin, blob: ClaudeLogin["blob"]) => void } = { read: readClaudeLogin, write: writeClaudeLogin }, opts: { keepSessions?: boolean } = {}): { env: NodeJS.ProcessEnv; dir: string; done: () => void } {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = join(dir, ".credentials.json");
-  const login = store.read();
-  const given = login?.blob.claudeAiOauth ? JSON.stringify({ claudeAiOauth: login.blob.claudeAiOauth }) : undefined;
-  if (given) writeFileSync(file, given, { mode: 0o600 });
-  return {
-    dir,
-    env: { ...builderEnv(), CLAUDE_CONFIG_DIR: dir },
-    done: () => {
-      try {
-        const after = existsSync(file) ? readFileSync(file, "utf8") : undefined;
-        const refreshed = after && after !== given ? (JSON.parse(after) as ClaudeLogin["blob"]).claudeAiOauth : undefined;
-        const yours = refreshed && login ? store.read() : undefined;
-        if (refreshed && yours && JSON.stringify(yours.blob.claudeAiOauth) === JSON.stringify(login!.blob.claudeAiOauth)) store.write(yours, { ...yours.blob, claudeAiOauth: refreshed });
-      } catch {
-        // Copying back is a courtesy: your own Claude Code can sign in again.
-      } finally {
-        if (opts.keepSessions) rmSync(file, { force: true });
-        else rmSync(dir, { recursive: true, force: true });
-      }
-    },
-  };
-}
-
-/**
- * Where a build's builder home lives: Claude Code's config directory, Codex's HOME. One per build,
- * so a build's session (kept there between attempts) is its own: no other build's sandbox can read
- * or edit it. The workbench removes it with the workspace.
- */
-export const claudeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "claude", buildId);
-export const codexBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "codex", buildId);
-export const opencodeBuildHome = (platformHome: string, buildId: string) => join(platformHome, "builder-home", "opencode", buildId);
 
 /** Codex, headless. Its own HOME (no user skills, instructions or config); OS sandbox limits writes to the workspace. */
 export const codexBuilder: CapabilityBuilder = {
@@ -531,7 +443,7 @@ export const codexBuilder: CapabilityBuilder = {
 
 /**
  * Codex's arguments for an attempt: fresh, or resuming the build's earlier thread with the failure.
- * Sessions stay on disk in its own home (no --ephemeral), so a thread can be resumed. `exec`'s own
+ * Sessions stay on disk in its builder home (no --ephemeral), so a thread can be resumed. `exec`'s own
  * options (the sandbox, the project root, the directory) go before `resume`, the shared ones after.
  */
 export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): string[] {
@@ -542,6 +454,8 @@ export function codexArgs(job: BuildJob, resume?: string, check?: CheckServer): 
     "--sandbox", job.platformRoot ? "danger-full-access" : "workspace-write",
     // The workspace is the project root: never walk up looking for other AGENTS.md files.
     "-c", 'project_root_markers=["BUILDER.md"]',
+    // Its login: the file in its builder home (never the system keyring, which our sandbox closes).
+    ...CODEX_FILE_LOGIN,
     // Its `check` tool (no other MCP server: --ignore-user-config), waited on as long as a check takes.
     ...(check
       ? ["-c", `mcp_servers.${CHECK_SERVER_NAME}.command=${JSON.stringify(check.command)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.args=${JSON.stringify(check.args)}`, "-c", `mcp_servers.${CHECK_SERVER_NAME}.tool_timeout_sec=${CHECK_CLIENT_TIMEOUT_MS / 1000}`]
@@ -590,28 +504,29 @@ export async function withResume(builder: keyof typeof sessions, job: BuildJob, 
 }
 
 async function codexRun(job: BuildJob) {
-  // Its own home per build (builds run side by side), kept between attempts for the thread; the login only for a run.
-  const home = codexBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("codex", job, async (resume, current) => {
-    const isolated = codexHome(home);
-    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
-    try {
-      await runCli(
-        "codex",
-        codexArgs(current, resume, check?.server),
-        current,
-        codexActivity,
-        // Codex has a shell: no Keychain. Its auth lives in its own home.
-        { ownState: [isolated.dir], denyKeychain: true },
-        isolated.env,
-        // Its thread, for the next attempt to resume.
-        (e) => e?.type === "thread.started" && typeof e.thread_id === "string" && noteSession("codex", job.buildId, e.thread_id),
-      );
-    } finally {
-      check?.close();
-      isolated.done();
-    }
-  });
+  const note = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
+  // Codex's builder home, signed in by Codex's own flow; a build's thread is its own (by id), kept between attempts.
+  await inBuilderHome("codex", platformHomeOf(job), { apiKey: job.apiKey, note }, (home) =>
+    withResume("codex", job, async (resume, current) => {
+      clearCodexInstructions(home);
+      const check = job.check ? openCheck(job.workspace, job.check) : undefined;
+      try {
+        await runCli(
+          "codex",
+          codexArgs(current, resume, check?.server),
+          current,
+          codexActivity,
+          // Codex has a shell: no Keychain. Its login is a file in its home.
+          { ownState: [home], denyKeychain: true },
+          codexEnv(home, job.apiKey ? { ...builderEnv(), CODEX_API_KEY: job.apiKey } : builderEnv()),
+          // Its thread, for the next attempt to resume.
+          (e) => e?.type === "thread.started" && typeof e.thread_id === "string" && noteSession("codex", job.buildId, e.thread_id),
+        );
+      } finally {
+        check?.close();
+      }
+    }),
+  );
 }
 
 /** OpenCode, headless, in a home of its own. File tools only (no shell, no web, no subagents); OS sandbox limits writes to the workspace. */
@@ -630,30 +545,33 @@ export function opencodeArgs(job: BuildJob, resume?: string): string[] {
 }
 
 async function opencodeRun(job: BuildJob) {
-  // Its own home per build (builds run side by side), kept between attempts for the session; the login only for a run.
-  const home = opencodeBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("opencode", job, async (resume, current) => {
-    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
-    const isolated = await opencodeHome(home, check ? opencodeCheck(check.server) : { rules: OPENCODE_BUILDER_RULES });
-    try {
-      // Asked from the run's own home, not the workspace (builder-written from the second attempt on).
-      if (job.model && !(await opencodeHasModel(job.model, isolated.env, isolated.dir))) throw opencodeModelRejected(job.model);
-      await runCli(
-        "opencode",
-        opencodeArgs(current, resume),
-        current,
-        opencodeActivity,
-        // Its logins come as a file in its own home: no Keychain, none of your ~/.config/opencode. A local model server's port stays open.
-        { ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback },
-        isolated.env,
-        // Its session (every event names it), for the next attempt to resume.
-        (e) => typeof e?.sessionID === "string" && e.sessionID && noteSession("opencode", job.buildId, e.sessionID),
-        OPENCODE_QUIET_START_MS,
-      );
-    } finally {
-      check?.close();
-      isolated.done();
-    }
+  const note = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
+  // OpenCode's builder home, set up by its own sign-in; a build's sessions in a database of its own, kept between attempts.
+  await inBuilderHome("opencode", platformHomeOf(job), { note }, async (home) => {
+    if (!(await signedIn("opencode", platformHomeOf(job)))) throw (note(notSignedInWords("opencode")), hewnLog(`${notSignedInWords("opencode")} In a terminal there: ${signInCommand("opencode")}`), notSignedIn("opencode"));
+    await withResume("opencode", job, async (resume, current) => {
+      const check = job.check ? openCheck(job.workspace, job.check) : undefined;
+      const isolated = await opencodeHome(home, { ...(check ? opencodeCheck(check.server) : { rules: OPENCODE_BUILDER_RULES }), db: opencodeBuildDb(home, job.buildId) });
+      try {
+        // Asked from its home, not the workspace (builder-written from the second attempt on).
+        if (job.model && !(await opencodeHasModel(job.model, isolated.env, isolated.dir))) throw opencodeModelRejected(job.model);
+        await runCli(
+          "opencode",
+          opencodeArgs(current, resume),
+          current,
+          opencodeActivity,
+          // Its logins are a file in its home: no Keychain, none of your ~/.config/opencode. A local model server's port stays open.
+          { ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback },
+          isolated.env,
+          // Its session (every event names it), for the next attempt to resume.
+          (e) => typeof e?.sessionID === "string" && e.sessionID && noteSession("opencode", job.buildId, e.sessionID),
+          OPENCODE_QUIET_START_MS,
+        );
+      } finally {
+        check?.close();
+        isolated.done();
+      }
+    });
   });
 }
 
@@ -691,31 +609,76 @@ export function claudeArgs(job: BuildJob, session: { id: string; resume: boolean
   ];
 }
 
+/** Claude Code's caches outside its config dir, which it writes as it runs. */
+export const claudeCaches = () => [join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")];
+
+/**
+ * Claude Code without a shell may read the macOS Keychain, where its sign-in keeps the login (an item named after its
+ * builder home): its file tools can't run `security`, and the login is Claude Code's to read. Elsewhere the login is a
+ * file in the home.
+ */
+export const CLAUDE_KEYCHAIN = platform() === "darwin";
+
 async function claudeRun(job: BuildJob) {
-  // Its own dir per build (builds run side by side), kept between attempts for the session; the login only for a run.
-  const home = claudeBuildHome(dirname(dirname(job.logPath)), job.buildId);
-  await withResume("claude", job, async (resume, current) => {
-    const session = { id: resume ?? randomUUID(), resume: !!resume };
-    // Known before it starts: a run stopped for no activity resumes it even if it never said so.
-    noteSession("claude", job.buildId, session.id);
-    const isolated = claudeHome(home, undefined, { keepSessions: true });
-    const check = job.check ? openCheck(job.workspace, job.check) : undefined;
+  const note = (line: string) => appendFileSync(job.logPath, `${stamp()} ${line}\n`);
+  // Claude Code's builder home, signed in by Claude Code's own flow; a build's session is its own (by id), kept between attempts.
+  await inBuilderHome("claude", platformHomeOf(job), { apiKey: job.apiKey, note }, (home) =>
+    withResume("claude", job, async (resume, current) => {
+      const session = { id: resume ?? randomUUID(), resume: !!resume };
+      // Known before it starts: a run stopped for no activity resumes it even if it never said so.
+      noteSession("claude", job.buildId, session.id);
+      const env = claudeEnv(home, job.apiKey ? { ...builderEnv(), ANTHROPIC_API_KEY: job.apiKey } : builderEnv());
+      const check = job.check ? openCheck(job.workspace, job.check) : undefined;
+      try {
+        await runCli(
+          "claude",
+          claudeArgs(current, session, check?.server),
+          current,
+          claudeActivity,
+          // Its home and caches; none of your ~/.claude.
+          { ownState: [home, ...claudeCaches()], denyKeychain: !CLAUDE_KEYCHAIN },
+          // A check takes longer than an MCP call usually does.
+          check ? { ...env, MCP_TOOL_TIMEOUT: String(CHECK_CLIENT_TIMEOUT_MS) } : env,
+          // The session it ran as (the one asked for), for the next attempt to resume.
+          (e) => e?.type === "system" && e.subtype === "init" && typeof e.session_id === "string" && noteSession("claude", job.buildId, e.session_id),
+        );
+      } finally {
+        check?.close();
+      }
+    }),
+  );
+}
+
+/**
+ * What a build kept in the builders' homes between its attempts, removed with its workspace: Claude Code's session
+ * (its project folder, named after the workspace), Codex's thread (its rollout file, when this process ran it),
+ * OpenCode's session database. Best effort: the homes are the vendors' to lay out.
+ */
+export function forgetBuild(platformHome: string, buildId: string, workspace: string) {
+  const claude = builderHome(platformHome, "claude");
+  let real = workspace;
+  try {
+    real = realpathSync(workspace);
+  } catch {
+    // Gone already: its path as given.
+  }
+  for (const ws of new Set([workspace, real])) rmSync(join(claude, "projects", ws.replace(/[^a-zA-Z0-9]/g, "-")), { recursive: true, force: true });
+  const thread = sessions.codex.get(buildId);
+  const rollouts = join(builderHome(platformHome, "codex"), ".codex", "sessions");
+  if (thread && existsSync(rollouts)) {
+    const walk = (dir: string, depth: number) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory() && depth < 4) walk(join(dir, e.name), depth + 1);
+        else if (e.isFile() && e.name.includes(thread)) rmSync(join(dir, e.name), { force: true });
+      }
+    };
     try {
-      await runCli(
-        "claude",
-        claudeArgs(current, session, check?.server),
-        current,
-        claudeActivity,
-        // Its login comes as a file in its own dir: no Keychain, none of your ~/.claude.
-        { ownState: [isolated.dir, join(homedir(), "Library", "Caches", "claude-cli-nodejs"), join(homedir(), ".cache", "claude-cli-nodejs")], denyKeychain: true },
-        // A check takes longer than an MCP call usually does.
-        check ? { ...isolated.env, MCP_TOOL_TIMEOUT: String(CHECK_CLIENT_TIMEOUT_MS) } : isolated.env,
-        // The session it ran as (the one asked for), for the next attempt to resume.
-        (e) => e?.type === "system" && e.subtype === "init" && typeof e.session_id === "string" && noteSession("claude", job.buildId, e.session_id),
-      );
-    } finally {
-      check?.close();
-      isolated.done();
+      walk(rollouts, 0);
+    } catch {
+      // A folder gone meanwhile: what's left stays.
     }
-  });
+  }
+  const db = opencodeBuildDb(builderHome(platformHome, "opencode"), buildId);
+  for (const f of [db, `${db}-wal`, `${db}-shm`]) rmSync(f, { force: true });
+  forgetSession(buildId);
 }

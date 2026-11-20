@@ -9,6 +9,7 @@ import { createInterface } from "node:readline/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { backupLocation, backupNow, findBackup, listBackups, restoreBackup } from "./backup.ts";
 import { BUILDERS, cliIntake, isCliAgent } from "./builders/cli-agents.ts";
+import { BUILDER_VENDORS, CLAUDE_TERMS_ASK, isBuilderVendor, signedIn, signIn, signInCommand } from "./builders/sign-in.ts";
 import { startMetrics } from "./supervisor/metrics.ts";
 import { idleLine } from "./supervisor/idle.ts";
 import { connect, type PlatformClient, supervisorInfo } from "./cli-client.ts";
@@ -41,6 +42,10 @@ Run Hewn
   service install [--force]|uninstall|start|stop|restart|status
                       run Hewn in the background (launchd on macOS, systemd user unit on Linux)
   doctor              check Hewn, the sandboxes, builders, agents, the secrets key and backups
+  builder sign-in claude|codex|opencode [--yes]
+                      sign a builder in for this Hewn's builds, by its own sign-in, in a home of its own (your own
+                      sign-in stays as it is; Claude Code asks once for Anthropic's Commercial Terms, --yes accepts);
+                      builder status: which are signed in
   uninstall [--yes]   remove the service, agent registrations and the hewn command (asks first;
                       --yes doesn't). Your data and backups stay; it says how to remove them
   upgrade [--to <tag>]
@@ -317,6 +322,48 @@ async function main() {
       });
       console.log(formatChecks(checks));
       if (checks.some((c) => c.state === "fail")) process.exitCode = 1;
+      return;
+    }
+
+    case "builder": {
+      const [sub, vendor] = positional();
+      if (sub === "sign-in") {
+        if (!vendor || !isBuilderVendor(vendor)) {
+          console.error(`usage: hewn builder sign-in ${BUILDER_VENDORS.join("|")}`);
+          process.exitCode = 1;
+          return;
+        }
+        // Running Claude Code in a product falls under Anthropic's Commercial Terms: accepted once per Hewn, and recorded.
+        if (vendor === "claude" && !readConfig(home).claudeTermsAccepted) {
+          if (!flag("yes")) {
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            const answer = await rl.question(CLAUDE_TERMS_ASK).finally(() => rl.close());
+            if (!/^y(es)?$/i.test(answer.trim())) {
+              console.log("Not signed in: Hewn runs Claude Code only under those terms.");
+              process.exitCode = 1;
+              return;
+            }
+          }
+          const on = new Date().toISOString().slice(0, 10);
+          writeConfig(home, { claudeTermsAccepted: on });
+          console.log(`Accepted for this Hewn (${on}).\n`);
+        }
+        // The vendor's own options go to its sign-in (Codex's --device-auth on a machine without a browser).
+        const extra = args.slice(args.indexOf(vendor) + 1).filter((a) => a !== "--yes");
+        const ok = await signIn(vendor, home.root, { io: { print: (l) => console.log(l) }, extra });
+        if (!ok && vendor !== "opencode") process.exitCode = 1;
+        return;
+      }
+      if (sub === undefined || sub === "status") {
+        const labels = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+        for (const v of BUILDER_VENDORS) {
+          const s = await signedIn(v, home.root);
+          console.log(`${s ? "✔" : s === false ? "✖" : "?"} ${labels[v].padEnd(12)} ${s ? "signed in for this Hewn's builds" : s === false ? `not signed in: ${signInCommand(v)}` : "can't tell (it didn't answer)"}`);
+        }
+        return;
+      }
+      console.log(USAGE);
+      process.exitCode = 1;
       return;
     }
 
