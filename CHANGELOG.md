@@ -6,6 +6,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- An open Home redrawing itself after its poll found a change no longer counts as your activity, so it doesn't delay Hewn giving memory back or a host suspending it.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
 
 ## 0.4.12 (2026-11-19)
