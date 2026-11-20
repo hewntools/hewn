@@ -643,7 +643,8 @@ export const operations = {
       await page.unroute(events);
     }
     // Put aside.
-    await page.evaluate(async (id: string) => void (await fetch(`/api/builds/${id}/reject`, { method: "POST", headers: { "x-hewn-ui": "1" } })), held.buildId);
+    const rejected = await page.evaluate(async (id: string) => (await fetch(`/api/builds/${id}/reject`, { method: "POST", headers: { "x-hewn-ui": "1" } })).status, held.buildId);
+    if (rejected !== 200) throw new Error(`reject: ${rejected}`);
   });
 
   await step("a tool from a file: Share… shows its sample data, and opens on the version on screen", async () => {

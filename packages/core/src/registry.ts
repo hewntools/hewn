@@ -1029,6 +1029,14 @@ export class Registry {
     return row ? toBuild(row as Row) : undefined;
   }
 
+  /** A capability's builds that haven't ended (waiting, open, building, validating, in review) or failed and weren't put aside, newest first. */
+  buildsNotEnded(capabilityId: string): BuildRow[] {
+    return this.db
+      .prepare("SELECT * FROM builds WHERE capability_id = ? AND (status IN ('waiting', 'open', 'building', 'validating', 'review') OR (status = 'failed' AND discarded_at IS NULL)) ORDER BY rowid DESC")
+      .all(capabilityId)
+      .map((r) => toBuild(r as Row));
+  }
+
   /** Every unfinished build (waiting, open, building, validating) of a capability, newest first. */
   unfinishedBuilds(capabilityId: string): BuildRow[] {
     return this.db

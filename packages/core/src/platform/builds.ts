@@ -578,8 +578,9 @@ export class Builds extends Domain {
   }
 
   /** Refused while a new tool of this id waits for the owner's approval: it keeps its id until they decide. */
-  private notHeld(agent: Agent, id: string) {
-    const held = this.registry.buildsInReview().find((b) => b.capabilityId === id && b.kind === "create");
+  private notHeld(agent: Agent, id: string, except?: string) {
+    // `except`: the held one a fix carries on from (its retry, when it failed before it opened).
+    const held = this.registry.buildsInReview().find((b) => b.capabilityId === id && b.kind === "create" && b.id !== except);
     if (held) throw new PlatformError("conflict", `'${id}' is built and waits for the owner's approval${this.buildRef(agent, held)}`);
   }
 
@@ -1155,6 +1156,8 @@ export class Builds extends Domain {
       await this.dropReviewShots(held);
       await this.keepTranscript(held.id);
       this.buildEnded(held.id);
+      // A fix of a fix: what the replaced one carried on from is done with too.
+      await this.dropFixSource(held);
     }
   }
 
@@ -1164,10 +1167,21 @@ export class Builds extends Domain {
     if (other) throw new PlatformError("conflict", `${heldId} is already being fixed in build ${other.id}; wait for it, or cancel it`);
   }
 
-  /** The held work a fix carried on from goes once the fix is decided (allowed, turned down, put aside): no retry opens on it after that. */
+  /**
+   * The held work a fix carried on from goes once nothing can open on it or promote it any more: not while the held
+   * build still waits for the owner (a fix that failed before it opened), nor while another build that hasn't ended
+   * or been put aside carries on from it or holds it as its candidate. Called when a fix is decided (allowed, turned
+   * down, put aside, stopped) and when a fix of it replaces it.
+   */
   private async dropFixSource(b: BuildRow) {
-    const hash = (b.request as RetryMarks).fixFrom;
-    if (hash && !this.registry.versionWithHash(hash)) await this.blobs.delete(`versions/${hash}.json`).catch(() => {});
+    const { fixOf, fixFrom: hash } = b.request as RetryMarks;
+    if (!hash || this.registry.versionWithHash(hash)) return;
+    if (fixOf && this.registry.getBuild(fixOf)?.status === "review") return;
+    const uses = (x: BuildRow) => x.id !== b.id && ((x.request as RetryMarks).fixFrom === hash || x.review?.contentHash === hash);
+    // A failed one that was retried is done with it (its retry counts instead).
+    if (this.registry.buildsNotEnded(b.capabilityId).some((x) => uses(x) && !(x.status === "failed" && this.registry.retryOf(x.id)))) return;
+    this.loaded.delete(hash);
+    await this.blobs.delete(`versions/${hash}.json`).catch(() => {});
   }
 
   /**
@@ -1180,6 +1194,7 @@ export class Builds extends Domain {
     if (!fixFrom) return undefined;
     const held = fixOf ? this.registry.getBuild(fixOf) : undefined;
     if (b.kind !== "create" && (held?.baseVersion ?? undefined) !== activeVersion) throw new PlatformError("conflict", `${b.capabilityId} changed since the held change was built on v${held?.baseVersion}: ask for the change again`);
+    if (b.kind === "create" && this.registry.getCapability(b.capabilityId)?.activeVersion) throw new PlatformError("conflict", `${b.capabilityId} went live meanwhile: change it instead`);
     const candidate = await this.loadCandidate(fixFrom).catch(() => {
       throw new PlatformError("not_found", "the held change's files are gone: ask for the change again");
     });
@@ -1243,7 +1258,7 @@ export class Builds extends Domain {
       // widgets build chained after this one (create with widgets): that one follows the retry.
       const building = this.registry.unfinishedBuild(old.capabilityId, { kind: "create" });
       if (building) throw new PlatformError("conflict", `'${old.capabilityId}' is being built again${this.buildRef(agent, building)}; wait for it`);
-      this.notHeld(agent, old.capabilityId);
+      this.notHeld(agent, old.capabilityId, req.fixOf);
       // Or took it over and paused, its work kept: retrying this one would strand it (unless this is its Continue).
       const paused = this.pausedBuild(old.capabilityId, "create");
       if (paused && paused.id !== old.id) throw this.pausedFirst(agent, `'${old.capabilityId}'`, paused);
@@ -1275,6 +1290,8 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { status: "cancelled", log: [...build.log, line] });
     this.buildEvent(buildId, line, `build ${buildId} [${build.kind} ${build.capabilityId}]`);
     this.aborts.get(buildId)?.abort();
+    // A stopped fix: what it carried on from goes (kept while the held build still waits, as when it hadn't opened yet).
+    void this.dropFixSource(build);
     if (!this.running.has(buildId)) {
       // Not running (waiting): nothing else will announce the end.
       this.steps.delete(buildId);
@@ -2173,7 +2190,8 @@ export const RESERVED_IDS = new Set(["hewn", "www", "api", "platform"]);
 /** Why a build failed, and how its validation log ended: what its fix or a retry carrying on from it is told. */
 const failedChecks = (log: string[]) => {
   const f = explainFailure(log);
-  return `The previous build failed: ${f.title}. ${f.detail}\nIts validation log ended with:\n${log.slice(-8).join("\n")}`;
+  // Not the warnings (they come before the failure, and would push it out of the tail).
+  return `The previous build failed: ${f.title}. ${f.detail}\nIts validation log ended with:\n${log.filter((l) => !/(^|: )warning: /.test(l)).slice(-8).join("\n")}`;
 };
 
 const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bundle" || builder === "submitted" || builder.startsWith("copy:");
