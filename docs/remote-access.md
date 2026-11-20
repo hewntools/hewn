@@ -11,7 +11,7 @@ Without a public URL, the web client is only on the machine Hewn runs on (`hewn 
 What the server needs:
 
 - **Linux:** Ubuntu 22.04 or newer (24.04 is what Hewn is tested on), or another distribution with glibc 2.28 or newer. Older ones can't run Node 24 or Claude Code (`GLIBC_2.28' not found`).
-- **2 GB of memory or more**, 20 GB of disk. Hewn itself takes a few hundred MB while it's busy and gives most of it back half a minute after you or your agents last used it (every few minutes while a page stays open). Each tool holds memory for its current version only: one you change lets go of the old version once its last call ends.
+- **2 GB of memory or more**, 20 GB of disk. Hewn itself takes a few hundred MB while it's busy and gives most of it back half a minute after you or your agents last used it (every few minutes while a page stays open). Each tool holds memory for its current version only: one you change lets go of the old version, whose memory goes when the tools' process next collects garbage.
 - **A VM on Proxmox (or another hypervisor):** set the CPU type to `host` (or `x86-64-v3`), then stop and start the VM. The default type (`kvm64`, `x86-64-v2-AES`) hides CPU features such as AVX2 that some tools' binaries need.
 
 Install Hewn on the server with the [quickstart](quickstart.md) (`hewn service install` keeps it running after you log out and across reboots).

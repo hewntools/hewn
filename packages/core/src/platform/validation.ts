@@ -41,10 +41,12 @@ export interface Candidate {
   failures?: string[];
 }
 
-/** The four renders of a candidate's screen a held build's review card shows (and a check returns): 1280 and 390 px, light and dark. */
-/** The scratch states a build's validation makes on its tool: dropped when it's done, or when Hewn finds it interrupted. */
-export const buildStates = (capabilityId: string, buildId: string): StateRef[] => ["test", "visual", "dryrun", "sample", "real"].map((k) => ({ capabilityId, scratch: `${k}:${buildId}` }));
+/** The kinds of scratch state a validation run makes on its tool, each named `<kind>:<run id>`. */
+export const SCRATCH_KINDS = ["test", "visual", "dryrun", "sample", "real"];
+/** The scratch states a validation run (a build's, a check's copy) makes on its tool: dropped when it's done, or swept at a restart. */
+export const buildStates = (capabilityId: string, buildId: string): StateRef[] => SCRATCH_KINDS.map((k) => ({ capabilityId, scratch: `${k}:${buildId}` }));
 
+/** The four renders of a candidate's screen a held build's review card shows (and a check returns): 1280 and 390 px, light and dark. */
 export const REVIEW_SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "mobile-dark"];
 /** Where a held build keeps one of them. */
 export const reviewShotKey = (buildId: string, name: string) => `screenshots/${buildId}/${name}.png`;

@@ -217,8 +217,9 @@ export class CapabilityHost extends DurableObject<Env> {
    * The isolate a state runs `code` in. Every one is unnamed, so workerd lets it go once nothing holds it
    * (at the main isolate's next GC); a named one (`LOADER.get`) it would keep until it restarts. The live
    * tool's own (`named`: its active version, with its calls' hosts and its limit) is held here, one per
-   * tool, its calls and data ops alike; another version, hosts or limit replaces it, and the old one goes
-   * once the last call on it ends. A build's states share one per code until they're dropped; on the
+   * tool, its calls and data ops alike (the host isn't evicted: `preventEviction`); another version, hosts or
+   * limit replaces it (the first call on the new key aborts one still running on the old), and the old one
+   * goes at the main isolate's next GC. A build's states share one per code until they're dropped; on the
    * live state (code going live, sample data replayed) one is held only while it runs.
    */
   private worker(name: string, code: CodeRef, hosts: string[], named: boolean, limit: number) {

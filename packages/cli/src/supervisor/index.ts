@@ -261,7 +261,7 @@ const hewn :Workerd.Worker = (
     (name = "VERSION", text = "${VERSION}"),${o.schedulesOff ? `\n    (name = "SCHEDULES", text = "off"),` : ""}
   ],
   durableObjectNamespaces = [
-    (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),
+    (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
 );
@@ -300,7 +300,7 @@ const tools :Workerd.Worker = (
     (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),${o.network ? `\n    (name = "NETWORK", text = "${o.network}"),` : ""}
   ],
   durableObjectNamespaces = [
-    (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true),
+    (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true, preventEviction = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
 );

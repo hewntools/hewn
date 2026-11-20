@@ -158,6 +158,13 @@ export class Submissions extends Domain {
   private checked = new Map<string, number[]>();
   /** Each client's checks run one at a time. */
   private checking = new Map<string, Promise<unknown>>();
+  /** Client checks running now, by their run's id (`chk-…`): a restart's sweep leaves their scratch states alone. */
+  private running = new Set<string>();
+
+  /** Whether a client check with this run id is going on. */
+  isChecking(runId: string): boolean {
+    return this.running.has(runId);
+  }
   /** The pack's download links, by their token's hash, in memory: a restart ends them. */
   private links = new Map<string, PackLink>();
 
@@ -267,11 +274,13 @@ export class Submissions extends Domain {
     const run = async (): Promise<ClientCheck> => {
       const build: BuildRow = { id: `chk-${crypto.randomUUID().slice(0, 8)}`, capabilityId: id, kind: cap ? "modify" : "create", request: {}, requestedBy: agent.id, builder: "submitted", status: "open", baseVersion: cap?.activeVersion ?? null, resultVersion: null, dependsOn: null, review: null, discardedAt: null, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       await this.workbench.open(build.id, files);
+      this.running.add(build.id);
       let r: CheckResult;
       try {
         // Not the upgrade dry run: a client's migrations run on a copy of the owner's data only once submitted.
         r = await this.d.validation.check(build, { liveData: false, shots });
       } finally {
+        this.running.delete(build.id);
         await this.workbench.remove(build.id).catch(() => {});
       }
       this.logger(`check by ${agent.id} of ${cap ? `a change to ${id}` : `new tool ${id}`}: ${r.passed ? "passed" : `${r.failures.length} problem(s)`}`);

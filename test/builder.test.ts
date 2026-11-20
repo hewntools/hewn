@@ -381,16 +381,16 @@ describe("platform-assigned builder", () => {
     restarted.close();
   });
 
-  test("the scratch states an interrupted build's validation left go at the restart", async () => {
+  test("the scratch states validation runs cut off by a restart left go at the restart: a build's, its check's, a client's check's", async () => {
     await installSeed(t.platform);
     useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
     const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index" });
-    // As a crash mid-validation leaves them (and, on workerd, the isolate they run).
-    for (const k of ["test", "dryrun"]) await platform.runtime.copyState({ capabilityId: "running-log" }, { capabilityId: "running-log", scratch: `${k}:${opened.buildId}` });
-    assert.equal((await platform.runtime.listStates("running-log", "")).filter((s) => s.endsWith(opened.buildId)).length, 2);
+    // As a crash mid-validation leaves them: the build's, its builder's check's, a client's check's. A backup stays.
+    const left = [`test:${opened.buildId}`, `dryrun:${opened.buildId}`, `dryrun:${opened.buildId}-check`, "sample:chk-1a2b3c4d-check", "backup:before-v2-1"];
+    for (const scratch of left) await platform.runtime.copyState({ capabilityId: "running-log" }, { capabilityId: "running-log", scratch });
     const restarted = nodePlatform(t.home);
     await restarted.recoverInterruptedBuilds();
-    assert.deepEqual((await restarted.runtime.listStates("running-log", "")).filter((s) => s.endsWith(opened.buildId)), []);
+    assert.deepEqual(await restarted.runtime.listStates("running-log", ""), ["backup:before-v2-1"]);
     restarted.close();
   });
 
