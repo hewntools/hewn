@@ -27,7 +27,8 @@ export function migrationProblems(migrations: Migration[], base: Migration[]): s
     // Durable Object SQL manages transactions itself (each migration is applied atomically).
     if (/^\s*(begin|commit|rollback|savepoint|release)\b/im.test(m.sql)) out.push(`migration ${m.name}: transaction statements (BEGIN/COMMIT) are not allowed; each migration already runs atomically`);
     // A shipped one ran already; it can't be edited, so it isn't held to a rule added after it.
-    if (!endsWithStatement(m.sql) && !base.some((b) => b.name === m.name && b.sql === m.sql)) out.push(`migration ${m.name}: nothing may follow the last statement; end it with \`;\``);
+    const end = endProblem(m.sql);
+    if (end && !base.some((b) => b.name === m.name && b.sql === m.sql)) out.push(`migration ${m.name}: ${end}`);
   }
   for (const b of base) {
     const cur = migrations.find((m) => m.name === b.name);
@@ -38,11 +39,12 @@ export function migrationProblems(migrations: Migration[], base: Migration[]): s
 }
 
 /**
- * Whether the file ends with its last statement's `;`, followed only by whitespace. Durable Object SQL
- * refuses a comment or a second `;` after it ("SQL code did not contain a statement"); node:sqlite doesn't.
- * Comments and quoted text elsewhere are skipped, so a `;` inside them doesn't count.
+ * What's wrong with how the file ends, if anything: it must end with its last statement's `;`, followed only
+ * by whitespace. Durable Object SQL refuses a comment or a second `;` after it ("SQL code did not contain a
+ * statement"); node:sqlite doesn't. Comments and quoted text elsewhere are skipped, so a `;` inside them
+ * doesn't count.
  */
-function endsWithStatement(sql: string): boolean {
+function endProblem(sql: string): string | undefined {
   let last = -1;
   let code = false; // code since the previous `;`
   let lastHadCode = false;
@@ -64,7 +66,10 @@ function endsWithStatement(sql: string): boolean {
       code = false;
     } else if (!/\s/.test(c)) code = true;
   }
-  return last >= 0 && lastHadCode && sql.slice(last + 1).trim() === "";
+  if (last < 0 || code) return "end it with `;`";
+  // SQLite's whitespace only: a no-break space or a BOM is not.
+  if (!lastHadCode || !/^[ \t\r\n\f]*$/.test(sql.slice(last + 1))) return "nothing may follow the last statement; end it with `;`";
+  return undefined;
 }
 
 /**
