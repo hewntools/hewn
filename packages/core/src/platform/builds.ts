@@ -213,6 +213,9 @@ const MAX_REPLY_CHARS = 100_000;
 export const archivedConflict = (c: { id: string; name: string; displayName?: string | null }) =>
   new PlatformError("conflict", `'${c.id}' was deleted by the owner and is kept with its data; use another id, or ask the owner to restore it`, { archived: { id: c.id, name: c.displayName ?? c.name } });
 
+/** Why an interrupted build wasn't started again (its log line; failure.ts explains it). */
+export const NOT_IN_A_COPY = "not started again: schedules are off in this Hewn (HEWN_SCHEDULES=off), so it starts no build by itself";
+
 export class Builds extends Domain {
   private buildModelFor: (builder: string) => { model?: string; effort?: string };
   private agentBuildModels?: (builder: string) => string[];
@@ -234,8 +237,12 @@ export class Builds extends Domain {
   /** Pipeline step of each in-flight build (see BuildStep). */
   private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number; spent: Partial<Record<BuildStep, number>>; passes?: Pass[] }>();
 
-  constructor(s: Shared, opts: Pick<PlatformOptions, "brief" | "designSystem" | "buildModel" | "agentBuildModels" | "modelEfforts">) {
+  /** HEWN_SCHEDULES=off: a copy of someone's Hewn starts no build by itself (an interrupted one, a waiting one). */
+  private copy: boolean;
+
+  constructor(s: Shared, opts: Pick<PlatformOptions, "brief" | "designSystem" | "buildModel" | "agentBuildModels" | "modelEfforts" | "schedulesOff">) {
     super(s);
+    this.copy = opts.schedulesOff === true;
     this.brief = opts.brief;
     this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
@@ -247,13 +254,20 @@ export class Builds extends Domain {
   /**
    * Call once at start: builds left mid-flight by a previous process are failed, and started
    * again once (not a retry that was itself interrupted). The retry runs as the original
-   * requester, with only the scope that request needed.
+   * requester, with only the scope that request needed. With schedules off (a copy of someone's
+   * Hewn, a restore drill) none is started again, and none waiting starts: each would run on
+   * their builder and their plan.
    */
   async recoverInterruptedBuilds(): Promise<string[]> {
     const retried: string[] = [];
     for (const id of this.registry.failInterruptedBuilds()) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
+      if (this.copy) {
+        this.registry.updateBuild(id, { log: [...b.log.slice(0, -1), `FAILED: interrupted by platform restart; ${NOT_IN_A_COPY}`] });
+        this.logger(`build ${id} not retried: schedules are off (HEWN_SCHEDULES=off)`);
+        continue;
+      }
       // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
       if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
@@ -268,7 +282,9 @@ export class Builds extends Domain {
         this.logger(`build ${id} not retried: ${(e as Error).message}`);
       }
     }
-    await this.resumeWaitingBuilds();
+    if (this.copy) {
+      for (const b of this.registry.waitingBuilds()) this.logger(`build ${b.id} left waiting: schedules are off (HEWN_SCHEDULES=off)`);
+    } else await this.resumeWaitingBuilds();
     return retried;
   }
 

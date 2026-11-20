@@ -73,6 +73,7 @@ function explainLog(log: string[]): BuildFailure {
   // Paused by the builder's host (the last word on the build): its own message says why and what's kept.
   const last = [...log].reverse().find((l) => /^(FAILED|PAUSED): /.test(l));
   if (last?.startsWith("PAUSED: ")) return { ...say("Paused", last.slice("PAUSED: ".length).trim() || "The builder paused it."), paused: true };
+  if (/interrupted by platform restart; not started again: schedules are off/.test(msg)) return say("Interrupted by a restart", "Hewn restarted while this was building, and didn't start it again: schedules are off in this Hewn (a copy), so it starts no build by itself.");
   if (/interrupted by platform restart/.test(msg)) return say("Interrupted by a restart", "The platform restarted while this was building.");
   // Builds failed before 0.4.12 say "kept Hewn from responding".
   const hung = /^its code kept Hewn(?:'s tools)? from responding \((.+)\)/.exec(msg);
