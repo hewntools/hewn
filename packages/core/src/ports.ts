@@ -161,12 +161,25 @@ export interface BuildHooks {
   onCheck?: (id: string) => Promise<CheckResult>;
 }
 
+/**
+ * Something a check found that doesn't fail the candidate (`passed` stays "no failures"): the check's
+ * name, a sentence, and the file and line where there is one. The owner sees it on the build.
+ */
+export interface CheckWarning {
+  check: string;
+  message: string;
+  file?: string;
+  line?: number;
+}
+
 /** What a builder's check of its work in progress found. */
 export interface CheckResult {
   passed: boolean;
-  /** What the builder reads: PASS or FAIL, every failure, what was measured on the UI, what passed. */
+  /** What the builder reads: PASS or FAIL, every failure and warning, what was measured on the UI, what passed. */
   text: string;
   failures: string[];
+  /** What the checks found that doesn't fail it. */
+  warnings: CheckWarning[];
   /** Measured on the UI: what sticks out or is cut short, page errors, controls that break the page. */
   defects: string[];
   /** The UI filled with its sample data: desktop-light, desktop-dark, mobile-light, mobile-dark (none when it didn't render), a long page's top part. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { CapabilityManifest, ToolSource } from "./manifest.ts";
-import type { Sql } from "./ports.ts";
+import type { CheckWarning, Sql } from "./ports.ts";
 
 export interface CapabilityRow {
   id: string;
@@ -73,6 +73,8 @@ export interface BuildReview {
   };
   /** Held because the agent's changes wait for the owner's approval (its approval mode), whatever the change adds. */
   approval?: "wait";
+  /** What its checks found that didn't fail it (absent: none). The build's log has them too. */
+  warnings?: CheckWarning[];
   /** The candidate's screen as validation rendered it (`desktop-light`, `desktop-dark`, `mobile-light`, `mobile-dark`): blobs `screenshots/<build>/<name>.png`. */
   shots?: string[];
 }

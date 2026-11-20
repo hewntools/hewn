@@ -11,7 +11,7 @@ import { codeBrowser } from "./files.js";
 import { route } from "./router.js";
 import { conversationThread } from "./intake.js";
 import { titleCase } from "./models.js";
-import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle } from "./review.js";
+import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, reviewWarnings, warnedWords } from "./review.js";
 import { openCapability } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
@@ -453,7 +453,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       files.addEventListener("toggle", () => files.open && !files.querySelector(".code-browser") && files.append(codeBrowser({ label: "the change", list: () => api(`/builds/${enc(id)}/code`), file: (p) => api(`/builds/${enc(id)}/code?path=${enc(p)}`) })), { once: false });
       put(
         card,
-        head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), "It passed its checks. It goes live only if you allow it."),
+        head(appIcon(cap(), { size: compact ? 36 : 56, badge: "warn" }), reviewTitle(b, all), warnedWords(b.review.warnings)),
+        reviewWarnings(b.review.warnings),
         b.review.newOperations.length > 0 && h("div", { class: "eyebrow" }, create ? "What agents can do with it" : "New"),
         ...b.review.newOperations.map((o) => reviewOp(o, { full: true })),
         changes && [h("div", { class: "eyebrow" }, changes.every(([ok]) => ok) ? "Nothing else changes" : "Also"), changeList(changes)],

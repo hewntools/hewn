@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER, WEB_USER } from "@hewntools/core/auth.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
+import type { Validation } from "@hewntools/core/platform/validation.ts";
 import { editJson, editText, FIXTURES, installFrom, installSeed, serve, setup } from "./helpers.ts";
 
 const code = (c: string) => (e: unknown) => e instanceof PlatformError && e.code === c;
@@ -60,6 +61,40 @@ describe("agents' changes wait for the owner's review", () => {
     await t.platform.invoke(t.claude, { capabilityId: "running-log", operation: "dump_runs" });
     assert.ok(t.platform.registry.authorityEvents().some((e) => e.action === "build_approved" && e.subject === "claude-code" && e.detail === b.buildId));
     assert.deepEqual(t.platform.buildsInReview(USER), []);
+  });
+
+  test("a warning never fails a candidate: the check carries it, a held build's review and every build's log keep it", async () => {
+    // Nothing warns yet (0.4.13's checks bring the warnings): one added to whatever validation finds.
+    const validation = (t.platform as any).d.validation as Validation;
+    const validate = validation.validate.bind(validation);
+    const warning = { check: "test", message: "a string that looks like a key", file: "src/index.ts", line: 3 };
+    validation.validate = async (...a) => {
+      const c = await validate(...a);
+      c.warnings.push(warning);
+      return c;
+    };
+    const said = (log: string[]) => log.some((l) => l.endsWith("warning: test: a string that looks like a key (src/index.ts:3)"));
+    // A client's check passes with it, and says it.
+    const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
+    const files = pack.files.filter((f) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path));
+    const checked = await t.platform.checkFiles(t.claude, { files, capabilityId: "running-log" });
+    assert.equal(checked.passed, true, checked.text);
+    assert.deepEqual(checked.warnings, [warning]);
+    assert.match(checked.text, /^PASS: validation would accept this\. Look at what follows before you stop\.\n\nWarnings \(they don't fail it; the owner sees each one on the build, so fix what you can\):\n- test: a string that looks like a key \(src\/index\.ts:3\)\n/);
+    // An agent's change waits with it on its review, and goes live once allowed.
+    const before = active();
+    const b = await modify(t.claude, reword);
+    assert.equal(b.status, "review", b.log.join("\n"));
+    assert.deepEqual(b.review!.warnings, [warning]);
+    assert.ok(said(b.log), b.log.join("\n"));
+    const done = await t.platform.approveBuild(WEB_USER, b.buildId);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.equal(active(), before! + 1);
+    assert.ok(said(done.log), "the log keeps it once it's live");
+    // The owner's own change goes live with it; its log says it.
+    const own = await modify(USER, reword);
+    assert.equal(own.status, "promoted", own.log.join("\n"));
+    assert.ok(said(own.log), own.log.join("\n"));
   });
 
   test("rejected: nothing changes, the candidate is gone, the agent sees it was turned down", async () => {

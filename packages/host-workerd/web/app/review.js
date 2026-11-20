@@ -2,7 +2,7 @@
 // Review of an agent's change: what's new, and what else changes.
 import { actorLabel, andList, capRef, h } from "../kit.js";
 
-export { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle };
+export { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, reviewWarnings, warnedWords };
 
 // ---------- review of agents' changes ----------
 
@@ -64,6 +64,14 @@ function reviewChanges(r) {
     c.removedOperations.length && [false, `Removes ${andList(c.removedOperations.map(opLabel))} (unused)`],
   ].filter(Boolean);
 }
+/** What its checks found that didn't fail it, each a notice: the sentence, then the check and where. Nothing when there's none. */
+const reviewWarnings = (ws = []) =>
+  ws.length > 0 && [
+    h("div", { class: "eyebrow" }, ws.length === 1 ? "Warning" : "Warnings"),
+    h("div", { class: "stack-sm" }, ws.map((w) => h("div", { class: "notice warn review-warning" }, h("span", { class: "stack-sm" }, h("span", {}, w.message), h("span", { class: "small faint mono" }, [w.check, w.file && `${w.file}${w.line ? `:${w.line}` : ""}`].filter(Boolean).join(" · ")))))),
+  ];
+/** The card's line under its title: "It passed its checks" (with 2 warnings). */
+const warnedWords = (ws = []) => `It passed its checks${ws.length ? ` with ${ws.length === 1 ? "a warning" : `${ws.length} warnings`}` : ""}. It goes live only if you allow it.`;
 const changeList = (items) => h("ul", { class: "small stack-sm change-list" }, items.map(([ok, text]) => h("li", { class: ok ? "muted" : "strong" }, `${ok ? "✓" : "•"} ${text}`)));
 
 /** The agent's own words, folded: written for the builder, so not the first thing to read. */

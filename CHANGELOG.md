@@ -2,6 +2,12 @@
 
 Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x line, and a new line (0.4 → 0.5) is a deliberate move. The tool contract (the ABI, [`spec/`](spec/README.md#versions)) is versioned separately as `major.minor`: minor versions only add, and a tool declares the lowest one it needs.
 
+## 0.4.13 (unreleased)
+
+### New
+
+- **A check can warn.** Besides passing or failing, a check can now find something worth your look that doesn't fail the tool. A change that waits for you shows each warning on its card, with the file and line, every build's log keeps it, and an agent's check says it (`structuredContent.warnings`). This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+
 ## 0.4.12 (2026-11-19)
 
 ### New

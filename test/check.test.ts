@@ -211,7 +211,7 @@ describe("the builder's check", () => {
       most = Math.max(most, ++running);
       await new Promise((r) => setTimeout(r, 5));
       running--;
-      return { passed: true, text: "PASS", failures: [], defects: [], images: [] };
+      return { passed: true, text: "PASS", failures: [], warnings: [], defects: [], images: [] };
     };
     const notes: string[] = [];
     const checks = validation.checksFor({ id: "b", capabilityId: "x" } as any, new AbortController().signal, (l) => notes.push(l));
