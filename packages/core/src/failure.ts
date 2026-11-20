@@ -74,7 +74,10 @@ function explainLog(log: string[]): BuildFailure {
   const last = [...log].reverse().find((l) => /^(FAILED|PAUSED): /.test(l));
   if (last?.startsWith("PAUSED: ")) return { ...say("Paused", last.slice("PAUSED: ".length).trim() || "The builder paused it."), paused: true };
   if (/interrupted by platform restart/.test(msg)) return say("Interrupted by a restart", "The platform restarted while this was building.");
-  // Builds failed before 0.4.12 say "kept Hewn from responding".
+  // The stall rule (since 0.4.13): the operation and what it ran on, as validation said it.
+  const stalled = /^(.+ worked for more than \d+ seconds without a pause.*?), so Hewn's tools were restarted/.exec(msg);
+  if (stalled) return say("It worked too long without a pause", `${stalled[1]}, so Hewn's tools were restarted. Split the work, or await between its parts. It wasn't tried again: it would do the same.`);
+  // Builds failed before 0.4.13 say "kept Hewn's tools from responding", and before 0.4.12 "kept Hewn from responding".
   const hung = /^its code kept Hewn(?:'s tools)? from responding \((.+)\)/.exec(msg);
   if (hung) return say("Its code kept Hewn's tools from responding", `${hung[1][0].toUpperCase()}${hung[1].slice(1)} never let go (an endless loop?), so Hewn's tools were restarted. It wasn't tried again: it would do the same.`);
   const noModel = /^model unavailable: ([\s\S]*)$/.exec(msg);

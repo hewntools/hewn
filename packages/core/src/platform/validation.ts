@@ -240,7 +240,7 @@ export class Validation extends Domain {
           const before = await this.runtime.countState(sampleState, code);
           let inserted: string[];
           try {
-            ({ inserted } = await this.replayCall(manifest, sampleTarget, c));
+            ({ inserted } = await this.replayCall(manifest, sampleTarget, c, `on sample call ${i + 1}`));
           } catch (e) {
             softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
             replayed = false;
@@ -294,6 +294,7 @@ export class Validation extends Domain {
                       throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
                     }
                   : undefined,
+                "in the visual check",
               );
               return { result };
             },
@@ -343,7 +344,7 @@ export class Validation extends Domain {
           for (const w of manifest.widgets!) {
             await breathe();
             const [operation, version] = w.operation.split("@");
-            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
+            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }, "in the widget sheet").catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
           }
         const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: sampled.get(w.operation) ?? views.get(w.operation) ?? null }));
@@ -546,9 +547,9 @@ export class Validation extends Domain {
   /**
    * One sample call (sample/calls.json), through the contract, with nothing granted: the target
    * has no hosts (no network), and other tools and the model refuse. Validation and installs both
-   * replay sample data this way.
+   * replay sample data this way. `via`: what a stall names it by ("on sample call 2").
    */
-  async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall) {
+  async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall, via?: string) {
     return this.d.invocation.execute(
       manifest,
       target,
@@ -561,6 +562,7 @@ export class Validation extends Domain {
             throw new PlatformError("forbidden", "sample data can't use the model");
           }
         : undefined,
+      via,
     );
   }
 
@@ -604,6 +606,7 @@ export class Validation extends Domain {
         { capabilityId: manifest.id, operation: c.operation, operationVersion: c.version, input: c.input },
         mock,
         fakeModel,
+        `on ${label}`,
       );
       if (c.expectError) throw new Error(`${label}: expected an error, got ${JSON.stringify(result)}`);
       const problems = widget ? viewErrors(result) : [];

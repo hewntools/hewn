@@ -10,6 +10,8 @@ import { type Agent, requireOwner } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { Domain } from "./context.ts";
 
+/** The rule: a call may not work longer than this without a pause. The host's watchdog restarts the tools after it. */
+export const STALL_MS = 10_000;
 /** Stalls within STALL_WINDOW_MS that suspend a tool. */
 export const STALLS_TO_SUSPEND = 3;
 export const STALL_WINDOW_MS = 3600_000;
@@ -90,7 +92,7 @@ export class Stalls extends Domain {
       }
       const build = BUILD_STATE.exec(r.state)?.[1];
       if (build) {
-        this.stalledBuild(build, r.what);
+        this.stalledBuild(build, r.what, r.caller);
         if (!out.builds.includes(build)) out.builds.push(build);
       } else if (!r.state && this.registry.getCapability(r.capabilityId)) {
         // Its call's entry in the tool's log, as an ended call's would be.
@@ -133,11 +135,17 @@ export class Stalls extends Domain {
     }
   }
 
-  /** A build's own code was running when Hewn stalled: it fails as it is (no retry, which would only do it again). */
-  private stalledBuild(buildId: string, what: string) {
+  /**
+   * A build's own code was running when Hewn stalled: it fails as it is (no retry, which would only do it again), naming
+   * the operation and, where validation said it (`caller` "on test '…'", "in the visual check"), what it was running on.
+   */
+  private stalledBuild(buildId: string, what: string, caller: string) {
     const b = this.registry.getBuild(buildId);
     if (!b || !["building", "validating"].includes(b.status)) return;
-    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: its code kept Hewn's tools from responding (${what === "load" ? "loading it" : `running ${what}`}), so Hewn's tools were restarted; not retried`] });
+    const rule = `worked for more than ${STALL_MS / 1000} seconds without a pause`;
+    const where = /^(on|in) /.test(caller) ? `, ${caller}` : "";
+    const line = what === "load" ? `its code ${rule} while loading` : `${what} ${rule}${where}`;
+    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: ${line}, so Hewn's tools were restarted; not retried`] });
     this.logger(`build ${buildId} failed: its code kept Hewn's tools from responding (${what})`);
     // What's left of its run (the rest of its tests, another attempt) stops here.
     this.d.builds.stopStalled(buildId);

@@ -169,13 +169,14 @@ describe("stalls", () => {
     t.queue(() => new Promise<void>((r) => (release = r)));
     const opened = await t.platform.modify(t.claude, { capabilityId: "runaway", request: "change" });
     while (!release) await new Promise((r) => setTimeout(r, 10));
-    code(t.platform, "runaway", "tick@1", `test:${opened.buildId}`, "validation");
+    code(t.platform, "runaway", "tick@1", `test:${opened.buildId}`, "on test 'tick'");
     const { p, out } = restart(min(0));
     assert.deepEqual(out, { tools: [], suspended: [], builds: [opened.buildId] });
     assert.deepEqual(await p.recoverInterruptedBuilds(), [], "not retried");
     const b = p.getBuild(t.claude, opened.buildId);
     assert.equal(b.status, "failed");
-    assert.deepEqual([b.failure?.title, b.failure?.detail], ["Its code kept Hewn's tools from responding", "Running tick@1 never let go (an endless loop?), so Hewn's tools were restarted. It wasn't tried again: it would do the same."]);
+    assert.ok(b.log.includes("FAILED: tick@1 worked for more than 10 seconds without a pause, on test 'tick', so Hewn's tools were restarted; not retried"), b.log.join("\n"));
+    assert.deepEqual([b.failure?.title, b.failure?.detail], ["It worked too long without a pause", "tick@1 worked for more than 10 seconds without a pause, on test 'tick', so Hewn's tools were restarted. Split the work, or await between its parts. It wasn't tried again: it would do the same."]);
     assert.deepEqual(stalled(p, "runaway"), []);
     release();
   });

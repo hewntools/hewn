@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import type { CapabilityBuilder } from "../builders/types.ts";
 import { toBase64, fromBase64 } from "@hewntools/core/files.ts";
 import { checkFromJson } from "@hewntools/core/checks.ts";
+import { STALL_MS } from "@hewntools/core/platform/stalls.ts";
 import type { CheckResult, Files } from "@hewntools/core/ports.ts";
 import type { Home } from "../home.ts";
 import { localWorkbench } from "../workbench.ts";
@@ -864,12 +865,12 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   for (const t of backupTimers) t.unref();
 
   // ---------- watchdog ----------
-  // Each process answers /health; one that stops answering for `stallMs` is restarted. The tools stop
+  // Each process answers /health; one that stops answering for `stallMs` (the stall rule's 10 s) is restarted. The tools stop
   // answering when a tool's code never yields (the platform is told what was running, then they're restarted);
   // the platform is restarted alone.
   const timers: ReturnType<typeof setInterval>[] = [];
   if (o.watchdog !== false) {
-    const { intervalMs, stallMs } = o.watchdog ?? { intervalMs: 1000, stallMs: 5000 };
+    const { intervalMs, stallMs } = o.watchdog ?? { intervalMs: 1000, stallMs: STALL_MS };
     const watch = (check: (ms: number) => Promise<boolean>, onStall: (seconds: number) => Promise<void> | void) => {
       let lastOk = Date.now();
       let checking = false;

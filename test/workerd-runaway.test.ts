@@ -130,8 +130,8 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     await until(() => fetch(`${h.sv.url}/health`).then((r) => r.ok, () => false));
     const build = (await h.sv.admin("call", { method: "getBuild", args: [started.buildId] })).result;
     assert.equal(build.status, "failed");
-    assert.equal(build.failure.title, "Its code kept Hewn's tools from responding");
-    assert.match(build.failure.detail, /^Running tick@1 never let go .*It wasn't tried again/);
+    assert.equal(build.failure.title, "It worked too long without a pause");
+    assert.match(build.failure.detail, /^tick@1 worked for more than 10 seconds without a pause, on test 'tick', so Hewn's tools were restarted\..*It wasn't tried again/);
     await sleep(1000);
     const builds = (await h.sv.admin("status")).builds;
     assert.ok(!builds.some((b: any) => b.request?.autoRetryOf === started.buildId), "not retried");

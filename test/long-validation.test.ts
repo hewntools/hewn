@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A long validation (hundreds of test cases, some of them slow) lets the rest of Hewn run between cases: the
-// supervisor's health check is answered behind it, and after 5 s without an answer workerd is restarted.
+// supervisor's health check is answered behind it, and after 10 s without an answer workerd is restarted.
 import assert from "node:assert/strict";
 import { appendFileSync, cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { editJson, SEED } from "./helpers.ts";
+import { STALL_MS } from "@hewntools/core/platform/stalls.ts";
 import { startTestHost } from "./workerd-helpers.ts";
 
 test("Hewn answers its health check all through a validation of hundreds of cases, a dozen of them slow", async () => {
   // The supervisor's own watchdog, as it runs for an owner (a test host's is tighter).
-  const h = await startTestHost({ watchdog: { intervalMs: 1000, stallMs: 5000 } });
+  const h = await startTestHost({ watchdog: { intervalMs: 1000, stallMs: STALL_MS } });
   const dir = mkdtempSync(join(tmpdir(), "hewn-many-cases-"));
   try {
     cpSync(SEED, dir, { recursive: true });
