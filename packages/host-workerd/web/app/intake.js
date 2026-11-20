@@ -105,9 +105,11 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const keepKey = `hewn.intake.${mode === "create" ? "new" : `change.${capId}`}`;
   const keepable = !widgetsMode && !polishMode && !connection;
   // "Ask builder to fix this" left what failed here (too long for the address); it goes in the box below.
-  const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
-  // A change to a held change (its card's "Ask builder to fix"): the intake sees what it is, the build carries on from it.
-  const held = (mode === "modify" && q?.get("held")) || null;
+  // A build on held work (its card's "Ask builder to fix"): the intake sees what it is, the build carries on from it.
+  // A held new tool's text waits under the build's id (the New page has no tool yet).
+  const held = q?.get("held") || null;
+  const fixKey = capId ? `hewn.fix.${capId}` : held ? `hewn.fix.${held}` : null;
+  const failure = fixKey && q?.get("fix") ? sessionStorage.getItem(fixKey) : null;
   const prefilled = !!(q?.get("m") || failure);
   // Whether this view keeps its conversation now: one put in, from its first send; not once it's built from.
   let keeps = keepable && !from && !prefilled;
@@ -210,7 +212,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   picker.addEventListener("change", () => (addFiles([...picker.files]), (picker.value = "")));
   // "Ask builder to fix this": what failed goes in the box as text, as other pre-fills do; nothing sends until Send.
   if (failure) {
-    sessionStorage.removeItem(`hewn.fix.${capId}`);
+    sessionStorage.removeItem(fixKey);
     input.value = JSON.parse(failure).text;
     requestAnimationFrame(growWhenShown);
   }
@@ -876,7 +878,7 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
   }
   const wait = first?.buildId ?? after;
   const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...carried };
-  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w, ...(held ? { held } : {}) } });
+  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w, ...(held ? { held } : {}) } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w, ...(held ? { held } : {}) } });
 }
 
 /** The id the platform gives a new tool with this name (the intake names ideas it builds on this way). */
@@ -1105,7 +1107,8 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask });
+          // Made on a held new tool: one tool, which takes the held one's place.
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask, ...(held && p.order.length === 1 ? { held } : {}) });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {

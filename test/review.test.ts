@@ -124,7 +124,7 @@ describe("agents' changes wait for the owner's review", () => {
       writeFileSync(join(ws, "tests", "cases.json"), "[");
     });
     const fixing = await t.platform.modify(WEB_USER, ask);
-    assert.match(brief, /Requested change: Fix the warnings\n\nThe workspace holds a change that waits for the owner's review, not the live version/);
+    assert.match(brief, /Requested change: Fix the warnings\n\nThe workspace holds work that waits for the owner's review, not what is live/);
     const replaced = t.platform.getBuild(USER, held.buildId);
     assert.equal(replaced.status, "cancelled");
     assert.equal(replaced.log.at(-1), `REPLACED by web: build ${fixing.buildId} carries on from it`);
@@ -139,6 +139,40 @@ describe("agents' changes wait for the owner's review", () => {
     assert.equal(active(), before, "nothing live until the owner allows it");
     assert.equal((await t.platform.approveBuild(WEB_USER, again.buildId)).status, "promoted");
     await t.platform.invoke(t.claude, { capabilityId: "running-log", operation: "dump_runs" });
+  });
+
+  test("Ask builder to fix on a held new tool: the owner's new tool takes its place, carries on from its files, and is held again", async () => {
+    const validation = (t.platform as any).d.validation as Validation;
+    const validate = validation.validate.bind(validation);
+    validation.validate = async (...a) => {
+      const c = await validate(...a);
+      c.warnings.push({ check: "test", message: "a string that looks like a key", file: "src/index.ts", line: 3 });
+      return c;
+    };
+    // An agent's new tool: a copy of Running Log under another id, held for the owner.
+    t.queue((ws) => {
+      cpSync(join(FIXTURES, "running-log"), ws, { recursive: true });
+      editJson(join(ws, "capability.json"), (m) => ((m.id = "run-diary"), (m.name = "Run Diary")));
+    });
+    const held = await t.platform.settle((await t.platform.create(t.claude, { name: "Run Diary", purpose: "Runs", requirements: "Log runs" })).buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    const ask = { name: "Run Diary", purpose: "Runs", requirements: "Fix the warnings", held: held.buildId };
+    await assert.rejects(t.platform.create(t.claude, ask), code("forbidden"));
+    let carried: unknown;
+    t.queue((ws, job) => {
+      carried = job.carriesOn;
+      assert.ok(readFileSync(join(ws, "src", "index.ts"), "utf8").includes("list_runs@1"), "the held tool's files, not a skeleton");
+      assert.match(readFileSync(join(ws, "BUILDER.md"), "utf8"), /Requirements: Fix the warnings\n\nThe workspace holds work that waits for the owner's review/);
+    });
+    const fixing = await t.platform.create(WEB_USER, ask);
+    assert.equal(fixing.capabilityId, "run-diary", "the held tool's id");
+    assert.equal(t.platform.getBuild(USER, held.buildId).status, "cancelled");
+    const done = await t.platform.settle(fixing.buildId);
+    assert.equal(carried, "held", "its builder is told the work is there (and not to start with the icon)");
+    assert.equal(done.status, "review", "held for the owner again");
+    assert.match(done.instructions!, /the owner asked for this fix/);
+    assert.equal(t.platform.registry.getCapability("run-diary")?.activeVersion ?? null, null, "nothing live until the owner allows it");
+    assert.equal((await t.platform.approveBuild(WEB_USER, done.buildId)).status, "promoted");
   });
 
   test("rejected: nothing changes, the candidate is gone, the agent sees it was turned down", async () => {

@@ -85,7 +85,7 @@ const reviewWarnings = (ws = [], { openAt } = {}) =>
   ];
 /** "Ask builder to fix" on a held change's warnings: what goes in the Change drawer's box (the owner sends it, and may add to it first). */
 const warningsAsk = (b, all) =>
-  `Fix what Hewn's checks warned about in ${b.request?.fixOf ? "this change" : `${actorLabel(b.requestedBy, all)}'s change`}, and change nothing else:\n${(b.review.warnings ?? []).map((w) => `- ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`).join("\n")}`;
+  `Fix what Hewn's checks warned about in ${b.request?.fixOf ? "this" : `${actorLabel(b.requestedBy, all)}'s`} ${b.kind === "create" ? "new tool" : "change"}, and change nothing else:\n${(b.review.warnings ?? []).map((w) => `- ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`).join("\n")}`;
 /** The card's line under its title: "It passed its checks" (with 2 warnings). */
 const warnedWords = (ws = []) => `It passed its checks${ws.length ? ` with ${ws.length === 1 ? "a warning" : `${ws.length} warnings`}` : ""}. It goes live only if you allow it.`;
 const changeList = (items) => h("ul", { class: "small stack-sm change-list" }, items.map(([ok, text]) => h("li", { class: ok ? "muted" : "strong" }, `${ok ? "✓" : "•"} ${text}`)));

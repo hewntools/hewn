@@ -460,16 +460,15 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         files.open = true;
         files.scrollIntoView({ block: "start", behavior: "smooth" });
       };
-      // With warnings, a change to a live tool: the Change drawer with them in its box (nothing goes until Send). What it
-      // builds carries on from this change's own files, and comes back here for you to allow. Not a held new tool: it has no page yet.
+      // With warnings: the Change drawer (a new tool: the New page, it has no page yet) with them in its box; nothing
+      // goes until Send. What it builds carries on from this one's own files, and comes back here for you to allow.
       const fix =
         b.review.warnings?.length > 0 &&
-        !create &&
         h("button", {
           onclick: () => {
             // The box picks it up (once) from here, as "Ask builder to fix this" does: too long for the address.
-            sessionStorage.setItem(`hewn.fix.${b.capabilityId}`, JSON.stringify({ text: warningsAsk(b, all) }));
-            openChange(cap(), { fix: "1", held: id });
+            sessionStorage.setItem(`hewn.fix.${create ? id : b.capabilityId}`, JSON.stringify({ text: warningsAsk(b, all) }));
+            create ? go(`#/new?${new URLSearchParams({ fix: "1", held: id })}`) : openChange(cap(), { fix: "1", held: id });
           },
         }, "Ask builder to fix");
       put(

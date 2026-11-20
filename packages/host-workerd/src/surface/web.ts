@@ -248,7 +248,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   const n = Number(url.searchParams.get("n") ?? 100);
 
   if (resource === "capabilities" && !id) {
-    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
+    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation", "held"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
     return withEtag(req, await capabilityList(platform, owner));
   }

@@ -134,8 +134,8 @@ export interface BuildJob {
    * with `request` when it can, else starts afresh with it after the usual prompt. Unset: an attempt.
    */
   pass?: BuildPass;
-  /** It carries on from the build it retries, which failed or which the owner stopped: the workspace holds that one's work (`Workbench.carryOver`). */
-  carriesOn?: "failed" | "stopped";
+  /** It carries on from the build it retries, which failed or which the owner stopped: the workspace holds that one's work (`Workbench.carryOver`). `held`: from work held for the owner's review (its card's "Ask builder to fix"). */
+  carriesOn?: "failed" | "stopped" | "held";
 }
 
 /** A pass's attempt: which pass, and what it asks. */

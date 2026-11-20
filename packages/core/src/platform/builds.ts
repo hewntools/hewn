@@ -227,7 +227,7 @@ export class Builds extends Domain {
   /** Abort handles of in-flight builds (cancel). */
   private aborts = new Map<string, AbortController>();
   /** Retries that carry on from the build they retry (its workspace), by why that one ended: their builder's first attempt is told so. */
-  private carriedOn = new Map<string, "failed" | "stopped">();
+  private carriedOn = new Map<string, "failed" | "stopped" | "held">();
   private progress = new Map<
     string,
     { attempt: number; maxAttempts: number; startedAt: number; lastActivity?: string; lastActivityAt?: number }
@@ -470,10 +470,17 @@ export class Builds extends Domain {
    * for, e.g. the connection this capability will call; it starts once that one promotes.
    * `schedules`: the owner's approved schedules, set up once the build promotes (owner only).
    */
-  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
+  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
+    // The owner's new tool made on a held one (its card's "Ask builder to fix", sent from the New page): it takes
+    // the held tool's id over, carries on from its files, and is held in turn.
+    if (req.held !== undefined) {
+      const { held, marks } = await this.heldFix(agent, req.held, { kind: "create" });
+      const r: CreateRequest = { name: req.name, purpose: req.purpose, requirements: req.requirements, ...(held.request.kind === "connection" ? { kind: "connection" as const } : {}), ...(req.schedules !== undefined ? { schedules: req.schedules } : {}), ...pickAsk(req), ...marks };
+      return this.openCreateBuild(agent, held.capabilityId, r, false, undefined, undefined, undefined, conversation);
+    }
     if (req.widgets && req.kind === "connection") throw new PlatformError("invalid_request", "a connection has no widgets");
     const b = await this.createBuild(agent, req, conversation);
     if (!req.widgets) return b;
@@ -789,7 +796,7 @@ export class Builds extends Domain {
     // What a builder reads: written over a failed build's workspace when this retry carries on from it.
     const readFiles: Files = reads
       ? {
-          "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
+          "BUILDER.md": bytes(this.builderText("create", id, `${connection ? 'Build a connection ("kind": "connection"; see "Connections" in `BRIEF.md`).\n\n' : ""}Requirements: ${req.requirements}${req.fixOf ? HELD_NOTE : ""}${scheduledNote(req.schedules, "create")}${attached.note}`, this.registry.buildContext(buildId))),
           ...this.briefFile(),
           ...this.ownersWordsFile(buildId),
           ...ownerInstructionFiles(this.registry.buildContext(buildId)?.ownerInstructions),
@@ -924,7 +931,7 @@ export class Builds extends Domain {
     const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const cap = this.visibleActive(agent, req.capabilityId);
     // The owner's change to a held one: it carries on from that change's files, and is held in turn.
-    if (req.held !== undefined) marks = { ...marks, ...(await this.heldFix(agent, req.held, cap)) };
+    if (req.held !== undefined) marks = { ...marks, ...(await this.heldFix(agent, req.held, { kind: "modify", cap })).marks };
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const after = this.dependency(agent, req.after);
@@ -1047,7 +1054,7 @@ export class Builds extends Domain {
         })
       : b.kind === "widgets"
         ? widgetsRequest(request)
-        : `Requested change: ${request}${(b.request as RetryMarks).fixOf ? "\n\nThe workspace holds a change that waits for the owner's review, not the live version: make this change to it, and keep the rest of it." : ""}`;
+        : `Requested change: ${request}${(b.request as RetryMarks).fixOf ? HELD_NOTE : ""}`;
     const ask = `${requestText}${scheduledNote((b.request as { schedules?: ApprovedSchedule[] }).schedules, b.kind)}${attached.note}`;
     // versionFiles: versions stored before builder configuration was dropped may still carry it. A Polish's
     // request says where its owner's words are (BUILDER.md's own note on them is for a single conversation).
@@ -1097,23 +1104,28 @@ export class Builds extends Domain {
     }
     const held = await this.fixSource(b, activeVersion);
     await this.workbench.open(b.id, { ...(held ?? files), ...readFiles });
-    if (held) await this.replaceHeld(b);
+    if (held) {
+      this.carriedOn.set(b.id, "held");
+      await this.replaceHeld(b);
+    }
     return false;
   }
 
   /**
-   * The marks of the owner's change to a held one (its card's "Ask builder to fix", sent from the Change
-   * drawer): the build opens on that change's own files (`fixSource`) and is held for the owner in turn
-   * (`promote`). A change to the tool as it is now: not a held new tool, nor one built on an older version.
+   * The marks of the owner's build on a held one (its card's "Ask builder to fix", sent from the Change
+   * drawer, or the New page for a new tool): the build opens on the held one's own files (`fixSource`)
+   * and is held for the owner in turn (`promote`). A change: to the tool it's for, as it is now (not built
+   * on an older version, which it would undo). A new tool: one still waiting, not live meanwhile.
    */
-  private async heldFix(agent: Agent, heldId: unknown, cap: { id: string; activeVersion: number | null }): Promise<RetryMarks> {
+  private async heldFix(agent: Agent, heldId: unknown, want: { kind: "create" } | { kind: "modify"; cap: { id: string; activeVersion: number | null } }): Promise<{ held: BuildRow & { review: BuildReview }; marks: RetryMarks }> {
     requireOwner(agent);
     const held = typeof heldId === "string" ? this.registry.getBuild(heldId) : undefined;
-    if (!held || held.capabilityId !== cap.id || held.status !== "review" || !held.review) throw new PlatformError("conflict", `${String(heldId)} isn't a change to ${cap.id} waiting for your review`);
-    if (held.kind === "create") throw new PlatformError("conflict", "a new tool waiting for your review can't be changed before it's allowed: don't allow it, and ask for it again");
-    if (cap.activeVersion !== held.baseVersion) throw new PlatformError("conflict", `${cap.id} changed since that change was built on v${held.baseVersion}: don't allow it, and ask for it again`);
+    const fits = !!held && held.status === "review" && !!held.review && (want.kind === "create" ? held.kind === "create" : held.kind !== "create" && held.capabilityId === want.cap.id);
+    if (!fits || !held?.review) throw new PlatformError("conflict", `${String(heldId)} isn't ${want.kind === "create" ? "a new tool" : `a change to ${want.cap.id}`} waiting for your review`);
+    const live = this.registry.getCapability(held.capabilityId)?.activeVersion ?? null;
+    if (want.kind === "modify" ? want.cap.activeVersion !== held.baseVersion : live !== null) throw new PlatformError("conflict", `${held.capabilityId} changed since that was built: don't allow it, and ask for it again`);
     await this.loadCandidate(held.review.contentHash);
-    return { fixOf: held.id, fixFrom: held.review.contentHash };
+    return { held: held as BuildRow & { review: BuildReview }, marks: { fixOf: held.id, fixFrom: held.review.contentHash } };
   }
 
   /**
@@ -2524,6 +2536,8 @@ const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKin
 
 /** Separates an owner's request from the failure context "Ask builder to fix" appends. */
 const FIX_MARK = "--- Fix request ---";
+/** BUILDER.md's word on a build made on a held one ("Ask builder to fix" on its warnings): its workspace is that one's files. */
+const HELD_NOTE = "\n\nThe workspace holds work that waits for the owner's review, not what is live: make this change to it, and keep the rest of it.";
 
 const reviewReason = (r: BuildReview, kind: BuildKind, fix = false) =>
   fix
