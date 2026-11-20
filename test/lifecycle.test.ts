@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
 import { type Agent, USER } from "@hewntools/core/auth.ts";
+import { migrationProblems } from "@hewntools/core/migrations.ts";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -154,6 +155,47 @@ describe("modification lifecycle", () => {
     );
     assert.equal(r2.status, "failed");
     assert.match(r2.log.join("\n"), /append-only/);
+  });
+
+  test("a migration with anything after its last statement is refused by name; node:sqlite would run it, workerd wouldn't", async () => {
+    for (const sql of ["ALTER TABLE runs ADD COLUMN shoe TEXT;\n-- shoes", "ALTER TABLE runs ADD COLUMN shoe TEXT;;"]) {
+      const r = await t.build(
+        () => t.platform.modify(t.claude, { capabilityId: "running-log", request: "shoe" }),
+        (ws) => write(join(ws, "migrations", "002_shoe.sql"), sql),
+      );
+      assert.equal(r.status, "failed", sql);
+      assert.match(r.log.join("\n"), /migration 002_shoe\.sql: nothing may follow the last statement; end it with `;`/);
+    }
+    // Comments before, between and inside statements are fine.
+    const ok = await t.build(
+      () => t.platform.modify(t.claude, { capabilityId: "running-log", request: "shoe" }),
+      (ws) => write(join(ws, "migrations", "002_shoe.sql"), "-- shoes; and more\nALTER TABLE runs ADD COLUMN shoe TEXT /* the model */;\n/* size */ ALTER TABLE runs ADD COLUMN size TEXT DEFAULT ';';\n"),
+    );
+    assert.equal(ok.status, "promoted", ok.log.join("\n"));
+  });
+
+  test("how a migration ends: the rule's cases, without a build", () => {
+    const end = (sql: string) => migrationProblems([{ name: "003_notes.sql", sql }], []).map((p) => p.replace("migration 003_notes.sql: ", ""));
+    const follows = "nothing may follow the last statement; end it with `;`";
+    const cases: [string, string[]][] = [
+      ["CREATE TABLE notes (id INTEGER);", []],
+      ["CREATE TABLE notes (id INTEGER);\r\nCREATE INDEX n ON notes (id);\r\n", []],
+      ["INSERT INTO notes VALUES ('it''s; done');", []],
+      ["INSERT INTO notes VALUES ('-- not a comment', '/* nor this');", []],
+      ["CREATE TABLE notes (id INTEGER); /* done */", [follows]],
+      ["CREATE TABLE notes (id INTEGER);\r\n-- done\r\n", [follows]],
+      ["CREATE TABLE notes (id INTEGER);;", [follows]],
+      ["CREATE TABLE notes (id INTEGER);\u00a0", [follows]],
+      ["CREATE TABLE notes (id INTEGER); /* never closed", [follows]],
+      ["INSERT INTO notes VALUES ('never closed);", ["end it with `;`"]],
+      ["-- only a comment\n/* and another; */", ["end it with `;`"]],
+      ["CREATE TABLE notes (id INTEGER)", ["end it with `;`"]],
+      ["CREATE TABLE notes (id INTEGER); CREATE INDEX n ON notes (id)", ["end it with `;`"]],
+    ];
+    for (const [sql, want] of cases) assert.deepEqual(end(sql), want, JSON.stringify(sql));
+    // One a version shipped before the rule ran already and can't be edited: it isn't refused.
+    const shipped = { name: "002_old.sql", sql: "CREATE TABLE old (id INTEGER);\n-- end" };
+    assert.deepEqual(migrationProblems([shipped], [shipped]), []);
   });
 
   test("implementation must export every declared operation", async () => {
