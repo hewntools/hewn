@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { claudeActivity, codexActivity, USED_TOOL } from "@hewntools/cli/builders/activity.ts";
-import { builderPrompt, claudeArgs, claudeBuildHome, codexArgs, codexBuildHome, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
+import { builderPrompt, claudeArgs, codexArgs, codexBuilder, forgetSession, noteSession, resumePrompt, runCli, sessionOf, withResume } from "@hewntools/cli/builders/cli.ts";
+import { builderHome } from "@hewntools/cli/builders/sign-in.ts";
 import type { BuildJob } from "@hewntools/cli/builders/types.ts";
 import { readConfig } from "@hewntools/cli/config.ts";
 import { openHome } from "@hewntools/cli/home.ts";
@@ -49,12 +50,12 @@ describe("a later attempt resumes the builder's session", () => {
     assert.equal(first[0], "exec");
     assert.ok(!first.includes("--ephemeral"));
     assert.ok(!first.includes("resume"));
-    assert.deepEqual(first.slice(-5), ["-c", 'project_root_markers=["BUILDER.md"]', "-C", "/tmp/ws", first.at(-1)]);
+    assert.deepEqual(first.slice(-7), ["-c", 'project_root_markers=["BUILDER.md"]', "-c", 'cli_auth_credentials_store="file"', "-C", "/tmp/ws", first.at(-1)]);
     assert.match(first.at(-1)!, /Read BUILDER\.md/);
     const again = codexArgs(job({ attempt: 2, feedback: "nope" }), "01a15811-9c22-7611-80b3-3a87c3622bfd");
     const at = again.indexOf("resume");
     assert.ok(at > 0);
-    assert.deepEqual(again.slice(1, at), ["--sandbox", "danger-full-access", "-c", 'project_root_markers=["BUILDER.md"]', "-C", "/tmp/ws"]);
+    assert.deepEqual(again.slice(1, at), ["--sandbox", "danger-full-access", "-c", 'project_root_markers=["BUILDER.md"]', "-c", 'cli_auth_credentials_store="file"', "-C", "/tmp/ws"]);
     assert.deepEqual(again.slice(at + 1, at + 4), ["--ignore-user-config", "--skip-git-repo-check", "--json"]);
     assert.deepEqual(again.slice(-2), ["01a15811-9c22-7611-80b3-3a87c3622bfd", resumePrompt(job({ attempt: 2, feedback: "nope" }))]);
   });
@@ -116,6 +117,10 @@ describe("a later attempt resumes the builder's session", () => {
     process.env.HOME = home;
     mkdirSync(join(home, ".codex"));
     writeFileSync(join(home, ".codex", "auth.json"), '{"tokens":"yours"}');
+    // Signed in on this Hewn (its builder home), by Codex's own login.
+    const own = builderHome(home, "codex");
+    mkdirSync(join(own, ".codex"), { recursive: true });
+    writeFileSync(join(own, ".codex", "auth.json"), '{"tokens":"the builder\'s"}');
     try {
       const ws = join(home, "ws");
       const logPath = join(home, "builds", "b-7.log");
@@ -133,10 +138,9 @@ describe("a later attempt resumes the builder's session", () => {
       assert.deepEqual(fake.calls().slice(1).map((c) => c.includes(" resume ")), [true, false], "resumed, then fresh");
       assert.match(readFileSync(logPath, "utf8"), /couldn't resume the earlier session; starting over/);
       assert.equal(sessionOf("codex", j), "t-new", "the fresh run's thread is the one to resume next");
-      // Its home is the build's own; the login is there for a run only.
-      const own = codexBuildHome(home, "b-7");
-      assert.ok(existsSync(join(own, ".codex")));
-      assert.ok(!existsSync(join(own, ".codex", "auth.json")));
+      // Its builder home's login, kept in its file; neither it nor yours read, copied or written.
+      assert.ok(fake.calls().every((c) => c.includes('cli_auth_credentials_store="file"')));
+      assert.equal(readFileSync(join(own, ".codex", "auth.json"), "utf8"), '{"tokens":"the builder\'s"}');
       assert.equal(readFileSync(join(home, ".codex", "auth.json"), "utf8"), '{"tokens":"yours"}');
     } finally {
       Object.assign(process.env, env);
@@ -144,18 +148,22 @@ describe("a later attempt resumes the builder's session", () => {
     }
   });
 
-  test("the workbench removes what a build's builder kept: its home per build (Claude Code's config dir, Codex's)", async () => {
+  test("the workbench removes what a build's builder kept in its builder home (Claude Code's project folder, Codex's thread); the homes and other builds' stay", async () => {
     const home = mkdtempSync(join(tmpdir(), "hewn-wb-"));
     const wb = localWorkbench({ root: join(home, "builds"), builders: {} });
-    const claude = claudeBuildHome(home, "b-1");
-    const codex = codexBuildHome(home, "b-1");
-    const other = codexBuildHome(home, "b-2");
-    for (const d of [join(claude, "projects"), join(codex, ".codex", "sessions"), join(other, ".codex")]) mkdirSync(d, { recursive: true });
+    await wb.open("b-1", {});
+    const project = (b: string) => join(builderHome(home, "claude"), "projects", join(realpathSync(join(home, "builds")), b).replace(/[^a-zA-Z0-9]/g, "-"));
+    const rollouts = join(builderHome(home, "codex"), ".codex", "sessions", "2026", "11", "20");
+    for (const d of [project("b-1"), join(builderHome(home, "claude"), "projects", "other-build"), rollouts]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(rollouts, "rollout-2026-11-20T10-00-00-t-mine.jsonl"), "");
+    writeFileSync(join(rollouts, "rollout-2026-11-20T10-00-00-t-theirs.jsonl"), "");
     noteSession("claude", "b-1", "s");
+    noteSession("codex", "b-1", "t-mine");
     await wb.remove("b-1");
-    assert.ok(!existsSync(claude) && !existsSync(codex), "the build's homes go");
-    assert.ok(existsSync(other), "another build's stays");
+    assert.ok(!existsSync(project("b-1")) && !existsSync(join(rollouts, "rollout-2026-11-20T10-00-00-t-mine.jsonl")), "the build's sessions go");
+    assert.ok(existsSync(join(builderHome(home, "claude"), "projects", "other-build")) && existsSync(join(rollouts, "rollout-2026-11-20T10-00-00-t-theirs.jsonl")), "another build's stay");
     assert.equal(sessionOf("claude", job({ buildId: "b-1", attempt: 2 })), undefined);
+    assert.equal(sessionOf("codex", job({ buildId: "b-1", attempt: 2 })), undefined);
   });
 });
 
@@ -278,12 +286,10 @@ test("a retry carries on from the failed build's workspace, the new request over
   const root = join(home, "builds");
   const wb = localWorkbench({ root, builders: {} });
   await wb.open("b-old", { "src/half.ts": new TextEncoder().encode("half"), "BUILDER.md": new TextEncoder().encode("old request") });
-  mkdirSync(claudeBuildHome(home, "b-old"), { recursive: true });
   noteSession("claude", "b-old", "s-old");
   assert.equal(await wb.carryOver("b-old", "b-new", { "BUILDER.md": new TextEncoder().encode("new request") }), true);
   assert.equal(readFileSync(join(root, "b-new", "src", "half.ts"), "utf8"), "half");
   assert.equal(readFileSync(join(root, "b-new", "BUILDER.md"), "utf8"), "new request");
-  assert.ok(!existsSync(claudeBuildHome(home, "b-new")), "no builder home carried");
   assert.equal(sessionOf("claude", job({ buildId: "b-new", attempt: 2 })), undefined, "nor its session");
   assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "stopped" })), /an earlier build of the same request that the owner stopped before it finished: the workspace holds its work/);
   assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "failed" })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);

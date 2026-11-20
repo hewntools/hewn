@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
-import { claudeHome, claudeModelArgs, codexHome, codexModelArgs, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, OPENCODE_READER_RULES, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
+import { join } from "node:path";
+import { CLAUDE_KEYCHAIN, claudeCaches, claudeModelArgs, clearCodexInstructions, codexModelArgs, inBuilderHome, OPENCODE_INTAKE_RULES, OPENCODE_QUIET_START_MS, OPENCODE_READER_RULES, opencodeHasModel, opencodeHome, opencodeModelArgs, opencodeModelRejected } from "./builders/cli.ts";
+import { claudeEnv, CODEX_FILE_LOGIN, codexEnv, notSignedIn, signedIn, signInCommand } from "./builders/sign-in.ts";
 import { errorText } from "./builders/activity.ts";
 import { wrapBuilder } from "./builders/sandbox.ts";
 import { EFFORT, MODEL_NAME } from "@hewntools/core/build-models.ts";
@@ -653,30 +654,31 @@ export const opencodeIntake = (platformRoot: string, model: JobModel): Intake =>
   intakeOn(model, { web: true }, async ({ ws, prompt, summarize, images, onProgress, signal }) => {
     const imageArgs = imageFiles(ws, images).flatMap((p) => ["-f", p]);
     const args = ["run", ...imageArgs, "--format", "json", "--pure", "--auto", ...opencodeModelArgs(model)];
-    // Its own home, like the builder: none of your OpenCode config, plugins or sessions. One per intake (two at once would
-    // share a session database and a login copy), gone after it: no session is resumed.
-    mkdirSync(join(platformRoot, "builder-home"), { recursive: true, mode: 0o700 });
-    const isolated = await opencodeHome(mkdtempSync(join(platformRoot, "builder-home", "intake-opencode-")), { rules: summarize ? OPENCODE_READER_RULES : OPENCODE_INTAKE_RULES });
-    const out = opencodeOutput((e) => {
-      if (!onProgress) return;
-      if (e.type === "step_start") onProgress({ activity: "Thinking" });
-      else if (e.type === "tool_use") onProgress({ activity: e.part?.tool === "webfetch" ? "Reading a web page" : "Looking" });
+    // OpenCode's builder home, like a build: none of your OpenCode config, plugins or sessions. Its session goes in a
+    // database of its own, gone with the talk's folder: no session is resumed.
+    return inBuilderHome("opencode", platformRoot, {}, async (home) => {
+      if (!(await signedIn("opencode", platformRoot))) throw (console.error(`[${new Date().toISOString()}] ${notSignedIn("opencode").message} In a terminal there: ${signInCommand("opencode")}`), notSignedIn("opencode"));
+      const isolated = await opencodeHome(home, { rules: summarize ? OPENCODE_READER_RULES : OPENCODE_INTAKE_RULES, db: join(ws, "opencode.db") });
+      const out = opencodeOutput((e) => {
+        if (!onProgress) return;
+        if (e.type === "step_start") onProgress({ activity: "Thinking" });
+        else if (e.type === "tool_use") onProgress({ activity: e.part?.tool === "webfetch" ? "Reading a web page" : "Looking" });
+      });
+      try {
+        // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
+        if (model.model && !(await opencodeHasModel(model.model, isolated.env, ws))) throw opencodeModelRejected(model.model);
+        const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
+        await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, prompt, OPENCODE_QUIET_START_MS);
+      } catch (e) {
+        // OpenCode says why it stopped (a model it won't run, a provider without a key) in an error event.
+        if (out.error() && !signal?.aborted) throw new Error(`intake failed: ${out.error()!.slice(0, 300)}`);
+        throw e;
+      } finally {
+        isolated.done();
+      }
+      if (out.error() || !out.text()) throw new Error(`intake failed: ${(out.error() ?? "no reply").slice(0, 300)}`);
+      return out.text()!;
     });
-    try {
-      // A model OpenCode can't resolve hangs its run instead of failing it: ask first.
-      if (model.model && !(await opencodeHasModel(model.model, isolated.env, ws))) throw opencodeModelRejected(model.model);
-      const w = wrapBuilder("opencode", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true, allowLoopback: isolated.loopback });
-      await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, out.line, signal, prompt, OPENCODE_QUIET_START_MS);
-    } catch (e) {
-      // OpenCode says why it stopped (a model it won't run, a provider without a key) in an error event.
-      if (out.error() && !signal?.aborted) throw new Error(`intake failed: ${out.error()!.slice(0, 300)}`);
-      throw e;
-    } finally {
-      isolated.done();
-      rmSync(isolated.dir, { recursive: true, force: true });
-    }
-    if (out.error() || !out.text()) throw new Error(`intake failed: ${(out.error() ?? "no reply").slice(0, 300)}`);
-    return out.text()!;
   });
 
 /** Codex: `codex exec` with the draft's schema as its output schema, in a home of its own; no web lookup; the prompt on stdin (`-`). */
@@ -688,30 +690,27 @@ export const codexIntake = (platformRoot: string, model: JobModel): Intake =>
     const args = [
       "exec", "--ignore-user-config", "--ephemeral", "--skip-git-repo-check", ...imageArgs,
       ...codexModelArgs(model),
-      "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0",
+      "--sandbox", "danger-full-access", "-c", "project_doc_max_bytes=0", ...CODEX_FILE_LOGIN,
       // A reading needs neither a shell nor the web: its code is in the prompt.
       ...(summarize ? ["-c", "features.shell_tool=false", "-c", 'web_search="disabled"'] : []),
       "-C", ws, "--output-schema", join(ws, "schema.json"), "-o", join(ws, "out.json"), "-",
     ];
-    // Its own home, like the builder: none of your Codex config or instructions.
-    const isolated = codexHome(join(platformRoot, "builder-home", "intake-codex"));
-    try {
-      const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [isolated.dir], denyKeychain: true });
-      await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, undefined, signal, prompt);
-    } finally {
-      isolated.done();
-    }
+    // Codex's builder home, like a build: none of your Codex config or instructions; nothing kept (--ephemeral).
+    await inBuilderHome("codex", platformRoot, {}, async (home) => {
+      clearCodexInstructions(home);
+      const w = wrapBuilder("codex", args, { workspace: ws, platformRoot, ownState: [home], denyKeychain: true });
+      await run(w.command, w.args, ws, codexEnv(home), INTAKE_TIMEOUT_MS, undefined, signal, prompt);
+    });
     return readFileSync(join(ws, "out.json"), "utf8");
   });
 
-/** Claude Code: `claude -p` with web tools only (a reading: none), in a config dir of its own per request; the reply streams as it comes. */
+/** Claude Code: `claude -p` with web tools only (a reading: none), in its builder home, keeping no session; the reply streams as it comes. */
 export const claudeIntake = (platformRoot: string, model: JobModel): Intake =>
   intakeOn(model, { web: true }, async ({ ws, prompt, summarize, images, onProgress, signal }) => {
-    const h = homedir();
     // The prompt goes in on stdin as one user message, with any attached images as image blocks (stream-json input).
     const stdin = claudeIntakeInput(prompt, images.map((i) => ({ mediaType: i.mediaType, data: i.data! })));
     const args = [
-      "-p", "--input-format", "stream-json",
+      "-p", "--input-format", "stream-json", "--no-session-persistence",
       "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--max-turns", summarize ? "2" : "8",
       ...claudeModelArgs(model),
       "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -723,14 +722,7 @@ export const claudeIntake = (platformRoot: string, model: JobModel): Intake =>
       ...(summarize ? ["--tools", ""] : ["--allowedTools", "WebFetch", "WebSearch"]),
       "--disallowedTools", "Bash", "Edit", "Write", "Task",
     ];
-    // Its own config dir per request, with your model login only (never your MCP tokens).
-    const isolated = claudeHome(join(platformRoot, "builder-home", "intake-claude", basename(ws)));
-    const w = wrapBuilder("claude", args, {
-      workspace: ws,
-      platformRoot,
-      ownState: [isolated.dir, join(h, "Library", "Caches", "claude-cli-nodejs"), join(h, ".cache", "claude-cli-nodejs")],
-      denyKeychain: true,
-    });
+    // Claude Code's builder home, like a build: its sign-in, none of your ~/.claude (settings, MCP tokens, sessions).
     // Stream: text deltas of the current assistant turn, parsed as they arrive; tool calls as activity.
     let text = "";
     let out: { result?: string; is_error?: boolean } = {};
@@ -754,15 +746,16 @@ export const claudeIntake = (platformRoot: string, model: JobModel): Intake =>
         onProgress({ activity: e.content_block.name === "WebSearch" ? "Searching the web" : "Reading a web page" });
       }
     };
-    try {
-      await run(w.command, w.args, ws, isolated.env, INTAKE_TIMEOUT_MS, onLine, signal, stdin);
-    } catch (e) {
-      // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
-      if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);
-      throw e;
-    } finally {
-      isolated.done();
-    }
+    await inBuilderHome("claude", platformRoot, {}, async (home) => {
+      const w = wrapBuilder("claude", args, { workspace: ws, platformRoot, ownState: [home, ...claudeCaches()], denyKeychain: !CLAUDE_KEYCHAIN });
+      try {
+        await run(w.command, w.args, ws, claudeEnv(home), INTAKE_TIMEOUT_MS, onLine, signal, stdin);
+      } catch (e) {
+        // Claude Code reports why it stopped (an API error, a rate limit, a sign-in) on stdout, as its result.
+        if (out.result && !signal?.aborted) throw new Error(`intake failed: ${String(out.result).slice(0, 300)}`);
+        throw e;
+      }
+    });
     if (out.is_error || !out.result) throw new Error(`intake failed: ${String(out.result ?? "no result").slice(0, 300)}`);
     return out.result;
   });

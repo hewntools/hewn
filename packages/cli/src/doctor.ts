@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { busFix } from "./service.ts";
 import type { Harness } from "./setup/harnesses.ts";
 import { defaultKeySource, type KeySource } from "./supervisor/master-key.ts";
 import { findBrowser } from "./visual.ts";
-import { loggedIn as toolLoggedIn } from "./setup/tools.ts";
+import { claudeBareDefault, isBuilderVendor, signedIn, signInCommand } from "./builders/sign-in.ts";
 import { APP_DIR, BUNDLED, workerdBinary } from "./app-dir.ts";
 
 const hasWorkerd = () => {
@@ -52,7 +52,7 @@ export interface DoctorDeps {
   /** The running supervisor's status (hewn serve), if any. */
   control?: () => Promise<{ restarts: number; toolsRestarts?: number; keySource: KeySource; sandbox: boolean } | undefined>;
   /** The owner's builder and intake settings (from the running Hewn, else platform.json). */
-  settings?: () => Promise<{ builder: string; jobModels?: { builder?: Record<string, { model?: string; effort?: string }> } }>;
+  settings?: () => Promise<{ builder: string; intake?: string; jobModels?: { builder?: Record<string, { model?: string; effort?: string }> } }>;
   service?: () => { installed: boolean; running: boolean; busLost?: boolean };
   hasWorkerd?: () => boolean;
   /** Can this install build the workerd host? The first error, or undefined. */
@@ -61,10 +61,15 @@ export interface DoctorDeps {
   sandbox?: () => { ok: boolean; how: string; detail?: string };
   keySource?: () => KeySource;
   browser?: () => string | undefined;
-  /** Whether a builder CLI is logged in (undefined: can't tell). */
-  loggedIn?: (builder: string) => boolean | undefined;
+  /** Whether a builder CLI is signed in on this Hewn, in its builder home (undefined: can't tell). */
+  loggedIn?: (builder: string) => Promise<boolean | undefined> | boolean | undefined;
+  /** `claude --help`, for the `-p` tripwire (undefined: Claude Code isn't here or didn't answer). */
+  claudeHelp?: () => Promise<string | undefined>;
   now?: Date;
 }
+
+/** `claude --help`, without a synchronous wait. */
+const claudeHelp = () => new Promise<string | undefined>((done) => execFile("claude", ["--help"], { encoding: "utf8", timeout: 20_000 }, (e, out) => done(e ? undefined : out)));
 
 const onPath = (bin: string) => spawnSync("sh", ["-c", `command -v ${bin}`], { encoding: "utf8" }).status === 0;
 
@@ -137,22 +142,29 @@ export async function runDoctor(d: DoctorDeps): Promise<Check[]> {
 
   // Who builds tools: the builder's agent talks each request through and builds it.
   const cfg = await (d.settings ?? (async () => readConfig(d.home)))();
-  const loggedIn = d.loggedIn ?? toolLoggedIn;
+  const loggedIn = d.loggedIn ?? ((builder: string) => (isBuilderVendor(builder) ? signedIn(builder, d.home.root) : undefined));
   const agent = cfg.builder;
   const m = cfg.jobModels?.builder?.[agent];
   const model = m?.model || m?.effort ? ` · ${[m.model, m.effort && `${m.effort} effort`].filter(Boolean).join(", ")}` : "";
   const name = "Builds tools";
-  const builds = (): Check => {
+  const builds = async (): Promise<Check> => {
     if (agent === "remote") return { name, state: "ok", detail: `the host's builder (HEWN_BUILD_URL)${model}` };
     // One of the CLIs: its binary and its own install and sign-in words (the descriptor's); another name is checked as is.
     const cli = isCliAgent(agent) ? CLI_AGENTS[agent] : undefined;
     const label = cli?.label ?? agent;
     if (!which(cli?.bin ?? agent)) return { name, state: "fail", detail: `${label} isn't on PATH`, fix: `${cli ? cli.install : `install ${agent}`}, or pick another in Settings › AI` };
-    const li = loggedIn(agent);
-    if (li === false) return { name, state: "fail", detail: `${label} isn't logged in`, fix: cli ? cli.login : `run ${agent} once and log in` };
-    return { name, state: "ok", detail: `${label} found${li ? ", logged in" : ""}${model}` };
+    const li = await loggedIn(agent);
+    if (li === false) return { name, state: "fail", detail: `${label} isn't signed in on this Hewn (it signs in once, in a home of its own)`, fix: isBuilderVendor(agent) ? signInCommand(agent) : `sign ${agent} in` };
+    return { name, state: "ok", detail: `${label} found${li ? ", signed in" : ""}${model}` };
   };
-  add(builds());
+  add(await builds());
+
+  // The tripwire: Claude Code's announced change that would stop `claude -p` using the sign-in.
+  if (agent === "claude" || cfg.intake === "claude") {
+    const help = which("claude") ? await (d.claudeHelp ?? claudeHelp)() : undefined;
+    const why = help && claudeBareDefault(help);
+    if (help) add(why ? { name: "Claude -p", state: "fail", detail: `${why}: builds and talks on the sign-in would fail`, fix: "keep the Claude Code version before this one until Hewn handles it (docs/models.md)" } : { name: "Claude -p", state: "ok", detail: "uses the builder's sign-in" });
+  }
 
   // Visual check
   const browser = (d.browser ?? findBrowser)();

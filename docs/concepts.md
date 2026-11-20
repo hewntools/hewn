@@ -25,7 +25,7 @@ See [Connecting agents](agents.md).
 
 Hewn uses AI itself, for two jobs (Settings › AI):
 
-- **Builds tools:** an agent talks your request through with you, proposes a **spec** of what to build, and once you say Build, writes the tool in a sandbox. It runs Claude Code, Codex or OpenCode on your machine, on however it's signed in: a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or (OpenCode) a local model server. Hewn adds no fees of its own. You choose its model and effort; [Choosing the model](models.md#building-tools) says how.
+- **Builds tools:** an agent talks your request through with you, proposes a **spec** of what to build, and once you say Build, writes the tool in a sandbox. It runs Claude Code, Codex or OpenCode on your machine, on its [sign-in for Hewn](models.md#signing-the-builder-in): a subscription, an API key, a cloud provider such as Amazon Bedrock or Google Vertex AI, or (OpenCode) a local model server. Hewn adds no fees of its own. You choose its model and effort; [Choosing the model](models.md#building-tools) says how.
 - **Thinks inside tools:** tools that need a model call one through Hewn, with your API key and a monthly budget. See [Models](models.md).
 
 Building is two parts underneath: the **intake** talks it through (quick, writes nothing) and the **builder** builds (in a sandbox, takes minutes). One agent does both, on the model you pick.

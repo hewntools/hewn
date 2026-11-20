@@ -28,7 +28,7 @@ import { backedUpToday, backupLocation, backupNow, listBackups, restoreBackup, s
 import { readConfig } from "../config.ts";
 import { type KeySource, masterKey } from "./master-key.ts";
 import { Tunnel, validTunnelConfig } from "./tunnel.ts";
-import { toolStatus } from "../setup/tools.ts";
+import { type ToolStatus, toolStatus } from "../setup/tools.ts";
 import { cliCatalogs } from "../builders/cli-agents.ts";
 import { hostAllowance, modelCatalogs } from "../builders/models.ts";
 import { remoteGenerate, type RemoteJobs } from "../builders/remote.ts";
@@ -79,7 +79,7 @@ export interface SupervisorOptions {
   /** Where the secrets master key lives (default: Keychain on macOS, libsecret or a file on Linux). */
   keySource?: KeySource;
   /** Builder / intake CLI status (default: checked on this machine). Tests stub it. */
-  tools?: () => ReturnType<typeof toolStatus>;
+  tools?: () => ToolStatus[] | Promise<ToolStatus[]>;
   /** The browser for visual checks (default: found on this machine; "" = none, checks are skipped). */
   browser?: string;
   /** The newest release in this version's line, for Settings › About (default: none). `hewn serve` checks the release feed. */
@@ -386,7 +386,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const controlToken = randomBytes(24).toString("hex");
   const startedAt = Date.now();
   const backupDir = () => backupLocation(o.home, readConfig(o.home).backupDir).dir;
-  const models = o.models ?? modelCatalogs({ catalogs: cliCatalogs(), ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
+  const models = o.models ?? modelCatalogs({ catalogs: cliCatalogs(o.home.root), ...(o.remote ? { remote: { url: o.remote.url, token: o.remote.token } } : {}) });
   // What the host's builder says of the owner's allowance (hosted); none without one.
   const allowance = o.allowance ?? (o.remote ? hostAllowance({ url: o.remote.url, token: o.remote.token }) : async () => null);
   const workbench = localWorkbench({ root: o.home.builds, builders: o.builders, confineTo: () => (o.sandboxBuilders?.() ? o.home.root : undefined), builderIdleMs: () => {
@@ -437,7 +437,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         await workbench.build(job, { signal: abort.signal, onActivity: (activity) => send({ activity }), onModel: (model) => send({ model }), onCharge: (charge) => send({ charge }), ...(check === true ? { onCheck } : {}) });
         send({ done: true });
       } catch (e) {
-        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, paused: (e as { paused?: boolean }).paused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable });
+        send({ error: (e as Error).message, unavailable: (e as { unavailable?: boolean }).unavailable, refused: (e as { refused?: boolean }).refused, paused: (e as { paused?: boolean }).paused, modelUnavailable: (e as { modelUnavailable?: boolean }).modelUnavailable, notSignedIn: (e as { notSignedIn?: boolean }).notSignedIn });
       }
       // Checks still waiting when the build ends get no answer from the core: say so.
       for (const key of asked) {
@@ -540,7 +540,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     },
     "/tunnel/status": async () => tunnel.current(),
     // Hosted: no agents on the machine, only the host's builder.
-    "/setup/tools": async () => [...(o.hosted ? [] : (o.tools ?? toolStatus)()), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
+    "/setup/tools": async () => [...(o.hosted ? [] : await (o.tools ?? (() => toolStatus(o.home.root)))()), ...(o.remote ? [{ name: "remote", label: o.remote.label, found: true, loggedIn: true, remote: true }] : [])],
     "/models/catalog": async (b) => models(String(b.agent), b.fresh === true),
     "/models/allowance": async (b) => ({ allowance: await allowance(b.fresh === true) }),
     "/status/info": async () => ({ machine: hostname().replace(/\.local$/, ""), version: VERSION, dataFormat: DATA_FORMAT, lastBackup: listBackups(backupDir())[0]?.at ?? null, backupDir: backupDir(), latest: o.latest?.() ?? null, notes: o.latestNotes?.() ?? [] }),

@@ -11,6 +11,7 @@ import { cellsFromSvg, glyphSvg } from "../glyph.ts";
 import type { BundleSummary } from "../bundle.ts";
 import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, stampSource, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
+import { MODEL_KEYS } from "./models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { BuildPass, Files } from "../ports.ts";
 import { isPolish, type Pass, PASS_TRIES, PASSES, POLISH_KEEPS, passRequest } from "../passes.ts";
@@ -1539,6 +1540,21 @@ export class Builds extends Domain {
     this.registry.updateBuild(run.build.id, { status: "failed", log: run.history });
   }
 
+  /**
+   * The account a build runs on. The owner's own build (from the web or the CLI) runs on the builder's sign-in. An
+   * unattended one, an agent's, with nobody necessarily watching, runs on the owner's API key for the builder's vendor
+   * when Settings › AI has one, else on the sign-in, and says so (a soft default: the vendors' terms allow the sign-in,
+   * and a refusal would stop the owner's own agents). Only a builder on this machine gets a key, never the host's.
+   */
+  private runsOn(build: BuildRow, builder: string): { apiKey?: string; ranOn?: "key" | "sign-in"; line: string } {
+    const v = BUILDER_KEYS[builder];
+    if (!v || build.requestedBy === "web" || build.requestedBy === "user") return { line: "" };
+    const key = this.secrets.get(MODEL_KEYS, v.provider);
+    return key
+      ? { apiKey: key, ranOn: "key", line: `runs on your ${v.label} API key (Settings › AI): an agent asked for it` }
+      : { ranOn: "sign-in", line: `runs on your ${v.subscription} sign-in (no ${v.label} API key set in Settings › AI)` };
+  }
+
   /** A line in a run's history, and on the platform log and the build's transcript. */
   private note(run: BuilderRun, line: string) {
     run.history.push(line);
@@ -1575,11 +1591,17 @@ export class Builds extends Domain {
     const checks = this.d.validation.checksFor(build, signal, (line) => ((live.lastActivity = line), (live.lastActivityAt = Date.now()), this.events.emit(buildId, line)));
     try {
       const asked = this.registry.buildModel(buildId);
+      const on = this.runsOn(build, builder);
+      // Said once, on the build's first run: the log and Activity say which account it ran on.
+      if (on.ranOn && attempt === 1) {
+        this.registry.setRanOn(buildId, on.ranOn);
+        this.buildEvent(buildId, on.line, tag);
+      }
       // Told once, on its first attempt: later ones carry on from their own.
       const carriesOn = this.carriedOn.get(buildId);
       this.carriedOn.delete(buildId);
       await this.workbench.build(
-        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}), ...(carriesOn ? { carriesOn } : {}) },
+        { buildId, capabilityId: build.capabilityId, kind: build.kind, builder, attempt, ...(run.retryOf ? { retryOf: run.retryOf } : {}), feedback: o.feedback, ...(asked?.model ? { model: asked.model } : {}), ...(asked?.effort ? { effort: asked.effort } : {}), ...(o.pass ? { pass: o.pass } : {}), ...(carriesOn ? { carriesOn } : {}), ...(on.apiKey ? { apiKey: on.apiKey } : {}) },
         {
           signal,
           onActivity: (line) => {
@@ -1617,6 +1639,8 @@ export class Builds extends Domain {
       const msg = `${o.label}: builder ${builder} failed: ${(e as Error).message}`;
       run.history.push(msg);
       this.buildEvent(buildId, msg, tag);
+      // The builder isn't signed in on this Hewn: its words say where to go (the build's log names the command).
+      if ((e as { notSignedIn?: boolean }).notSignedIn) return { end: `not signed in: ${(e as Error).message}` };
       // Retrying can't help (e.g. not logged in); stop now with a clear next step.
       if ((e as { unavailable?: boolean }).unavailable) return { end: `builder ${builder} is unavailable. Fix it, then retry this build.` };
       return "again";
@@ -2462,6 +2486,12 @@ Don't change existing operations, \`requires\`, migrations or the UI. Existing w
  * live, each running an operation by name (one that doesn't fit is skipped then), and the intake's
  * brief leaves a new tool's operations to the builder.
  */
+/** The vendor an unattended build's API key is for, by builder: its provider in Settings › AI, and the words. */
+const BUILDER_KEYS: Record<string, { provider: string; label: string; subscription: string }> = {
+  claude: { provider: "anthropic", label: "Anthropic", subscription: "Claude" },
+  codex: { provider: "openai", label: "OpenAI", subscription: "ChatGPT" },
+};
+
 const scheduledNote = (schedules: ApprovedSchedule[] | undefined, kind: BuildKind) =>
   schedules?.length
     ? `\n\nThe owner approved schedules that Hewn sets up once the ${kind === "create" ? "capability" : "change"} is live: ${schedules.map((x) => `\`${x.operation.split("@")[0]}\` (${x.cadence})`).join(", ")}. Each runs the operation of that exact name with no input, so ${kind === "create" ? "give the capability an operation by each name" : "the capability must have an operation by each name after this change"}: read or write (not destructive), accepting \`{}\`.`

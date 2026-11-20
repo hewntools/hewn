@@ -131,7 +131,7 @@ function buildMeta(b) {
     "div",
     { class: "build-meta" },
     asked && cell("Asked by", [agentTile(catalogOf({ id: b.requestedBy })?.id ?? b.requestedBy, who, 18), who]),
-    cell("Builder", [agentTile(AGENT_CATALOG.find((c) => c.tool === b.builder)?.id ?? b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder !== "remote" && "on your account"),
+    cell("Builder", [agentTile(AGENT_CATALOG.find((c) => c.tool === b.builder)?.id ?? b.builder, builderLabel(b.builder), 18), builderLabel(b.builder)], b.builder !== "remote" && (b.model?.ranOn === "key" ? "on your API key" : "on your account")),
     cell("Model", model ? pretty(model) : "Default", null, model),
     cell("Effort", [h("span", { class: "meter", "aria-hidden": "true" }, efforts.map((_, i) => h("i", { class: i < level ? "on" : "" }))), b.model?.effort ? b.model.effort[0].toUpperCase() + b.model.effort.slice(1) : "Default"]),
   );
@@ -350,8 +350,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const f = b.failure ?? { title: "The build didn't pass", detail: b.log.at(-1) ?? "" };
       if (f.paused) return paused(f);
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
-      // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
-      const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
+      // Refused by the builder's host (e.g. over the month's builds), or the builder isn't signed in: asking it to fix can't help.
+      const refused = /^(refused|not signed in): /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
       const fix = !refused && !noBuilder(b) && h("button", { class: "primary" }, "Ask builder to fix");
       const retry = retryable(b) && h("button", { class: refused || !fix ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
@@ -17,7 +17,7 @@ import {
   OPENCODE_INTAKE_RULES,
   OPENCODE_READER_RULES,
   opencodeArgs,
-  opencodeBuildHome,
+  opencodeBuildDb,
   opencodeBuilder,
   opencodeHasModel,
   opencodeHome,
@@ -28,6 +28,7 @@ import {
   UNAVAILABLE,
 } from "@hewntools/cli/builders/cli.ts";
 import { MODEL_REJECTED, opencodeCatalogFrom } from "@hewntools/cli/builders/models.ts";
+import { builderHome, prepareOpencodeHome, signedIn, signIn } from "@hewntools/cli/builders/sign-in.ts";
 import { builderProfile, builderSandboxAvailable, PRIVATE_HOME_DIRS, wrapBuilder } from "@hewntools/cli/builders/sandbox.ts";
 import type { BuildJob } from "@hewntools/cli/builders/types.ts";
 import { opencodeOutput } from "@hewntools/cli/intake.ts";
@@ -105,7 +106,7 @@ describe("OpenCode's arguments", () => {
 
 describe("OpenCode's home", () => {
   const yoursIn = (root: string) => {
-    const yours = { config: join(root, "yours", ".config", "opencode"), data: join(root, "yours", ".local", "share", "opencode"), cache: join(root, "yours", ".cache", "opencode") };
+    const yours = { config: join(root, "yours", ".config", "opencode"), data: join(root, "yours", ".local", "share", "opencode"), cache: join(root, "yours", ".cache", "opencode"), state: join(root, "yours", ".local", "state", "opencode") };
     mkdirSync(join(yours.config, "node_modules", "@opencode-ai", "plugin"), { recursive: true });
     writeFileSync(join(yours.config, "node_modules", "@opencode-ai", "plugin", "package.json"), '{"version":"1.18.18"}');
     writeFileSync(join(yours.config, "package.json"), '{"dependencies":{"@opencode-ai/plugin":"1.18.18"}}');
@@ -119,71 +120,68 @@ describe("OpenCode's home", () => {
     return yours;
   };
 
-  test("its own HOME and XDG dirs, with your logins for the run, your providers, the plugin SDK copied from yours; never your config, plugins or MCP tokens", async () => {
+  test("its builder home: its own HOME and XDG dirs with the plugin SDK copied from yours, never your config, plugins, logins or MCP tokens; a run gets your providers in a config of its own and keeps its sessions in its own database", async () => {
     const root = mkdtempSync(join(tmpdir(), "hewn-oc-home-"));
     try {
       const yours = yoursIn(root);
-      const dir = join(root, "platform", "builder-home", "opencode", "b-1");
+      const home = builderHome(join(root, "platform"), "opencode");
+      await prepareOpencodeHome(home, yours);
+      assert.ok(existsSync(join(home, "config", "opencode", "node_modules", "@opencode-ai", "plugin", "package.json")), "the SDK install, so OpenCode doesn't fetch it");
+      assert.ok(existsSync(join(home, "config", "opencode", "package.json")));
+      assert.ok(existsSync(join(home, "cache", "opencode", "models.json")));
+      assert.ok(existsSync(join(home, "cache", "opencode", "bin", "rg")));
+      assert.ok(!existsSync(join(home, "data", "opencode", "auth.json")), "never your login: OpenCode's own sign-in makes the home's");
+      assert.ok(!existsSync(join(home, "data", "opencode", "mcp-auth.json")), "never your MCP tokens");
+      assert.ok(!existsSync(join(home, "config", "opencode", "opencode.jsonc")), "never your config");
+      // The login OpenCode's sign-in made: Hewn never reads, copies or writes it.
+      writeFileSync(join(home, "data", "opencode", "auth.json"), '{"anthropic":{"type":"oauth"}}');
       const providers = { ollama: { npm: "@ai-sdk/openai-compatible", options: { baseURL: "http://localhost:11434/v1" } } };
-      const h = await opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => providers });
-      assert.equal(h.dir, dir);
-      assert.equal(h.env.HOME, dir);
-      assert.equal(h.env.XDG_CONFIG_HOME, join(dir, "config"));
-      assert.equal(h.env.XDG_DATA_HOME, join(dir, "data"));
-      assert.equal(h.env.XDG_CACHE_HOME, join(dir, "cache"));
-      assert.equal(h.env.XDG_STATE_HOME, join(dir, "state"));
+      const db = opencodeBuildDb(home, "b-1");
+      const h = await opencodeHome(home, { rules: OPENCODE_BUILDER_RULES, providers: () => providers, db });
+      assert.equal(h.dir, home);
+      assert.equal(h.env.HOME, home);
+      assert.equal(h.env.XDG_CONFIG_HOME, join(home, "config"));
+      assert.equal(h.env.XDG_DATA_HOME, join(home, "data"));
+      assert.equal(h.env.XDG_CACHE_HOME, join(home, "cache"));
+      assert.equal(h.env.XDG_STATE_HOME, join(home, "state"));
       assert.equal(h.env.OPENCODE_DISABLE_CLAUDE_CODE, "1");
       assert.equal(h.env.OPENCODE_DISABLE_PROJECT_CONFIG, "1");
+      assert.equal(h.env.OPENCODE_DB, db);
       const inline = JSON.parse(h.env.OPENCODE_CONFIG_CONTENT!);
       assert.equal(inline.autoupdate, false);
       assert.equal(inline.share, "disabled");
       assert.equal(inline.permission.shell, "deny");
       assert.deepEqual(h.loopback, [11434]);
-      const cfg = JSON.parse(readFileSync(join(dir, "config", "opencode", "opencode.json"), "utf8"));
+      // Your providers (keys and all) in a config file for this run alone, gone after it.
+      const cfg = JSON.parse(readFileSync(h.env.OPENCODE_CONFIG!, "utf8"));
       assert.equal(cfg.autoupdate, false);
       assert.deepEqual(cfg.provider, providers);
-      assert.equal(cfg.permission.edit, "allow");
       assert.equal(cfg.plugin, undefined, "none of your plugins");
-      assert.ok(existsSync(join(dir, "config", "opencode", "node_modules", "@opencode-ai", "plugin", "package.json")), "the SDK install, so OpenCode doesn't fetch it");
-      assert.ok(existsSync(join(dir, "config", "opencode", "package.json")));
-      assert.ok(existsSync(join(dir, "cache", "opencode", "models.json")));
-      assert.ok(existsSync(join(dir, "cache", "opencode", "bin", "rg")));
-      assert.equal(readFileSync(join(dir, "data", "opencode", "auth.json"), "utf8"), '{"anthropic":{"type":"oauth"}}');
-      assert.ok(!existsSync(join(dir, "data", "opencode", "mcp-auth.json")), "never your MCP tokens");
-      assert.ok(!existsSync(join(dir, "config", "opencode", "opencode.jsonc")), "never your config");
-      // Unchanged: nothing copied back; the login goes.
+      assert.ok(!existsSync(join(home, "config", "opencode", "opencode.json")), "nothing in the config every run shares");
       h.done();
-      assert.ok(!existsSync(join(dir, "data", "opencode", "auth.json")));
-      // Your provider config (keys and all) goes with it; the rules stay in the file.
-      const afterRun = JSON.parse(readFileSync(join(dir, "config", "opencode", "opencode.json"), "utf8"));
-      assert.equal(afterRun.provider, undefined);
-      assert.deepEqual(afterRun.permission, OPENCODE_BUILDER_RULES.permission);
-      assert.equal(readFileSync(join(yours.data, "auth.json"), "utf8"), '{"anthropic":{"type":"oauth"}}');
-      // A later attempt: the same home, nothing copied twice, the login back for the run.
-      const again = await opencodeHome(dir, { rules: OPENCODE_BUILDER_RULES, yours, providers: () => undefined });
-      assert.ok(existsSync(join(dir, "data", "opencode", "auth.json")));
-      assert.equal(JSON.parse(readFileSync(join(dir, "config", "opencode", "opencode.json"), "utf8")).provider, undefined);
-      assert.deepEqual(again.loopback, []);
-      // Refreshed by OpenCode: copied back to yours.
-      writeFileSync(join(dir, "data", "opencode", "auth.json"), '{"anthropic":{"type":"oauth","refreshed":true}}');
-      const later = Date.now() / 1000 + 5;
-      utimesSync(join(dir, "data", "opencode", "auth.json"), later, later);
-      again.done();
-      assert.match(readFileSync(join(yours.data, "auth.json"), "utf8"), /refreshed/);
+      assert.ok(!existsSync(h.env.OPENCODE_CONFIG!));
+      assert.equal(readFileSync(join(home, "data", "opencode", "auth.json"), "utf8"), '{"anthropic":{"type":"oauth"}}', "the login untouched");
+      assert.equal(readFileSync(join(yours.data, "auth.json"), "utf8"), '{"anthropic":{"type":"oauth"}}', "and yours");
+      // Two runs side by side: each its own config file, the same home.
+      const [one, two] = await Promise.all([opencodeHome(home, { rules: OPENCODE_BUILDER_RULES, providers: () => undefined, db }), opencodeHome(home, { rules: OPENCODE_INTAKE_RULES, providers: () => undefined, db: opencodeBuildDb(home, "b-2") })]);
+      assert.notEqual(one.env.OPENCODE_CONFIG, two.env.OPENCODE_CONFIG);
+      assert.deepEqual(one.loopback, []);
+      one.done();
+      two.done();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  test("without an OpenCode of your own: an empty home that still runs (OpenCode installs its SDK itself)", async () => {
+  test("without an OpenCode of your own: a home that still runs (OpenCode installs its SDK itself)", async () => {
     const root = mkdtempSync(join(tmpdir(), "hewn-oc-home-"));
     try {
-      const yours = { config: join(root, "none", "config"), data: join(root, "none", "data"), cache: join(root, "none", "cache") };
-      const h = await opencodeHome(join(root, "home"), { rules: OPENCODE_INTAKE_RULES, yours, providers: () => undefined });
-      assert.ok(existsSync(join(h.dir, "config", "opencode", "opencode.json")));
-      assert.ok(!existsSync(join(h.dir, "config", "opencode", "node_modules")));
-      assert.ok(!existsSync(join(h.dir, "data", "opencode", "auth.json")));
-      h.done();
+      const yours = { config: join(root, "none", "config"), data: join(root, "none", "data"), cache: join(root, "none", "cache"), state: join(root, "none", "state") };
+      const home = join(root, "home");
+      await prepareOpencodeHome(home, yours);
+      assert.ok(existsSync(join(home, "config", "opencode")));
+      assert.ok(!existsSync(join(home, "config", "opencode", "node_modules")));
+      assert.ok(!existsSync(join(home, "data", "opencode", "auth.json")));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -250,7 +248,7 @@ case "$1" in
   debug) echo '{"provider":{}}'; exit 0;;
 esac
 printf '%s' "$*" | tr '\\n' ' ' >> "$d/calls"; echo >> "$d/calls"
-echo "HOME=$HOME XDG=$XDG_DATA_HOME RULES=$OPENCODE_CONFIG_CONTENT" >> "$d/env"
+echo "HOME=$HOME XDG=$XDG_DATA_HOME DB=$OPENCODE_DB RULES=$OPENCODE_CONFIG_CONTENT" >> "$d/env"
 case " $* " in *" -s "*) resuming=1;; esac
 if [ -n "$resuming" ]; then
   if [ "$(cat "$d/mode")" = after ]; then echo '{"type":"tool_use","sessionID":"ses_old","part":{"type":"tool","tool":"write","state":{"status":"completed","input":{"filePath":"/tmp/ws/src/index.ts"}}}}'; echo '{"type":"error","sessionID":"ses_old","error":{"name":"UnknownError","data":{"message":"boom"}}}'; exit 1; fi
@@ -286,6 +284,16 @@ echo '{"type":"step_finish","sessionID":"ses_new","part":{"type":"step-finish","
       const logPath = join(home, "builds", "b-7.log");
       mkdirSync(ws);
       mkdirSync(dirname(logPath));
+      // Not set up on this Hewn yet: the build stops in the owner's words, the log names the command, OpenCode never runs.
+      await assert.rejects(opencodeBuilder.build(job({ buildId: "b-6", workspace: ws, logPath, platformRoot: undefined })), (e: Error & { notSignedIn?: boolean }) => e.notSignedIn === true && e.message === "OpenCode isn't signed in on this Hewn. Sign in from the terminal on the machine that runs it.");
+      assert.match(readFileSync(logPath, "utf8"), /OpenCode isn't signed in on this Hewn/);
+      assert.doesNotMatch(readFileSync(logPath, "utf8"), /hewn builder/, "the build's log is on the web: no command");
+      assert.equal(fake.calls().length, 0);
+      // Its sign-in (OpenCode's own `auth login`, here answering at once): the home is ready.
+      const lines: string[] = [];
+      assert.equal(await signIn("opencode", home, { io: { print: (l) => lines.push(l) }, run: async (cmd, args, env) => (assert.deepEqual([cmd, ...args], ["opencode", "auth", "login"]), assert.equal(env.XDG_DATA_HOME, join(builderHome(home, "opencode"), "data")), 0) }), true);
+      assert.equal(await signedIn("opencode", home), true);
+      assert.match(lines.join("\n"), /OpenCode is set up for this Hewn's builds/);
       const j = job({ buildId: "b-7", workspace: ws, logPath, platformRoot: undefined, attempt: 2, feedback: "nope", model: "anthropic/claude-sonnet-4-5" });
       noteSession("opencode", "b-7", "ses_old");
       fake.mode("after");
@@ -299,10 +307,9 @@ echo '{"type":"step_finish","sessionID":"ses_new","part":{"type":"step-finish","
       assert.match(readFileSync(logPath, "utf8"), /couldn't resume the earlier session; starting over/);
       assert.match(readFileSync(logPath, "utf8"), /💬 Done\./);
       assert.equal(sessionOf("opencode", j), "ses_new", "the fresh run's session is the one to resume next");
-      // Its home is the build's own, with the rules in its environment; the login is there for a run only.
-      const own = opencodeBuildHome(home, "b-7");
-      assert.match(fake.env(), new RegExp(`HOME=${own} XDG=${join(own, "data")} RULES=\\{"autoupdate":false`));
-      assert.ok(existsSync(join(own, "config", "opencode", "opencode.json")));
+      // Its builder home, with the build's own session database and the rules in its environment; your login is never copied in.
+      const own = builderHome(home, "opencode");
+      assert.match(fake.env(), new RegExp(`HOME=${own} XDG=${join(own, "data")} DB=${opencodeBuildDb(own, "b-7")} RULES=\\{"autoupdate":false`));
       assert.ok(!existsSync(join(own, "data", "opencode", "auth.json")));
       assert.equal(readFileSync(join(home, ".local", "share", "opencode", "auth.json"), "utf8"), '{"yours":true}');
       // A model it doesn't list: the build stops at once, in the owner's words, and OpenCode never runs.
@@ -311,6 +318,7 @@ echo '{"type":"step_finish","sessionID":"ses_new","part":{"type":"step-finish","
       assert.equal(fake.calls().length, calls);
     } finally {
       for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+      forgetSession("b-6");
       forgetSession("b-7");
       forgetSession("b-8");
       rmSync(home, { recursive: true, force: true });
@@ -318,16 +326,18 @@ echo '{"type":"step_finish","sessionID":"ses_new","part":{"type":"step-finish","
     }
   });
 
-  test("the workbench removes the build's OpenCode home with the workspace", async () => {
+  test("the workbench removes the build's OpenCode sessions with the workspace; the home stays", async () => {
     const home = mkdtempSync(join(tmpdir(), "hewn-oc-wb-"));
     try {
       const wb = localWorkbench({ root: join(home, "builds"), builders: {} });
-      const mine = opencodeBuildHome(home, "b-1");
-      const other = opencodeBuildHome(home, "b-2");
-      for (const d of [join(mine, "data", "opencode"), join(other, "data")]) mkdirSync(d, { recursive: true });
+      const own = builderHome(home, "opencode");
+      const mine = opencodeBuildDb(own, "b-1");
+      const other = opencodeBuildDb(own, "b-2");
+      mkdirSync(dirname(mine), { recursive: true });
+      for (const f of [mine, `${mine}-wal`, other]) writeFileSync(f, "");
       noteSession("opencode", "b-1", "s");
       await wb.remove("b-1");
-      assert.ok(!existsSync(mine) && existsSync(other));
+      assert.ok(!existsSync(mine) && !existsSync(`${mine}-wal`) && existsSync(other) && existsSync(own));
       assert.equal(sessionOf("opencode", job({ buildId: "b-1", attempt: 2 })), undefined);
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -477,9 +487,9 @@ describe("OpenCode as an MCP client", () => {
     }
   });
 
-  test("the first run and doctor list it: installed, and signed in when it has a credential", () => {
-    const s = toolStatus((bin) => bin === "opencode", (name) => (name === "opencode" ? true : undefined));
+  test("the first run and doctor list it: installed, and signed in once its sign-in ran on this Hewn", async () => {
+    const s = await toolStatus("/nowhere", (bin) => bin === "opencode", async (name) => (name === "opencode" ? true : undefined));
     assert.deepEqual(s.find((t) => t.name === "opencode"), { name: "opencode", label: "OpenCode", harnessId: "opencode", found: true, loggedIn: true });
-    assert.equal(toolStatus(() => false).find((t) => t.name === "opencode")?.fix, "Install it: curl -fsSL https://opencode.ai/install | bash");
+    assert.equal((await toolStatus("/nowhere", () => false)).find((t) => t.name === "opencode")?.fix, "Install it: curl -fsSL https://opencode.ai/install | bash");
   });
 });

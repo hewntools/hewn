@@ -136,6 +136,11 @@ export interface BuildJob {
   pass?: BuildPass;
   /** It carries on from the build it retries, which failed or which the owner stopped: the workspace holds that one's work (`Workbench.carryOver`). */
   carriesOn?: "failed" | "stopped";
+  /**
+   * The API key an unattended build runs on instead of the builder's sign-in (Settings › AI: Anthropic's for Claude
+   * Code, OpenAI's for Codex). Only ever given to a builder on this machine, never the host's.
+   */
+  apiKey?: string;
 }
 
 /** A pass's attempt: which pass, and what it asks. */
@@ -202,7 +207,8 @@ export interface Workbench {
   file(buildId: string, path: string): Promise<Uint8Array | undefined>;
   remove(buildId: string): Promise<void>;
   /**
-   * Run a builder in the workspace. Throws; `unavailable: true` on the error means retrying won't
+   * Run a builder in the workspace. Throws; `notSignedIn: true` on the error means the builder isn't signed in on
+   * this Hewn (the message says where to go, in words); `unavailable: true` means retrying won't
    * help, `refused: true` that the builder's host declined it (e.g. over quota; the message says why),
    * `paused: true` that the builder's host paused it part-way with its work kept (the owner continues
    * or stops it; the message says why), and `modelUnavailable: true` that the model asked for can't

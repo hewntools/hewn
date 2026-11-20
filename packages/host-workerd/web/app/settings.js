@@ -4,7 +4,7 @@ import { ago, api, appIcon, BRAND, capRef, CLI, commandBlock, confirmDialog, enc
 import { installFromFileOrLink } from "./install.js";
 import { addPasskey, knownPasskeys, passkeyError, passkeysSupported } from "../passkey.js";
 import { deviceName } from "./add-passkey.js";
-import { addSheet, agentModelsSheet, agentTileOf, buildJobs, jobPicker, modelSheet, providerTile } from "./agents.js";
+import { addSheet, agentModelsSheet, agentTileOf, buildJobs, hewnAgentsSheet, jobPicker, modelSheet, notReadyWords, providerTile } from "./agents.js";
 import { applyTheme, THEME_KEY } from "./appearance.js";
 import { brandTile, browserZone, hewnMachine, hues, sandboxNotice, setSettings, settings, shortcutsDialog, stillHere, topBar, view } from "./frame.js";
 import { buildsChosen, jobModelOf, modelWords } from "./home.js";
@@ -120,7 +120,7 @@ async function aiSection() {
   const tile = (t) => agentTileOf(t, 20);
   const builder = tools.find((x) => x.name === s.builder);
   const catalogs = new Map([[s.builder, await api(`/tools/${enc(s.builder)}/models`).catch(() => null)]]);
-  const agentWords = (t) => (t.remote && ready(t) ? t.label : `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? "signed in" : t.fix ?? "not ready"}`);
+  const agentWords = (t) => (t.remote && ready(t) ? t.label : `${t.label}${t.remote ? "" : ` on ${machine.word}`} · ${ready(t) ? "signed in" : notReadyWords(t, machine)}`);
   /** Who builds tools, on which model; Change picks the agent, Model… the model and effort. */
   const buildsRow = () => {
     const chosen = buildsChosen(s);
@@ -142,6 +142,18 @@ async function aiSection() {
     h("button", { "aria-label": "More attempts", disabled: n >= 5, onclick: () => saveSettings({ maxBuildAttempts: n + 1 }, `Build attempts: ${n + 1}`) }, "+"),
   );
   const builds = buildsRow();
+  // Each builder on this machine: signed in on this Hewn (in a home of its own), or not, or not installed.
+  const local = tools.filter((t) => !t.remote);
+  const stateWords = (t) => `${t.label}: ${!t.found ? "not installed" : ready(t) ? "signed in" : "not signed in"}`;
+  const builders =
+    !s.hosted &&
+    local.length > 0 &&
+    h(
+      "div",
+      { class: "setting" },
+      h("div", { class: "grow" }, h("span", { class: "strong" }, `Builders on ${machine.word}`), h("span", { class: "sub" }, local.map(stateWords).join(" · "))),
+      h("button", { class: "sm", onclick: () => hewnAgentsSheet().then(() => route()) }, "Details…"),
+    );
   // As the server has it (the owner's ticks, else its default for this agent).
   const allowed = catalogs.get(s.builder)?.agentModels ?? ["default"];
   const asks =
@@ -167,6 +179,7 @@ async function aiSection() {
     h("div", { class: "row between" }, h("h1", { class: "flush" }, "AI"), h("button", { onclick: () => addSheet().then(() => !location.hash.startsWith("#/settings/ai/models") && route()) }, "Add…")),
     settingsCard(
       h("div", { class: "setting-with-extra" }, builds, h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
+      builders,
       asks,
       instructions,
       h(
@@ -193,7 +206,7 @@ async function aiSection() {
         h("a", { class: "btn sm", href: "#/settings/ai/models" }, "Models ›"),
       ),
     ),
-    !builder?.remote && h("div", { class: "small faint" }, "Building runs on the agent's own account (a subscription, an API key or a cloud provider), including builds an agent asks for. Thinking inside tools uses your model key, metered."),
+    !builder?.remote && h("div", { class: "small faint" }, "Building runs on the agent's sign-in for this Hewn (a subscription, an API key or a cloud provider). A build an agent asks for runs on your Anthropic or OpenAI key from Models, when you've set one. Thinking inside tools uses your model key, metered."),
     h("div", { class: "small faint" }, "Agents that use your tools are on ", h("a", { href: "#/agents" }, "Agents"), "."),
   );
 }

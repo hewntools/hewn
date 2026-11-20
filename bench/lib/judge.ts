@@ -3,9 +3,8 @@
 // grades on), and each arm's tools as a set (do they all look alike?). The judge sees only screenshots and
 // the request, never the arm. It is calibrated against the owner's blind votes, not trusted on its own.
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { claudeHome } from "@hewntools/cli/builders/cli.ts";
 import { loadCases } from "./cases.ts";
 import { cleanEnv } from "./run.ts";
 import { visibleResults } from "./view.ts";
@@ -85,14 +84,14 @@ export function parseJson<T>(text: string): T {
 
 export const total = (s: Pick<Score, "design_quality" | "originality" | "craft" | "usefulness">) => 2 * s.design_quality + 2 * s.originality + s.craft + s.usefulness;
 
-/** Ask Claude Code (read-only, isolated from your settings like the builder), with `tools` allowed, in `cwd`. */
+/**
+ * Ask your own Claude Code (read-only, none of your settings, hooks or MCP servers, like the builder; nothing kept in
+ * your sessions), with `tools` allowed, in `cwd`.
+ */
 export function ask(cwd: string, prompt: string, model?: string, tools: string[] = ["Read"]): Promise<string> {
-  const home = claudeHome(join(cwd, ".judge-home"));
-  const args = ["-p", prompt, "--output-format", "json", ...(model ? ["--model", model] : []), "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands", ...(tools.length ? ["--allowedTools", ...tools] : []), "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task"];
+  const args = ["-p", prompt, "--output-format", "json", "--no-session-persistence", ...(model ? ["--model", model] : []), "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--disable-slash-commands", ...(tools.length ? ["--allowedTools", ...tools] : []), "--disallowedTools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task"];
   return new Promise((resolve, reject) =>
-    execFile("claude", args, { cwd, env: { ...cleanEnv(), ...home.env }, maxBuffer: 16 << 20, timeout: 10 * 60_000 }, (e, out) => {
-      home.done();
-      rmSync(join(cwd, ".judge-home"), { recursive: true, force: true });
+    execFile("claude", args, { cwd, env: cleanEnv(), maxBuffer: 16 << 20, timeout: 10 * 60_000 }, (e, out) => {
       if (e) return reject(e);
       try {
         const r = JSON.parse(out);

@@ -2,12 +2,12 @@
 
 Hewn runs on your own machine: macOS, Linux, or Windows through WSL.
 
-Install it where the agent that [builds your tools](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode) is signed in, usually the computer you work on. Want Hewn on your phone too? Put it on a machine that's always on and follow [Using Hewn from anywhere](remote-access.md) after this.
+Install it where the agent that [builds your tools](concepts.md#hewns-two-jobs) (Claude Code, Codex or OpenCode) is installed, usually the computer you work on. Want Hewn on your phone too? Put it on a machine that's always on and follow [Using Hewn from anywhere](remote-access.md) after this.
 
 ## Before you start
 
 - **Node.js 24 or newer.** `node --version`. If it's older: Use [nvm](https://github.com/nvm-sh/nvm), then `nvm install 24`.
-- **A builder:** Claude Code (`claude`), Codex (`codex`) or OpenCode (`opencode`), installed and signed in: with a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI (OpenCode: any provider it supports, a local model server too). It writes and tests your tools.
+- **A builder:** Claude Code (`claude`), Codex (`codex`) or OpenCode (`opencode`), installed, with a subscription, an API key, or a cloud provider such as Amazon Bedrock or Google Vertex AI (OpenCode: any provider it supports, a local model server too). It writes and tests your tools. You sign it in for Hewn once, below.
 - **Linux:** Ubuntu 22.04 or newer, or another distribution with glibc 2.28 or newer.
 
 The install script takes care of the rest on Linux and WSL: it installs bubblewrap (the sandbox) if it's missing, and on WSL tells you how to turn on systemd if it's off.
@@ -28,6 +28,7 @@ Your data lives in `~/.hewn`, and nightly backups in `~/.hewn-backups`. To keep 
 
 ```sh
 hewn service install    # runs in the background, starts at login, restarts if it stops
+hewn builder sign-in claude    # or codex, or opencode: the builder signs in once, for Hewn
 hewn doctor             # checks everything: each problem comes with the fix
 hewn open               # opens Hewn in your browser, signed in
 ```
@@ -41,7 +42,8 @@ On a healthy install, `hewn doctor` says:
 ✔ workerd       installed
 ✔ Sandbox       Seatbelt: workerd and builders are confined
 ✔ Secrets key   in the macOS Keychain
-✔ Builds tools  claude found, logged in
+✔ Builds tools  Claude Code found, signed in
+✔ Claude -p     uses the builder's sign-in
 ✔ Visual check  chrome-headless-shell
 ✔ Claude Code   Hewn registered (if it asks to sign in: hewn setup --agents claude-code)
 ✔ Codex         Hewn registered (if it asks to sign in: hewn setup --agents codex)
@@ -50,6 +52,8 @@ On a healthy install, `hewn doctor` says:
 
 No problems.
 ```
+
+The builder's sign-in is the agent's own, in a home of its own: your own sign-in stays as it is. See [Signing the builder in](models.md#signing-the-builder-in).
 
 The first run has three steps:
 1. Connect the agents on this machine that will use your tools (Claude Code, Codex, OpenCode).
