@@ -2,7 +2,8 @@
 // Which isolate a tool's code runs in, on the real workerd host: the owner's data ops share the live
 // tool's (so they never stop a call in progress), and a build's code runs in isolates of its own.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -72,5 +73,81 @@ describe("a tool's isolates (workerd)", () => {
     const failed = await h.sv.admin("modify", { capabilityId: "counter", request: "break its tests", wait: true });
     assert.equal(failed.status, "failed", failed.log.join("\n"));
     assert.equal(await bump("counter"), 3);
+  });
+});
+
+/**
+ * The tools process's isolates, by its inspector (a target each), after a full GC of its main isolate: what workerd
+ * still holds (an unnamed isolate goes at the main isolate's next GC). Tool isolates don't answer the inspector.
+ */
+async function isolatesHeld(inspector: string, poke: () => Promise<unknown>): Promise<number> {
+  const list = async () => (await (await fetch(`http://${inspector}/json/list`)).json()) as { title: string; webSocketDebuggerUrl: string }[];
+  const gc = async () => {
+    for (const t of (await list()).filter((t) => t.title.endsWith(" main"))) {
+      const ws = new WebSocket(t.webSocketDebuggerUrl);
+      await new Promise<void>((ok, no) => ((ws.onopen = () => ok()), (ws.onerror = () => no(new Error("inspector")))));
+      ws.send(JSON.stringify({ id: 1, method: "HeapProfiler.collectGarbage" }));
+      await new Promise<void>((ok) => (ws.onmessage = () => ok()));
+      ws.close();
+    }
+  };
+  // What a GC frees is let go at the end of the next request (workerd pumps V8's tasks then): a call, then again.
+  for (let i = 0; i < 2; i++) {
+    await gc();
+    await poke();
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  return (await list()).length;
+}
+
+const freePort = () =>
+  new Promise<number>((ok) => {
+    const s = createServer().listen(0, "127.0.0.1", () => {
+      const port = (s.address() as AddressInfo).port;
+      s.close(() => ok(port));
+    });
+  });
+
+describe("a replaced version's isolate is released (workerd)", () => {
+  let h: TestHost;
+  let dirs: string;
+  let inspector: string;
+  before(async () => {
+    inspector = `127.0.0.1:${await freePort()}`;
+    h = await startTestHost({ toolsInspector: inspector });
+    dirs = mkdtempSync(join(tmpdir(), "hewn-isolates-"));
+  });
+  after(async () => {
+    await h?.stop();
+    rmSync(dirs, { recursive: true, force: true });
+  });
+
+  test("a tool holds one isolate: changed three times, its data limit changed, and after an idle spell", { timeout: 180_000 }, async () => {
+    const before = await isolatesHeld(inspector, async () => {});
+    const build = await h.sv.admin("install", { name: "counter", purpose: "counts", dir: toolDir(dirs, "counter", []), wait: true });
+    assert.equal(build.status, "promoted", build.log.join("\n"));
+    const bump = async () => (await h.invoke("counter", "bump", {})).result.calls as number;
+    assert.equal(await bump(), 1);
+    const one = await isolatesHeld(inspector, bump);
+    // Listed at all (the count would pass empty otherwise): the live isolate, and one more the tool's host holds, as
+    // many after any number of changes.
+    assert.ok(one > before, `the inspector lists the tool's isolates (${before} before the install, ${one} after)`);
+    for (const n of [2, 3, 4]) {
+      h.queue((ws) => appendFileSync(join(ws, "src", "index.ts"), `\n// version ${n}\n`));
+      const changed = await h.sv.admin("modify", { capabilityId: "counter", request: `version ${n}`, wait: true });
+      assert.equal(changed.status, "promoted", changed.log.join("\n"));
+      assert.equal(await bump(), 1, "a new version starts in an isolate of its own");
+      assert.equal(await isolatesHeld(inspector, bump), one, `v${n}: the replaced version's isolate is gone`);
+    }
+    // Another data limit is another isolate (its key): the old one goes the same way.
+    await h.sv.admin("settings", { toolDataLimitsMB: { counter: 50 } });
+    assert.equal(await bump(), 1, "the new limit runs in an isolate of its own");
+    assert.equal(await isolatesHeld(inspector, bump), one, "the old limit's isolate is gone");
+    // Idle past workerd's eviction of a tool's host (~10 s): the next call runs in the same isolate (its module state
+    // kept), not one compiled again.
+    const calls = await bump();
+    await new Promise((r) => setTimeout(r, 15_000));
+    assert.equal(await bump(), calls + 1, "the same isolate after an idle spell");
+    assert.equal(await isolatesHeld(inspector, bump), one);
   });
 });

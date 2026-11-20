@@ -4,6 +4,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.13 (unreleased)
 
+### Changes
+
+- **A changed tool lets go of its old version.** Until now each version of a tool kept its memory until Hewn restarted, so a tool changed often held one copy per change; now a tool holds its current version only. The first call on a new version stops one still running on the old (as before), and the old one's memory goes when the tools' process next collects garbage. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
+
 ### Fixes
 
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).

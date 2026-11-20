@@ -67,6 +67,8 @@ export interface SupervisorOptions {
   /** Confine builders away from the platform home. */
   sandboxBuilders?: () => boolean;
   log?: (line: string) => void;
+  /** Tests only: the tools process's V8 inspector on this address ("127.0.0.1:9229"), to count its isolates. */
+  toolsInspector?: string;
   /** Health check cadence and the stall that triggers a restart. */
   watchdog?: { intervalMs: number; stallMs: number } | false;
   /**
@@ -259,7 +261,7 @@ const hewn :Workerd.Worker = (
     (name = "VERSION", text = "${VERSION}"),${o.schedulesOff ? `\n    (name = "SCHEDULES", text = "off"),` : ""}
   ],
   durableObjectNamespaces = [
-    (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),
+    (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
 );
@@ -298,7 +300,7 @@ const tools :Workerd.Worker = (
     (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),${o.network ? `\n    (name = "NETWORK", text = "${o.network}"),` : ""}
   ],
   durableObjectNamespaces = [
-    (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true),
+    (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true, preventEviction = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
 );
@@ -637,7 +639,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // The tools' own storage (made before each start): the tools process can write nowhere else in the data dir.
   const toolsStorage = join(data, "do", STORAGE_KEYS.capability);
   const platformBase = [bin, "serve", "--experimental", join(data, "config.capnp")];
-  const toolsBase = [bin, "serve", "--experimental", join(data, "tools.capnp")];
+  const toolsBase = [bin, "serve", "--experimental", join(data, "tools.capnp"), ...(o.toolsInspector ? ["--inspector-addr", o.toolsInspector] : [])];
   const platformCommand = o.sandbox ? sandboxed(platformBase, { readable: [binDir, ...Object.values(assetDirs()).map((d) => realpathSync(d))], writable: [data], profile: join(data, "workerd.sb") }) : platformBase;
   const toolsCommand = o.sandbox ? sandboxed(toolsBase, toolsSandbox(o.home.root, data, binDir)) : toolsBase;
   const url = `http://127.0.0.1:${o.port}`;
