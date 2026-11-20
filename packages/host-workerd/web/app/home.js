@@ -39,7 +39,8 @@ const modelWords = (m = {}, catalog) => {
   return m.effort ? `${name} · ${m.effort} effort` : name;
 };
 
-async function home({ editing = false } = {}) {
+/** `auto`: redrawn by Home's own poll (a build started or ended elsewhere), not by the owner: its requests are the page's own (see kit's api). */
+async function home({ editing = false, auto = false } = {}) {
   // Redrawn in place (a layout save, a build starting or ending): stop the last drawing's timers first.
   for (const fn of leaving.splice(0)) fn();
   const here = stillHere();
@@ -49,7 +50,7 @@ async function home({ editing = false } = {}) {
     view(topBar("home"), h("main", { class: "home", "aria-busy": "true" }, h("div", { class: "home-grid" }, Array.from({ length: 6 }, () => h("span", { class: "skeleton tile-skeleton" })))));
   // Connections live under Accounts, not on Home.
   const onHome = (cs) => [...cs.values()].filter((c) => c.kind !== "connection");
-  const [all0, homeData] = await Promise.all([caps(true), api("/home").catch(() => ({ layout: [], gallery: [] }))]);
+  const [all0, homeData] = await Promise.all([caps(true, { poll: auto }), api("/home", { refresh: auto }).catch(() => ({ layout: [], gallery: [] }))]);
   if (!here()) return;
   const list = onHome(all0);
   setWallpaper(list.map(tintOf), { dim: !list.length });
@@ -164,7 +165,7 @@ async function home({ editing = false } = {}) {
     if (!document.body.contains(grid)) return;
     const next = onHome(await caps(true, { poll: true }).catch(() => new Map()));
     const busy = grid.querySelector("input.rename") || document.querySelector(".menu.context") || grid.classList.contains("editing");
-    if (signature(next) !== last && !busy) return home();
+    if (signature(next) !== last && !busy) return home({ auto: true });
     for (const c of next) if (c.building) tiles.get(c.id)?.update(c);
     last = busy ? last : signature(next);
     timer = setTimeout(poll, list.some((c) => c.building) || next.some((c) => c.building) ? BUILDING_POLL : IDLE_POLL);

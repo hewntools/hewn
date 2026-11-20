@@ -778,6 +778,33 @@ export const operations = {
     }
   });
 
+  await step("Home redrawn by its own poll (a tool added elsewhere) makes the page's own requests only: none counts as the owner's activity", async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await ctx.addCookies(await page.context().cookies());
+    const p = await ctx.newPage();
+    try {
+      // The owner's requests: an API request without the refresh header (an icon and a build's events the server leaves out itself).
+      const owners: string[] = [];
+      p.on("request", (r: { url(): string; headers(): Record<string, string> }) => {
+        const path = new URL(r.url()).pathname;
+        if (path.startsWith("/api/") && r.headers()["x-hewn-refresh"] !== "1" && !/\/(icon|events)$/.test(path)) owners.push(path);
+      });
+      await p.clock.install();
+      await p.goto(`${web}/#/`);
+      await p.locator(".home-grid").waitFor();
+      await p.waitForTimeout(1000);
+      owners.length = 0;
+      // A tool added elsewhere (an agent's, the CLI's): Home's next poll sees it and redraws.
+      const added = await sv.admin("install", { name: "Probe", purpose: "Probes", dir: join(FIX, "probe"), wait: true });
+      if (added.status !== "promoted") throw new Error(added.log.join("\n"));
+      for (let t = 0; t < 70_000; t += 5000) await p.clock.runFor(5000), await p.waitForTimeout(100);
+      await p.locator(".home-grid .tile", { hasText: "Probe" }).first().waitFor({ timeout: 5000 });
+      if (owners.length) throw new Error(`Home's own redraw asked as the owner: ${owners.join(", ")}`);
+    } finally {
+      await ctx.close();
+    }
+  });
+
   if (!real)
     await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick opens it again after a minute and carries it to the end", async () => {
       let release!: () => void;
