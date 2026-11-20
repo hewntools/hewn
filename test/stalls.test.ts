@@ -3,6 +3,7 @@
 // does it 3 times within an hour suspended until the owner resumes it. (On workerd, with a real
 // stall and the watchdog: workerd-runaway.test.ts.)
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
@@ -14,7 +15,13 @@ const code = (p: Platform, capabilityId: string, what: string, state = "", calle
 const running = (p: Platform) => p.registry.db.prepare("SELECT capability_id, state, what, caller FROM running_code").all().map((r) => ({ ...r }));
 const stalled = (p: Platform, id: string) => p.logLines(id, 100).filter((l) => / ERROR stalled: /.test(l));
 /** A suspension's reason: its count, and which stalls (what was running, when). */
-const suspendedFor = (what: string) => new RegExp(`it kept Hewn's tools from responding 3 times within an hour \\((${what} at \\d\\d:\\d\\d(, )?){3}\\)`);
+const suspendedFor = (what: string) => new RegExp(`it worked for more than 10 seconds without a pause 3 times within an hour \\((${what} at \\d\\d:\\d\\d(, )?){3}\\)`);
+/** A tool's files, as a client hands them over. */
+const entriesOf = (dir: string, rel = ""): { path: string; content: string }[] =>
+  readdirSync(join(dir, rel)).flatMap((n) => {
+    const path = rel ? `${rel}/${n}` : n;
+    return statSync(join(dir, path)).isDirectory() ? entriesOf(dir, path) : [{ path, content: readFileSync(join(dir, path), "utf8") }];
+  });
 const min = (n: number) => new Date(Date.parse("2026-11-11T10:00:00.000Z") + n * 60_000).toISOString();
 
 describe("stalls", () => {
@@ -122,9 +129,9 @@ describe("stalls", () => {
     assert.equal(st.ready, false);
     assert.equal(st.suspended?.at, min(2));
     assert.match(st.suspended!.reason, suspendedFor("spin@1"));
-    assert.match(st.userAction!, /^Hewn suspended it: it kept Hewn's tools from responding 3 times within an hour \(.+\)\. It runs again once the owner resumes it .*hewn resume runaway/);
+    assert.match(st.userAction!, /^Hewn suspended it: it worked for more than 10 seconds without a pause 3 times within an hour \(.+\)\. It runs again once the owner resumes it .*hewn resume runaway/);
     assert.equal(p.list(t.codex).find((c) => c.id === "runaway")?.ready, false);
-    await assert.rejects(p.invoke(t.codex, { capabilityId: "runaway", operation: "tick", input: { tag: "x" } }), (e: any) => e.code === "not_ready" && /^runaway is suspended: it kept Hewn's tools from responding 3 times within an hour \(.+\)\. It runs again once the owner resumes it$/.test(e.message) && !!e.details.suspended);
+    await assert.rejects(p.invoke(t.codex, { capabilityId: "runaway", operation: "tick", input: { tag: "x" } }), (e: any) => e.code === "not_ready" && /^runaway is suspended: it worked for more than 10 seconds without a pause 3 times within an hour \(.+\)\. It runs again once the owner resumes it$/.test(e.message) && !!e.details.suspended);
     await assert.rejects(p.widget(USER, "runaway", "rows"), /runaway is suspended/);
     p.schedules.update(s.id, { nextRunAt: Date.now() - 1000 });
     await p.runDueSchedules();
@@ -176,8 +183,51 @@ describe("stalls", () => {
     const b = p.getBuild(t.claude, opened.buildId);
     assert.equal(b.status, "failed");
     assert.ok(b.log.includes("FAILED: tick@1 worked for more than 10 seconds without a pause, on test 'tick', so Hewn's tools were restarted; not retried"), b.log.join("\n"));
-    assert.deepEqual([b.failure?.title, b.failure?.detail], ["It worked too long without a pause", "tick@1 worked for more than 10 seconds without a pause, on test 'tick', so Hewn's tools were restarted. Split the work, or await between its parts. It wasn't tried again: it would do the same."]);
+    assert.deepEqual([b.failure?.title, b.failure?.detail], ["It worked too long without a pause", "tick@1 worked for more than 10 seconds without a pause, on test 'tick', so Hewn's tools were restarted. Split the work across calls. It wasn't tried again: it would do the same."]);
     assert.deepEqual(stalled(p, "runaway"), []);
     release();
+    await t.platform.settle(opened.buildId);
+  });
+
+  test("each validation step's stall names what it ran on: a sample call, the visual check, the widget sheet, loading the code", async () => {
+    const at = ["on sample call 2", "in the visual check", "in the widget sheet"];
+    for (const [i, via] of at.entries()) {
+      let release!: () => void;
+      t.queue(() => new Promise<void>((r) => (release = r)));
+      const opened = await t.platform.modify(t.claude, { capabilityId: "runaway", request: `change ${i}` });
+      while (!release) await new Promise((r) => setTimeout(r, 10));
+      code(t.platform, "runaway", "tick@1", `${["sample", "visual", "sample"][i]}:${opened.buildId}`, via);
+      t.platform.recoverStall(min(i));
+      const b = t.platform.getBuild(t.claude, opened.buildId);
+      assert.equal(b.log.at(-1), `FAILED: tick@1 worked for more than 10 seconds without a pause, ${via}, so Hewn's tools were restarted; not retried`);
+      release();
+      await t.platform.settle(opened.buildId);
+    }
+    let release!: () => void;
+    t.queue(() => new Promise<void>((r) => (release = r)));
+    const opened = await t.platform.modify(t.claude, { capabilityId: "runaway", request: "load" });
+    while (!release) await new Promise((r) => setTimeout(r, 10));
+    code(t.platform, "runaway", "load", `test:${opened.buildId}`, "validation");
+    t.platform.recoverStall(min(5));
+    const b = t.platform.getBuild(t.claude, opened.buildId);
+    assert.equal(b.failure?.title, "It worked too long without a pause");
+    assert.match(b.failure!.detail, /^Its code worked for more than 10 seconds without a pause while loading, so Hewn's tools were restarted\. Split the work across calls\. It wasn't tried again/);
+    release();
+    await t.platform.settle(opened.buildId);
+  });
+
+  test("a check whose code stalls says so by the rule and stops there: Hewn's tools restart once at most", async () => {
+    const files = entriesOf(join(FIXTURES, "runaway")).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace('"id": "runaway"', '"id": "runaway-two"') } : f.path === "tests/cases.json" ? { ...f, content: JSON.stringify([{ name: "slow", operation: "slow", input: { ms: 400 } }, { name: "tick", operation: "tick", input: { tag: "after" } }]) } : f));
+    const checking = t.platform.checkFiles(t.claude, { files });
+    // The watchdog's word while the first case runs (on workerd the call then fails with the tools' restart).
+    let row: { state: string; what: string; caller: string } | undefined;
+    while (!(row = running(t.platform).find((r: any) => r.what === "slow@1") as any)) await new Promise((r) => setTimeout(r, 10));
+    assert.match(row.state, /^test:chk-.+-check$/);
+    t.platform.recoverStall(new Date().toISOString());
+    const r = await checking;
+    assert.equal(r.passed, false);
+    assert.deepEqual(r.failures, ["slow@1 worked for more than 10 seconds without a pause, on test 'slow', so Hewn's tools were restarted; the rest wasn't run"]);
+    assert.ok(!running(t.platform).length);
+    assert.doesNotMatch(r.text, /sample data|test cases? passed/, "nothing after the stall ran");
   });
 });

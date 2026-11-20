@@ -87,10 +87,10 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     }
     const st = await h.sv.admin("readiness", { capabilityId: "runaway" });
     assert.equal(st.ready, false);
-    assert.match(st.suspended.reason, /kept Hewn's tools from responding 3 times within an hour/);
+    assert.match(st.suspended.reason, /worked for more than 10 seconds without a pause 3 times within an hour/);
     assert.match(st.userAction, /resumes it/);
     // Calls, widgets and schedules are refused, each saying why.
-    await assert.rejects(h.invoke("runaway", "tick"), /runaway is suspended: it kept Hewn's tools from responding 3 times within an hour/);
+    await assert.rejects(h.invoke("runaway", "tick"), /runaway is suspended: it worked for more than 10 seconds without a pause 3 times within an hour/);
     const agent = await h.agent("codex", ["discover", "invoke"]);
     const w: any = await agent.callTool({ name: "widgets_show", arguments: { capabilityId: "runaway", widget: "rows" } });
     assert.equal(w.isError, true);
@@ -111,7 +111,7 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     const activity = (await web("/api/activity?capability=runaway")).items.filter((i: any) => i.kind === "lifecycle" && i.outcome !== "schedule");
     const lines = activity.map((i: any) => `${i.outcome} ${i.detail}`).sort();
     assert.deepEqual(lines.slice(0, 3), ["stalled spin@1", "stalled spin@1", "stalled spin@1"]);
-    assert.match(lines[3], /^suspend it kept Hewn's tools from responding 3 times within an hour \(spin@1 at \d\d:\d\d, spin@1 at \d\d:\d\d, spin@1 at \d\d:\d\d\)$/);
+    assert.match(lines[3], /^suspend it worked for more than 10 seconds without a pause 3 times within an hour \(spin@1 at \d\d:\d\d, spin@1 at \d\d:\d\d, spin@1 at \d\d:\d\d\)$/);
     // Resumed (hewn resume), it runs again.
     writeFileSync(join(h.root, "supervisor.json"), JSON.stringify({ url: h.sv.url, adminToken: h.sv.adminToken, control: h.sv.control, pid: process.pid }));
     assert.match(await hewn(h.root, "resume", "runaway"), /runaway resumed/);

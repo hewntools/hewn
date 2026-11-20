@@ -7,12 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { editJson, SEED } from "./helpers.ts";
-import { STALL_MS } from "@hewntools/core/platform/stalls.ts";
+import { WATCHDOG } from "@hewntools/cli/supervisor/index.ts";
 import { startTestHost } from "./workerd-helpers.ts";
 
 test("Hewn answers its health check all through a validation of hundreds of cases, a dozen of them slow", async () => {
   // The supervisor's own watchdog, as it runs for an owner (a test host's is tighter).
-  const h = await startTestHost({ watchdog: { intervalMs: 1000, stallMs: STALL_MS } });
+  assert.deepEqual(WATCHDOG, { intervalMs: 1000, stallMs: 10_000 }, "the stall rule's 10 s");
+  const h = await startTestHost({ watchdog: WATCHDOG });
   const dir = mkdtempSync(join(tmpdir(), "hewn-many-cases-"));
   try {
     cpSync(SEED, dir, { recursive: true });

@@ -42,6 +42,9 @@ import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
 
+/** The watchdog an owner's Hewn runs: a health check a second, and a restart past the stall rule's 10 s. */
+export const WATCHDOG = { intervalMs: 1000, stallMs: STALL_MS };
+
 export interface SupervisorOptions {
   home: Home;
   port: number;
@@ -870,7 +873,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // the platform is restarted alone.
   const timers: ReturnType<typeof setInterval>[] = [];
   if (o.watchdog !== false) {
-    const { intervalMs, stallMs } = o.watchdog ?? { intervalMs: 1000, stallMs: STALL_MS };
+    const { intervalMs, stallMs } = o.watchdog ?? WATCHDOG;
     const watch = (check: (ms: number) => Promise<boolean>, onStall: (seconds: number) => Promise<void> | void) => {
       let lastOk = Date.now();
       let checking = false;

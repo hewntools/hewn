@@ -31,8 +31,8 @@ describe("plain-language build failures", () => {
     const say = (line: string) => explainFailure([line]);
     const t = say("FAILED: import_feed@1 worked for more than 10 seconds without a pause, on sample call 2, so Hewn's tools were restarted; not retried");
     assert.equal(t.title, "It worked too long without a pause");
-    assert.match(t.detail, /^import_feed@1 worked for more than 10 seconds without a pause, on sample call 2, so Hewn's tools were restarted\. Split the work, or await between its parts\. It wasn't tried again/);
-    assert.match(say("FAILED: its code worked for more than 10 seconds without a pause while loading, so Hewn's tools were restarted; not retried").detail, /^its code worked for more than 10 seconds without a pause while loading, so/);
+    assert.match(t.detail, /^import_feed@1 worked for more than 10 seconds without a pause, on sample call 2, so Hewn's tools were restarted\. Split the work across calls\. It wasn't tried again/);
+    assert.match(say("FAILED: Its code worked for more than 10 seconds without a pause while loading, so Hewn's tools were restarted; not retried").detail, /^Its code worked for more than 10 seconds without a pause while loading, so/);
   });
 
   test("code that never let go: log lines from before the stall rule (0.4.12, and before the tools ran in a process of their own)", () => {
