@@ -8,13 +8,13 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { USER } from "@hewntools/core/auth.ts";
 import { crc32, dependencyProblems, MAX_BUNDLE_BYTES, packBundle, readZip, registrySpec, scanFiles, SIDECAR, type Sidecar, unpackBundle, writeZip } from "@hewntools/core/bundle.ts";
 import { bytes, text } from "@hewntools/core/files.ts";
 import { readShelf } from "@hewntools/cli/shelf.ts";
 import { createZip } from "@hewntools/cli/zip.ts";
-import { auditOf, bundleWorkspace } from "@hewntools/cli/workbench.ts";
+import { auditOf, bundleWorkspace, npmAudit } from "@hewntools/cli/workbench.ts";
 import { editJson, editText, installFrom, installSeed, platformWith, SEED, setup } from "./helpers.ts";
 
 const SAMPLE = JSON.stringify([
@@ -884,7 +884,7 @@ describe("npm's advisories on a tool's dependencies", () => {
     assert.match(moderate.log, /warning: npm-advisories: a known vulnerability in a dependency: tiny-dep \(<2\.0\.0\): ReDoS in tiny-dep \(moderate, https:\/\/github\.com\/advisories\/GHSA-moderate\)/);
     const down = await changeWith(503);
     assert.equal(down.b.status, "promoted", down.log);
-    assert.match(down.log, /warning: npm-advisories: its dependencies weren't checked for known vulnerabilities: npm's registry couldn't be reached/);
+    assert.match(down.log, /warning: npm-advisories: its dependencies weren't checked for known vulnerabilities: npm's registry answered 503/);
   });
 
   test("no dependencies: npm isn't asked; none known: said in the log", async () => {
@@ -908,6 +908,83 @@ describe("npm's advisories on a tool's dependencies", () => {
     });
     assert.deepEqual(auditOf(JSON.stringify({ message: "request to http://127.0.0.1:1/-/npm/v1/security/advisories/bulk failed", error: { summary: "" } })), { unchecked: "npm's registry couldn't be reached" });
     assert.deepEqual(auditOf("npm ERR!"), { unchecked: "npm's answer couldn't be read" });
+    // npm's errors, each by what it says; what it doesn't say is "couldn't check them".
+    assert.deepEqual(auditOf(JSON.stringify({ statusCode: 503, message: "503 Service Unavailable", error: {} })), { unchecked: "npm's registry answered 503" });
+    assert.deepEqual(auditOf(JSON.stringify({ error: { code: "ENOLOCK", summary: "This command requires an existing lockfile." } })), { unchecked: "there's no lockfile to check them by" });
+    assert.deepEqual(auditOf(JSON.stringify({ error: { code: "EWHATEVER" } })), { unchecked: "npm couldn't check them" });
+    assert.deepEqual(auditOf(JSON.stringify({ advisories: {}, metadata: {} })), { unchecked: "npm couldn't check them" }, "npm 6's report");
+  });
+
+  test("npm's report: a package pulled in by a dependency names it; a severity npm doesn't name is taken as high", () => {
+    const report = {
+      vulnerabilities: {
+        deep: { name: "deep", isDirect: false, effects: ["mid"], via: [{ source: 7, name: "deep", title: "Bad", url: "https://x/7", severity: "dire", range: "<1" }] },
+        mid: { name: "mid", isDirect: false, effects: ["top"], via: ["deep"] },
+        top: { name: "top", isDirect: true, effects: [], via: ["mid"] },
+      },
+    };
+    assert.deepEqual(auditOf(JSON.stringify(report)), { found: [{ name: "deep", severity: "high", title: "Bad", url: "https://x/7", range: "<1", through: ["top"] }] });
+  });
+
+  test("critical fails; low and info warn, one warning a package", async () => {
+    const critical = await changeWith([{ ...HIGH, id: 1003, severity: "critical", title: "RCE in tiny-dep" }]);
+    assert.equal(critical.b.status, "failed", critical.log);
+    assert.match(critical.log, /RCE in tiny-dep \(critical/);
+    const lesser = await changeWith([{ ...MODERATE, id: 1004, severity: "low", title: "A low one" }, { ...MODERATE, id: 1005, severity: "info", title: "An info one" }]);
+    assert.equal(lesser.b.status, "promoted", lesser.log);
+    assert.equal(lesser.b.log.filter((l) => /warning: npm-advisories: a known vulnerability in a dependency: tiny-dep/.test(l)).length, 1, lesser.log);
+    assert.match(lesser.log, /A low one \(low, [^)]*\), and 1 more for tiny-dep/);
+  });
+});
+
+describe("npm audit, outside the sandbox: in a folder of its own, with no npm settings", () => {
+  test("no lockfile to go by: not checked, and npm isn't run", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "hewn-audit-ws-"));
+    try {
+      writeFileSync(join(ws, "package.json"), JSON.stringify({ dependencies: { "tiny-dep": "^1.0.0" } }));
+      assert.deepEqual(await npmAudit(ws), { unchecked: "there's no lockfile to check them by" });
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test("what the builder installed is what's audited (npm's own record in node_modules), none of the tool's npm settings or the owner's; a registry that never answers is cut off", async () => {
+    const asked: { url: string; body: string }[] = [];
+    let hang = false;
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        asked.push({ url: req.url ?? "", body: req.headers["content-encoding"] === "gzip" ? gunzipSync(Buffer.concat(chunks)).toString() : Buffer.concat(chunks).toString() });
+        if (!req.url?.startsWith("/-/npm/v1/security/advisories/bulk")) return void res.writeHead(404).end("{}");
+        if (hang) return;
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ "tiny-dep": [{ id: 1, url: "https://x/1", title: "Bad", severity: "high", vulnerable_versions: "<2.0.0" }] }));
+      });
+    });
+    await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+    const env = { registry: process.env.npm_config_registry };
+    process.env.npm_config_registry = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+    const ws = mkdtempSync(join(tmpdir(), "hewn-audit-ws-"));
+    try {
+      writeFileSync(join(ws, "package.json"), JSON.stringify({ name: "t", dependencies: { "tiny-dep": "^1.0.0" } }));
+      mkdirSync(join(ws, "node_modules", "tiny-dep"), { recursive: true });
+      writeFileSync(join(ws, "node_modules", "tiny-dep", "package.json"), JSON.stringify({ name: "tiny-dep", version: "1.0.0" }));
+      writeFileSync(join(ws, "node_modules", ".package-lock.json"), JSON.stringify({ name: "t", lockfileVersion: 3, requires: true, packages: { "node_modules/tiny-dep": { version: "1.0.0", resolved: "https://registry.npmjs.org/tiny-dep/-/tiny-dep-1.0.0.tgz" } } }));
+      // A tool's own npm settings, written after the checks: never read (the audit runs elsewhere).
+      writeFileSync(join(ws, ".npmrc"), "registry=http://127.0.0.1:1/\n");
+      const audit = await npmAudit(ws);
+      assert.deepEqual(audit, { found: [{ name: "tiny-dep", severity: "high", title: "Bad", url: "https://x/1", range: "<2.0.0" }] });
+      assert.match(asked.find((a) => a.url.includes("bulk"))!.body, /"tiny-dep":\["1\.0\.0"\]/);
+      hang = true;
+      const started = Date.now();
+      assert.deepEqual(await npmAudit(ws, 1500), { unchecked: "npm's registry didn't answer in time" });
+      assert.ok(Date.now() - started < 5000);
+    } finally {
+      for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[`npm_config_${k}`] : (process.env[`npm_config_${k}`] = v);
+      server.close();
+      server.closeAllConnections();
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 });
 

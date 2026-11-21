@@ -179,6 +179,8 @@ export interface Advisory {
   title: string;
   url?: string;
   range?: string;
+  /** Not a dependency of the tool's own: the ones that pull it in. */
+  through?: string[];
 }
 
 /** npm's advisories on a tool's dependencies: what was found, or why they weren't checked (the registry out of reach). */

@@ -54,6 +54,9 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
 
+/** The most advisories (failing) or packages (warning) the advisories check names; the rest are counted. */
+export const ADVISORIES_NAMED = 20;
+
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
 /** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
@@ -142,8 +145,15 @@ export class Validation extends Domain {
     if (audit && "unchecked" in audit) warnings.push({ check: "npm-advisories", message: `its dependencies weren't checked for known vulnerabilities: ${audit.unchecked}` });
     else if (audit) {
       const serious = audit.found.filter((a) => a.severity === "high" || a.severity === "critical");
-      if (serious.length) softFail("a known vulnerability in its dependencies, high or critical (update the package to a version without it, or use another)", serious.map(advisoryWords));
-      for (const a of audit.found.filter((a) => !serious.includes(a))) warnings.push({ check: "npm-advisories", message: `a known vulnerability in a dependency: ${advisoryWords(a)}` });
+      if (serious.length) softFail("a known vulnerability in its dependencies, high or critical (update the package to a version without it, or use another; for one a dependency pulls in, update that dependency, or pin the package with overrides in package.json)", serious.slice(0, ADVISORIES_NAMED).map(advisoryWords).concat(serious.length > ADVISORIES_NAMED ? [`and ${serious.length - ADVISORIES_NAMED} more`] : []));
+      // One warning a package (its first advisory, and how many more), for at most ADVISORIES_NAMED packages.
+      const lesser = audit.found.filter((a) => !serious.includes(a));
+      const packages = [...new Set(lesser.map((a) => a.name))];
+      for (const name of packages.slice(0, ADVISORIES_NAMED)) {
+        const its = lesser.filter((a) => a.name === name);
+        warnings.push({ check: "npm-advisories", message: `a known vulnerability in a dependency: ${advisoryWords(its[0])}${its.length > 1 ? `, and ${its.length - 1} more for ${name}` : ""}` });
+      }
+      if (packages.length > ADVISORIES_NAMED) warnings.push({ check: "npm-advisories", message: `and known vulnerabilities in ${packages.length - ADVISORIES_NAMED} more of its dependencies` });
       if (!audit.found.length) step("npm advisories: none known for its dependencies");
     }
     const code: CodeRef = { hash: contentHash(files, bundled.js), js: bundled.js };
@@ -801,7 +811,7 @@ function shotsText(images: string[], parts: string[], shown: ShotsShown): string
 }
 
 /** An advisory in a line: "tiny-dep (<1.0.1): Prototype pollution (high, https://…)". */
-const advisoryWords = (a: Advisory) => `${a.name}${a.range ? ` (${a.range})` : ""}: ${a.title} (${a.severity}${a.url ? `, ${a.url}` : ""})`;
+const advisoryWords = (a: Advisory) => `${a.name}${a.range ? ` (${a.range})` : ""}${a.through?.length ? `, through ${a.through.slice(0, 3).join(", ")}` : ""}: ${a.title} (${a.severity}${a.url ? `, ${a.url}` : ""})`;
 
 /** A warning in one line: "secret-scan: a long random string (src/data.ts:12)". */
 export const warningText = (w: CheckWarning) => `${w.check}: ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`;
