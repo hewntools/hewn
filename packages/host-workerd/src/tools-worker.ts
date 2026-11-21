@@ -142,6 +142,10 @@ function run(env: Env, host: CapabilityHost, method: HostMethod, b: any, code: C
 /** How long after an isolate is let go its release runs (calls still running on it end first), and the host's run after the GC. */
 const FLUSH_DELAY_MS = 5000;
 const FLUSH_AFTER_GC_MS = 100;
+/** The longest a let-go waits for its release while more keep coming (back-to-back checks): the release runs then. */
+const FLUSH_MAX_WAIT_MS = 30_000;
+/** When the release's GC last ran in this process (any host's): one GC serves every host that let go before it. */
+let releaseGcAt = 0;
 
 /** A capability's states are facets of its host: "live", or "s:<scratch name>". */
 const LIVE = "live";
@@ -155,8 +159,9 @@ export class CapabilityHost extends DurableObject<Env> {
   private running = new Map<string, string>();
   /** The live tool's isolate: replaced when its version, its calls' hosts or its limit change (see `worker`). */
   private liveIsolate?: { key: string; stub: WorkerStub };
-  /** The release of isolates let go here, waiting to run (see `flush`). */
+  /** The release of isolates let go here, waiting to run (see `flush`), since the first and the last let-go. */
   private flushing?: ReturnType<typeof setTimeout>;
+  private letGo = { first: 0, last: 0 };
   /** The isolates a build's states run, by code: each kept until every state that ran it is dropped (the build is done with them). */
   private buildIsolates = new Map<string, { stub: WorkerStub; states: Set<string> }>();
   /** Calls (and other work) in progress on each facet. */
@@ -197,6 +202,8 @@ export class CapabilityHost extends DurableObject<Env> {
       else {
         this.busy.delete(name);
         this.halt(name, "finished");
+        // An unnamed isolate on the live state (the code going live migrating, sample data replayed) is let go now.
+        if (name === LIVE && !named) this.flush();
       }
     }
   }
@@ -249,17 +256,25 @@ export class CapabilityHost extends DurableObject<Env> {
    * Release the isolates this host let go (a replaced live version, a build's): workerd drops an unnamed isolate once
    * its handle here is garbage, and only when this host next runs something after the main isolate's GC; nothing forces
    * that GC on its own, and an idle tool runs nothing. So: a major GC a little later (the tools process has
-   * --expose-gc, which the guard takes off every tool's global), then this host runs once more. Several lettings-go
-   * in a row (a change's validation, then its promotion) share one.
+   * --expose-gc, which the guard takes off every tool's global), then this host runs once more. Lettings-go in a row
+   * (a change's validation, then its promotion) share one, run 5 s after the last but never more than 30 s after the
+   * first; and hosts letting go at once (a setting that replaces every tool's isolate) share one GC.
    */
   private flush() {
+    const now = Date.now();
+    if (!this.letGo.first) this.letGo.first = now;
+    this.letGo.last = now;
     if (this.flushing) clearTimeout(this.flushing);
     this.flushing = setTimeout(() => {
       this.flushing = undefined;
-      const gc = (globalThis as { gc?: (o: object) => void }).gc;
-      gc?.({ type: "major", execution: "sync" });
+      const { last } = this.letGo;
+      this.letGo = { first: 0, last: 0 };
+      if (releaseGcAt <= last) {
+        (globalThis as { gc?: (o: object) => void }).gc?.({ type: "major", execution: "sync" });
+        releaseGcAt = Date.now();
+      }
       setTimeout(() => {}, FLUSH_AFTER_GC_MS);
-    }, FLUSH_DELAY_MS);
+    }, Math.max(0, Math.min(FLUSH_DELAY_MS, this.letGo.first + FLUSH_MAX_WAIT_MS - now)));
   }
 
   /** The facet for a state, running `code` with `limit` (restarted if it was running other code or another limit). */
@@ -280,7 +295,11 @@ export class CapabilityHost extends DurableObject<Env> {
 
   // Validation's: an unnamed isolate, gone once described (it opens no state, so no limit).
   async describe(code: CodeRef): Promise<string[]> {
-    return (this.env.LOADER.load(this.workerCode(code, [], 0, isolateKey(code.hash, [], 0, false))).getEntrypoint() as any).describe();
+    try {
+      return await (this.env.LOADER.load(this.workerCode(code, [], 0, isolateKey(code.hash, [], 0, false))).getEntrypoint() as any).describe();
+    } finally {
+      this.flush();
+    }
   }
 
   // The data ops' `hosts` and `named`: the tool's calls', when this is the live tool (see `worker`).

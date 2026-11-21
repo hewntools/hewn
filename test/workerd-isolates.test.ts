@@ -138,7 +138,7 @@ describe("a replaced version's isolate is released (workerd)", () => {
     assert.equal(await isolatesHeld(inspector), one);
   });
 
-  test("a tool's code can't reach the tools process's gc(): the global, globalThis, a redefinition, code made from a string", async () => {
+  test("a tool's code can't reach the tools process's gc(): by name, globalThis, assignment, redefinition, eval and new Function at load, ShadowRealm, node:vm", async () => {
     const dir = join(dirs, "gc-probe");
     for (const d of ["src", "migrations", "tests"]) mkdirSync(join(dir, d), { recursive: true });
     const look = { name: "look", description: "Looks for gc", version: 1, sideEffect: "read", inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: { type: "object" } };
@@ -146,18 +146,24 @@ describe("a replaced version's isolate is released (workerd)", () => {
     writeFileSync(join(dir, "migrations", "001_init.sql"), "CREATE TABLE t (id INTEGER PRIMARY KEY);\n");
     writeFileSync(
       join(dir, "src", "index.ts"),
-      `const atLoad = typeof (globalThis as any).gc;
-const tried = (f: () => unknown) => { try { return String(f()); } catch (e) { return "refused"; } };
+      `import * as vm from "node:vm";
+const tried = (f: () => unknown) => { try { return String(f()); } catch (e) { return "refused: " + String((e as Error)?.message ?? e).slice(0, 80); } };
+// At load, where workerd still lets code be made from a string (at request time it refuses).
+const atLoad = {
+  bare: tried(() => typeof (globalThis as any).gc),
+  indirectEval: tried(() => (0, eval)("typeof gc")),
+  fromString: tried(() => new Function("return typeof gc")()),
+  shadowRealm: typeof (globalThis as any).ShadowRealm,
+  vm: tried(() => vm.runInContext("typeof gc", vm.createContext({}))),
+};
 export const operations = {
   "look@1"() {
     const g = globalThis as any;
     return {
       atLoad,
-      bare: tried(() => typeof (0, eval)("gc")),
       global: typeof g.gc,
       assigned: tried(() => ((g.gc = () => 1), typeof g.gc)),
       redefined: tried(() => (Object.defineProperty(g, "gc", { value: () => 1 }), typeof g.gc)),
-      fromString: tried(() => new Function("return typeof gc")()),
       descriptor: JSON.stringify(Object.getOwnPropertyDescriptor(g, "gc") ?? null),
     };
   },
@@ -168,9 +174,13 @@ export const operations = {
     const build = await h.sv.admin("install", { name: "GC Probe", purpose: "looks", dir, wait: true });
     assert.equal(build.status, "promoted", build.log.join("\n"));
     const r = (await h.invoke("gc-probe", "look", {})).result;
-    assert.equal(r.atLoad, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.bare, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.indirectEval, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.fromString, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.shadowRealm, "undefined", JSON.stringify(r));
+    assert.ok(r.atLoad.vm === "undefined" || r.atLoad.vm.startsWith("refused"), JSON.stringify(r));
     assert.equal(r.global, "undefined", JSON.stringify(r));
-    for (const k of ["bare", "assigned", "redefined", "fromString"]) assert.ok(["undefined", "refused"].includes(r[k]), `${k}: ${JSON.stringify(r)}`);
+    for (const k of ["assigned", "redefined"]) assert.ok(r[k] === "undefined" || r[k].startsWith("refused"), `${k}: ${JSON.stringify(r)}`);
     // Still there (V8 makes it non-configurable), with no value and read-only.
     const d = JSON.parse(r.descriptor);
     assert.deepEqual([d.writable, d.configurable, "value" in d ? d.value : undefined], [false, false, undefined], r.descriptor);

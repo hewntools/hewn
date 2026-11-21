@@ -63,6 +63,13 @@ describe("when the platform collects", () => {
     const tools = toolsConfig({ keys: STORAGE_KEYS, data: "/h", channel });
     assert.match(tools, /^\s*v8Flags = \["--expose-gc"\],$/m);
   });
+
+  test("neither process's Durable Object is evicted when idle: the platform's (sessions, builds) nor a tool's host (its live isolate)", () => {
+    const channel = { tools: "unix:/h/run/tools.sock", calls: "unix:/h/run/calls.sock" };
+    const platform = platformConfig({ dir: "/h", keys: STORAGE_KEYS, port: 7000, publicPort: 7001, supervisorPort: 1, data: "/h", assets: { web: "/w", ui: "/u", docs: "/d", spec: "/s" }, channel });
+    assert.match(platform, /\(className = "HewnDO", [^)]*preventEviction = true\)/);
+    assert.match(toolsConfig({ keys: STORAGE_KEYS, data: "/h", channel }), /\(className = "CapabilityHost", [^)]*preventEviction = true\)/);
+  });
 });
 
 /** A GET on the web API as the signed-in owner; `refresh`: as a page's own poll (Home's), which the idle report ignores; `anonymous`: refused. */

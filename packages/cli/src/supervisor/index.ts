@@ -266,7 +266,7 @@ const hewn :Workerd.Worker = (
     (name = "VERSION", text = "${VERSION}"),${o.schedulesOff ? `\n    (name = "SCHEDULES", text = "off"),` : ""}
   ],
   durableObjectNamespaces = [
-    (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true),
+    (className = "HewnDO", uniqueKey = "${o.keys.owner}", enableSql = true, preventEviction = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
 );
@@ -290,7 +290,7 @@ const config :Workerd.Config = (
     (name = "tools", address = "${o.channel.tools}", http = (), service = "main"),
   ],
   # gc() for CapabilityHost's release of replaced isolates (tools-worker.ts, \`flush\`). Tool isolates get it too: the
-  # guard (capability-guard.ts) deletes it from their global before their code runs, and checks it's gone.
+  # guard (capability-guard.ts) redefines theirs as undefined and read-only before their code runs, and checks it.
   v8Flags = ["--expose-gc"],
 );
 const tools :Workerd.Worker = (

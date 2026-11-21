@@ -69,13 +69,12 @@ function stripProtos(on: object, names: string[]) {
 // The flag's additions any code here can reach: before the capability's own bundle runs.
 strip(protoOf(globalThis), ["Datagram"]);
 // The tools process runs with V8's --expose-gc, for its own release of replaced isolates (tools-worker.ts): every
-// isolate in it gets a `gc` global, this one too. A tool's code never sees it (it could only spend CPU with it, which
-// the stall rule bounds, but it has no business there). V8 makes it non-configurable, so it can't be deleted: it's
-// made `undefined` and read-only instead (allowed for a writable one), and a tool whose global keeps it doesn't start.
-if (own(globalThis, "gc")) {
-  defineProperty(globalThis, "gc", { value: undefined, writable: false });
-  if (typeof (globalThis as { gc?: unknown }).gc !== "undefined") throw new Failure("can't take gc away from this tool");
-}
+// isolate in it gets a `gc` global, this one too. A tool's code never sees it (with it, it could spend CPU, and
+// an exact-timing GC is a known aid to exploiting V8 memory bugs). V8 makes it non-configurable, so it can't be
+// deleted: it's made `undefined` and read-only instead (allowed for a writable one). Whatever put it there (own,
+// inherited), a tool that can still see a `gc` doesn't start.
+if (own(globalThis, "gc")) defineProperty(globalThis, "gc", { value: undefined, writable: false });
+if (typeof (globalThis as { gc?: unknown }).gc !== "undefined") throw new Failure("can't take gc away from this tool");
 strip(AbortSignal.prototype as unknown as Record<string, unknown>, ["skipReleaseForTest", "getNativeRegistrationCountForTest"]);
 
 /** Limit the database of the facet being constructed (call before `super`). */
