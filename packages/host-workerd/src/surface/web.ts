@@ -542,8 +542,10 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "shots" && arg && method === "GET") return new Response(body(await platform.reviewShot(owner, id, arg)), { status: 200, headers: { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" } });
     if (sub === "screenshot") {
       platform.getBuild(owner, id);
-      // ?scheme=dark: the dark-mode render, if the build has one (older builds have only light).
-      const png = (url.searchParams.get("scheme") === "dark" ? await platform.blobs.get(`screenshots/${id}-dark.png`) : undefined) ?? (await platform.blobs.get(`screenshots/${id}.png`));
+      // ?scheme=dark: the dark-mode render, if the build has one (older builds have only light). ?sheet=widgets: the
+      // widgets' sheet, when it was drawn beside the UI's screenshot.
+      const name = url.searchParams.get("sheet") === "widgets" ? `${id}-widgets` : id;
+      const png = (url.searchParams.get("scheme") === "dark" ? await platform.blobs.get(`screenshots/${name}-dark.png`) : undefined) ?? (await platform.blobs.get(`screenshots/${name}.png`));
       if (!png) throw new PlatformError("not_found", "no screenshot for this build");
       return new Response(body(png), { status: 200, headers: { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" } });
     }

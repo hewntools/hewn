@@ -16,7 +16,7 @@ import type { Platform } from "@hewntools/core/platform.ts";
 import type { Home } from "@hewntools/cli/home.ts";
 import { chromiumCheck, findBrowser, type VisualCheck } from "@hewntools/cli/visual.ts";
 import type { Validation } from "@hewntools/core/platform/validation.ts";
-import { platformWith, setup } from "./helpers.ts";
+import { editJson, platformWith, setup } from "./helpers.ts";
 
 const FIX = resolve(import.meta.dirname, "fixtures");
 
@@ -407,6 +407,30 @@ describe("visual validation: widgets", () => {
     assert.equal(seen[0].view.value, 4, "the sample's four taps, not the test case's one");
     assert.ok(done.log.some((l) => /widgets render in every size \(screenshot attached, with the sample data\)/.test(l)));
     assert.equal(done.screenshot, true, "the build page shows it");
+    platform.close();
+  });
+
+  test("a tool with a screen whose widgets change gets both: its screen's screenshot, and the widget sheet beside it", async () => {
+    const withScreen: CapabilityBuilder = {
+      name: "wc",
+      build: async (job) => {
+        cpSync(join(FIX, "widget-counter"), job.workspace, { recursive: true });
+        mkdirSync(join(job.workspace, "ui"), { recursive: true });
+        writeFileSync(join(job.workspace, "ui", "index.html"), "<!doctype html><main>Taps</main>");
+        editJson(join(job.workspace, "capability.json"), (m) => (m.ui = { available: true }));
+        mkdirSync(join(job.workspace, "sample"), { recursive: true });
+        writeFileSync(join(job.workspace, "sample", "calls.json"), taps(2));
+      },
+    };
+    const drawn: string[] = [];
+    const platform = platformWith(t.home, () => withScreen, { attempts: 1, visualCheck: async (req) => (drawn.push(req.widgets ? "sheet" : "ui"), { errors: [], screenshot: Buffer.from(req.widgets ? "sheet" : "ui") }) });
+    const done = await build(platform);
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.ok(drawn.includes("ui") && drawn.at(-1) === "sheet", drawn.join(", "));
+    assert.ok(done.log.some((l) => /widgets render in every size \(widget sheet attached, with the sample data\)/.test(l)), done.log.join("\n"));
+    assert.deepEqual([done.screenshot, done.widgetSheet], [true, true]);
+    const blob = (name: string) => readFileSync(join(t.home.root, "blobs", "screenshots", name), "utf8");
+    assert.deepEqual([blob(`${done.buildId}.png`), blob(`${done.buildId}-widgets.png`)], ["ui", "sheet"], "the screen's screenshot stays the screen's");
     platform.close();
   });
 

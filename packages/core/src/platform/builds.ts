@@ -51,6 +51,8 @@ export interface BuildView {
   resultVersion?: number;
   /** A screenshot of its UI from validation exists (GET /api/builds/:id/screenshot). */
   screenshot?: boolean;
+  /** Its widgets' sheet, drawn beside the UI's screenshot (GET /api/builds/:id/screenshot?sheet=widgets). */
+  widgetSheet?: boolean;
   /** Where the build is in its pipeline, while in flight. */
   step?: BuildStepState;
   /** Test cases of the latest validation. */
@@ -2093,6 +2095,7 @@ export class Builds extends Domain {
     if (b.discardedAt) view.discardedAt = b.discardedAt;
     // Builds made on a 0.4.9 pre-release logged "(screenshot with the sample data)", and their logs keep it.
     if (b.log.some((l) => /\(screenshot (attached|with the sample data)/.test(l))) view.screenshot = true;
+    if (b.log.some((l) => /\(widget sheet attached/.test(l))) view.widgetSheet = true;
     const step = this.stepState(b.id);
     if (step && (b.status === "waiting" || b.status === "open" || b.status === "building" || b.status === "validating")) view.step = step;
     const tests = testCounts(b.log);

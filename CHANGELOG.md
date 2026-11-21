@@ -14,6 +14,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- A change to a tool with a screen that changes its widgets draws them again, beside the screen's screenshot. Until now the widgets weren't checked when the screen was.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
 
 ## 0.4.12 (2026-11-19)
