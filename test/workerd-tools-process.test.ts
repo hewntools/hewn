@@ -91,17 +91,21 @@ describe("the channel's code by hash", () => {
 
   test("a connection dropped before any answer (a kept-alive socket closed as the call went out): the safe calls are sent once more, the rest fail", async () => {
     /** Drops the first `drops` connections, then answers; counts the attempts. */
-    const flaky = (drops: number) => {
+    const flaky = (drops: number, retry?: () => boolean) => {
       let n = 0;
       const socket = { fetch: async () => (++n <= drops ? Promise.reject(new TypeError("Network connection lost.")) : Response.json({ result: true })) } as unknown as ToolsSocket;
-      return { host: toolsChannel(socket, "t")("cap"), tries: () => n };
+      return { host: toolsChannel(socket, "t", { retry })("cap"), tries: () => n };
     };
+    const code = { hash: "h", js: "export const operations = {};" };
     for (const [method, call] of [
       ["hasState", (h: ReturnType<typeof flaky>["host"]) => h.hasState({ scratch: null })],
       ["listStates", (h: ReturnType<typeof flaky>["host"]) => h.listStates({ prefix: "b" })],
       ["copyState", (h: ReturnType<typeof flaky>["host"]) => h.copyState({ from: null, to: "s" })],
       ["dropState", (h: ReturnType<typeof flaky>["host"]) => h.dropState({ scratch: "s" })],
       ["stop", (h: ReturnType<typeof flaky>["host"]) => h.stop({ scratch: null, reason: "r" })],
+      ["describe", (h: ReturnType<typeof flaky>["host"]) => h.describe({ code })],
+      ["dump", (h: ReturnType<typeof flaky>["host"]) => h.dump({ scratch: null, code, limit: 1, hosts: [], named: true })],
+      ["count", (h: ReturnType<typeof flaky>["host"]) => h.count({ scratch: null, code, limit: 1, hosts: [], named: true })],
     ] as const) {
       const once = flaky(1);
       assert.equal(await call(once.host), true, method);
@@ -112,6 +116,22 @@ describe("the channel's code by hash", () => {
       assert.ok(e instanceof ToolsUnreachable && !e.timeout && /Network connection lost/.test(e.message), method);
       assert.equal(twice.tries(), 2, method);
     }
+    // While the tools are away (a stall's restart cut the connection): not sent again, even a read.
+    const away = flaky(1, () => false);
+    assert.ok((await away.host.hasState({ scratch: null }).catch((x) => x)) instanceof ToolsUnreachable);
+    assert.equal(away.tries(), 1);
+    // Dropped, then the tools process asks for the bundle's text (409): the text goes on the next send.
+    const bodies: any[] = [];
+    let k = 0;
+    const resend = toolsChannel({ fetch: async (_u: string, init: RequestInit) => {
+      k++;
+      if (k === 1) return Promise.reject(new TypeError("Network connection lost."));
+      bodies.push(JSON.parse(String(init.body)));
+      return k === 2 ? Response.json({ missing: "h2" }, { status: 409 }) : Response.json({ result: ["x@1"] });
+    } } as unknown as ToolsSocket, "t")("cap");
+    assert.deepEqual(await resend.describe({ code: { hash: "h2", js: "js" } }), ["x@1"]);
+    assert.equal(k, 3);
+    assert.deepEqual(bodies.map((b) => b.code.js ?? null), ["js", "js"]);
     // A call that runs a tool's operation may have run: not sent again.
     const invoke = flaky(1);
     const e = await invoke.host.invoke({ code: { hash: "h", js: "" }, scratch: null, key: "k", input: {}, secrets: {}, hosts: [], caller: undefined, config: {}, readOnly: false, limit: 1, named: true, call: "c", model: false } as never).catch((x) => x);

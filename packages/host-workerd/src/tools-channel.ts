@@ -84,11 +84,14 @@ export type ToolsHost = {
 
 /**
  * The platform's side: `tools` is the tools process's socket, `token` its token. Code goes by hash once the tools
- * process has it; a tools process started since gets the text again.
+ * process has it; a tools process started since gets the text again. `retry`: whether a dropped call may be sent once
+ * more now (not while the tools process is away: a connection a stall's restart cut isn't the idle close, and
+ * resending at once could run the code that stalled it again, in the new process).
  */
-export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: string) => ToolsHost {
+export function toolsChannel(tools: ToolsSocket, token: string, o: { retry?: () => boolean } = {}): (capabilityId: string) => ToolsHost {
   /** Hashes the tools process has the text of (as far as the platform knows: it says 409 when it hasn't). */
   const sent = new Set<string>();
+  const mayRetry = o.retry ?? (() => true);
   const post = async (capabilityId: string, method: HostMethod, body: Record<string, unknown>, o: SendOptions = {}): Promise<unknown> => {
     const { timeoutMs } = o;
     const code = body.code as CodeRef | undefined;
@@ -105,7 +108,7 @@ export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: 
         try {
           return await attempt();
         } catch (e) {
-          if (isTimeout(e) || !RETRIED_ONCE.has(method)) throw e;
+          if (isTimeout(e) || !RETRIED_ONCE.has(method) || !mayRetry()) throw e;
           return await attempt();
         }
       } catch (e) {
