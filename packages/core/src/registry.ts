@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { CapabilityManifest, ToolSource } from "./manifest.ts";
-import type { Sql } from "./ports.ts";
+import type { CheckWarning, Sql } from "./ports.ts";
 
 export interface CapabilityRow {
   id: string;
@@ -73,6 +73,8 @@ export interface BuildReview {
   };
   /** Held because the agent's changes wait for the owner's approval (its approval mode), whatever the change adds. */
   approval?: "wait";
+  /** What its checks found that didn't fail it (absent: none). The build's log has them too. */
+  warnings?: CheckWarning[];
   /** The candidate's screen as validation rendered it (`desktop-light`, `desktop-dark`, `mobile-light`, `mobile-dark`): blobs `screenshots/<build>/<name>.png`. */
   shots?: string[];
 }
@@ -1025,6 +1027,22 @@ export class Registry {
       .prepare(`SELECT * FROM builds WHERE capability_id = ? AND id != ? AND status IN (${statuses})${kind ? " AND kind = ?" : ""} ORDER BY rowid DESC LIMIT 1`)
       .get(capabilityId, except, ...(kind ? [kind] : []));
     return row ? toBuild(row as Row) : undefined;
+  }
+
+  /** A capability's builds that haven't ended (waiting, open, building, validating, in review) or failed and weren't put aside, newest first. */
+  buildsNotEnded(capabilityId: string): BuildRow[] {
+    return this.db
+      .prepare("SELECT * FROM builds WHERE capability_id = ? AND (status IN ('waiting', 'open', 'building', 'validating', 'review') OR (status = 'failed' AND discarded_at IS NULL)) ORDER BY rowid DESC")
+      .all(capabilityId)
+      .map((r) => toBuild(r as Row));
+  }
+
+  /** Every unfinished build (waiting, open, building, validating) of a capability, newest first. */
+  unfinishedBuilds(capabilityId: string): BuildRow[] {
+    return this.db
+      .prepare("SELECT * FROM builds WHERE capability_id = ? AND status IN ('waiting', 'open', 'building', 'validating') ORDER BY rowid DESC")
+      .all(capabilityId)
+      .map((r) => toBuild(r as Row));
   }
 
   /** A capability's failed builds of one of `kinds` (a paused one is stored as failed), newest first. */
