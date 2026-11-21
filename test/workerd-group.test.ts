@@ -95,3 +95,20 @@ test("a previous run's leftover: its group goes even when its leader is already 
   assert.equal(stopLeftover(process.pid, "no-such-command-line"), false);
   assert.ok(alive(process.pid));
 });
+
+test("a previous run's leftover: only this home's (its own config on the command line), never another Hewn's group", async () => {
+  const m = marker();
+  const home = (h: string) => join(tmpdir(), `hewn-${h}-${process.pid}`, "data", "tools.capnp");
+  // Like a sandbox's leader, the group's leader carries the config it runs (sh's $0 here), its child doesn't.
+  const other = spawn("sh", ["-c", `sleep ${m} & wait`, home("b")], { detached: true, stdio: "ignore" });
+  await gone(() => (sleepers(m).length ? [] : [0]));
+  // A recorded pid that is now another Hewn's group: left alone, by its group and as a process.
+  assert.equal(stopLeftover(other.pid!, home("a")), false);
+  assert.equal(stopLeftover(other.pid!, home("b").replace("tools.capnp", "tools")), false, "nor a path that is only the start of its own");
+  assert.ok(alive(other.pid!));
+  assert.equal(sleepers(m).length, 1);
+  // Its own home's config: stopped, the whole group.
+  assert.equal(stopLeftover(other.pid!, home("b")), true);
+  await exited(other);
+  assert.deepEqual(await gone(() => sleepers(m)), []);
+});

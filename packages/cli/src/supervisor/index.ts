@@ -728,10 +728,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   };
   // A workerd left behind by a supervisor that died (macOS has no die-with-parent) would hold the port.
   const pidFiles = { platform: join(data, "workerd.pid"), tools: join(data, "workerd-tools.pid") };
-  for (const pidFile of Object.values(pidFiles)) {
+  // Each found by its own config, this home's: never another Hewn's on the machine.
+  for (const [pidFile, config] of [[pidFiles.platform, platformBase.at(-1)!], [pidFiles.tools, toolsBase.at(-1)!]]) {
     if (!existsSync(pidFile)) continue;
     const old = Number(readFileSync(pidFile, "utf8"));
-    if (stopLeftover(old)) log(`stopped a workerd left over from a previous run (pid ${old})`);
+    if (stopLeftover(old, config)) log(`stopped a workerd left over from a previous run (pid ${old})`);
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const platform = workerdProcess({

@@ -28,20 +28,24 @@ export function signalChild(child: ChildProcess | undefined, signal: NodeJS.Sign
   signalGroup(child.pid, signal);
 }
 
+/** Whether a command line has `path` as one of its arguments (paths may have spaces: macOS's Application Support). */
+const hasArg = (command: string, path: string) => command.trimEnd().endsWith(path) || command.includes(`${path} `);
+
 /**
- * A workerd a previous run left (its supervisor died), by the pid it recorded: the whole process group, when anything
- * in it is a workerd (the leader, an outer bwrap, may be gone and its inner one not); or, from a version that didn't
- * start it in a group of its own, the process alone. `match`: what its command line has. Says whether it stopped one.
+ * A workerd a previous run of this Hewn left (its supervisor died), by the pid it recorded: the whole process group,
+ * when anything in it runs this home's own config (`config`: its capnp path; the leader, an outer bwrap, may be gone
+ * and its inner one not); or, from a version that didn't start it in a group of its own, the process alone. Nothing
+ * of another Hewn on the machine: a recorded pid may be another Hewn's group by now. Says whether it stopped one.
  */
-export function stopLeftover(pid: number, match = "workerd"): boolean {
+export function stopLeftover(pid: number, config: string): boolean {
   if (!pid) return false;
   const rows = spawnSync("ps", ["-A", "-o", "pgid=,command="], { encoding: "utf8" }).stdout.split("\n");
   const inGroup = rows.map((r) => /^\s*(\d+)\s+(.*)$/.exec(r)).filter((m) => m && Number(m[1]) === pid);
-  if (inGroup.some((m) => m![2].includes(match))) {
+  if (inGroup.some((m) => hasArg(m![2], config))) {
     signalGroup(pid, "SIGKILL");
     return true;
   }
-  if (spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).stdout.includes(match)) {
+  if (hasArg(spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).stdout, config)) {
     try {
       process.kill(pid, "SIGKILL");
       return true;
