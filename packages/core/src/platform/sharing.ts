@@ -20,7 +20,7 @@ import { breather, Domain } from "./context.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
 import { candidateFiles } from "./submissions.ts";
-import { copyrightLine, LICENSE_CHOICES, licenseFile, NO_LICENSE } from "../licenses.ts";
+import { KEPT_LICENSE, LICENSE_CHOICES, licenseFile, NO_LICENSE, noticeLine } from "../licenses.ts";
 
 /** A staged bundle (uploaded, not installed) is dropped after a day. */
 const STAGED_MS = 24 * 3600_000;
@@ -60,13 +60,20 @@ export interface ShareCheck {
 export interface ShareLicense {
   /** An SPDX id, or "none": all rights reserved (no `license`, no LICENSE file). */
   id: string;
-  why: "chosen" | "manifest" | "built-here" | "arrived-without";
+  why: "chosen" | "manifest" | "built-here" | "arrived-without" | "hewn";
   /** The five on the sheet, each with its line; a manifest's other id is offered as it is. */
   choices: { id: string; label: string; line: string }[];
-  /** The LICENSE file's copyright line, as it would be written. */
+  /** The LICENSE file's first line, as it would be written: the copyright line (CC0: its waiver). */
   copyright: string;
-  /** The name the owner gave for the copyright line, kept on this Hewn for every tool; null: "the <tool> authors". */
+  /** The name the owner gave for the copyright line, kept on this Hewn for all their tools; null: "the <tool> authors". */
   holder: string | null;
+  /**
+   * It came from elsewhere (a file, a link, Hewn's tools): someone else's work, so the owner's name never goes on it, and
+   * a LICENSE it came with travels on, never replaced.
+   */
+  elsewhere: boolean;
+  /** It came from elsewhere (not one of Hewn's tools) with no license: the row says so, whatever is chosen. */
+  arrivedWithout: boolean;
 }
 
 /** A card in Hewn's tools (Q2): enough to choose, and whether you have it. */
@@ -217,11 +224,15 @@ export class Sharing extends Domain {
     const m = this.registry.getVersion(capabilityId, version)!.manifest;
     const chosen = this.registry.getKv<string>(licenseKey(capabilityId));
     const own = m.license;
-    const id = chosen ?? own ?? (m.source ? NO_LICENSE : "MIT");
-    const why = chosen ? "chosen" : own ? "manifest" : m.source ? "arrived-without" : "built-here";
+    // Hewn's own tools are Apache-2.0 (seeds/LICENSE), also those installed before their manifests said so.
+    const hewn = m.source?.from === "hub";
+    const id = chosen ?? own ?? (hewn ? "Apache-2.0" : m.source ? NO_LICENSE : "MIT");
+    const why = chosen ? "chosen" : own ? "manifest" : hewn ? "hewn" : m.source ? "arrived-without" : "built-here";
     const holder = this.registry.getKv<string>(HOLDER_KEY) ?? null;
+    const elsewhere = !!m.source;
     const other = [own, chosen].find((x) => x && !LICENSE_CHOICES.some((c) => c.id === x));
-    return { id, why, choices: [...LICENSE_CHOICES, ...(other ? [{ id: other, label: other, line: "The license its manifest names." }] : [])], copyright: copyrightLine(new Date().getUTCFullYear(), m.name, holder ?? undefined), holder };
+    const copyright = noticeLine(id, { year: new Date().getUTCFullYear(), toolName: m.name, ...(holder && !elsewhere ? { holder } : {}) });
+    return { id, why, choices: [...LICENSE_CHOICES, ...(other ? [{ id: other, label: other, line: "The license its manifest names." }] : [])], copyright, holder, elsewhere, arrivedWithout: elsewhere && !hewn && !own };
   }
 
   /**
@@ -264,10 +275,11 @@ export class Sharing extends Domain {
     const { license: _, ...unlicensed } = JSON.parse(text(files["capability.json"])) as CapabilityManifest;
     const manifest: CapabilityManifest = license.id === NO_LICENSE ? unlicensed : { ...unlicensed, ...(abiBelow(abiOf(unlicensed), "2.7") ? { abi: "2.7" } : {}), license: license.id };
     files["capability.json"] = bytes(JSON.stringify(manifest, null, 2) + "\n");
-    const file = license.id === NO_LICENSE ? undefined : licenseFile(license.id, { year: new Date().getUTCFullYear(), toolName: manifest.name, holder: license.holder ?? undefined });
-    // A tool's own LICENSE stays only for a license Hewn has no text for.
-    if (license.id === NO_LICENSE) delete files.LICENSE;
-    else if (file) files.LICENSE = bytes(file);
+    // A LICENSE the version came with (from elsewhere) is someone's notice: it travels on, never dropped or replaced.
+    // Shared under the same license, it goes as it is; under another, the new one comes first and it follows, as it was.
+    const original = files.LICENSE ? text(files.LICENSE) : undefined;
+    const file = license.id === NO_LICENSE ? undefined : licenseFile(license.id, { year: new Date().getUTCFullYear(), toolName: manifest.name, ...(license.holder && !license.elsewhere ? { holder: license.holder } : {}) });
+    if (file && (!original || license.id !== row.manifest.license)) files.LICENSE = bytes(original ? `${file}\n\n${KEPT_LICENSE}\n\n${original}` : file);
     const sidecar: Sidecar = { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(manifest), exportedAt: new Date().toISOString(), tool: { id: capabilityId, version, hash: row.contentHash } };
     return { name: `${capabilityId}.hewn.zip`, bundle: packBundle(files, sidecar) };
   }

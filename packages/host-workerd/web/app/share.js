@@ -11,9 +11,9 @@ import { segmented } from "./widgets.js";
 
 export { licenseWords, samplePage, shareButton, shareIcon, shareSheet };
 
-/** A license as the sheets say it: its name, or "All rights reserved" (none). */
-const LICENSE_NAMES = { MIT: "MIT", "Apache-2.0": "Apache 2.0", "GPL-3.0-or-later": "GPL 3.0 or later", "CC0-1.0": "CC0 (public domain)", none: "All rights reserved" };
-const licenseWords = (id) => (id ? LICENSE_NAMES[id] ?? id : LICENSE_NAMES.none);
+/** A license as the sheets say it, as the share sheet's choices do: its name, or "All rights reserved" (none); another id as it is. */
+const LICENSE_NAMES = { MIT: "MIT", "Apache-2.0": "Apache 2.0", "GPL-3.0-or-later": "GPL 3.0 or later", "CC0-1.0": "CC0", none: "All rights reserved" };
+const licenseWords = (id) => (!id ? LICENSE_NAMES.none : Object.hasOwn(LICENSE_NAMES, id) ? LICENSE_NAMES[id] : id);
 
 /** The share mark everyone knows: a box with an arrow out of it. */
 const shareIcon = () =>
@@ -80,9 +80,17 @@ async function shareSheet(c, { version } = {}) {
         const l = check.license;
         const chosen = l.choices.find((x) => x.id === l.id) ?? { id: l.id, label: l.id, line: "" };
         const select = h("select", { class: "license-select", "aria-label": "License", onchange: (e) => setLicense({ license: e.target.value }) }, l.choices.map((x) => h("option", { value: x.id, selected: x.id === l.id }, x.label)));
-        const holder = h("input", { type: "text", class: "grow", value: l.holder ?? "", placeholder: `the ${check.name} authors`, maxLength: 80, "aria-label": "Copyright holder" });
-        holder.addEventListener("change", () => setLicense({ holder: holder.value }));
-        const why = l.why === "arrived-without" ? "It arrived without a license. " : "";
+        // The line follows the name as it's typed; saving it redraws nothing, so a click on Download right after still counts.
+        const notice = h("span", { class: "sub mono" }, l.copyright);
+        const holder = h("input", { type: "text", value: l.holder ?? "", placeholder: `the ${check.name} authors`, maxLength: 80, "aria-label": "Your name, for the copyright line of all your tools" });
+        holder.addEventListener("input", () => {
+          const who = holder.value.trim() || `the ${check.name} authors`;
+          notice.textContent = l.id === "CC0-1.0" ? `To the extent possible under law, ${who} ${holder.value.trim() ? "has" : "have"} waived all copyright and related or neighboring rights to ${check.name}.` : l.copyright.replace(/^(Copyright \(c\) \d+ ).*$/, (_, head) => head + who);
+        });
+        holder.addEventListener("change", () =>
+          api(`/capabilities/${enc(c.id)}/share/license`, { method: "PUT", body: { holder: holder.value } }).then((next) => (check = { ...check, license: next }), fail),
+        );
+        const why = l.arrivedWithout ? "It arrived without a license. " : "";
         return h(
           "div",
           {},
@@ -91,7 +99,18 @@ async function shareSheet(c, { version } = {}) {
             "ul",
             { class: "list" },
             h("li", {}, h("div", { class: "grow" }, h("span", {}, chosen.label), h("span", { class: "sub" }, `${why}${chosen.line}`)), select),
-            l.id !== "none" && h("li", {}, h("div", { class: "grow stack-xs" }, h("span", { class: "sub mono" }, l.copyright), h("label", { class: "row tight" }, h("span", { class: "small faint" }, "Your name, optional"), holder))),
+            l.id !== "none" &&
+              h(
+                "li",
+                {},
+                h(
+                  "div",
+                  { class: "grow stack-xs" },
+                  notice,
+                  // Someone else's work: never the owner's name, and the notice it came with travels on.
+                  l.elsewhere ? h("span", { class: "small faint" }, "Someone else's work: the notice it came with goes with it.") : h("label", { class: "field flush" }, h("span", { class: "label" }, "Your name, optional, for all your tools"), holder),
+                ),
+              ),
           ),
         );
       };

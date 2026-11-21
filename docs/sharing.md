@@ -25,7 +25,7 @@ Two things stop a share (a file and a link alike):
 
 From the terminal: `hewn share <id> [--version N] [--out file]` prints the same findings and writes the file unless something stops it.
 
-![Share Running Log: a version picker, what's in it (its sample data, always included), what's never in it, Download and Link, and one link that works for 7 more days with Revoke](images/share.png)
+![Share Running Log: a version picker, what's in it (its sample data, always included), what's never in it, its license (MIT, with the copyright line and a field for your name), Download and Link, and one link that works for 7 more days with Revoke](images/share.png)
 
 ## License
 
@@ -37,7 +37,9 @@ Share…'s **License** row says what others may do with your tool, one of five:
 - **CC0:** public domain: anyone may do anything with it, no credit needed.
 - **All rights reserved:** no license. Others may install it, but not change it or pass it on without asking you.
 
-A tool built on your Hewn starts at MIT. A tool that came from elsewhere starts at the license it came with, or at all rights reserved when it came without one (the row says so). You can always change it, and Hewn remembers your choice for that tool. Choosing one never makes a new version: Hewn writes it into the file when you download it or someone fetches a link, as the manifest's `license` and a `LICENSE` file with the license's text and a copyright line, "Copyright (c) 2026 the Running Log authors". Put your own name in the field under it if you'd rather; Hewn keeps it for all your tools. All rights reserved writes neither. A link serves the license you've chosen for the tool when it's fetched, and the install sheet shows the license a tool comes with. Hewn's own tools are Apache 2.0.
+A tool built on your Hewn starts at MIT, and one of Hewn's own tools at Apache 2.0. A tool that came from elsewhere starts at the license it came with, or at all rights reserved when it came without one (the row says so). You can always change it, and Hewn remembers your choice for that tool. Choosing one never makes a new version: Hewn writes it into the file when you download it or someone fetches a link, as the manifest's `license` and a `LICENSE` file with the license's text and a copyright line, "Copyright (c) 2026 the Running Log authors" (CC0's says the rights are waived instead). All rights reserved writes neither. A link serves the license you've chosen for the tool when it's fetched, and the install sheet shows the license a tool comes with.
+
+**Your name** in the field under it goes on the tools built on your Hewn, all of them, links already made included. A tool that came from elsewhere is someone else's work: your name never goes on it, and a `LICENSE` it came with travels on. Shared under the same license, it goes as it came; under another, the new license comes first and the one it came with follows, as it was; all rights reserved adds nothing and drops nothing it came with.
 
 ## Links
 
@@ -85,7 +87,7 @@ A file can't bring a reading of its own, from a link either: whatever it says ab
 
 **+ New** › **Or install** › **One of Hewn's tools** lists tools ready to install, Hewn's own (**Official**): Habits, Plant Log, Gift Ideas, Kid Quotes, Idea Tracker, Reading List, Running Log and Aurora Watch, shipped with Hewn (`seeds/` in the repo). A tool's page shows what it does and what it keeps (Hewn's reading of its code), its operations and its **Source code**; there's no file to download. **Install** opens the same sheet as for a file, with Hewn's reading already in it, so there's no wait; **Check it yourself** has your builder read it too. Info shows "from Hewn's tools · Official", and Activity "Installed from Hewn's tools". They're yours once installed, like any tool.
 
-![Install Plant Log, one of Hewn's tools: what it does, keeps and sends where, a warning that it sends a photo to the model when asked, Source code, what it will ask for, its name and Start with sample data](images/install.png)
+![Install Plant Log, one of Hewn's tools: what it does, keeps and sends where, a warning that it sends a photo to the model when asked, Source code, what it will ask for, its license (Apache 2.0), its name and Start with sample data](images/install.png)
 
 ## Start over
 

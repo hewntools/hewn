@@ -14,23 +14,34 @@ export const LICENSE_CHOICES: { id: string; label: string; line: string }[] = [
   { id: NO_LICENSE, label: "All rights reserved", line: "No license: others may install it, but not change it or pass it on without asking you." },
 ];
 
-/** An SPDX id, or an expression of them (`MIT OR Apache-2.0`), as the manifest takes it. */
-export const LICENSE_ID = /^[A-Za-z0-9][A-Za-z0-9.+-]*( (AND|OR|WITH) [A-Za-z0-9][A-Za-z0-9.+-]*)*$/;
+/**
+ * The line a LICENSE file starts with: "Copyright (c) 2026 the Plant Care authors", or with the name the owner gave;
+ * for CC0, the waiver it asks for instead.
+ */
+export function noticeLine(id: string, o: { year: number; toolName: string; holder?: string }): string {
+  const who = o.holder?.trim() || `the ${o.toolName} authors`;
+  if (id === "CC0-1.0") return `To the extent possible under law, ${who} ${o.holder?.trim() ? "has" : "have"} waived all copyright and related or neighboring rights to ${o.toolName}.`;
+  return `Copyright (c) ${o.year} ${who}`;
+}
 
-/** "Copyright (c) 2026 the Plant Care authors", or with the name the owner gave. */
-export const copyrightLine = (year: number, toolName: string, holder?: string) => `Copyright (c) ${year} ${holder?.trim() || `the ${toolName} authors`}`;
+/** GPL's own notice for "or later", which the license text asks to be stated (its "How to Apply" section). */
+const GPL_LATER = "This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.";
 
 /**
- * The LICENSE file for one of the four licenses Hewn ships, with its copyright line (CC0: the waiver it asks for).
- * Undefined for all rights reserved and for an id Hewn has no text for.
+ * The LICENSE file for one of the four licenses Hewn ships, starting with its notice line. Undefined for all rights
+ * reserved and for an id Hewn has no text for.
  */
 export function licenseFile(id: string, o: { year: number; toolName: string; holder?: string }): string | undefined {
-  const line = copyrightLine(o.year, o.toolName, o.holder);
-  if (id === "MIT") return TEXTS.MIT.replace("Copyright (c) [year] [fullname]", line);
-  if (id === "CC0-1.0") return `To the extent possible under law, ${o.holder?.trim() || `the ${o.toolName} authors`} ${o.holder?.trim() ? "has" : "have"} waived all copyright and related or neighboring rights to ${o.toolName}.\n\n${TEXTS["CC0-1.0"]}`;
+  const line = noticeLine(id, o);
+  // A function, so a name with "$&" in it is written as it is.
+  if (id === "MIT") return TEXTS.MIT.replace("Copyright (c) [year] [fullname]", () => line);
+  if (id === "GPL-3.0-or-later") return `${line}\n\n${GPL_LATER}\n\n${TEXTS[id]}`;
   const text = TEXTS[id as keyof typeof TEXTS];
   return text ? `${line}\n\n${text}` : undefined;
 }
+
+/** Where a LICENSE that came with the tool goes when it's shared under another license: under the new one, as it was. */
+export const KEPT_LICENSE = "It came with this license and notice, kept as they were:";
 
 const TEXTS = {
   MIT: "MIT License\n\nCopyright (c) [year] [fullname]\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
