@@ -264,7 +264,7 @@ export class Submissions extends Domain {
     const limit = this.platform.checksPerHour;
     const now = Date.now();
     const recent = (this.checked.get(agent.id) ?? []).filter((t) => now - t < HOUR);
-    if (recent.length >= limit) throw new PlatformError("conflict", `No checks left this hour (${limit}). The next one frees up in ${Math.ceil((recent[0] + HOUR - now) / 60_000)} min; capabilities_submit runs the same validation.`);
+    if (recent.length >= limit) throw new PlatformError("conflict", `No checks left this hour (${limit}). The next one frees up in ${Math.ceil((recent[0] + HOUR - now) / 60_000)} min.`);
     this.checked.set(agent.id, [...recent, now]);
     const run = async (): Promise<ClientCheck> => {
       const build: BuildRow = { id: `chk-${crypto.randomUUID().slice(0, 8)}`, capabilityId: id, kind: cap ? "modify" : "create", request: {}, requestedBy: agent.id, builder: "submitted", status: "open", baseVersion: cap?.activeVersion ?? null, resultVersion: null, dependsOn: null, review: null, discardedAt: null, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };

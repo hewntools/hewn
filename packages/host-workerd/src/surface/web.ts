@@ -795,7 +795,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 const readings = new Map<string, AbortController>();
 
 /** The intake's agent isn't there: none set up, none by that name, or its CLI isn't installed (the sandbox can't start it). */
-const NO_READER = /intake is not configured|no intake named|intake isn't configured|execvp.*No such file/i;
+export const NO_READER = /intake is not configured|no intake named|intake isn't configured|execvp.*No such file/i;
 const NO_BUILDER = "No builder is set up (Settings › AI)";
 
 /**

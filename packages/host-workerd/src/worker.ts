@@ -26,6 +26,7 @@ import { defaultPasses } from "@hewntools/core/passes.ts";
 import { agentModels, intakeJob, jobModel, type ModelCatalog, type Settings, settingsProblems, type SurfaceHost, TOOL_DATA_LIMIT_MB, toolDataLimitMB } from "./surface/host.ts";
 import { CLIENT_IP_HEADER, gatePublic, PROXY_CLIENT_IP_HEADER, PROXY_SECRET_HEADER, PUBLIC_HEADER, RateLimiter } from "./surface/public.ts";
 import { fetchLink } from "./surface/fetch-link.ts";
+import { NO_READER } from "./surface/web.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import BRIEF from "./builder-brief.md";
@@ -591,12 +592,14 @@ export class HewnDO extends DurableObject<Env> {
         schedulesOff: env.SCHEDULES === "off",
         // The reader on an agent's submission: the intake's "summarize", as for a file the owner installs (hosted, a charge).
         readCode: async (bundle, signal) => {
-          const intake = this.surfaceHost().intake;
-          if (!intake) throw new Error("no builder is set up to read it");
+          const intake = this.surfaceHost().intake!;
+          // No agent to read with (none set up, or its CLI gone) says so in words, as the install sheet does.
           const reply = await intake({ mode: "summarize", messages: [], bundle }, (p) => {
             const charge = (p as IntakeProgress).charge;
             if (charge !== undefined) this.platform.recordHostCharge(USER, "intake", charge);
-          }, signal);
+          }, signal).catch((e: Error) => {
+            throw NO_READER.test(e.message) ? new Error("no builder is set up to read it (Settings › AI)") : e;
+          });
           const summary = reply.kind === "summary" ? readSummary(reply) : null;
           if (!summary) throw new Error("the reading didn't come back as a summary");
           return summary;

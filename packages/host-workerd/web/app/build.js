@@ -297,9 +297,16 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           h("div", { class: "row tight" }, h("a", { class: "btn", href: "#/accounts" }, "Later"), h("button", { class: "primary", onclick: () => (signIn && detail.status.pendingGrants.length === 0 ? signInDialog(c.id) : grantsSheet(c.id)).then(() => go(`#/c/${enc(c.id)}`)) }, signIn ? "Sign in" : "Set up")),
           logBlock(false),
         );
+      // An agent's own tool that went live: what your builder read in it, or why it wasn't read.
+      const reading = b.builder === "submitted" && h("div", {});
+      if (reading)
+        api(`/builds/${enc(id)}/context`)
+          .then((x) => x.reading && put(reading, reviewReading(x.reading)))
+          .catch(() => {});
       put(
         card,
         head(appIcon(c, { size: 64 }), `${c.name} is ready`, b.kind === "create" ? `Added to ${connection ? "Accounts" : "Home"}${tests ? ` · ${tests}` : ""}` : `Updated to v${b.resultVersion ?? "?"}${tests ? ` · ${tests}` : ""}`, h("button", { class: "primary lg", onclick: () => openCapability({ ...c, ready: true }).catch(fail) }, "Open")),
+        reading,
         builtWith(b),
         b.screenshot && h("img", { class: "build-shot", src: shotUrl(id), alt: `${c.name}, as rendered during validation` }),
         convoView,
@@ -474,7 +481,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       // A client's own code: what your builder read in it, or why it wasn't read and Check it yourself, which reads it now.
       const reading = b.builder === "submitted" && h("div", {});
       if (reading) {
-        const tried = (b.review.warnings ?? []).filter((w) => w.check === "hosts").map((w) => /^tried to reach (\S+),/.exec(w.message)?.[1]).filter(Boolean);
+        const tried = (b.review.warnings ?? []).filter((w) => w.check === "hosts" && w.host).map((w) => w.host);
         let read;
         const draw = (busy = false) => {
           const check = !read?.summary && h("button", { class: "link sm", disabled: busy, onclick: () => readNow() }, busy ? "Reading the code…" : "Check it yourself");
@@ -485,7 +492,9 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           try {
             read = await api(`/builds/${enc(id)}/read`, { method: "POST" });
           } catch (e) {
-            fail(e);
+            // Cut off on the way (a proxy, a closed laptop): the read goes on, and is kept; what's kept now is shown.
+            read = (await api(`/builds/${enc(id)}/context`).catch(() => null))?.reading ?? read;
+            if (!read?.summary) fail(e);
           }
           draw();
         };

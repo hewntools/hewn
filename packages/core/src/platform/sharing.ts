@@ -122,6 +122,8 @@ export interface SummaryInput {
   manifest: CapabilityManifest;
   files: { path: string; text: string }[];
   cut: string[];
+  /** An agent wrote it and handed it over: who, what it says the tool is or changes (its own words), and for a change the files that differ. */
+  submitted?: { by: string; says: string; changed?: string[] };
 }
 
 /** A reading with each finding's place kept only when it's in `files` (a file it has, a line that file has): Show never opens somewhere the reading made up. */

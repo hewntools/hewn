@@ -137,7 +137,7 @@ export interface BuildContext {
 }
 
 /** What the reader said of a build's code (`summary`), or why the code wasn't read (`unread`), and when. */
-export type BuildReading = ({ summary: BundleSummary } | { unread: string }) & { at: string };
+export type BuildReading = ({ summary: BundleSummary; cut?: string[] } | { unread: string }) & { at: string };
 
 export interface BuildRow {
   id: string;

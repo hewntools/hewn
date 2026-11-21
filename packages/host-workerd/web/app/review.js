@@ -104,6 +104,8 @@ const reviewReading = (reading, { openAt, check, tried = [] } = {}) => {
     { class: "stack-sm" },
     h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), check),
     s ? [h("div", { class: "pretty" }, s.message), s.keeps && h("div", { class: "small muted" }, s.keeps), s.reaches && h("div", { class: "small muted" }, s.reaches)] : reading?.unread && h("div", { class: "small muted" }, `The code wasn't read: ${reading.unread}.`),
+    // What the reading left out or cut short, as the install sheet says it.
+    reading?.cut?.length > 0 && h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `Not read: ${reading.cut.slice(0, 5).join(", ")}${reading.cut.length > 5 ? ` and ${reading.cut.length - 5} more` : ""}. The reading covers the rest; open the files for these.`)),
     triedLine,
     found,
   );
