@@ -24,7 +24,7 @@ ui/look.json         with a UI: its look (palette, type, layout; see "Design it 
 
 Capabilities run as JavaScript in a V8 isolate, like a Cloudflare Worker. The platform bundles `src/index.ts` and its imports into one module. Leave `"runtime"` out of capability.json.
 
-Call chains have 30 seconds, with up to 120 seconds of model waiting excluded; widgets have 15 seconds. Nothing runs after a call returns or runs out of time: await all work before returning. `ctx.call` chains reach at most three capabilities, with no cycles or self-calls. Batch long work and report progress for later calls.
+Call chains have 30 seconds, with up to 120 seconds of model waiting excluded; widgets have 15 seconds. A call may not work for more than 10 seconds without a pause (an `await` on a fetch, `ctx.call` or `ctx.model`); the build fails naming the operation and the test, so split heavy computation across calls. Nothing runs after a call returns or runs out of time: await all work before returning. `ctx.call` chains reach at most three capabilities, with no cycles or self-calls. Batch long work and report progress for later calls.
 
 ### capability.json
 
