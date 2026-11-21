@@ -57,6 +57,14 @@ export type EgressMark = { isolate: string; delta: 1 | -1 };
 /** How a call to the tools process is sent: a bound on its answer, and `started` (an invoke started there, in this isolate). */
 export type SendOptions = { timeoutMs?: number; started?: (isolate: string) => void };
 
+/**
+ * The calls sent once more when the connection drops before any answer: the reads, and the writes that leave the same
+ * result when repeated. That's how a kept-alive socket looks when the tools process closes it for being idle just as a
+ * request goes out on it, and the tools process is fine. A call that runs a tool's operation, migrates or loads rows
+ * (invoke, migrate, load) isn't: it may have run. A timeout isn't a dropped connection, and isn't retried.
+ */
+export const RETRIED_ONCE: ReadonlySet<HostMethod> = new Set<HostMethod>(["describe", "dump", "count", "hasState", "listStates", "copyState", "dropState", "stop"]);
+
 /** The tools process didn't answer: it stopped, was restarted, or is stuck (`timeout`). */
 export class ToolsUnreachable extends Error {
   readonly timeout: boolean;
@@ -86,15 +94,22 @@ export function toolsChannel(tools: ToolsSocket, token: string): (capabilityId: 
     const code = body.code as CodeRef | undefined;
     const send = async (withJs: boolean) => {
       const payload = code ? { ...body, code: withJs ? { hash: code.hash, js: code.js } : { hash: code.hash } } : body;
+      const attempt = () => tools.fetch(`http://tools/${method}`, {
+        method: "POST",
+        headers: { [TOOLS_TOKEN_HEADER]: token, "content-type": "application/json" },
+        body: JSON.stringify({ capabilityId, ...payload }),
+        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+      });
+      const isTimeout = (e: unknown) => (e as Error).name === "TimeoutError";
       try {
-        return await tools.fetch(`http://tools/${method}`, {
-          method: "POST",
-          headers: { [TOOLS_TOKEN_HEADER]: token, "content-type": "application/json" },
-          body: JSON.stringify({ capabilityId, ...payload }),
-          ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-        });
+        try {
+          return await attempt();
+        } catch (e) {
+          if (isTimeout(e) || !RETRIED_ONCE.has(method)) throw e;
+          return await attempt();
+        }
       } catch (e) {
-        const timeout = (e as Error).name === "TimeoutError";
+        const timeout = isTimeout(e);
         throw new ToolsUnreachable(timeout ? `Hewn's tools didn't answer within ${timeoutMs}ms` : `Hewn's tools stopped (${(e as Error).message})`, timeout);
       }
     };

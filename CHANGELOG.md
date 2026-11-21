@@ -11,6 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### Fixes
 
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
+- A build no longer fails with "Hewn's tools stopped (Network connection lost.)" when a kept-alive connection to the tools closes as a request goes out: reads and data copies are sent once more. See [Troubleshooting](docs/troubleshooting.md#tools).
 
 ## 0.4.12 (2026-11-19)
 
