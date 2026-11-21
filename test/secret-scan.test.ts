@@ -213,7 +213,8 @@ describe("the owner's stored keys", () => {
     const ended = await Promise.all(started.map((b) => t.platform.settle(b.buildId)));
     const views = ended.map((b) => JSON.stringify(t.platform.getBuild(t.claude, b.buildId)));
     assert.equal(views.filter((v) => v.includes(OWN_KEY_FOUND)).length, 1, views.join("\n"));
-    for (const [i, v] of views.entries()) if (!v.includes(OWN_KEY_FOUND)) assert.ok(v.includes(KEY_LOCKED) || ended[i].status === "cancelled", v);
+    // The rest meet the lock, or were stopped by it, and say so, never who stopped them.
+    for (const v of views) if (!v.includes(OWN_KEY_FOUND)) assert.ok(v.includes(KEY_LOCKED) && !v.includes("CANCELLED by"), v);
   });
 
   test("the build that found one ends there: no further attempt runs its builder", async () => {
@@ -235,13 +236,20 @@ describe("the owner's stored keys", () => {
     t.queue((ws: string) => writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`));
     const agents = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a fixture" })).buildId);
     assert.equal(agents.status, "failed");
+    // While the agent is locked, the owner's build on its work meets the lock too: nothing more is learned from it.
+    t.queue(() => {});
+    const early = await t.platform.settle((await t.platform.retryBuild(USER, agents.buildId, { fix: true })).buildId);
+    assert.ok(JSON.stringify(t.platform.getBuild(t.claude, early.buildId)).includes(KEY_LOCKED));
+    t.platform.acknowledgeKeyLock(USER, "claude-code");
     const seen: string[] = [];
     t.queue((async (_ws: string, job: { check?: (id: string) => Promise<unknown> }) => seen.push(JSON.stringify(await job.check!("1")))) as never);
-    const fix = await t.platform.settle((await t.platform.retryBuild(USER, agents.buildId, { fix: true })).buildId);
+    // Retried again: the earlier fix is the one to carry on from now, and it carries on from the agent's.
+    const fix = await t.platform.settle((await t.platform.retryBuild(USER, early.buildId, { fix: true })).buildId);
     assert.ok(!seen[0].includes("notes.txt:2") && !seen[0].includes(LABEL), seen[0]);
     assert.equal(fix.status, "failed");
     assert.ok(JSON.stringify(t.platform.getBuild(t.claude, fix.buildId)).includes(OWN_KEY_FOUND));
     assert.ok(((await t.platform.buildTranscript(USER, fix.buildId)) ?? "").includes(`tests/notes.txt:2: ${LABEL}`));
+    assert.deepEqual(Object.keys(t.platform.keyLocks(USER)), ["claude-code"], "locked again: its work held the key");
   });
 
   test("locked out: create, add widgets and an automatic retry are refused too; the lock holds across a restart", async () => {
@@ -281,12 +289,13 @@ describe("the owner's stored keys", () => {
       assert.match(item.detail, /put one of your stored keys in it/);
       assert.equal((await http("/api/agents/claude-code/key-lock", "DELETE")).status, 200);
       assert.deepEqual(t.platform.keyLocks(USER), {});
-      // Locked again, then disconnected: nothing left to look at.
+      // Locked again, then disconnected: the lock stays with its id, and the Inbox still says so, and which key.
       await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding().map((f) => (f.path === "tests/notes.txt" ? { ...f, content: f.content + "again\n" } : f)), capabilityId: "running-log", request: "a fixture" })).buildId);
       assert.ok(Object.keys(t.platform.keyLocks(USER)).includes("claude-code"));
       t.platform.updateAgent(USER, "claude-code", "revoke");
-      const after = JSON.parse((await http("/api/inbox")).body).needs as { kind: string }[];
-      assert.ok(!after.some((n) => n.kind === "key-lock"));
+      const after = JSON.parse((await http("/api/inbox")).body).needs as { kind: string; detail: string }[];
+      const still = after.find((n) => n.kind === "key-lock")!;
+      assert.match(still.detail, /\(disconnected\) put one of your stored keys in it \(your Site Connection key \(API_KEY\)\): change it/);
     } finally {
       await new Promise((r) => server.close(r));
     }
@@ -300,6 +309,75 @@ describe("the owner's stored keys", () => {
       if (b.status === "review") await t.platform.rejectBuild(USER, b.buildId);
     }
     await assert.rejects(t.platform.submitFiles(t.claude, { files: other(), capabilityId: "running-log", request: "x" }), /No builds left this hour \(2\)/);
+    await assert.rejects(t.platform.modify(t.claude, { capabilityId: "running-log", request: "x" }), /No builds left this hour/);
+  });
+
+  test("the cap counts a retry too", async () => {
+    t.platform.buildsPerHour = 1;
+    t.queue(() => {
+      throw new Error("the builder fell over");
+    });
+    const failed = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "x" })).buildId);
+    assert.equal(failed.status, "failed");
+    await assert.rejects(t.platform.retryBuild(t.claude, failed.buildId), /No builds left this hour \(1\)/);
+  });
+
+  test("the owner's retry of an agent's failed build carries on from its files: a key there locks the agent, and ends the build", async () => {
+    t.cleanup();
+    t = setup({ attempts: 3 });
+    await installSeed(t.platform);
+    await installFrom(t.platform, resolve(import.meta.dirname, "fixtures/site-connection"));
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", STORED);
+    // The agent's build writes the key and fails before anything is checked.
+    t.queue((ws: string) => {
+      writeFileSync(join(ws, "tests", "notes.txt"), `password: ${STORED}\n`);
+      throw new Error("the builder fell over");
+    });
+    t.queue(() => {
+      throw new Error("the builder fell over");
+    });
+    t.queue(() => {
+      throw new Error("the builder fell over");
+    });
+    const agents = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.equal(agents.status, "failed");
+    assert.deepEqual(t.platform.keyLocks(USER), {});
+    let ran = 0;
+    const keep = () => void ran++;
+    t.queue(keep, keep, keep);
+    const owners = await t.platform.settle((await t.platform.retryBuild(USER, agents.buildId)).buildId);
+    assert.equal(owners.status, "failed");
+    assert.equal(ran, 1, "ended at the hit, no more attempts");
+    assert.deepEqual(Object.keys(t.platform.keyLocks(USER)), ["claude-code"]);
+  });
+
+  test("the owner's change to a version an agent wrote: its builder's check is blind to the owner's keys, and a key found there locks that agent", async () => {
+    const planted = "rumpelstiltskin-1999";
+    const files = plus("tests/notes.txt", `note: ${planted}`);
+    const held = await t.platform.settle((await t.platform.submitFiles(t.claude, { files, capabilityId: "running-log", request: "a note" })).buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    assert.equal((await t.platform.approveBuild(USER, held.buildId)).status, "promoted");
+    // Later the owner stores a key equal to what the agent planted.
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", planted);
+    const seen: string[] = [];
+    t.queue((async (_ws: string, job: { check?: (id: string) => Promise<unknown> }) => seen.push(JSON.stringify(await job.check!("1")))) as never);
+    const owners = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "anything" })).buildId);
+    assert.ok(!seen[0].includes("notes.txt") && !seen[0].includes("Site Connection"), seen[0]);
+    assert.equal(owners.status, "failed");
+    assert.ok(JSON.stringify(t.platform.getBuild(t.claude, owners.buildId)).includes(OWN_KEY_FOUND));
+    assert.deepEqual(Object.keys(t.platform.keyLocks(USER)), ["claude-code"]);
+  });
+
+  test("the owner's fix of an agent's held change (fixOf) is blind too", async () => {
+    const held = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: plus("src/index.ts", `// ${RANDOM}`), capabilityId: "running-log", request: "a constant" })).buildId);
+    assert.equal(held.status, "review");
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", RANDOM);
+    const seen: string[] = [];
+    t.queue((async (_ws: string, job: { check?: (id: string) => Promise<unknown> }) => seen.push(JSON.stringify(await job.check!("1")))) as never);
+    const fix = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "fix the warnings", held: held.buildId })).buildId);
+    assert.ok(fix.request.fixOf === held.buildId, JSON.stringify(fix.request));
+    assert.ok(!seen[0].includes("Site Connection"), seen[0]);
+    assert.equal(fix.status, "failed");
   });
 
   test("settings' values are never looked for: a city in a tool's files is no key", async () => {

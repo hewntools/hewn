@@ -198,15 +198,17 @@ export class Validation extends Domain {
     const found = scanFiles(files);
     const shapes = found.filter((f) => f.kind === "key" && f.label !== LONG_RANDOM);
     const random = found.filter((f) => f.kind === "key" && f.label === LONG_RANDOM && !LOCKFILES.includes(f.file));
-    // An agent locked out (its build held one before) gets the lock's answer, whatever its files hold: nothing more
-    // is learned from a build of its, in flight or not. Checked and set with nothing awaited between, so of its
-    // builds validating at once, one at most can find one.
-    const locked = !opts.check && this.d.builds.lockedOut(build);
-    // The owner's builder learns where one is from its check, unless the build carries on from an agent's, whose
-    // agent could read what the builder did with it.
-    const own = !locked && (!opts.check || (byOwner(build) && !this.d.builds.fromAnAgent(build))) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
+    // Whose work this is, at any remove (its requester, its retries and fixes, the versions it's built on). A build
+    // of, or carrying on from, a locked-out agent's work gets the lock's answer, whatever its files hold: nothing more
+    // is learned from it. Checked and set with nothing awaited between, so of builds validating at once, one at most
+    // finds one. The owner's builder learns where one is from its check, unless an agent had a hand in the work (it
+    // could read what the builder did with it) or a version came from a file.
+    const behind = this.d.builds.behind(build);
+    const locked = !opts.check && this.d.builds.lockedOut(build, behind);
+    const blind = behind.agents.size > 0 || behind.foreign;
+    const own = !locked && (!opts.check || !blind) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
     const stored = ownValuesIn(files, own);
-    if (stored.length && !opts.check) this.d.builds.lockForKey(build);
+    if (stored.length && !opts.check) this.d.builds.lockForKey(build, behind.agents, stored.map((f) => f.label));
     let storedFailure: string | undefined = locked ? KEY_LOCKED : undefined;
     if (stored.length) {
       const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));

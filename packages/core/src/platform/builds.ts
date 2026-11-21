@@ -169,6 +169,8 @@ export interface KeyLock {
   buildId: string;
   capabilityId: string;
   at: string;
+  /** Which of the owner's keys turned up (their labels: for the owner, to change them). */
+  keys?: string[];
 }
 
 /** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
@@ -1294,7 +1296,7 @@ export class Builds extends Domain {
    * Stop a build: the builder is stopped and nothing is promoted. Allowed for the owner and the
    * agent that requested it. A candidate already being validated finishes first.
    */
-  cancelBuild(agent: Agent, buildId: string): BuildView {
+  cancelBuild(agent: Agent, buildId: string, reason?: string): BuildView {
     const build = this.mustBuild(buildId);
     requireScope(agent, scopeOf(build.kind));
     if (agent.kind !== "user" && agent.id !== build.requestedBy) throw new PlatformError("forbidden", `only the owner or ${build.requestedBy} can cancel this build`);
@@ -1304,7 +1306,7 @@ export class Builds extends Domain {
     const continued = paused ? this.registry.retryOf(build.id) : undefined;
     if (continued) throw new PlatformError("conflict", `build ${buildId} was continued as ${continued}`);
     if (!paused && build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review") throw new PlatformError("conflict", `build is already ${build.status}`);
-    const line = paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
+    const line = reason ? `CANCELLED: ${reason}` : paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
     this.registry.updateBuild(buildId, { status: "cancelled", log: [...build.log, line] });
     this.buildEvent(buildId, line, `build ${buildId} [${build.kind} ${build.capabilityId}]`);
     this.aborts.get(buildId)?.abort();
@@ -1838,47 +1840,64 @@ export class Builds extends Domain {
    * submission is still a search, many guesses at a time (a whole PIN space fits in a file); this makes it one.
    * The owner's own builds lock nobody.
    */
-  lockForKey(build: BuildRow) {
-    if (byOwner(build)) return;
-    const locks = this.keyLocks();
-    if (locks[build.requestedBy]) return;
-    // Synchronously, before anything awaits: another validation of its builds sees the lock at once.
-    this.registry.setKv("keylocks", { ...locks, [build.requestedBy]: { buildId: build.id, capabilityId: build.capabilityId, at: new Date().toISOString() } });
-    const name = this.agentStore.list().find((a) => a.id === build.requestedBy)?.name ?? build.requestedBy;
-    this.registry.addLifecycleEvent(build.capabilityId, "key-lock", `${name}'s build held one of your stored keys: it can't build until you look`, build.requestedBy);
-    this.logger(`agent ${build.requestedBy} locked out of building: its build ${build.id} held one of the owner's stored keys`);
-    // Its other builds in flight stop (queued, waiting, building); one already validating meets the lock there.
+  lockForKey(build: BuildRow, agents: Iterable<string>, keys: string[]) {
+    const locks = { ...this.keyLocks() };
+    const now = new Date().toISOString();
+    const locked = [...agents].filter((a) => !locks[a]);
+    if (!locked.length) return;
+    // Synchronously, before anything awaits: another validation of their builds sees the lock at once.
+    for (const a of locked) locks[a] = { buildId: build.id, capabilityId: build.capabilityId, at: now, keys: [...new Set(keys)] };
+    this.registry.setKv("keylocks", locks);
+    for (const a of locked) {
+      const name = this.agentStore.list().find((x) => x.id === a)?.name ?? a;
+      this.registry.addLifecycleEvent(build.capabilityId, "key-lock", `one of your stored keys turned up in work ${name} had a hand in: it can't build until you look`, a);
+      this.logger(`agent ${a} locked out of building: build ${build.id}, which carries on from its work, held one of the owner's stored keys`);
+    }
+    // Their other builds in flight stop (queued, waiting, building); one already validating meets the lock there.
     for (const id of this.registry.recentBuilds(500)) {
       const other = this.registry.getBuild(id);
-      if (!other || other.id === build.id || other.requestedBy !== build.requestedBy || !["open", "waiting", "building"].includes(other.status)) continue;
+      if (!other || other.id === build.id || !locked.includes(other.requestedBy) || !["open", "waiting", "building"].includes(other.status)) continue;
       try {
-        this.cancelBuild(USER, other.id);
+        this.cancelBuild(USER, other.id, KEY_LOCKED);
       } catch {
         // ended meanwhile
       }
     }
   }
 
-  /** Whether a build is an agent's, and that agent is locked out (`lockForKey`). */
-  lockedOut(build: BuildRow): boolean {
-    return !byOwner(build) && !!this.keyLocks()[build.requestedBy];
+  /** Whether a build is, or carries on from, the work of an agent that's locked out (`lockForKey`). */
+  lockedOut(build: BuildRow, behind = this.behind(build)): boolean {
+    const locks = this.keyLocks();
+    return [...behind.agents].some((a) => !!locks[a]);
   }
 
   /**
-   * Whether a build carries on from an agent's (a retry, a fix, a fix of held work, at any remove): the owner's
-   * builder on it doesn't learn where the owner's keys are, since the agent can follow the chain and read what the
-   * builder did.
+   * Whose work a build carries on from, at any remove: the agents among its requester, every build it retries or
+   * fixes (each mark), and the builds that made the versions it's built on; `foreign`, a version installed from a
+   * file or a link. The owner's builder on such a build doesn't learn where the owner's keys are, and a key found in
+   * it locks those agents: they can follow the chain and read what happened.
    */
-  fromAnAgent(build: BuildRow): boolean {
+  behind(build: BuildRow): { agents: Set<string>; foreign: boolean } {
+    const agents = new Set<string>();
+    let foreign = false;
     const seen = new Set<string>();
-    for (let b: BuildRow | undefined = build; b && !seen.has(b.id); ) {
-      if (!byOwner(b)) return true;
+    const todo: BuildRow[] = [build];
+    while (todo.length && seen.size < 2000) {
+      const b = todo.pop()!;
+      if (seen.has(b.id)) continue;
       seen.add(b.id);
+      if (!byOwner(b)) agents.add(b.requestedBy);
+      if (b.builder === "bundle") foreign = true;
       const r = b.request as RetryMarks & { autoRetryOf?: string };
-      const from = r.retryOf ?? r.fixOf ?? r.autoRetryOf;
-      b = from ? this.registry.getBuild(from) : undefined;
+      for (const from of [r.retryOf, r.fixOf, r.autoRetryOf]) {
+        const x = from ? this.registry.getBuild(from) : undefined;
+        if (x) todo.push(x);
+      }
+      const made = b.baseVersion ? this.registry.getVersion(b.capabilityId, b.baseVersion)?.buildId : undefined;
+      const x = made ? this.registry.getBuild(made) : undefined;
+      if (x) todo.push(x);
     }
-    return false;
+    return { agents, foreign };
   }
 
   /** The agents locked out, by id (`lockForKey`). */
