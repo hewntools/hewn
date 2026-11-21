@@ -118,7 +118,7 @@ describe("remote builder and intake", () => {
     const j = job(dir, {
       check: async (id) => {
         checked.push({ id, src: readFileSync(join(dir, "src", "index.ts"), "utf8"), old: existsSync(join(dir, "old.txt")) });
-        return { passed: false, text: "FAIL: 1 problem.", failures: ["1 of 2 test cases failed"], defects: ["Text cut short on the phone (390 px): \"Mon\""], images: [{ name: "desktop-light", png: new Uint8Array([137, 80, 78, 71]) }] };
+        return { passed: false, text: "FAIL: 1 problem.", failures: ["1 of 2 test cases failed"], warnings: [{ check: "secret-scan", message: "a long random string", file: "src/data.ts", line: 12 }], defects: ["Text cut short on the phone (390 px): \"Mon\""], images: [{ name: "desktop-light", png: new Uint8Array([137, 80, 78, 71]) }] };
       },
     });
     await remoteBuilder(remote).build(j);
@@ -126,13 +126,13 @@ describe("remote builder and intake", () => {
     assert.deepEqual(checked, [{ id: "c1", src: "// in progress", old: false }], "the workspace as the service sent it");
     const sent = seen.find((s) => s.path === "/v1/builds/b-1/checks/c1")!;
     assert.equal(sent.auth, "Bearer hewn-token");
-    assert.deepEqual(sent.body, { passed: false, text: "FAIL: 1 problem.", failures: ["1 of 2 test cases failed"], defects: ['Text cut short on the phone (390 px): "Mon"'], images: [{ name: "desktop-light", png: Buffer.from([137, 80, 78, 71]).toString("base64") }] });
+    assert.deepEqual(sent.body, { passed: false, text: "FAIL: 1 problem.", failures: ["1 of 2 test cases failed"], warnings: [{ check: "secret-scan", message: "a long random string", file: "src/data.ts", line: 12 }], defects: ['Text cut short on the phone (390 px): "Mon"'], images: [{ name: "desktop-light", png: Buffer.from([137, 80, 78, 71]).toString("base64") }] });
     assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// done", "the final tree still decides");
     assert.match(readFileSync(j.logPath, "utf8"), /check c1: failed/);
     // A service that doesn't know the offer builds as before; a check that can't run is posted as an error.
     handle = (_b, _r, res) => ndjson(res, [{ files: { "src/index.ts": b64("// plain") } }, { done: true }]);
     let asked = 0;
-    await remoteBuilder(remote).build(job(dir, { check: async () => (asked++, { passed: true, text: "PASS", failures: [], defects: [], images: [] }) }));
+    await remoteBuilder(remote).build(job(dir, { check: async () => (asked++, { passed: true, text: "PASS", failures: [], warnings: [], defects: [], images: [] }) }));
     assert.equal(asked, 0);
     assert.equal(readFileSync(join(dir, "src", "index.ts"), "utf8"), "// plain");
     let postedError: (body: any) => void = () => {};
@@ -153,7 +153,7 @@ describe("remote builder and intake", () => {
       ndjson(res, [{ check: { id: "c3", files: { "src/index.ts": b64("// first") } } }, { check: { id: "c4", files: { "src/index.ts": b64("// second") } } }, { error: "the builder crashed" }]);
     };
     const ran: string[] = [];
-    const slow = async (id: string) => (ran.push(id), await new Promise((r) => setTimeout(r, 100)), { passed: true, text: "PASS", failures: [], defects: [], images: [] });
+    const slow = async (id: string) => (ran.push(id), await new Promise((r) => setTimeout(r, 100)), { passed: true, text: "PASS", failures: [], warnings: [], defects: [], images: [] });
     await assert.rejects(remoteBuilder(remote).build(job(dir, { check: slow })), /crashed/);
     assert.deepEqual(ran, ["c3"], "only the check already running ran");
     assert.deepEqual(posts.map((p) => [p.url, p.body.error ?? p.body.text]), [["/v1/builds/b-1/checks/c3", "PASS"], ["/v1/builds/b-1/checks/c4", "the build ended"]]);
