@@ -170,7 +170,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: "capabilities_check",
     scopes: ["create", "modify"],
     description:
-      "Check a capability you wrote as validation will, without submitting it: the manifest, bundling, contract compatibility (with capabilityId), migrations (on empty tables: on a copy of the capability's own data they run when you submit), tests/cases.json, sample/calls.json, and the UI rendered at 1280 and 390 px wide in light and dark with what to fix measured on it. Returns PASS or FAIL with every failure, and the four screenshots as images, a long page's top part (screenshots: \"all\" adds its further parts after them; structuredContent.screenshots names the images sent). Fix what it shows and check again; 30 checks an hour. Promotes nothing.",
+      "Check a capability you wrote as validation will, without submitting it: the manifest, bundling, contract compatibility (with capabilityId), migrations (on empty tables: on a copy of the capability's own data they run when you submit), tests/cases.json, sample/calls.json, and the UI rendered at 1280 and 390 px wide in light and dark with what to fix measured on it. Returns PASS or FAIL with every failure and warning (a warning doesn't fail it; the owner sees it on the build), and the four screenshots as images, a long page's top part (screenshots: \"all\" adds its further parts after them; structuredContent.screenshots names the images sent). Fix what it shows and check again; 30 checks an hour. Promotes nothing.",
     inputSchema: obj(
       {
         files,

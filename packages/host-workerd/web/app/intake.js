@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The intake (a page, or in the change drawer), its proposal card, and kept conversations.
-import { ago, api, appIcon, builderLabel, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
+import { actorLabel, ago, api, appIcon, builderLabel, capRef, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, kindTag, markdown, postStream, setWallpaper, toast } from "../kit.js";
 import { briefParts } from "./brief.js";
 import { brandTile, go, HEWNS_TOOLS, hues, moment, onLeave, put, settings, stillHere, topBar, view } from "./frame.js";
 import { installFromFileOrLink } from "./install.js";
@@ -105,7 +105,11 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const keepKey = `hewn.intake.${mode === "create" ? "new" : `change.${capId}`}`;
   const keepable = !widgetsMode && !polishMode && !connection;
   // "Ask builder to fix this" left what failed here (too long for the address); it goes in the box below.
-  const failure = capId && q?.get("fix") ? sessionStorage.getItem(`hewn.fix.${capId}`) : null;
+  // A build on held work (its card's "Ask builder to fix"): the intake sees what it is, the build carries on from it.
+  // A held new tool's text waits under the build's id (the New page has no tool yet).
+  let held = q?.get("held") || null;
+  const fixKey = capId ? `hewn.fix.${capId}` : held ? `hewn.fix.${held}` : null;
+  const failure = fixKey && q?.get("fix") ? sessionStorage.getItem(fixKey) : null;
   const prefilled = !!(q?.get("m") || failure);
   // Whether this view keeps its conversation now: one put in, from its first send; not once it's built from.
   let keeps = keepable && !from && !prefilled;
@@ -126,7 +130,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const stopKeeping = () => (finish(), (keeps = false));
   // Built from: the page goes to the build, the drawer shows it. A reply still on its way (Build was pressed
   // while one was) is dropped, not kept again.
-  const built = (b) => (stopKeeping(), shownViews.get(keepKey) === me && shownViews.delete(keepKey), onBuilt(b));
+  const built = (b) => (stopKeeping(), shownViews.get(keepKey) === me && shownViews.delete(keepKey), held && doneWithHeld(), onBuilt(b));
   if (from) continueFrom(from).catch(fail);
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
   const offer = h("div", { class: "card continue-card", hidden: true });
@@ -208,7 +212,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   picker.addEventListener("change", () => (addFiles([...picker.files]), (picker.value = "")));
   // "Ask builder to fix this": what failed goes in the box as text, as other pre-fills do; nothing sends until Send.
   if (failure) {
-    sessionStorage.removeItem(`hewn.fix.${capId}`);
+    sessionStorage.removeItem(fixKey);
     input.value = JSON.parse(failure).text;
     requestAnimationFrame(growWhenShown);
   }
@@ -229,12 +233,38 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, "+ New");
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : polishMode ? `Polish ${cap?.name ?? "it"}` : "What should change?")
-    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : "What should it do?"));
+    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : held ? "New tool · fix" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : held ? "What should change?" : "What should it do?"));
+  // Built on held work ("Ask builder to fix" on its card): what it continues, above the box, with the way back to its card.
+  const heldRow = held && h("div", { class: "notice info held-context", hidden: true });
+  if (heldRow)
+    Promise.all([api(`/builds/${enc(held)}`), caps().catch(() => all)])
+      .then(([b, m]) => {
+        const c = m.get(b.capabilityId);
+        const what = b.kind === "create" ? `${actorLabel(b.requestedBy, m)}'s new tool, ` : `${actorLabel(b.requestedBy, m)}'s change to `;
+        const waiting = b.status === "review";
+        heldRow.classList.toggle("warn", !waiting);
+        heldRow.classList.toggle("info", waiting);
+        put(heldRow, h("span", { class: "grow" }, `Continues ${what}`, capRef(c, b.capabilityId), waiting ? " · waiting for you" : " · no longer waiting for you"), h("a", { href: `#/b/${enc(held)}` }, "View ›"));
+        heldRow.hidden = false;
+      })
+      .catch(() => {});
+  // Built from the held work: this view and the address forget it, so the next change ("Change more") is an ordinary one.
+  const doneWithHeld = () => {
+    held = null;
+    for (const k of ["held", "fix"]) q?.delete?.(k);
+    heldRow?.remove();
+    const [path, query = ""] = location.hash.split("?");
+    const p = new URLSearchParams(query);
+    if (!p.has("held") && !p.has("fix")) return;
+    for (const k of ["held", "fix"]) p.delete(k);
+    history.replaceState(null, "", `${path}${[...p].length ? `?${p}` : ""}`);
+  };
   // Q1 New: or install one: one of Hewn's tools, or a file or link someone shared (gone once you're talking).
   const option = (glyph, title, sub, props) => h(props.href ? "a" : "button", { class: "card start-option", ...props }, glyph, h("span", { class: "grow col" }, h("span", { class: "strong" }, title), h("span", { class: "small muted" }, sub)), h("span", { class: "faint" }, "›"));
   const installOptions =
     mode === "create" &&
     !connection &&
+    !held &&
     h(
       "div",
       { class: "start-from" },
@@ -247,7 +277,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       ),
     );
   // Continue the last conversation? sits above the box, not in it.
-  const el = embedded ? h("div", { class: "drawer-intake" }, heading, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, thread, offer, composer, installOptions));
+  const el = embedded ? h("div", { class: "drawer-intake" }, heading, heldRow, thread, offer, composer) : h("div", { class: "stack-lg" }, heading, h("div", { class: "chat-col" }, heldRow, thread, offer, composer, installOptions));
   const say = (who, text, attachments) => (installOptions && (installOptions.hidden = true), thread.append(who === "them" ? themBubble(text) : h("div", { class: `bubble ${who}` }, text, attachmentsView(attachments))));
   const syncSend = () => send.classList.toggle("primary", !!input.value.trim() || pending.length > 0);
   input.addEventListener("input", syncSend);
@@ -282,7 +312,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     // again on return, nor for a reply that came while no view was looking (the rules are saved all the same).
     if (live) for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
     // Schedules set here (the drawer stays on the conversation) or from the page: done, not kept any more.
-    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
+    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, held, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
     if (reply.kind === "questions") {
       messages.push(turnOf(reply));
       say("them", chatText(reply.message, reply.questions));
@@ -357,7 +387,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       let reply = null;
       let failure = null;
       const progress = (data) => ((flight.last = { ...flight.last, ...data }), flight.listeners.forEach((f) => f(data)));
-      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from ? { earlier: { buildId: from } } : {}) }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from || held ? { earlier: { buildId: from ?? held } } : {}) }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       result = { reply };
     } catch (err) {
@@ -857,7 +887,7 @@ function scheduleTicks(list = []) {
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
  * set up once the draft's build promotes. `conversation`: the chat that led here, kept with each build.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {} } = {}) {
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {}, held } = {}) {
   // What every build it starts carries (a connection first, then the tool): the conversation, and the chip's model.
   const carried = { ...(conversation?.length ? { conversation } : {}), ...ask };
   const conn = d.connection;
@@ -874,7 +904,7 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
   }
   const wait = first?.buildId ?? after;
   const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...carried };
-  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w } });
+  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w, ...(held ? { held } : {}) } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w, ...(held ? { held } : {}) } });
 }
 
 /** The id the platform gives a new tool with this name (the intake names ideas it builds on this way). */
@@ -909,7 +939,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  */
 function proposalCard(kind, list, ctx) {
   // `readOnly`: a card from a kept conversation: as it was, nothing to tick or build.
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, done, finished, readOnly = false } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, held, done, finished, readOnly = false } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -1085,12 +1115,14 @@ function proposalCard(kind, list, ctx) {
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask, held });
         invalidateCaps();
         return onBuilt(b);
       }
       // New tools: side by side, or after the ones they build on.
       const p = buildPlan(chosen().map((r) => r.d));
+      // Made on a held new tool: one tool takes its place, never several.
+      if (held && p.order.length > 1) throw new Error("This continues one held tool: tick just that one here, and ask for the others from New.");
       const connections = new Map();
       const builds = new Map();
       const started = [];
@@ -1103,7 +1135,8 @@ function proposalCard(kind, list, ctx) {
         }
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask });
+          // Made on a held new tool: it takes the held one's place.
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask, held });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {
