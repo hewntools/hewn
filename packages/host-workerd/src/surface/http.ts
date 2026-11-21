@@ -32,7 +32,9 @@ export function sse(headers: Record<string, string>, run: (event: (name: string,
   const enc = new TextEncoder();
   const abort = new AbortController();
   let open = true;
-  clientSignal?.addEventListener("abort", () => ((open = false), abort.abort()), { once: true });
+  const gone = () => ((open = false), abort.abort());
+  if (clientSignal?.aborted) gone();
+  else clientSignal?.addEventListener("abort", gone, { once: true });
   const event = (name: string, data: unknown) => {
     if (!open) return;
     writer.write(enc.encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {
