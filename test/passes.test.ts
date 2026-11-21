@@ -251,7 +251,7 @@ describe("passes after a new tool's build", () => {
     const ws = mkdtempSync(join(tmpdir(), "hewn-parts-"));
     mkdirSync(join(ws, "screenshots"));
     writeFileSync(join(ws, "screenshots", "mobile-light-3.png"), "a pass's, from before");
-    const check = openCheck(ws, async () => ({ passed: true, text: "PASS", failures: [], defects: [], images: [{ name: "mobile-light", png: Buffer.from("top") }], parts: [{ name: "mobile-light-2", png: Buffer.from("rest") }] }));
+    const check = openCheck(ws, async () => ({ passed: true, text: "PASS", failures: [], warnings: [], defects: [], images: [{ name: "mobile-light", png: Buffer.from("top") }], parts: [{ name: "mobile-light-2", png: Buffer.from("rest") }] }));
     try {
       writeFileSync(join(ws, CHECK_DIR, "requests", "c1.json"), "{}");
       const result = join(ws, CHECK_DIR, "results", "c1.json");
