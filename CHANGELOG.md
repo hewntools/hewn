@@ -11,6 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### Fixes
 
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
+- Cancelling a build no longer leaves a "Broken pipe" error line in `hewn.log`: the cancel answers once the build's live log has ended. See [Troubleshooting](docs/troubleshooting.md#building).
 
 ## 0.4.12 (2026-11-19)
 
