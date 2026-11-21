@@ -869,6 +869,8 @@ export const operations = {
       await p.waitForTimeout(1000);
       if (!owners.includes("GET /api/home")) throw new Error(`the owner's redraw didn't ask as the owner: ${owners.join(", ")}`);
     } finally {
+      // Gone again: the steps after this one see the tools they did before it.
+      await p.evaluate(() => fetch("/api/capabilities/probe", { method: "DELETE", headers: { "x-hewn-ui": "1" } })).catch(() => {});
       await ctx.close();
     }
   });
