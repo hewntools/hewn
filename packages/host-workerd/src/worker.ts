@@ -819,11 +819,12 @@ export class HewnDO extends DurableObject<Env> {
     if (request.method === "POST" && adminChanges(url.pathname, body)) this.platform.activity.changed();
     try {
       switch (url.pathname) {
-        case "/_admin/resumed":
-          // The supervisor saw the wall clock jump (a suspended machine woke), or a schedule's time come by it: run
-          // what became due, re-arm the alarm.
+        case "/_admin/resumed": {
+          // The supervisor saw time pass while it didn't run (a suspended machine woke), or a schedule's time come by
+          // the wall clock: run what became due, re-arm the alarm, and say what ran.
           const ran = await this.runDue();
           return Response.json({ ok: true, nextAlarmAt: this.platform.nextScheduleAt(), ran });
+        }
         case "/_admin/changed":
           // A restore swapped the data in (adminChanges counts it).
           return Response.json({ ok: true });

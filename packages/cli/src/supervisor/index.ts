@@ -4,6 +4,7 @@
 // in separate workerd processes, which talk over Unix sockets in the data dir. It also keeps both
 // alive: a tool stuck in a CPU loop blocks the tools' (single-threaded) workerd, so a stalled
 // /health there restarts the tools; the platform keeps answering meanwhile.
+import { performance as nodePerformance } from "node:perf_hooks";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
@@ -80,12 +81,12 @@ export interface SupervisorOptions {
   /** Health check cadence and the stall that triggers a restart. */
   watchdog?: { intervalMs: number; stallMs: number } | false;
   /**
-   * The resume check, every `intervalMs`: the wall clock jumping ahead of the time this process ran by more than
-   * `jumpMs` (a suspended machine woke, a laptop's lid opened) runs what became due, then once more `recheckMs` later;
+   * The resume check, every `intervalMs`: more than `jumpMs` by the wall clock between two looks while the event loop
+   * wasn't busy (a suspended machine woke, a laptop's lid opened) runs what became due, then once more `recheckMs` later;
    * and the next schedule's time coming by the wall clock runs what's due (workerd's alarm can be late after a sleep).
-   * Tests move `wall`.
+   * Tests only: `wall`, `mono` (the monotonic clock, for the log line) and `busy` (the event loop's busy ms so far).
    */
-  resume?: { intervalMs?: number; jumpMs?: number; recheckMs?: number; wall?: () => number; mono?: () => number } | false;
+  resume?: { intervalMs?: number; jumpMs?: number; recheckMs?: number; wall?: () => number; mono?: () => number; busy?: () => number } | false;
   /** Where the secrets master key lives (default: Keychain on macOS, libsecret or a file on Linux). */
   keySource?: KeySource;
   /** Builder / intake CLI status (default: checked on this machine). Tests stub it. */
@@ -906,7 +907,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     });
   }
 
-  // The resume check: the wall clock ran ahead of this process (the machine was suspended, or asleep). Due schedules run
+  // The resume check: time passed by the wall clock while this process didn't run (the machine was suspended, or asleep). Due schedules run
   // by the wall clock and the alarm is re-armed (whether workerd's own alarm fires after such a jump isn't assumed),
   // the backup check runs, and all of it once more a little later: after a wake the clock may lag until NTP catches up.
   // And when the next schedule's time comes by the wall clock, what's due runs too: workerd's alarm waits on a clock
@@ -917,7 +918,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   let resumedAt: number | null = null;
   const recheckTimers = new Set<ReturnType<typeof setTimeout>>();
   if (o.resume !== false) {
-    const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now, mono = () => performance.now() } = o.resume ?? {};
+    const { intervalMs = 5000, jumpMs = 30_000, recheckMs = 15_000, wall = Date.now, mono = () => performance.now(), busy = () => nodePerformance.eventLoopUtilization().active } = o.resume ?? {};
     /** When the next schedule is due (ms), as the platform last said: at start, and in every catch-up's reply. */
     let nextAlarmAt: number | null = null;
     /** Whether a catch-up has replied (the start's read then says nothing newer). */
@@ -969,22 +970,24 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
       },
       (e) => log(`couldn't read the next schedule's time at start: ${(e as Error).message}`),
     );
-    let last = { wall: wall(), mono: mono() };
+    let last = { wall: wall(), mono: mono(), busy: busy() };
     resumeTimer = setInterval(() => {
-      const now = { wall: wall(), mono: mono() };
+      const now = { wall: wall(), mono: mono(), busy: busy() };
       // A sleep shows as the ticks' gap by the wall clock: the process didn't run meanwhile. The monotonic clock
-      // can't tell it: on macOS it may run on through a sleep (and a DarkWake runs the process for moments).
-      const gap = now.wall - last.wall;
+      // can't tell it: on macOS it may run on through a sleep (and a DarkWake runs the process for moments). A gap
+      // the event loop was busy for (a big backup made in this process, a debugger's pause) isn't one.
+      const gap = now.wall - last.wall - (now.busy - last.busy);
       const monoGap = now.mono - last.mono;
       last = now;
-      // What the owner's sleep test reads in hewn.log: each long gap, by both clocks.
-      if (gap > Math.max(TICK_GAP_LOGGED_MS, 3 * intervalMs)) log(`tick gap: ${Math.round(gap / 1000)}s by the wall clock, ${Math.round(monoGap / 1000)}s by the monotonic one`);
+      // What the owner's sleep test reads in hewn.log: each long gap, by both clocks (one over jumpMs says so below).
+      const secs = (ms: number) => Math.round(ms / 1000);
+      if (gap > Math.max(TICK_GAP_LOGGED_MS, 3 * intervalMs) && gap <= jumpMs) log(`tick gap: ${secs(gap)}s by the wall clock, ${secs(monoGap)}s by the monotonic one`);
       if (gap <= jumpMs) {
         // The next schedule's time came by the wall clock (and a little more: the alarm, when it fires, comes first).
         if (!catchingUp && nextAlarmAt !== null && nextAlarmAt !== caughtUpFor && now.wall >= nextAlarmAt + ALARM_GRACE_MS) scheduleTime(nextAlarmAt);
         return;
       }
-      log(`${Math.round(gap / 1000)}s passed between two looks (the machine slept, or Hewn was suspended): resumed; catching up`);
+      log(`${secs(gap)}s passed between two looks (${secs(monoGap)}s by the monotonic clock; the machine slept, or Hewn was suspended): resumed; catching up`);
       resumedAt = Date.now();
       void caughtUp();
       const t = setTimeout(() => (recheckTimers.delete(t), void caughtUp()), recheckMs);
