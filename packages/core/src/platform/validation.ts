@@ -10,7 +10,7 @@ import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
-import type { CallHandler, CheckResult, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
+import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
@@ -39,6 +39,8 @@ export interface Candidate {
   screenshotDark?: Uint8Array;
   /** With `check`: what failed (validation stops at the first). Such a candidate is never promoted. */
   failures?: string[];
+  /** What the checks found that doesn't fail it: kept on the build, and on its review card when it's held. */
+  warnings: CheckWarning[];
 }
 
 /** The four renders of a candidate's screen a held build's review card shows (and a check returns): 1280 and 390 px, light and dark. */
@@ -74,6 +76,18 @@ export class Validation extends Domain {
    * client's check, whose migrations run there only once submitted.
    */
   async validate(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean; liveData?: boolean } = {}): Promise<Candidate> {
+    // What a check finds that doesn't fail the candidate. Every build's log keeps them, however validation ends (a
+    // builder's check has them in its text instead).
+    const warnings: CheckWarning[] = [];
+    try {
+      return await this.validateSteps(build, step, opts, warnings);
+    } finally {
+      if (!opts.check) for (const w of warnings) step(`warning: ${warningText(w)}`);
+    }
+  }
+
+  /** `validate`'s steps; the checks add what they find that doesn't fail the candidate to `warnings`. */
+  private async validateSteps(build: BuildRow, step: (message: string) => void, opts: { onTests?: (passed: number, total: number) => void; measure?: boolean; check?: boolean; liveData?: boolean }, warnings: CheckWarning[]): Promise<Candidate> {
     const onTests = opts.onTests ?? (() => {});
     const id = build.capabilityId;
     const fail = (msg: string, problems: string[] = []): never => {
@@ -400,6 +414,7 @@ export class Validation extends Domain {
       ...(kept.screenshot ? { screenshot: kept.screenshot } : {}),
       ...(kept.screenshotDark ? { screenshotDark: kept.screenshotDark } : {}),
       ...(opts.check ? { failures } : {}),
+      warnings,
     };
   }
 
@@ -429,6 +444,7 @@ export class Validation extends Domain {
       await this.workbench.remove(copy.id).catch(() => {});
     }
     const defects = candidate?.defects ?? [];
+    const warnings = candidate?.warnings ?? [];
     // The top of a long page shown, four images a call whatever its length (a session keeps every image
     // it was shown); the rest in files beside them, to open when needed.
     const shots = candidate?.shots ?? [];
@@ -438,7 +454,7 @@ export class Validation extends Domain {
     const parts = shots.filter((s) => isPart(s.name) && (room -= s.png.length) >= 0);
     // Its UI renders unless it has none, or the build adds widgets only (they're drawn, but not shown back).
     const ui = candidate ? !!candidate.manifest.ui?.available && build.kind !== "widgets" : undefined;
-    return { passed: !failures.length, text: checkText({ failures, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled, shown: opts.shots ?? "files" }), failures, defects, images, ...(parts.length ? { parts } : {}) };
+    return { passed: !failures.length, text: checkText({ failures, warnings, defects, images: images.map((i) => i.name), parts: parts.map((i) => i.name), passed, ui, sampled: !!candidate?.sampled, shown: opts.shots ?? "files" }), failures, warnings, defects, images, ...(parts.length ? { parts } : {}) };
   }
 
   /**
@@ -448,14 +464,14 @@ export class Validation extends Domain {
   checksFor(build: BuildRow, signal: AbortSignal, note: (line: string) => void): { run: (id: string) => Promise<CheckResult>; settled: () => Promise<void> } {
     let used = 0;
     let queue: Promise<unknown> = Promise.resolve();
-    const refused = (text: string): CheckResult => ({ passed: false, text, failures: [text], defects: [], images: [] });
+    const refused = (text: string): CheckResult => ({ passed: false, text, failures: [text], warnings: [], defects: [], images: [] });
     const run = (_id: string) => {
       const next = queue.then(async (): Promise<CheckResult> => {
         if (signal.aborted) return refused("The build was cancelled.");
         if (++used > MAX_CHECKS) return refused(`No checks left: this attempt has had its ${MAX_CHECKS}. Fix what the last one showed and stop; Hewn validates your work when you do.`);
         note(`Checking its work (${used} of ${MAX_CHECKS})`);
         const r = await this.check(build);
-        note(r.passed ? `Check passed${r.defects.length ? `, ${counted(r.defects.length, "thing")} measured on the screen to fix` : ""}` : `Check: ${counted(r.failures.length, "problem")} to fix`);
+        note(r.passed ? `Check passed${r.warnings.length ? ` with ${counted(r.warnings.length, "warning")}` : ""}${r.defects.length ? `, ${counted(r.defects.length, "thing")} measured on the screen to fix` : ""}` : `Check: ${counted(r.failures.length, "problem")} to fix`);
         return r;
       });
       queue = next.catch(() => {});
@@ -491,6 +507,8 @@ export class Validation extends Domain {
     const id = build.capabilityId;
     const { manifest, files, code, base, views } = candidate;
     if (candidate.failures?.length) throw new Error("a candidate that failed its check isn't promoted");
+    // A held one's card shows its warnings (its log has them from validation).
+    const warnings = candidate.warnings ?? [];
     // A later check of the same build (another pass) may have drawn over the build page's screenshot.
     await this.keepScreenshots(build, candidate);
     await this.blobs.put(`versions/${code.hash}.json`, encodeVersion(code.hash, files, code.js));
@@ -500,13 +518,14 @@ export class Validation extends Domain {
     // an agent's waits for the owner all the same while its approval mode says so.
     const dep = build.dependsOn ? this.registry.getBuild(build.dependsOn) : undefined;
     const partOfCreate = dep?.kind === "create" && dep.capabilityId === id && dep.requestedBy === build.requestedBy;
-    const held = !byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait";
+    // A fix of a held change the owner asked for ("Ask builder to fix") is held again: they haven't allowed it yet.
+    const held = !!(build.request as { fixOf?: string }).fixOf || (!byOwner(build) && this.agentStore.approvalMode(build.requestedBy) === "wait");
     const review = partOfCreate && !held ? undefined : base ? reviewFor(build, base, { manifest, files }, code.hash, views, held) : held ? newToolReview(manifest, code.hash, views) : undefined;
     if (review) {
       const shots = (candidate.shots ?? []).filter((s) => REVIEW_SHOTS.includes(s.name));
       for (const s of shots) await this.blobs.put(reviewShotKey(build.id, s.name), s.png);
       await this.workbench.remove(build.id);
-      return { review: shots.length ? { ...review, shots: shots.map((s) => s.name) } : review };
+      return { review: { ...review, ...(shots.length ? { shots: shots.map((s) => s.name) } : {}), ...(warnings.length ? { warnings } : {}) } };
     }
     return { version: await this.promoteVersion(build, manifest, files, code, step) };
   }
@@ -699,7 +718,7 @@ function reviewOps(ops: OperationManifest[], views: Map<string, unknown>): Build
  * new tool waits while its mode says to: `promote`.)
  */
 function reviewFor(build: BuildRow, base: { manifest: CapabilityManifest; files: Files }, candidate: { manifest: CapabilityManifest; files: Files }, contentHash: string, views: Map<string, unknown>, held: boolean): BuildReview | undefined {
-  if (byOwner(build)) return undefined;
+  if (byOwner(build) && !held) return undefined;
   const key = (o: OperationManifest) => opKey(o.name, o.version);
   const had = new Map(base.manifest.operations.map((o) => [key(o), o]));
   const newOperations = reviewOps(candidate.manifest.operations.filter((o) => !had.has(key(o))), views);
@@ -771,19 +790,23 @@ function shotsText(images: string[], parts: string[], shown: ShotsShown): string
   return `${where}${rest} Open every one and fix what looks broken, cramped, cut off or unreadable.`;
 }
 
+/** A warning in one line: "secret-scan: a long random string (src/data.ts:12)". */
+export const warningText = (w: CheckWarning) => `${w.check}: ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`;
+
 /**
  * What a builder reads back from its check. `images`: the renders' names; `passed`: the steps that
  * passed; `ui`: whether its UI should have rendered (unknown when validation stopped early);
  * `sampled`: whether the renders show the sample data; `parts`: the rest of a long page; `shown`:
  * where the renders are.
  */
-function checkText(c: { failures: string[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean; shown: ShotsShown }): string {
-  const { failures, defects, images, parts, passed, ui, sampled, shown } = c;
+function checkText(c: { failures: string[]; warnings: CheckWarning[]; defects: string[]; images: string[]; parts: string[]; passed: string[]; ui: boolean | undefined; sampled: boolean; shown: ShotsShown }): string {
+  const { failures, warnings, defects, images, parts, passed, ui, sampled, shown } = c;
   const list = (lines: string[]) => lines.map((l) => `- ${l.replace(/ \(screenshot attached[^)]*\)/, "")}`).join("\n");
   const skipped = passed.find((l) => /visual check skipped/.test(l));
   return [
-    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${defects.length || (images.length && shown !== "none") ? " Look at what follows before you stop." : ""}`,
+    failures.length ? `FAIL: ${counted(failures.length, "problem")}. Fix ${failures.length === 1 ? "it" : "them"}, then check again.` : `PASS: validation would accept this.${warnings.length || defects.length || (images.length && shown !== "none") ? " Look at what follows before you stop." : ""}`,
     failures.length ? `What failed:\n${list(failures)}` : "",
+    warnings.length ? `Warnings (they don't fail it; the owner sees each one on the build, so fix what you can):\n${list(warnings.map(warningText))}` : "",
     defects.length ? `Measured on the UI (fix these too: on the phone first, keep it working from 375 px up):\n${list(defects)}` : "",
     images.length
       ? `Your UI ${sampled ? "filled with your sample data" : "empty (there's no sample/calls.json to fill it)"}, at 1280 and 390 px wide, light and dark: ${shotsText(images, parts, shown)}`
