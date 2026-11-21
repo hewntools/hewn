@@ -199,6 +199,7 @@ export function crc32(data: Uint8Array): number {
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+const latin1 = new TextDecoder("latin1");
 
 /** A zip of `files` (path → bytes), stored, sorted by path. */
 export function writeZip(files: Files, now = new Date()): Uint8Array {
@@ -461,23 +462,11 @@ function indexOfBytes(data: Uint8Array, needle: Uint8Array, from = 0): number {
  */
 export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
   const out: Finding[] = [];
-  const named = new Map<string, { label: string; kind: "secret" | "setting" }>();
-  for (const o of own) {
-    const v = typeof o === "string" ? { value: o, label: "One of your own stored values", kind: "secret" as const } : { value: o.value, label: o.label, kind: o.kind ?? "secret" };
-    // The same value as a key and as a setting: a key, so it blocks.
-    if (v.value.length >= 6 && (!named.has(v.value) || (v.kind === "secret" && named.get(v.value)!.kind !== "secret"))) named.set(v.value, { label: v.label, kind: v.kind });
-  }
+  const named = ownNamed(own);
   const mine = [...named.keys()].sort((a, b) => b.length - a.length);
   for (const [file, data] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (data.includes(0)) {
-      for (const v of mine) {
-        const at = indexOfBytes(data, enc.encode(v));
-        if (at < 0) continue;
-        let line = 1;
-        for (let i = data.indexOf(10); i >= 0 && i < at; i = data.indexOf(10, i + 1)) line++;
-        const { label, kind } = named.get(v)!;
-        out.push({ file, line, kind, label, masked: mask(v), text: v });
-      }
+      out.push(...ownInBinary(file, data, named), ...shapesInBinary(file, data));
       continue;
     }
     const lines = dec.decode(data).split("\n");
@@ -500,4 +489,58 @@ export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
     });
   }
   return out;
+}
+
+/**
+ * Where the owner's own values are in `files`, exactly, and nothing else: validation's pass for them,
+ * apart from the patterns, so that what's said of a key shape is the same whether or not it's one of them.
+ */
+export function ownValuesIn(files: Files, own: OwnValue[]): Finding[] {
+  const out: Finding[] = [];
+  const named = ownNamed(own);
+  const mine = [...named.keys()].sort((a, b) => b.length - a.length);
+  for (const [file, data] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
+    if (data.includes(0)) {
+      out.push(...ownInBinary(file, data, named));
+      continue;
+    }
+    dec
+      .decode(data)
+      .split("\n")
+      .forEach((text, i) => {
+        for (const v of mine) if (text.includes(v)) out.push({ file, line: i + 1, kind: named.get(v)!.kind, label: named.get(v)!.label, masked: mask(v), text: v });
+      });
+  }
+  return out;
+}
+
+/** The owner's values to look for, each named, from 6 characters (shorter ones are too common to mean anything). The same value as a key and a setting: a key. */
+function ownNamed(own: OwnValue[]): Map<string, { label: string; kind: "secret" | "setting" }> {
+  const named = new Map<string, { label: string; kind: "secret" | "setting" }>();
+  for (const o of own) {
+    const v = typeof o === "string" ? { value: o, label: "One of your own stored values", kind: "secret" as const } : { value: o.value, label: o.label, kind: o.kind ?? "secret" };
+    if (v.value.length >= 6 && (!named.has(v.value) || (v.kind === "secret" && named.get(v.value)!.kind !== "secret"))) named.set(v.value, { label: v.label, kind: v.kind });
+  }
+  return named;
+}
+
+/** The line `at` (a byte offset) is on. */
+const lineAt = (data: Uint8Array, at: number) => {
+  let line = 1;
+  for (let i = data.indexOf(10); i >= 0 && i < at; i = data.indexOf(10, i + 1)) line++;
+  return line;
+};
+
+/** The owner's values in a binary file (one with a NUL byte), byte for byte. */
+function ownInBinary(file: string, data: Uint8Array, named: Map<string, { label: string; kind: "secret" | "setting" }>): Finding[] {
+  return [...named.keys()].flatMap((v) => {
+    const at = indexOfBytes(data, enc.encode(v));
+    return at < 0 ? [] : [{ file, line: lineAt(data, at), ...named.get(v)!, masked: mask(v), text: v }];
+  });
+}
+
+/** Key shapes in a binary file, read byte for byte (a key is ASCII wherever it's kept): not the long random strings or personal data, which binary data is full of. */
+function shapesInBinary(file: string, data: Uint8Array): Finding[] {
+  const text = latin1.decode(data);
+  return KEYS.flatMap(([label, re]) => [...text.matchAll(re)].map((m): Finding => ({ file, line: lineAt(data, m.index), kind: "key", label, masked: mask(m[0]), text: m[0] })));
 }

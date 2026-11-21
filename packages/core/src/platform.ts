@@ -426,6 +426,8 @@ export class Platform {
   buildReport(owner: Agent, opts?: { days?: number }): BuildReport { return this.d.builds.buildReport(owner, opts); }
   buildTranscript(owner: Agent, buildId: string): Promise<string | undefined> { return this.d.builds.buildTranscript(owner, buildId); }
   buildsInReview(owner: Agent): BuildView[] { return this.d.builds.buildsInReview(owner); }
+  keyLocks(owner: Agent) { return this.d.builds.keyLocksFor(owner); }
+  acknowledgeKeyLock(owner: Agent, agentId: string) { return this.d.builds.acknowledgeKeyLock(owner, agentId); }
   approveBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.approveBuild(owner, buildId); }
   rejectBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.rejectBuild(owner, buildId); }
   reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number | null; files: CodeFile[] }> { return this.d.builds.reviewCode(owner, buildId); }

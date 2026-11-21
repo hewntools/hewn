@@ -5,13 +5,22 @@
 // learns where and which: an agent's check never looks, and an agent's build is told only that one is there.
 // Sharing refuses a key shape as it refuses the owner's own keys: no Hewn would install it.
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER, WEB_USER } from "@hewntools/core/auth.ts";
+import { bytes, contentHash, decodeVersion, encodeVersion } from "@hewntools/core/files.ts";
 import type { FileEntry } from "@hewntools/core/platform.ts";
 import { OWN_KEY_FOUND } from "@hewntools/core/platform/validation.ts";
+import { KEY_LOCKED } from "@hewntools/core/platform/builds.ts";
 import { installFrom, installSeed, SEED, setup } from "./helpers.ts";
+
+const CLI = fileURLToPath(new URL("../packages/cli/src/cli.ts", import.meta.url));
 
 /** A GitHub token's shape, made here so that no file in this repository holds one. */
 const TOKEN = `ghp_${"A1b2C3d4".repeat(5)}`;
@@ -139,7 +148,7 @@ describe("the owner's stored keys", () => {
     assert.ok(view.includes(OWN_KEY_FOUND) && !view.includes("notes.txt:2"), view);
   });
 
-  test("the owner's own build: its check and its failure name the file, the line and which key, never the value", async () => {
+  test("the owner's own build: its check names the file, the line and which key; its failure, which an agent may read, says only that one is there", async () => {
     const seen: string[] = [];
     t.queue((async (ws: string, job: { check?: (id: string) => Promise<unknown> }) => {
       writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`);
@@ -148,9 +157,54 @@ describe("the owner's stored keys", () => {
     const b = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a fixture" })).buildId);
     assert.ok(seen[0].includes(`tests/notes.txt:2: ${LABEL}`) && !seen[0].includes(STORED), seen[0]);
     assert.equal(b.status, "failed");
-    const log = b.log.join("\n");
-    assert.match(log, /one of the owner's stored keys is in its files/);
+    // An agent that can see the tool can read its builds: only the generic line.
+    const view = JSON.stringify(t.platform.getBuild(t.claude, b.buildId));
+    assert.ok(view.includes(OWN_KEY_FOUND), view);
+    for (const leak of [STORED, "notes.txt:2", "Site Connection", "API_KEY"]) assert.ok(!view.includes(leak), `${leak} in ${view}`);
+    const log = (await t.platform.buildTranscript(USER, b.buildId)) ?? "";
     assert.ok(log.includes(`tests/notes.txt:2: ${LABEL}`) && !log.includes(STORED), log);
+  });
+
+  test("what an agent is told of key shapes doesn't depend on the owner's keys: one that is a stored key is listed like any other", async () => {
+    const shaped = (n: string) => `ghp_${n.repeat(5)}`;
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", shaped("Z9y8X7w6"));
+    const submit = async (guess: string) => {
+      const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: plus("tests/notes.txt", "fixtures", `one: ${shaped("Q1w2E3r4")}`, `two: ${guess}`), capabilityId: "running-log", request: "fixtures" })).buildId);
+      const v = t.platform.getBuild(t.claude, b.buildId);
+      return { id: b.buildId, said: JSON.stringify({ status: v.status, failure: v.failure, log: v.log }).replaceAll(b.buildId, "BUILD") };
+    };
+    const unmatched = await submit(shaped("M5n6B7v8"));
+    const matched = await submit(shaped("Z9y8X7w6"));
+    assert.equal(matched.said, unmatched.said);
+    // What it does learn is the lockout: one bit, after which it builds nothing until the owner looks.
+    assert.deepEqual(Object.keys(t.platform.keyLocks(USER)), ["claude-code"]);
+    assert.match(matched.said, /tests\/notes\.txt:3: looks like a GitHub token/);
+    // The owner's log has it all the same, though the shapes failed it first.
+    assert.ok(((await t.platform.buildTranscript(USER, matched.id)) ?? "").includes(`tests/notes.txt:3: ${LABEL}`));
+    assert.ok(!((await t.platform.buildTranscript(USER, unmatched.id)) ?? "").includes(LABEL));
+  });
+
+  test("an agent whose build held one is locked out of building until the owner has looked; the owner's own build locks nobody", async () => {
+    const hit = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding(), capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.equal(hit.status, "failed");
+    assert.deepEqual(Object.keys(t.platform.keyLocks(USER)), ["claude-code"]);
+    assert.equal(t.platform.keyLocks(USER)["claude-code"].buildId, hit.buildId);
+    assert.throws(() => t.platform.keyLocks(t.claude), (e: { code?: string }) => e.code === "forbidden");
+    const locked = (e: unknown) => (e as { code?: string; message?: string }).code === "forbidden" && (e as Error).message === KEY_LOCKED;
+    await assert.rejects(t.platform.submitFiles(t.claude, { files: entriesOf(SEED), capabilityId: "running-log", request: "again" }), locked);
+    await assert.rejects(t.platform.modify(t.claude, { capabilityId: "running-log", request: "again" }), locked);
+    await assert.rejects(t.platform.retryBuild(t.claude, hit.buildId), locked);
+    assert.equal((await t.platform.checkFiles(t.claude, { files: entriesOf(SEED), capabilityId: "running-log" })).passed, true, "a check still runs: it never looks for the owner's keys");
+    assert.throws(() => t.platform.acknowledgeKeyLock(t.claude, "claude-code"), (e: { code?: string }) => e.code === "forbidden");
+    t.platform.acknowledgeKeyLock(USER, "claude-code");
+    assert.deepEqual(t.platform.keyLocks(USER), {});
+    const again = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: entriesOf(SEED).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace("durable", "lasting") } : f)), capabilityId: "running-log", request: "again" })).buildId);
+    assert.equal(again.status, "review", again.log.join("\n"));
+    // The owner's own build with one in it: failed, nobody locked.
+    t.queue((ws: string) => writeFileSync(join(ws, "tests", "notes.txt"), `password: ${STORED}\n`));
+    const own = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.equal(own.status, "failed");
+    assert.deepEqual(t.platform.keyLocks(USER), {});
   });
 
   test("settings' values are never looked for: a city in a tool's files is no key", async () => {
@@ -164,22 +218,59 @@ test("sharing refuses a key shape, naming its file and line, as it refuses the o
   const t = setup();
   try {
     await installSeed(t.platform);
-    // Validation leaves npm's lockfile alone (its hashes look random); sharing reads every file.
-    const lock = JSON.stringify({ name: "running-log", lockfileVersion: 3, packages: { "": { name: "running-log" } }, note: TOKEN });
-    const b = await t.build(
-      () => t.platform.modify(USER, { capabilityId: "running-log", request: "a lockfile" }),
-      (ws) => {
-        writeFileSync(join(ws, "package-lock.json"), lock);
-        writeFileSync(join(ws, "sample", "calls.json"), JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }]));
-      },
-    );
-    assert.equal(b.status, "promoted", b.log.join("\n"));
-    const check = await t.platform.shareCheck(USER, "running-log");
-    assert.deepEqual(check.blocked, { kind: "key", file: "package-lock.json", line: 1, label: "Looks like a GitHub token" });
-    assert.ok(check.findings.find((f) => f.file === "package-lock.json")?.blocks);
-    await assert.rejects(t.platform.shareBundle(USER, "running-log"), /package-lock\.json:1 looks like a GitHub token\. Remove it, then share again \(a tool with a key in it doesn't install anywhere\)/);
-    await assert.rejects(t.platform.createShareLink(USER, "running-log", {}), /looks like a GitHub token/);
+    // A version kept before the scan, its test holding a fake token: written as an earlier Hewn would have kept it.
+    const row = t.platform.registry.getVersion("running-log", 1)!;
+    const kept = decodeVersion((await t.platform.blobs.get(`versions/${row.contentHash}.json`))!);
+    const files = { ...kept.files, "tests/notes.txt": bytes(`fixtures\ntoken: ${TOKEN}\n`) };
+    const hash = contentHash(files, kept.bundle);
+    await t.platform.blobs.put(`versions/${hash}.json`, encodeVersion(hash, files, kept.bundle));
+    t.platform.registry.insertVersion({ capabilityId: "running-log", version: 2, manifest: row.manifest, contentHash: hash, buildId: row.buildId });
+    const check = await t.platform.shareCheck(USER, "running-log", 2);
+    assert.deepEqual(check.blocked, { kind: "key", file: "tests/notes.txt", line: 2, label: "Looks like a GitHub token" });
+    assert.ok(check.findings.find((f) => f.file === "tests/notes.txt")?.blocks);
+    await assert.rejects(t.platform.shareBundle(USER, "running-log", 2), /tests\/notes\.txt:2 looks like a GitHub token\. Remove it, then share again \(a tool with a key in it doesn't install anywhere\)/);
+    await assert.rejects(t.platform.createShareLink(USER, "running-log", { version: 2 }), /looks like a GitHub token/);
   } finally {
     t.cleanup();
+  }
+});
+
+test("npm's lockfile and binary files are scanned for key shapes too (only long random strings are let off in the lockfile)", async () => {
+  const t = setup();
+  try {
+    await installSeed(t.platform);
+    const lock = JSON.stringify({ name: "running-log", lockfileVersion: 3, packages: { "": { name: "running-log" } }, note: TOKEN });
+    const locked = await t.platform.checkFiles(t.claude, { files: [...entriesOf(SEED), { path: "package-lock.json", content: lock }], capabilityId: "running-log" });
+    assert.ok(locked.failures.some((f) => f.includes("package-lock.json:1: looks like a GitHub token")), locked.text);
+    const blob = Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from(`\n${TOKEN}`), Buffer.from([0])]).toString("base64");
+    const binary = await t.platform.checkFiles(t.claude, { files: [...entriesOf(SEED), { path: "ui/blob.bin", content: blob, encoding: "base64" }], capabilityId: "running-log" });
+    assert.ok(binary.failures.some((f) => f.includes("ui/blob.bin:2: looks like a GitHub token")), binary.text);
+  } finally {
+    t.cleanup();
+  }
+});
+
+test("hewn share on a key shape: the finding marked ✖, the reason said, nothing written", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hewn-cli-share-"));
+  const finding = { file: "tests/notes.txt", line: 2, kind: "key", label: "Looks like a GitHub token", masked: "ghp_••••", blocks: true };
+  const server = createServer((req, res) => {
+    if (req.url === "/health") return void res.end("ok");
+    req.resume();
+    req.on("end", () => res.setHeader("content-type", "application/json").end(JSON.stringify({ check: { name: "Running Log", version: 1, files: 6, sample: { calls: 3 }, findings: [finding], blocked: { kind: "key", file: finding.file, line: finding.line, label: finding.label } } })));
+  }).listen(0, "127.0.0.1");
+  try {
+    await new Promise((r) => server.once("listening", r));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    writeFileSync(join(home, "supervisor.json"), JSON.stringify({ url, adminToken: "t", control: { url, token: "t" }, pid: 1 }));
+    const run = await new Promise<{ code: number; out: string; err: string }>((done) =>
+      execFile(process.execPath, ["--disable-warning=ExperimentalWarning", CLI, "share", "running-log", "--out", join(home, "x.zip")], { env: { ...process.env, HEWN_HOME: home } }, (e, out, err) => done({ code: (e as { code?: number } | null)?.code ?? 0, out, err })),
+    );
+    assert.equal(run.code, 1, run.err);
+    assert.match(run.out, /✖ tests\/notes\.txt:2 {2}Looks like a GitHub token: ghp_••••/);
+    assert.match(run.err, /✖ keys are in it \(✖ above: tests\/notes\.txt:2\)\. Remove them, then share again\./);
+    assert.ok(!existsSync(join(home, "x.zip")));
+  } finally {
+    server.close();
+    rmSync(home, { recursive: true, force: true });
   }
 });

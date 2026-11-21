@@ -19,7 +19,7 @@ A shared tool is one file, `<tool>.hewn.zip` (a link serves the same file), with
 
 Two things stop a share (a file and a link alike):
 
-- **One of your own keys is in the code:** a key you gave any of your tools, or a model provider's key. Share… lists each by file and line, and **Change…** asks the builder to take them all out. Share again once the new version is live.
+- **One of your own keys is in the code, or anything shaped like a key:** a key you gave any of your tools, a model provider's key, or something like `sk-…` or a GitHub, Slack or AWS token (no Hewn would install it). Share… lists each by file and line, and **Change…** asks the builder to take them all out. Share again once the new version is live.
 - **No sample data.** **Ask builder** adds it (the usual way: it writes made-up entries that fit the tool), or **Write it yourself**. A connection shares without it: it has no data of its own to show, and its sign-in never travels (whoever installs it signs in with their own account).
 
 From the terminal: `hewn share <id> [--version N] [--out file]` prints the same findings and writes the file unless something stops it.

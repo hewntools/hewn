@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Inbox (Needs you, Building, Recent), behind the bell in the top bar, and the banner for an
 // agent blocked on a destructive call.
-import { api, appIcon, BRAND, caps, enc, fail, h, pixelGlyph, rowCells, skeleton } from "../kit.js";
+import { api, appIcon, BRAND, caps, confirmDialog, enc, fail, h, pixelGlyph, rowCells, skeleton, toast } from "../kit.js";
 import { activityRow, groupItems } from "./activity.js";
 import { agentRequestSheet, agentTile, confirmationSheet, providerTile } from "./agents.js";
 import { waitingPill } from "./build.js";
@@ -78,6 +78,21 @@ async function openNeed(n) {
       if (n.action === "Replace…" && c) await toolModelSheet(c, { replace: true });
       else await grantsSheet(n.capabilityId);
     } else if (n.kind === "builder-model") go("#/settings/ai");
+    else if (n.kind === "key-lock") {
+      // Whether the agent may build again. The build it's about is in the Inbox too: its log says where the key was.
+      const who = n.detail.split(" put one of")[0];
+      const ok = await confirmDialog({
+        title: `Let ${who} build again?`,
+        body: `Its last build of ${n.title} had one of your stored keys in the tool's files; that failed build's log says where. Until you say so, it can't build or hand over a tool. If you didn't expect this, disconnect it on Agents instead.`,
+        confirm: "Let it build again",
+        cancel: "Not now",
+      });
+      if (ok) {
+        await api(`/agents/${enc(n.agentId)}/key-lock`, { method: "DELETE" });
+        toast(`${who} can build again`);
+        pollInbox(true);
+      }
+    }
     // Suspended: the tool's page says why, with Resume.
     else if (n.kind === "suspended") go(`#/c/${enc(n.capabilityId)}`);
     else if (n.kind === "model-key") {

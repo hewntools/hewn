@@ -179,14 +179,15 @@ A Builder should receive only the information needed for its build job.
 
 An Agent that writes a tool itself (`capabilities_submit`) is held to the same: it promotes nothing (its files go through the same validation as any build, and while its approval mode is `wait` the owner approves the result), and it never receives the owner's data or secrets.
 
-**Keys in a tool's files, and who learns of them (owner, 2026-11-21).** Validation scans a candidate's own files (not npm's lockfile) for key shapes, which fail it, and long random strings, which warn; and for the owner's stored keys (every tool's secrets and the model providers' keys; never settings' values, never the personal-data patterns), one of which fails every build. What's said, and to whom, is set so that the scan is never an oracle on the owner's keys:
+**Keys in a tool's files, and who learns of them (owner, 2026-11-21).** Validation scans a candidate's own files for key shapes (binary files and npm's lockfile too), which fail it, and long random strings (not in the lockfile, whose integrity hashes all look random), which warn; and, in a pass of its own, for the owner's stored keys (every tool's secrets and the model providers' keys; never settings' values, never the personal-data patterns), one of which fails every build. What's said, and to whom, is set so that the scan is never an oracle on the owner's keys:
 
 - An Agent's `capabilities_check`, and Hewn's builder's `check` on a build an Agent asked for, never look for the owner's keys. A check is cheap, silent and up to 30 an hour, and an answer naming a line would test thousands of guesses at once against a weak value stored as a key (a password, a PIN). Key shapes and long random strings are reported in full: they depend on the Agent's own text only.
-- An Agent's build or submission holding one fails with one line, `OWN_KEY_FOUND` ("a file holds one of the owner's stored keys; the owner's build log says where"). The file, the line and which key go to the owner's build log only (`ownersDetail`), as a failed dry run's error does.
-- The owner's own builds name the file, the line and which key in the builder's check and in the failure.
+- Any build holding one, the owner's too, fails with one line, `OWN_KEY_FOUND` ("a file holds one of the owner's stored keys; the owner's build log says where"): a build's log and failure are what an Agent that can see the tool may read (its build ids reach Agents), and "Ask builder to fix" carries them into the next request. The file, the line and which key go to the build's transcript only, which is the owner's, written even when the build fails earlier on a key shape.
+- What's said of key shapes doesn't depend on the owner's keys: they're found without them, so a shape that is one of the owner's keys is listed like any other.
+- The owner's own builder learns the file, the line and which key from its `check`, to take it out.
 - Never the value, to anyone, not even masked.
 
-What's left is one bit per submission, and each costs a failed build in the owner's Inbox naming the key.
+What's left is one bit, and then the Agent is stopped: one bit a submission would still be a search, since the match is on a substring, a submission can be 5 MB and submissions have no hourly cap (every 6-digit PIN fits in about 1 MB, so halving would find one in about 20). **After an Agent's first `OWN_KEY_FOUND`, on a build it asked for or a submission, it's locked out** (owner, 2026-11-21, "Lock the agent out"): its builds, retries and submissions are refused with `KEY_LOCKED` ("the owner needs to look at your last build first"), which says nothing more, until the owner acknowledges the Inbox item that names the Agent and the tool (`keylocks` in the platform's KV; `DELETE /api/agents/:id/key-lock`). Its checks still run: they never look for the owner's keys. The owner's own builds lock nobody.
 
 One exception, the owner's to make per build: a Polish with **Show the builder my own data** ticked
 (`realData`, off by default, only offered when the tool has rows of its own, never by an agent: Polish is
@@ -386,4 +387,4 @@ A tool installed from a file, a link or Hewn's own tools runs through the same v
 11. External account connections belong to the user.
 12. Platform policy is authoritative over Agent claims.
 13. Destructive actions require stronger controls than ordinary reads and writes.
-14. Nothing an Agent is told says whether a value is one of the owner's stored keys, or where one is.
+14. Nothing an Agent is told says whether a value is one of the owner's stored keys, or where one is; an Agent whose build held one builds nothing more until the owner has looked.

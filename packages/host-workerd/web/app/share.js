@@ -24,9 +24,9 @@ const shareIcon = () =>
 const shareButton = (c, { version } = {}) => h("button", { class: "with-icon", onclick: () => shareSheet(c, { version }).catch(fail) }, shareIcon(), "Share…");
 
 /** What Ask builder asks for: sample data, written the way the brief says. */
+const ASK_SAMPLE = "Add sample data: sample/calls.json with made-up entries that show what the tool does (it fills an empty tool when someone installs it, and its screenshots).";
 /** A finding that stops the share: one of your own keys, or anything shaped like a key (no Hewn would install it). */
 const blocks = (f) => !!f.blocks;
-const ASK_SAMPLE = "Add sample data: sample/calls.json with made-up entries that show what the tool does (it fills an empty tool when someone installs it, and its screenshots).";
 
 async function shareSheet(c, { version } = {}) {
   let check = await api(`/capabilities/${enc(c.id)}/share${version ? `?version=${version}` : ""}`);

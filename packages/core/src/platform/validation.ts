@@ -4,7 +4,7 @@
 // review. The check and the promotion are separate steps: a candidate can be checked and never promoted.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { dependencyProblems, LOCKFILES, LONG_RANDOM, readSample, SAMPLE_FILE, scanFiles } from "../bundle.ts";
+import { dependencyProblems, LOCKFILES, LONG_RANDOM, ownValuesIn, readSample, SAMPLE_FILE, scanFiles } from "../bundle.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -55,8 +55,8 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
 
 /**
- * What an agent's build says when one of the owner's stored keys is in its files: never where, or which,
- * which the owner's build log has (an agent could otherwise learn whether a guess is one of them).
+ * What a build says when one of the owner's stored keys is in its files: never where, or which, which the
+ * owner's build log has. Any build's, the owner's too: an agent that can see a tool can read its builds.
  */
 export const OWN_KEY_FOUND = "a file holds one of the owner's stored keys; the owner's build log says where";
 
@@ -186,24 +186,32 @@ export class Validation extends Domain {
     const migrationErrors = migrationProblems(migrations, base ? migrationsOf(base.files) : []);
     if (migrationErrors.length) softFail("migrations rejected", migrationErrors);
 
-    // 4b. the secret scan, of its own files (not npm's lockfile: what it installs, with hashes that look
-    // random): a known key shape fails, and so does one of the owner's stored keys; a long random string
-    // warns, since a hash looks the same. Each named by its file and line, never its value. The owner's
-    // keys are looked for only where the answer stays the owner's (security-and-authority.md): never in an
-    // agent's check, which would say whether a guess is one of them, line by line; an agent's build is told
-    // only that one is there, and where and which go to the owner's build log.
+    // 4b. the secret scan, of its own files: a known key shape fails, and so does one of the owner's stored
+    // keys; a long random string warns, since a hash looks the same (not in npm's lockfile, whose integrity
+    // hashes all look random). Each named by its file and line, never its value. The owner's keys are looked
+    // for in a pass of their own, so what's said of a key shape is the same whether or not it's one of them,
+    // and only where the answer stays the owner's (security-and-authority.md): never in an agent's check,
+    // which would say whether a guess is one; a build is failed with OWN_KEY_FOUND alone, and where and which
+    // go to the owner's build log (a build's log is one an agent may read). The owner's own builder learns
+    // where from its check, to take it out.
+    const found = scanFiles(files);
+    const shapes = found.filter((f) => f.kind === "key" && f.label !== LONG_RANDOM);
+    const random = found.filter((f) => f.kind === "key" && f.label === LONG_RANDOM && !LOCKFILES.includes(f.file));
     const own = !opts.check || byOwner(build) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
-    const found = scanFiles(Object.fromEntries(Object.entries(files).filter(([p]) => !LOCKFILES.includes(p))), own);
-    const keys = found.filter((f) => f.kind === "key");
-    const shapes = keys.filter((f) => f.label !== LONG_RANDOM);
-    if (shapes.length) softFail(`a key in its files (a tool gets its keys from its connection's secrets, never from its files; a test's fake is a word like "fake")`, shapes.map((f) => `${f.file}:${f.line}: ${f.label[0].toLowerCase()}${f.label.slice(1)}`));
-    const stored = found.filter((f) => f.kind === "secret");
+    const stored = ownValuesIn(files, own);
+    let storedFailure: string | undefined;
     if (stored.length) {
       const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));
-      softFail(await this.ownersDetail(build, detail, OWN_KEY_FOUND, { note: !opts.check }));
+      if (opts.check) storedFailure = detail;
+      else {
+        await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${detail}`).catch(() => {});
+        storedFailure = OWN_KEY_FOUND;
+        this.d.builds.lockForKey(build);
+      }
     }
+    if (shapes.length) softFail(`a key in its files (a tool gets its keys from its connection's secrets, never from its files; a test's fake is a word like "fake")`, shapes.map((f) => `${f.file}:${f.line}: ${f.label[0].toLowerCase()}${f.label.slice(1)}`));
+    if (storedFailure) softFail(storedFailure);
     // One warning a file, at its first: a fixture full of hashes is one thing to look at.
-    const random = keys.filter((f) => f.label === LONG_RANDOM);
     for (const file of new Set(random.map((f) => f.file))) {
       const here = random.filter((f) => f.file === file);
       const what = here.length === 1 ? "a long random string" : `${here.length} long random strings, the first here`;
