@@ -80,7 +80,7 @@ Use it (as the owner; talks to the running Hewn)
   review [approve|reject <buildId>]
                       agents' changes waiting for you (to a connection, or adding operations)
   restore <id>        bring back a deleted tool, with its data
-  resume <id>         let a tool Hewn suspended run again (it kept Hewn's tools from responding, 3 times in an hour)
+  resume <id>         let a tool Hewn suspended run again (it worked over 10 s without a pause, 3 times in an hour)
   rollback <id> [version]
   export <id> [--out file.json]
   data reset <id> [--sample]

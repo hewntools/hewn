@@ -47,7 +47,7 @@ export { type InvokeRequest, maskInput, CALL_DEADLINE_MS, MAX_CALL_DEPTH, type C
 export { WIDGET_DEADLINE_MS, type HomeEntry, type HomeEntryView, type WidgetResult } from "./platform/widgets.ts";
 export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
-export { type Suspension, STALLS_TO_SUSPEND, STALL_WINDOW_MS } from "./platform/stalls.ts";
+export { type Suspension, STALL_MS, STALLS_TO_SUSPEND, STALL_WINDOW_MS } from "./platform/stalls.ts";
 export { type SummaryInput } from "./platform/sharing.ts";
 export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReportRow, type BuildReport, slugify, RESERVED_IDS, type SubmitEntry } from "./platform/builds.ts";
 export { CHECKS_PER_HOUR, type ClientCheck, type FileEntry, type Pack, candidateFiles, PACK_PATH } from "./platform/submissions.ts";

@@ -50,7 +50,7 @@ async function openCapability(c) {
 const suspendedText = (reason) => `Suspended: ${reason}. Its calls, schedules and widgets are refused until you resume it.`;
 
 /** Ask builder to fix: a Change with what happened in the box. */
-const fixSuspended = (c) => openChange(c, { m: "It kept Hewn's tools from responding while it ran (an endless loop?), so Hewn suspended it. Find what never lets go and fix it." });
+const fixSuspended = (c) => openChange(c, { m: "It worked for more than 10 seconds without a pause, 3 times within an hour, so Hewn suspended it. Find the code that runs that long without a pause (an endless loop?) and split the work across calls." });
 
 /** Resume: it runs again. Resolves whether it did. */
 const resumeSuspended = (c) =>

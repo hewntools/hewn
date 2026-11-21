@@ -142,7 +142,9 @@ export class Validation extends Domain {
       // Loading runs its top-level code: written down like a call, for a candidate that never lets go.
       exportedKeys = await this.d.stalls.running({ capabilityId: id, state: `test:${build.id}`, what: "load", caller: "validation" }, () => this.runtime.describe(code));
     } catch (e) {
-      return fail(`implementation failed to load: ${(e as Error).message}`);
+      const stalled = this.d.stalls.stalledRun(build.id);
+      this.d.stalls.forgetRun(build.id);
+      return fail(stalled ? `${stalled}, so Hewn's tools were restarted` : `implementation failed to load: ${(e as Error).message}`);
     }
     const exported = new Set(exportedKeys);
     const missing = manifest.operations.map((o) => opKey(o.name, o.version)).filter((k) => !exported.has(k));
@@ -194,9 +196,12 @@ export class Validation extends Domain {
     try {
       // One for all its loops of calls, so the time between them counts too.
       const breathe = breather();
-      // Its code kept Hewn's tools from responding (stalls.ts failed the build): the rest isn't run.
+      // Its code broke the stall rule (stalls.ts failed the build, or noted a check's copy): the rest isn't run, so a
+      // build or a check restarts Hewn's tools once at most.
       const stopIfStalled = () => {
-        if (this.registry.getBuild(build.id)?.status === "failed") throw new Error("stopped: its code kept Hewn's tools from responding");
+        const stalled = this.d.stalls.stalledRun(build.id);
+        if (stalled) throw new Error(`${stalled}, so Hewn's tools were restarted; the rest wasn't run`);
+        if (this.registry.getBuild(build.id)?.status === "failed") throw new Error("stopped: the build failed");
       };
       await this.runtime.dropState(testState);
       await this.runtime.migrate(testState, migrations, code);
@@ -254,7 +259,7 @@ export class Validation extends Domain {
           const before = await this.runtime.countState(sampleState, code);
           let inserted: string[];
           try {
-            ({ inserted } = await this.replayCall(manifest, sampleTarget, c));
+            ({ inserted } = await this.replayCall(manifest, sampleTarget, c, `on sample call ${i + 1}`));
           } catch (e) {
             softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
             replayed = false;
@@ -286,6 +291,7 @@ export class Validation extends Domain {
       // data, again on a tool filled with it, and that's the screenshot (the tool in use, not empty)
       let shot = false;
       const visualCheck = this.workbench.visualCheck;
+      stopIfStalled();
       if (manifest.ui?.available && visualCheck && build.kind !== "widgets") {
         await this.runtime.dropState(visualState);
         await this.runtime.migrate(visualState, migrations, code);
@@ -296,6 +302,7 @@ export class Validation extends Domain {
             ...(measure ? { measure } : {}),
             manifest: { ...manifest, status: { ready: true, missingSecrets: [], missingConfig: [], pendingGrants: [], missingDependencies: [] } },
             invoke: async (body) => {
+              stopIfStalled();
               const { result } = await this.d.invocation.execute(
                 manifest,
                 { capabilityId: id, code, state, secrets, config, caller: { kind: "test", id: "visual-check" } },
@@ -308,6 +315,7 @@ export class Validation extends Domain {
                       throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
                     }
                   : undefined,
+                "in the visual check",
               );
               return { result };
             },
@@ -350,14 +358,16 @@ export class Validation extends Domain {
 
       // 5c. changed widgets, drawn in every size they offer (the screenshot, unless the UI's was taken):
       // with sample data, what each shows on a tool filled with it; else its test case's output
+      stopIfStalled();
       const widgetsChanged = !!manifest.widgets?.length && (build.kind === "widgets" || JSON.stringify(manifest.widgets) !== JSON.stringify(base?.row.manifest.widgets));
       if (widgetsChanged && !shot && visualCheck && abiAtLeast(manifest, "2.3")) {
         const sampled = new Map<string, unknown>();
         if (sample)
           for (const w of manifest.widgets!) {
             await breathe();
+            stopIfStalled();
             const [operation, version] = w.operation.split("@");
-            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }).catch(() => undefined);
+            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }, "in the widget sheet").catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
           }
         const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: sampled.get(w.operation) ?? views.get(w.operation) ?? null }));
@@ -374,6 +384,7 @@ export class Validation extends Domain {
       }
 
       // 6. dry-run migrations against a copy of real state
+      stopIfStalled();
       if (opts.liveData !== false && (await this.runtime.hasState({ capabilityId: id }))) {
         await this.runtime.copyState({ capabilityId: id }, dryRun);
         try {
@@ -385,7 +396,9 @@ export class Validation extends Domain {
           softFail(message);
         }
       }
+      stopIfStalled();
     } finally {
+      this.d.stalls.forgetRun(build.id);
       for (const s of [testState, visualState, dryRun, sampleState, realState]) await this.runtime.dropState(s).catch(() => {});
     }
     return {
@@ -427,6 +440,7 @@ export class Validation extends Domain {
       // A step nothing after it can run without (the manifest, the bundle).
       failures = [(e as Error).message];
     } finally {
+      this.d.stalls.forgetRun(copy.id);
       await this.workbench.remove(copy.id).catch(() => {});
     }
     const defects = candidate?.defects ?? [];
@@ -565,9 +579,9 @@ export class Validation extends Domain {
   /**
    * One sample call (sample/calls.json), through the contract, with nothing granted: the target
    * has no hosts (no network), and other tools and the model refuse. Validation and installs both
-   * replay sample data this way.
+   * replay sample data this way. `via`: what a stall names it by ("on sample call 2").
    */
-  async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall) {
+  async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall, via?: string) {
     return this.d.invocation.execute(
       manifest,
       target,
@@ -580,6 +594,7 @@ export class Validation extends Domain {
             throw new PlatformError("forbidden", "sample data can't use the model");
           }
         : undefined,
+      via,
     );
   }
 
@@ -623,6 +638,7 @@ export class Validation extends Domain {
         { capabilityId: manifest.id, operation: c.operation, operationVersion: c.version, input: c.input },
         mock,
         fakeModel,
+        `on ${label}`,
       );
       if (c.expectError) throw new Error(`${label}: expected an error, got ${JSON.stringify(result)}`);
       const problems = widget ? viewErrors(result) : [];
