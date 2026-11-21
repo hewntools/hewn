@@ -97,6 +97,11 @@ export interface CapabilityRuntime {
   /** Operation keys (`name@version`) the bundle actually exports. */
   describe(code: CodeRef): Promise<string[]>;
   /**
+   * The hosts a build's calls were refused that no call was told of yet (`onRefusedHosts`): a fetch its code
+   * didn't wait for. Only a runtime that gates the network can tell: workerd's.
+   */
+  refusedHosts?(build: string): string[];
+  /**
    * Apply not-yet-applied migrations to a state, each atomically. Returns the names applied.
    * `code` is the version the state is being prepared for (runtimes that keep state inside the
    * implementation's own object, like Durable Object facets, need it).
@@ -175,6 +180,8 @@ export interface CheckWarning {
   message: string;
   file?: string;
   line?: number;
+  /** The hosts report's: the host it names. */
+  host?: string;
 }
 
 /** What a builder's check of its work in progress found. */

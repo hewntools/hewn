@@ -13,7 +13,7 @@ import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
-import { resolveHosts, wantedGrants } from "./grants.ts";
+import { hostOf, resolveHosts, wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
 import { breather, Domain } from "./context.ts";
 
@@ -53,6 +53,9 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  * quote that data, so it goes to the build's transcript, which only the owner reads.
  */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
+
+/** The most hosts the hosts report names, one warning each; the rest are counted in one more. */
+export const REPORTED_HOSTS = 20;
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
@@ -196,7 +199,9 @@ export class Validation extends Domain {
     const tried = new Map<string, Set<string>>();
     const triedBy = (what: string, config: Record<string, string> = {}) => (hosts: string[]) => {
       const declared = resolveHosts(manifest, config);
-      for (const h of hosts) if (!declares(declared, h)) tried.set(h, (tried.get(h) ?? new Set()).add(what));
+      // A config:NAME host whose value the call didn't have (a placeholder, or none) is that host all the same.
+      const unresolved = (manifest.requires?.hosts ?? []).filter((x) => x.startsWith("config:")).flatMap((x) => [config[x.slice(7)] ?? "undefined", hostOf(config[x.slice(7)] ?? "") ?? ""]);
+      for (const h of hosts) if (!declares(declared, h) && !unresolved.includes(h)) tried.set(h, (tried.get(h) ?? new Set()).add(what));
     };
     const opOf = (c: { operation: string; version?: number }) => {
       const op = caseOperation(manifest, c);
@@ -410,13 +415,15 @@ export class Validation extends Domain {
       stopIfStalled();
     } finally {
       this.d.stalls.forgetRun(build.id);
+      // 6a. the hosts report, kept when a step above failed too: a host it tried beyond its declaration warns, never
+      // fails (a tool may come to be allowed a new host; when it runs, a fetch to a host it isn't allowed is refused
+      // anyway). What its code fetched without waiting, after its last call, is collected here. At most REPORTED_HOSTS.
+      triedBy("its code, after a call")(this.runtime.refusedHosts?.(build.id) ?? []);
+      const hosts = [...tried];
+      for (const [host, by] of hosts.slice(0, REPORTED_HOSTS)) warnings.push({ check: "hosts", host, message: `tried to reach ${host}, a host it doesn't declare (${[...by].slice(0, 5).join(", ")}${by.size > 5 ? ` and ${by.size - 5} more` : ""}): when it runs, that's refused` });
+      if (hosts.length > REPORTED_HOSTS) warnings.push({ check: "hosts", message: `and ${hosts.length - REPORTED_HOSTS} more hosts it doesn't declare` });
       for (const s of [testState, visualState, dryRun, sampleState, realState]) await this.runtime.dropState(s).catch(() => {});
     }
-
-    // 6a. the hosts report: a host it tried beyond its declaration warns, never fails (a tool may come to be allowed
-    // a new host; when it runs, a fetch to a host it isn't allowed is refused anyway).
-    for (const [host, by] of tried) warnings.push({ check: "hosts", message: `tried to reach ${host}, a host it doesn't declare (${[...by].join(", ")}): when it runs, that's refused` });
-    if (tried.size) step(`hosts tried that it doesn't declare: ${[...tried.keys()].join(", ")}`);
     return {
       manifest,
       files,
@@ -690,10 +697,10 @@ function undeclaredDelete(op: OperationManifest, call: { before: Record<string, 
   if (fewer.length) throw new Error(`${label ? `${label}: ` : ""}${op.name} leaves ${fewer.join(", ")} with fewer rows and adds none: declare it destructive`);
 }
 
-/** The operation a test case or sample call runs: its version, or the highest. */
 /** Whether `declared` has `host` ("*.example.com": any name under it), as the egress gate reads a tool's hosts. */
-const declares = (declared: string[], host: string) => declared.some((h) => (h.startsWith("*.") ? host.endsWith(h.slice(1)) && host.length > h.length - 1 : host === h));
+const declares = (declared: string[], host: string): boolean => declared.some((h) => (h.startsWith("*.") ? host.endsWith(h.slice(1)) && host.length > h.length - 1 : host === h));
 
+/** The operation a test case or sample call runs: its version, or the highest. */
 const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
   m.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
 

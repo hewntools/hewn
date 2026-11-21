@@ -30,7 +30,7 @@ import { fetchLink } from "./surface/fetch-link.ts";
 import BRIEF from "./builder-brief.md";
 import { type CallInFlight, stallRoles } from "./stall-blame.ts";
 import { IDLE_GC_BACKGROUND_EVERY_MS, IDLE_GC_QUIET_MS, IdleGc, tickCall } from "./idle-gc.ts";
-import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, EGRESS_PATH, type EgressMark, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
+import { buildOf, CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, EGRESS_PATH, type EgressMark, reportedHost, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
 
 interface Env {
   HEWN: DurableObjectNamespace;
@@ -350,11 +350,11 @@ interface ToolsSide {
   away(): boolean;
   /** The tools process won't stop a call (code that never yields): have the supervisor restart it. */
   stuck(reason: string): Promise<void>;
-  /** The hosts fetches out of `isolate` were refused since this was last asked (Egress's marks), forgotten once told. */
-  refused(isolate: string): string[];
+  /** The hosts fetches out of a build's isolates were refused since this was last asked (Egress's marks), forgotten once told. */
+  refused(build: string): string[];
 }
 
-/** The most refused hosts kept per isolate, and isolates with some, until a call collects them. */
+/** The most refused hosts kept per build, and builds with some, until a call collects them. */
 const REFUSED_KEPT = 32;
 /** How long a stop may take before the tools process counts as stuck. */
 const STOP_TIMEOUT_MS = 1000;
@@ -481,10 +481,13 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
         timer.clear();
         tools.calls.delete(token);
         // Each refusal is marked before it's answered, so a call's own are in by the time it's over (a build's calls run one at a time).
-        const refused = running.isolate ? tools.refused(running.isolate) : [];
+        const build = buildOf(target.state.scratch);
+        const refused = build ? tools.refused(build) : [];
         if (refused.length) target.onRefusedHosts?.(refused);
       }
     },
+    // What a build's isolates were refused after its last call ended (a fetch its code didn't wait for).
+    refusedHosts: (build) => tools.refused(build),
     // Describing only loads code (in an isolate of its own, gone once described); any capability id's host can do it.
     describe: (code) => toTools("loading it", () => host("_describe").describe({ code }), true),
     migrate: (state, migrations, code) => limited(state.capabilityId, "migrating", (limit) => host(state.capabilityId).migrate({ scratch: state.scratch ?? null, migrations, code, limit, ...dataIsolate(state, code) })),
@@ -546,7 +549,7 @@ export class HewnDO extends DurableObject<Env> {
   private toolsOtherWork = { running: 0 };
   /** Fetches out of each tool isolate in the tools process (Egress's marks), by isolate key. */
   private fetchesOut = new Map<string, number>();
-  /** The hosts fetches out of each tool isolate were refused (Egress's marks), until its calls are told (at most REFUSED_KEPT of each). */
+  /** The hosts fetches out of each build's isolates were refused (Egress's marks), until its calls are told (at most REFUSED_KEPT of each). */
   private refusedHosts = new Map<string, Set<string>>();
   /** When the supervisor last said the tools process went away (stalled or exited), and when one answered again (ms). */
   private toolsGoneAt = 0;
@@ -575,9 +578,9 @@ export class HewnDO extends DurableObject<Env> {
             away: () => this.toolsGoneAt > this.toolsBackAt,
             // The supervisor tells this DO what's stalled (/_admin/tools-stalled), then restarts the tools process.
             stuck: async (reason) => void (await supervisor(env).json("/tools/stalled", { reason })),
-            refused: (isolate) => {
-              const hosts = this.refusedHosts.get(isolate);
-              this.refusedHosts.delete(isolate);
+            refused: (build) => {
+              const hosts = this.refusedHosts.get(build);
+              this.refusedHosts.delete(build);
               return hosts ? [...hosts] : [];
             },
           },
@@ -651,11 +654,11 @@ export class HewnDO extends DurableObject<Env> {
   /** Egress's mark (ToolCalls): a fetch out of a tool isolate went out (1) or is over (-1), or was refused. */
   async toolsFetch(mark: EgressMark): Promise<void> {
     if ("denied" in mark) {
-      // Kept for the call to be told; what a call never collects (code still fetching after it ended) is bounded.
-      const hosts = this.refusedHosts.get(mark.isolate) ?? new Set<string>();
-      if (hosts.size < REFUSED_KEPT) hosts.add(mark.denied);
-      this.refusedHosts.delete(mark.isolate);
-      this.refusedHosts.set(mark.isolate, hosts);
+      // Kept for the build's call to be told (or validation, at its end); bounded in hosts, and in each host's length.
+      const hosts = this.refusedHosts.get(mark.build) ?? new Set<string>();
+      if (hosts.size < REFUSED_KEPT) hosts.add(reportedHost(mark.denied));
+      this.refusedHosts.delete(mark.build);
+      this.refusedHosts.set(mark.build, hosts);
       if (this.refusedHosts.size > REFUSED_KEPT) this.refusedHosts.delete(this.refusedHosts.keys().next().value!);
       return;
     }

@@ -12,7 +12,7 @@ import type { Migration } from "@hewntools/core/migrations.ts";
 import type { CodeRef } from "@hewntools/core/ports.ts";
 import { sameDigest } from "@hewntools/core/sha256.ts";
 import { gatedFetch, networkMode } from "./egress.ts";
-import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, EGRESS_PATH, type EgressMark, HOST_METHODS, type HostCalls, type HostMethod, ISOLATE_HEADER, type SentCode, STARTED_HEADER, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
+import { buildOf, CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, EGRESS_PATH, type EgressMark, HOST_METHODS, type HostCalls, type HostMethod, ISOLATE_HEADER, reportedHost, type SentCode, STARTED_HEADER, TOOLS_TOKEN_HEADER } from "./tools-channel.ts";
 // Text modules, embedded by the supervisor's config.
 // @ts-expect-error text module
 import RUNTIME from "./capability-runtime.js";
@@ -86,7 +86,7 @@ export default {
         // The answer can't be written (it doesn't serialize, the platform went): it ends, failed, rather than hanging.
         .catch((e: Error) => writer.abort(e).catch(() => {}));
       ctx.waitUntil(done);
-      return new Response(reply.readable, { headers: { "content-type": "application/json", [STARTED_HEADER]: "1", [ISOLATE_HEADER]: isolateKey(code!.hash, c.hosts, c.limit, c.named) } });
+      return new Response(reply.readable, { headers: { "content-type": "application/json", [STARTED_HEADER]: "1", [ISOLATE_HEADER]: isolateKey(code!.hash, c.hosts, c.limit, c.named, c.named ? undefined : buildOf(c.scratch)) } });
     }
     try {
       return Response.json({ result: (await run(env, host, method, body, code!)) ?? null });
@@ -96,8 +96,11 @@ export default {
   },
 };
 
-/** The key of the isolate that runs `hash` with these hosts and limit (CapabilityHost.worker); `named`: the live tool's own. */
-const isolateKey = (hash: string, hosts: string[], limit: number, named: boolean) => `${hash}|${hosts.join(",")}|${limitBytes(limit)}${named ? "" : "|unnamed"}`;
+/**
+ * The key of the isolate that runs `hash` with these hosts and limit (CapabilityHost.worker); `named`: the live tool's
+ * own; `build`: a build's, which no other build shares (each reports the hosts it was refused to its own build).
+ */
+const isolateKey = (hash: string, hosts: string[], limit: number, named: boolean, build?: string) => `${hash}|${hosts.join(",")}|${limitBytes(limit)}${named ? "" : "|unnamed"}${build ? `|${build}` : ""}`;
 
 /** Tell the platform a fetch out of `isolate` went out (1) or is over (-1), its code waiting on the network meanwhile; or was refused (`denied`: its host). */
 const egressMark = (env: Env, mark: EgressMark) =>
@@ -199,7 +202,7 @@ export class CapabilityHost extends DurableObject<Env> {
    * (capability-guard.ts) takes it, with what else the flag adds to storage, out of the
    * capability's reach before its code can use any.
    */
-  private workerCode(code: CodeRef, hosts: string[], bytes: number, key: string): WorkerLoaderWorkerCode {
+  private workerCode(code: CodeRef, hosts: string[], bytes: number, key: string, report?: string): WorkerLoaderWorkerCode {
     return {
       compatibilityDate: COMPAT_DATE,
       compatibilityFlags: ["nodejs_compat", "experimental"],
@@ -207,7 +210,8 @@ export class CapabilityHost extends DurableObject<Env> {
       mainModule: "hewn-runtime.js",
       modules: { "hewn-runtime.js": RUNTIME, "hewn-guard.js": GUARD, "hewn-limit.js": `export default ${bytes};`, "capability.js": code.js },
       env: {},
-      globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts, isolate: key } }),
+      // A build's isolate reports the hosts it's refused, to that build (validation's hosts report); the live tool's don't.
+      globalOutbound: (this.ctx as any).exports.Egress({ props: { hosts, isolate: key, ...(report ? { report } : {}) } }),
     };
   }
 
@@ -220,11 +224,12 @@ export class CapabilityHost extends DurableObject<Env> {
    */
   private worker(name: string, code: CodeRef, hosts: string[], named: boolean, limit: number) {
     const bytes = limitBytes(limit);
-    const key = isolateKey(code.hash, hosts, limit, named);
+    const build = named || name === LIVE ? undefined : buildOf(name.slice(2));
+    const key = isolateKey(code.hash, hosts, limit, named, build);
     if (named) return { key, stub: this.env.LOADER.get(key, () => this.workerCode(code, hosts, bytes, key)) };
     if (name === LIVE) return { key, stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)) };
     let entry = this.buildIsolates.get(key);
-    if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key)), states: new Set() }));
+    if (!entry) this.buildIsolates.set(key, (entry = { stub: this.env.LOADER.load(this.workerCode(code, hosts, bytes, key, build)), states: new Set() }));
     entry.states.add(name);
     return { key, stub: entry.stub };
   }
@@ -301,12 +306,12 @@ export class CapabilityHost extends DurableObject<Env> {
 
 // ---------- Egress: the only way out of a capability ----------
 
-export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: string }> {
+export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: string; report?: string }> {
   async fetch(request: Request): Promise<Response> {
     // While a tool's fetch is out, its code waits on the network: the platform is told before it goes and once it's
     // over (its body read, or dropped), so a tool waiting on a fetch isn't the one blamed when the tools stop
     // responding. Each mark is awaited (a loop that follows can't lose it), and kept alive past a stopped call.
-    const { hosts, isolate } = this.ctx.props;
+    const { hosts, isolate, report } = this.ctx.props;
     const over = () => {
       const mark = egressMark(this.env, { isolate, delta: -1 });
       this.ctx.waitUntil(mark);
@@ -315,8 +320,8 @@ export class Egress extends WorkerEntrypoint<Env, { hosts: string[]; isolate: st
     await egressMark(this.env, { isolate, delta: 1 });
     let res: Response;
     try {
-      // A refused host is told before the refusal is answered, so the call that tried it is still running.
-      res = await gatedFetch(request, hosts ?? [], fetch, networkMode(this.env.NETWORK), (host) => egressMark(this.env, { isolate, denied: host }));
+      // A build's refused host is told before the refusal is answered, so the call that tried it is still running.
+      res = await gatedFetch(request, hosts ?? [], fetch, networkMode(this.env.NETWORK), report ? (host) => egressMark(this.env, { build: report, denied: reportedHost(host) }) : undefined);
     } catch (e) {
       await over();
       throw e;

@@ -211,7 +211,7 @@ Each entry has `operation`, an optional `version` (default the highest) and `inp
 
 `expect` is a subset match: every key in an expected object must match in the output, and other output keys are ignored. Arrays must have the same length and match element by element. The string `"$any"` matches any value that is present.
 
-Validation never touches anything real. There is no network (`fetch` gets `403`), secrets and config are whatever the case passes, `ctx.call` returns the case's `calls` entry (a call that isn't declared fails, and one without an entry fails the case), and `ctx.model` serves the case's `model` replies (running out fails the case). Put logic that needs the network or a model behind operations that can also run on fake data.
+Validation never touches anything real. There is no network (`fetch` gets `403`; a host the manifest's `requires.hosts` doesn't declare is reported to the owner as a warning on the build, never a failure), secrets and config are whatever the case passes, `ctx.call` returns the case's `calls` entry (a call that isn't declared fails, and one without an entry fails the case), and `ctx.model` serves the case's `model` replies (running out fails the case). Put logic that needs the network or a model behind operations that can also run on fake data.
 
 UI renders are offline too: test-case `calls` and `model` mocks are not reused for screenshots. Operations called on load must handle unavailable external sources with schema-valid empty/unavailable results so the page renders without failed requests or fake production data.
 

@@ -55,7 +55,13 @@ export const CODES_KEPT = 200;
  * or one was refused, and to which host (`denied`).
  */
 export const EGRESS_PATH = "/egress";
-export type EgressMark = { isolate: string; delta: 1 | -1 } | { isolate: string; denied: string };
+export type EgressMark = { isolate: string; delta: 1 | -1 } | { build: string; denied: string };
+
+/** The build a scratch state is one of ("test:<build>", "visual:<build>" …): its isolates are its own, and report the hosts they're refused. */
+export const buildOf = (scratch: string | null | undefined) => (scratch ? scratch.slice(scratch.indexOf(":") + 1) : undefined);
+
+/** A refused host as it's reported: a host name is at most 253 characters, so anything longer is cut there. */
+export const reportedHost = (host: string) => (host.length > 253 ? `${host.slice(0, 252)}…` : host);
 
 /** How a call to the tools process is sent: a bound on its answer, and `started` (an invoke started there, in this isolate). */
 export type SendOptions = { timeoutMs?: number; started?: (isolate: string) => void };
