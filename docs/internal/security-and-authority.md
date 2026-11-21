@@ -207,6 +207,8 @@ A runtime should not simply execute code with all user privileges.
 
 Eventually, runtime credentials should be derived from or mediated by the platform's grant model.
 
+What the runtime gives a tool's code is checked, not assumed. Tool isolates run with workerd's `experimental` flag (for the size limit of their data) and, in the tools' process, V8's `--expose-gc` (for that process's own release of replaced isolates). The guard (`capability-guard.ts`, evaluated before the tool's bundle) takes away what those add: the flag's test hooks and storage methods, and `gc`, which V8 makes non-configurable, so the guard leaves the global undefined and read-only and a tool whose global keeps a `gc` doesn't start. `test/workerd-experimental.test.ts` compares what a tool's code can reach with an isolate started without either; `test/workerd-isolates.test.ts` checks a tool can't reach `gc` by name, through `globalThis`, by assigning or redefining it, or from a string. A tool that reached `gc` could only spend the one thread's CPU, which it can already do and the stall rule bounds.
+
 ## Side effects and risk
 
 Operation manifests should classify side effects.

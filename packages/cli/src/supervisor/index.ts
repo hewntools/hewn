@@ -231,7 +231,8 @@ const config :Workerd.Config = (
       o.publicListen && o.publicListen !== "0.0.0.0" ? `\n    (name = "public-network", address = "${o.publicListen}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),` : ""
     }
   ],
-  # gc() for the idle GC (the supervisor's tick, /_admin/idle-gc). This process only: the tools' never has it.
+  # gc() for the idle GC (the supervisor's tick, /_admin/idle-gc). The tools' process has it too, for its own release
+  # of replaced isolates; there the guard takes it off every tool's global before the tool's code runs.
   v8Flags = ["--expose-gc"],
 );
 const hewn :Workerd.Worker = (
@@ -288,6 +289,9 @@ const config :Workerd.Config = (
   sockets = [
     (name = "tools", address = "${o.channel.tools}", http = (), service = "main"),
   ],
+  # gc() for CapabilityHost's release of replaced isolates (tools-worker.ts, \`flush\`). Tool isolates get it too: the
+  # guard (capability-guard.ts) deletes it from their global before their code runs, and checks it's gone.
+  v8Flags = ["--expose-gc"],
 );
 const tools :Workerd.Worker = (
   modules = [

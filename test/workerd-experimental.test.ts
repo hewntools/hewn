@@ -25,7 +25,10 @@ const ADDED = [
   "entrypointCtx^.mapVirtualHost.length",
   "entrypointCtx^.mapVirtualHost.name",
 ];
-/** And what it no longer sees: nested facets, and deleteAll (the guard's own, flag or not). */
+/**
+ * And what it no longer sees: nested facets, deleteAll (the guard's own, flag or not), and the tools process's gc()
+ * (--expose-gc): its `gc` global stays, as undefined and read-only (V8 makes it non-configurable).
+ */
 const REMOVED = [
   "ctx.facets",
   "ctx.facets^.Symbol(Symbol.toStringTag)",
@@ -37,6 +40,8 @@ const REMOVED = [
   "ctx.facets^.delete",
   "ctx.facets^.get",
   "ctx.storage^.deleteAll",
+  "globalThis.gc.length",
+  "globalThis.gc.name",
   "storage^.constructor.prototype.deleteAll",
   "storage^.deleteAll",
   "storage^.deleteAll.length",
@@ -142,6 +147,8 @@ export default { fetch: (req, env) => env.HOST.get(env.HOST.idFromName("host")).
 const config :Workerd.Config = (
   services = [ (name = "main", worker = .host), (name = "do", disk = (path = ${JSON.stringify(join(dir, "do"))}, writable = true)) ],
   sockets = [ (name = "http", address = "127.0.0.1:${port}", http = (), service = "main") ],
+  # As the tools' process runs (supervisor toolsConfig): gc() for its release of replaced isolates.
+  v8Flags = ["--expose-gc"],
 );
 const host :Workerd.Worker = (
   modules = [ (name = "main.js", esModule = embed "main.js") ],

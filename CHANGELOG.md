@@ -6,7 +6,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Changes
 
-- **A changed tool lets go of its old version.** Until now each version of a tool kept its memory until Hewn restarted, so a tool changed often held one copy per change; now a tool holds its current version only. The first call on a new version stops one still running on the old (as before), and the old one's memory goes when the tools' process next collects garbage. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
+- **A changed tool lets go of its old version.** Until now each version of a tool kept its memory until Hewn restarted, so a tool changed often held one copy per change; now a tool holds its current version only, and Hewn lets the old one's memory go a few seconds after the change. The first call on a new version stops one still running on the old, as before. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
 
 ### Safety and limits
 
