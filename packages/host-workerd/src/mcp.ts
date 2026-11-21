@@ -138,7 +138,7 @@ function platformTools(platform: Platform, agent: Agent, caps: CapabilitySummary
       // The check's text first (what passed and failed, what to fix), then its renders as images; their names, in that order, in structuredContent (no image data there: a client may show it to the model as text).
       format: (r: ClientCheck) => ({
         content: [{ type: "text", text: r.text }, ...r.images.map((i) => ({ type: "image" as const, data: toBase64(i.png), mimeType: "image/png" }))],
-        structuredContent: { passed: r.passed, failures: r.failures, defects: r.defects, screenshots: r.images.map((i) => i.name) },
+        structuredContent: { passed: r.passed, failures: r.failures, warnings: r.warnings, defects: r.defects, screenshots: r.images.map((i) => i.name) },
       }),
     },
     capabilities_submit: { handler: (a) => platform.submitFiles(agent, a) },
