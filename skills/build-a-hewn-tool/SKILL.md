@@ -115,7 +115,7 @@ export const operations = {
 - `ctx.db` is this capability's private SQLite database, **synchronous** (no `await`). `db.transaction(() => { … })` groups writes atomically and nests. `BEGIN`/`COMMIT`/`ROLLBACK`, `SAVEPOINT`/`RELEASE` and `ATTACH` are not allowed.
 - Handlers may be `async` (for `fetch` or `ctx.call`) and return plain JSON. Input is validated against `inputSchema` before they run, output against `outputSchema` after.
 - Available: standard web APIs (`fetch`, `crypto`, `URL`, `TextEncoder`, `Date`, …) and host-free Node built-ins (`node:crypto`, `node:buffer`, `node:util`, …). **Not available:** a filesystem (`node:fs` sees an empty throwaway disk), child processes, raw sockets, environment variables. Keep everything in the database.
-- npm packages: list them in `package.json` `dependencies` and import normally. Pick browser/Worker-safe packages (no native addons or `fs`-heavy tooling); don't commit `node_modules`. Registry versions only (`"^1.2.0"`): a git, `file:`, `link:` or URL dependency, or an `.npmrc`, fails the build.
+- npm packages: list them in `package.json` `dependencies` and import normally. Pick browser/Worker-safe packages (no native addons or `fs`-heavy tooling); don't commit `node_modules`. Registry versions only (`"^1.2.0"`): a git, `file:`, `link:` or URL dependency, or an `.npmrc`, fails the build. The registry's advisories are checked too (what `npm audit` reads, `dependencies` only): a known vulnerability at high or critical fails the build, naming the package; pick a version without it. One below high is a warning the owner sees.
 - `console.log`/`console.error` are the capability's logs, which the owner sees.
 
 ### Network and credentials (`requires`)

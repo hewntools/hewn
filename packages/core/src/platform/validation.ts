@@ -10,7 +10,7 @@ import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
 import { inspectRequest, type ModelHandler, structured } from "../models.ts";
 import { migrationProblems, migrationsOf } from "../migrations.ts";
-import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
+import type { Advisory, Audit, CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
 import { wantedGrants } from "./grants.ts";
@@ -53,6 +53,9 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  * quote that data, so it goes to the build's transcript, which only the owner reads.
  */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
+
+/** The most advisories (failing) or packages (warning) the advisories check names; the rest are counted. */
+export const ADVISORIES_NAMED = 20;
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
@@ -129,13 +132,30 @@ export class Validation extends Domain {
     const npmProblems = dependencyProblems(workspace);
     if (npmProblems.length) fail("npm won't install this tool's dependencies", npmProblems);
     const files = versionFiles(workspace);
-    let bundled: { js: string; log: string[] };
+    let bundled: { js: string; log: string[]; audit?: Audit };
     try {
       bundled = await this.workbench.bundle(build.id);
     } catch (e) {
       return fail(`bundling failed: ${(e as Error).message}`);
     }
     for (const line of bundled.log) step(line);
+    // 2a. npm's advisories on its dependencies: one at high or critical fails it, one below warns, and so do
+    // advisories that couldn't be checked (the registry out of reach). No dependencies, nothing to check.
+    const audit = bundled.audit;
+    if (audit && "unchecked" in audit) warnings.push({ check: "npm-advisories", message: `its dependencies weren't checked for known vulnerabilities: ${audit.unchecked}` });
+    else if (audit) {
+      const serious = audit.found.filter((a) => a.severity === "high" || a.severity === "critical");
+      if (serious.length) softFail("a known vulnerability in its dependencies, high or critical (update the package to a version without it, or use another; for one a dependency pulls in, update that dependency, or pin the package with overrides in package.json)", serious.slice(0, ADVISORIES_NAMED).map(advisoryWords).concat(serious.length > ADVISORIES_NAMED ? [`and ${serious.length - ADVISORIES_NAMED} more`] : []));
+      // One warning a package (its first advisory, and how many more), for at most ADVISORIES_NAMED packages.
+      const lesser = audit.found.filter((a) => !serious.includes(a));
+      const packages = [...new Set(lesser.map((a) => a.name))];
+      for (const name of packages.slice(0, ADVISORIES_NAMED)) {
+        const its = lesser.filter((a) => a.name === name);
+        warnings.push({ check: "npm-advisories", message: `a known vulnerability in a dependency: ${advisoryWords(its[0])}${its.length > 1 ? `, and ${its.length - 1} more for ${name}` : ""}` });
+      }
+      if (packages.length > ADVISORIES_NAMED) warnings.push({ check: "npm-advisories", message: `and known vulnerabilities in ${packages.length - ADVISORIES_NAMED} more of its dependencies` });
+      if (!audit.found.length) step("npm advisories: none known for its dependencies");
+    }
     const code: CodeRef = { hash: contentHash(files, bundled.js), js: bundled.js };
     let exportedKeys: string[];
     try {
@@ -789,6 +809,9 @@ function shotsText(images: string[], parts: string[], shown: ShotsShown): string
         : ` A long page shows its top part; the rest (${parts.join(", ")}, top to bottom) is left out: check again with screenshots: "all" to see it.`;
   return `${where}${rest} Open every one and fix what looks broken, cramped, cut off or unreadable.`;
 }
+
+/** An advisory in a line: "tiny-dep (<1.0.1): Prototype pollution (high, https://…)". */
+const advisoryWords = (a: Advisory) => `${a.name}${a.range ? ` (${a.range})` : ""}${a.through?.length ? `, through ${a.through.slice(0, 3).join(", ")}` : ""}: ${a.title} (${a.severity}${a.url ? `, ${a.url}` : ""})`;
 
 /** A warning in one line: "secret-scan: a long random string (src/data.ts:12)". */
 export const warningText = (w: CheckWarning) => `${w.check}: ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`;

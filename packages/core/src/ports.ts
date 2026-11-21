@@ -172,6 +172,20 @@ export interface CheckWarning {
   line?: number;
 }
 
+/** A known vulnerability in a package a tool depends on, from npm's registry (`npm audit`): the package, the versions it's in. */
+export interface Advisory {
+  name: string;
+  severity: "info" | "low" | "moderate" | "high" | "critical";
+  title: string;
+  url?: string;
+  range?: string;
+  /** Not a dependency of the tool's own: the ones that pull it in. */
+  through?: string[];
+}
+
+/** npm's advisories on a tool's dependencies: what was found, or why they weren't checked (the registry out of reach). */
+export type Audit = { found: Advisory[] } | { unchecked: string };
+
 /** What a builder's check of its work in progress found. */
 export interface CheckResult {
   passed: boolean;
@@ -222,8 +236,11 @@ export interface Workbench {
    * run (the owner picks another).
    */
   build(job: BuildJob, hooks: BuildHooks): Promise<void>;
-  /** Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. */
-  bundle(buildId: string): Promise<{ js: string; log: string[] }>;
+  /**
+   * Bundle the workspace's src/index.ts (and npm dependencies) into one ESM module. `audit`: what npm's
+   * advisories say of its dependencies (absent: it has none).
+   */
+  bundle(buildId: string): Promise<{ js: string; log: string[]; audit?: Audit }>;
   /** Append a line to the build's human-readable transcript. */
   note(buildId: string, line: string): Promise<void>;
   transcript(buildId: string): Promise<string | undefined>;
