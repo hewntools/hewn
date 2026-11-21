@@ -931,14 +931,25 @@ export const operations = {
   await step("on a phone, an open tool's bar keeps ••• alone, which holds Change… (the drawer) and Share…, and the tool's name has the room (#116)", async () => {
     // What each tool bar shows (its items not hidden by the phone rule).
     const shown = () => page.locator(".tool-actions").first().locator(":scope > *").evaluateAll((els: Element[]) => els.filter((e) => getComputedStyle(e).display !== "none").map((e) => (e.textContent ?? "").trim()));
+    // The bar is drawn, then drawn again once the tool's state arrives: what it shows once that has held for 300 ms.
+    const settles = async (want: string, where: string) => {
+      let last = "";
+      let since = Date.now();
+      for (const end = Date.now() + 5000; Date.now() < end; await page.waitForTimeout(50)) {
+        const now = (await shown()).join("|");
+        if (now !== last) (last = now), (since = Date.now());
+        if (now === want && Date.now() - since >= 300) return;
+      }
+      throw new Error(`${where}: the bar shows ${last.split("|").join(", ")}, not ${want.split("|").join(", ")}`);
+    };
     await page.goto(`${web}/#/run/reading-list`);
     await page.locator(".tool-actions").waitFor();
-    if ((await shown()).join("|") !== "Change…|Share…|•••") throw new Error(`desktop: ${await shown()}`);
+    await settles("Change…|Share…|•••", "desktop");
     await page.setViewportSize({ width: 390, height: 844 });
     try {
       await page.goto(`${web}/#/run/reading-list`);
       await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).waitFor();
-      if ((await shown()).join("|") !== "•••") throw new Error(`the bar shows ${(await shown()).join(", ")}`);
+      await settles("•••", "phone");
       await page.locator(".tool-actions").first().getByRole("button", { name: "More" }).click();
       await page.getByRole("menuitem", { name: "Share…" }).waitFor({ timeout: 3000 });
       // •••'s Change… opens the drawer, as the bar's did: the tool stays where it is (no new page).
