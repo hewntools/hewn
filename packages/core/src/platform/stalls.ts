@@ -10,6 +10,20 @@ import { type Agent, requireOwner } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { Domain } from "./context.ts";
 
+/** The rule: a call may not work longer than this without a pause. The host's watchdog restarts the tools after it. */
+export const STALL_MS = 10_000;
+/**
+ * The stall rule broken, in words: the operation (`what`, "load" for loading the code) and, where validation said it
+ * (`caller` "on test '…'", "in the visual check"), what it ran on.
+ */
+export function stallLine(what: string, caller: string): string {
+  const rule = `worked for more than ${STALL_MS / 1000} seconds without a pause`;
+  if (what === "load") return `Its code ${rule} while loading`;
+  return `${what} ${rule}${/^(on|in) /.test(caller) ? `, ${caller}` : ""}`;
+}
+/** Who ran it, for hewn.log: a caller, or what validation ran it on. */
+const ranBy = (caller: string) => (/^(on|in) /.test(caller) ? caller : `called by ${caller}`);
+
 /** Stalls within STALL_WINDOW_MS that suspend a tool. */
 export const STALLS_TO_SUSPEND = 3;
 export const STALL_WINDOW_MS = 3600_000;
@@ -45,6 +59,18 @@ const key = (capabilityId: string) => `stalls:${capabilityId}`;
 const BUILD_STATE = /^(?:test|visual|dryrun|sample|real):(.+)$/;
 
 export class Stalls extends Domain {
+  /** Validation runs whose own code stalled, with the line saying so: a check's copy isn't a build in the registry. */
+  private runs = new Map<string, string>();
+
+  /** The stall line of a validation run (a build's, a check's copy) whose code stalled, until it's forgotten. */
+  stalledRun(buildId: string): string | undefined {
+    return this.runs.get(buildId);
+  }
+
+  forgetRun(buildId: string) {
+    this.runs.delete(buildId);
+  }
+
   /** Run tool code, written down while it runs. `state`: "" for the tool's own data, else the scratch state's name. */
   async running<T>(c: { capabilityId: string; state: string; what: string; caller: string }, run: () => Promise<T>): Promise<T> {
     let id: string | undefined;
@@ -84,13 +110,15 @@ export class Stalls extends Domain {
       // Activity names every tool there, with what it was doing ("spin@1 — waiting on a fetch"), so a pattern can be seen.
       const detail = part && part.doing !== "running" ? `${r.what} — ${part.doing}` : r.what;
       if (part && !part.caused) {
-        this.logger(`${r.capabilityId} (${r.what}, called by ${r.caller}) was ${part.doing} when Hewn's tools stopped responding: not the cause`);
+        this.logger(`${r.capabilityId} (${r.what}, ${ranBy(r.caller)}) was ${part.doing} when Hewn's tools stopped responding: not the cause`);
         if (!r.state && this.registry.getCapability(r.capabilityId)) this.registry.addLifecycleEvent(r.capabilityId, "held-up", detail, "hewn");
         continue;
       }
       const build = BUILD_STATE.exec(r.state)?.[1];
       if (build) {
-        this.stalledBuild(build, r.what);
+        const line = stallLine(r.what, r.caller);
+        this.runs.set(build, line);
+        this.stalledBuild(build, line);
         if (!out.builds.includes(build)) out.builds.push(build);
       } else if (!r.state && this.registry.getCapability(r.capabilityId)) {
         // Its call's entry in the tool's log, as an ended call's would be.
@@ -116,7 +144,7 @@ export class Stalls extends Domain {
     if (suspend) {
       // Which stalls: the owner can see whether it was the same code each time.
       const which = stalls.map((s) => `${s.what ? `${s.what} at ` : ""}${this.clock(s.at)}`).join(", ");
-      rec.suspended = { at, reason: `it kept Hewn's tools from responding ${stalls.length} times within an hour (${which})` };
+      rec.suspended = { at, reason: `it worked for more than ${STALL_MS / 1000} seconds without a pause ${stalls.length} times within an hour (${which})` };
       this.registry.addLifecycleEvent(capabilityId, "suspend", rec.suspended.reason, "hewn");
       this.logger(`${capabilityId} suspended: ${rec.suspended.reason}; its calls, schedules and widgets are refused until the owner resumes it`);
     }
@@ -133,12 +161,12 @@ export class Stalls extends Domain {
     }
   }
 
-  /** A build's own code was running when Hewn stalled: it fails as it is (no retry, which would only do it again). */
-  private stalledBuild(buildId: string, what: string) {
+  /** A build's own code was running when Hewn stalled (`line`, the rule broken): it fails as it is (no retry, which would only do it again). */
+  private stalledBuild(buildId: string, line: string) {
     const b = this.registry.getBuild(buildId);
     if (!b || !["building", "validating"].includes(b.status)) return;
-    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: its code kept Hewn's tools from responding (${what === "load" ? "loading it" : `running ${what}`}), so Hewn's tools were restarted; not retried`] });
-    this.logger(`build ${buildId} failed: its code kept Hewn's tools from responding (${what})`);
+    this.registry.updateBuild(buildId, { status: "failed", log: [...b.log, `FAILED: ${line}, so Hewn's tools were restarted; not retried`] });
+    this.logger(`build ${buildId} failed: ${line}`);
     // What's left of its run (the rest of its tests, another attempt) stops here.
     this.d.builds.stopStalled(buildId);
   }
