@@ -11,6 +11,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### Fixes
 
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
+- `hewn serve` no longer exits when its metrics port is asked for the status while workerd restarts, and an unresponsive workerd is restarted at growing intervals instead of every few seconds. See [Troubleshooting](docs/troubleshooting.md#tools).
 
 ## 0.4.12 (2026-11-19)
 

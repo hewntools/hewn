@@ -38,6 +38,7 @@ import { networkMode, type NetworkMode } from "@hewntools/host-workerd/egress.ts
 import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
+import { watchHealth } from "./watch.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
@@ -870,34 +871,17 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // ---------- watchdog ----------
   // Each process answers /health; one that stops answering for `stallMs` (the stall rule's 10 s) is restarted. The tools stop
   // answering when a tool's code never yields (the platform is told what was running, then they're restarted);
-  // the platform is restarted alone.
+  // the platform is restarted alone, and backs off: on a machine short of CPU a restart only costs more of it, so each
+  // one doubles the wait before the next (up to 2 minutes) until workerd has answered for a minute (watch.ts). The
+  // tools don't back off: a tool stuck in a loop is cut off at the stall rule's time, every time.
   const timers: ReturnType<typeof setInterval>[] = [];
   if (o.watchdog !== false) {
     const { intervalMs, stallMs } = o.watchdog ?? WATCHDOG;
-    const watch = (check: (ms: number) => Promise<boolean>, onStall: (seconds: number) => Promise<void> | void) => {
-      let lastOk = Date.now();
-      let checking = false;
-      const t = setInterval(async () => {
-        if (checking) return;
-        checking = true;
-        // A ping that timed out may have been this process's own pause (a long synchronous step, a laptop
-        // waking), not workerd's: one more, with a fresh timeout, before it counts.
-        if ((await check(intervalMs)) || (await check(intervalMs))) lastOk = Date.now();
-        else if (Date.now() - lastOk > stallMs) {
-          const seconds = Math.round((Date.now() - lastOk) / 1000);
-          lastOk = Date.now() + 5000;
-          await onStall(seconds);
-        }
-        checking = false;
-      }, intervalMs);
-      t.unref();
-      timers.push(t);
-    };
-    watch(toolsHealthy, (seconds) => toolsStalled(`no answer for ${seconds} s`));
-    watch(healthy, (seconds) => {
-      log(`workerd unresponsive for ${seconds}s; restarting it`);
+    timers.push(watchHealth({ intervalMs, stallMs, check: toolsHealthy, onStall: (seconds) => toolsStalled(`no answer for ${seconds} s`) }));
+    timers.push(watchHealth({ intervalMs, stallMs, backoff: true, check: healthy, onStall: (seconds, next) => {
+      log(`workerd unresponsive for ${seconds}s; restarting it${next > stallMs ? ` (restarted again before it answered for a minute: the next restart waits for ${Math.round(next / 1000)}s without an answer)` : ""}`);
       platform.child?.kill("SIGKILL");
-    });
+    } }));
   }
 
   // The resume check: the wall clock ran ahead of this process (the machine was suspended, or asleep). Due schedules run

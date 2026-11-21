@@ -131,6 +131,9 @@ A tool whose code never lets go (an endless loop) holds up all your tools, not o
 **`hewn doctor`: "the tools restarted 2× (a tool stuck in a loop, or a crash)"**
 Hewn's tools run in a process of their own, and since Hewn started it was restarted that many times: a tool's code held it (`hewn.log` says "Hewn's tools stopped responding … restarting them", and Activity names the tool, as above), or it exited ("tools: workerd exited"). Hewn itself kept answering. "workerd restarted N× (watchdog/crash)" on the same line is Hewn's own process; the tools restart with it, so they count that one too. `hewn status` shows both: `restarts: Hewn 0, tools 2`. If the tools keep restarting with no tool named in Activity, open an issue with those lines from `hewn.log`.
 
+**`hewn.log`: "workerd unresponsive for 12s; restarting it (restarted again before it answered for a minute: …)"**
+Hewn's own process didn't answer its health check for more than 10 seconds, so it was restarted. On a machine short of CPU (a throttled shared CPU, a small server under a heavy build) a restart doesn't help and costs CPU the machine doesn't have, so each restart before Hewn has answered for a minute doubles the wait before the next one, up to 2 minutes. If these lines keep coming, the machine needs more CPU, or something else on it is using it.
+
 **A build fails with "It worked too long without a pause"**
 An operation worked for more than 10 seconds without a pause in its tests, its sample data or its screen, so Hewn restarted its tools. The failure names the operation and what it ran on ("`import_feed@1` worked for more than 10 seconds without a pause, on test 'big feed'"). Builds that failed before 0.4.13 say "Its code kept Hewn's tools from responding". The build isn't tried again by itself: it would do the same. **Ask builder to fix** starts a new attempt with that as the reason.
 
