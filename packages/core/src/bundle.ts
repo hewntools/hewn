@@ -369,6 +369,8 @@ export interface Finding {
   masked: string;
   /** The match itself, for Show. */
   text: string;
+  /** In a share check: this one stops the share (one of the owner's keys, or something shaped like a key). */
+  blocks?: true;
 }
 
 /** One of the owner's own stored values: a key ("secret", blocks a share) or a setting (warns). A plain string is a key. */

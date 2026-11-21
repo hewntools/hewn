@@ -179,6 +179,15 @@ A Builder should receive only the information needed for its build job.
 
 An Agent that writes a tool itself (`capabilities_submit`) is held to the same: it promotes nothing (its files go through the same validation as any build, and while its approval mode is `wait` the owner approves the result), and it never receives the owner's data or secrets.
 
+**Keys in a tool's files, and who learns of them (owner, 2026-11-21).** Validation scans a candidate's own files (not npm's lockfile) for key shapes, which fail it, and long random strings, which warn; and for the owner's stored keys (every tool's secrets and the model providers' keys; never settings' values, never the personal-data patterns), one of which fails every build. What's said, and to whom, is set so that the scan is never an oracle on the owner's keys:
+
+- An Agent's `capabilities_check`, and Hewn's builder's `check` on a build an Agent asked for, never look for the owner's keys. A check is cheap, silent and up to 30 an hour, and an answer naming a line would test thousands of guesses at once against a weak value stored as a key (a password, a PIN). Key shapes and long random strings are reported in full: they depend on the Agent's own text only.
+- An Agent's build or submission holding one fails with one line, `OWN_KEY_FOUND` ("a file holds one of the owner's stored keys; the owner's build log says where"). The file, the line and which key go to the owner's build log only (`ownersDetail`), as a failed dry run's error does.
+- The owner's own builds name the file, the line and which key in the builder's check and in the failure.
+- Never the value, to anyone, not even masked.
+
+What's left is one bit per submission, and each costs a failed build in the owner's Inbox naming the key.
+
 One exception, the owner's to make per build: a Polish with **Show the builder my own data** ticked
 (`realData`, off by default, only offered when the tool has rows of its own, never by an agent: Polish is
 owner only) gives the builder screenshots of the tool rendered on a copy of its live state, in its
@@ -358,7 +367,7 @@ A tool installed from a file, a link or Hewn's own tools runs through the same v
 - **npm and imports stay inside the tool.** A bundle whose npm dependencies aren't registry versions or ranges, or that carries an `.npmrc`, is refused when it's staged; code that imports a file outside the tool fails at bundling, as in any build.
 - **`source` is the platform's.** Where a tool came from is the capability's record; validation writes it into every version's manifest, replacing whatever a builder wrote, so a later change can't claim another origin.
 - **Sample data runs with nothing granted.** Replayed after install (on the owner's request) and before every promotion, each call goes through the contract with no hosts, no other tools and no model.
-- **Sharing scans first.** Before a tool is shared, its files are scanned: an exact match of one of the owner's stored keys (any tool's secrets, the model providers' keys) blocks the share; one of the owner's settings, personal data and key shapes warn. The scan finds known values and common shapes; it can't prove a file clean.
+- **Sharing scans first.** Before a tool is shared, its files are scanned: an exact match of one of the owner's stored keys (any tool's secrets, the model providers' keys) blocks the share, and so does a key shape (owner, 2026-11-21: validation fails one, so no Hewn would install the file, and the sharer is the one who can fix it); one of the owner's settings, personal data and long random strings warn. The scan finds known values and common shapes; it can't prove a file clean.
 - **A share link is a bearer token for one version's file.** `/share/<token>` is one of two unauthenticated routes that serve something of the owner's (the other, a pack's download link, is minted inside an Agent's signed-in call and works once, for 10 minutes): the bundle of the version the link was made for (the same scan first, as for a file), until it expires or is revoked. The token is 24 random bytes (base64url, 32 characters); only its SHA-256 is stored and it never reaches a log; anything that isn't a working link is the same 404; links are rate limited on the public listener per address and per link (`share`, `shareLink`: a busy address can't use up everyone's, and a link fetched too often waits on its own; `share`'s total is only a backstop). `share` is counted in the front (`gatePublic`), `shareLink` in the surface once the link is known to work, so a revoked or expired link is a 404 at once, never a 429. It reveals nothing else (no other version, no data, no names beyond the tool's own manifest). Deleting the tool revokes its links for good.
 - **Install from a link fetches only public https.** The surface fetches the URL itself (`fetchLink`): https only, no credentials in the URL, at most 5 MB however the body is sent, redirects followed by hand (at most 5), each hop held to the same rules, literal loopback, private, link-local and CGNAT addresses and local names refused. On the workerd host, the HewnDO's own fetch can reach only public addresses (`network = (allow = ["public"])`), which also covers a public name that resolves to a private address. What it fetches is staged exactly as a file is; `source.host` is the host the file came from (the last hop), and the install sheet also names the link's own host when a redirect led elsewhere.
 
@@ -377,3 +386,4 @@ A tool installed from a file, a link or Hewn's own tools runs through the same v
 11. External account connections belong to the user.
 12. Platform policy is authoritative over Agent claims.
 13. Destructive actions require stronger controls than ordinary reads and writes.
+14. Nothing an Agent is told says whether a value is one of the owner's stored keys, or where one is.

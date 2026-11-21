@@ -12,7 +12,7 @@ A shared tool is one file, `<tool>.hewn.zip` (a link serves the same file), with
 
 **Share…** on a tool (in the top bar of Info and of the open tool, or the tool's menu) shows what the file would hold before you download it or make a link to it:
 
-- **What's in it:** anything in the files that looks personal (an email address, a phone number, coordinates) or like a key (`sk-…`, a GitHub or AWS token, a long random string), and any of your own settings (a value you gave one of your tools, such as a city or a site), each with the file and line, partly hidden; **Show** reveals it. These are warnings: test data often trips them, and a setting may well be something anyone could write, so read them and decide.
+- **What's in it:** anything in the files that looks personal (an email address, a phone number, coordinates) or like a random string a key might be, and any of your own settings (a value you gave one of your tools, such as a city or a site), each with the file and line, partly hidden; **Show** reveals it. These are warnings: test data often trips them, and a setting may well be something anyone could write, so read them and decide. Anything shaped like a key (`sk-…`, a GitHub, Slack or AWS token, a JWT, a private key) stops the share instead, as one of your own keys does: no Hewn would install it. **Change…** asks the builder to take it out.
 - **Sample data:** how many calls it holds. Sharing needs it (below).
 - **Download:** the file. Pick any version, not only the live one.
 - **Link:** a link anyone can install that version from ([below](#links)).

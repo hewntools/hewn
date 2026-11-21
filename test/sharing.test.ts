@@ -300,8 +300,8 @@ describe("sharing: a tool as a file", () => {
   test("the owner's own keys block sharing, each listed and never sent back whole; a setting only warns", async () => {
     await withSample();
     await installFrom(t.platform, resolve(FIX, "site-connection"));
-    await t.platform.setSecret(USER, "site-connection", "API_KEY", "my-own-api-key-123456");
     t.platform.registry.setConfig("running-log", "CITY", "Bergen city centre", "user");
+    // Validation refuses a stored key in a tool's files: this version holds the value from before it was stored.
     const b = await t.build(
       () => t.platform.modify(USER, { capabilityId: "running-log", request: "hardcode things" }),
       (ws) => {
@@ -311,6 +311,7 @@ describe("sharing: a tool as a file", () => {
       },
     );
     assert.equal(b.status, "promoted", b.log.join("\n"));
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", "my-own-api-key-123456");
     const check = await t.platform.shareCheck(USER, "running-log");
     const keys = check.findings.filter((f) => f.kind === "secret");
     assert.deepEqual(keys.map((f) => `${f.file}:${f.line}`), ["blob.bin:1", "notes.md:2"], "a binary file is searched for them too");

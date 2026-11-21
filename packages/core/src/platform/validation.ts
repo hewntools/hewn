@@ -54,6 +54,12 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
 
+/**
+ * What an agent's build says when one of the owner's stored keys is in its files: never where, or which,
+ * which the owner's build log has (an agent could otherwise learn whether a guess is one of them).
+ */
+export const OWN_KEY_FOUND = "a file holds one of the owner's stored keys; the owner's build log says where";
+
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
 /** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
@@ -181,11 +187,21 @@ export class Validation extends Domain {
     if (migrationErrors.length) softFail("migrations rejected", migrationErrors);
 
     // 4b. the secret scan, of its own files (not npm's lockfile: what it installs, with hashes that look
-    // random): a known key shape fails; a long random string warns, since a hash looks the same. Each
-    // named by its file and line, never its value.
-    const keys = scanFiles(Object.fromEntries(Object.entries(files).filter(([p]) => !LOCKFILES.includes(p)))).filter((f) => f.kind === "key");
+    // random): a known key shape fails, and so does one of the owner's stored keys; a long random string
+    // warns, since a hash looks the same. Each named by its file and line, never its value. The owner's
+    // keys are looked for only where the answer stays the owner's (security-and-authority.md): never in an
+    // agent's check, which would say whether a guess is one of them, line by line; an agent's build is told
+    // only that one is there, and where and which go to the owner's build log.
+    const own = !opts.check || byOwner(build) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
+    const found = scanFiles(Object.fromEntries(Object.entries(files).filter(([p]) => !LOCKFILES.includes(p))), own);
+    const keys = found.filter((f) => f.kind === "key");
     const shapes = keys.filter((f) => f.label !== LONG_RANDOM);
     if (shapes.length) softFail(`a key in its files (a tool gets its keys from its connection's secrets, never from its files; a test's fake is a word like "fake")`, shapes.map((f) => `${f.file}:${f.line}: ${f.label[0].toLowerCase()}${f.label.slice(1)}`));
+    const stored = found.filter((f) => f.kind === "secret");
+    if (stored.length) {
+      const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));
+      softFail(await this.ownersDetail(build, detail, OWN_KEY_FOUND, { note: !opts.check }));
+    }
     // One warning a file, at its first: a fixture full of hashes is one thing to look at.
     const random = keys.filter((f) => f.label === LONG_RANDOM);
     for (const file of new Set(random.map((f) => f.file))) {
@@ -193,7 +209,7 @@ export class Validation extends Domain {
       const what = here.length === 1 ? "a long random string" : `${here.length} long random strings, the first here`;
       warnings.push({ check: "secret-scan", message: `${what}: if it's a key, it belongs in a connection's secrets, not in the tool's files (a hash or an id can stay)`, file, line: here[0].line });
     }
-    if (!shapes.length) step(`secret scan: no keys in its files${random.length ? ` (${counted(random.length, "long random string")} to look at)` : ""}`);
+    if (!shapes.length && !stored.length) step(`secret scan: no keys in its files${random.length ? ` (${counted(random.length, "long random string")} to look at)` : ""}`);
 
     // 5. candidate test cases against fresh state
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };

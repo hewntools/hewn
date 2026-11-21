@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The secret scan in validation: a known key shape in a tool's own files fails it, named by its file
 // and line and never by its value; a long random string warns; npm's lockfile and made-up personal
-// data in sample data do neither.
+// data in sample data do neither. One of the owner's stored keys fails every build, and only the owner
+// learns where and which: an agent's check never looks, and an agent's build is told only that one is there.
+// Sharing refuses a key shape as it refuses the owner's own keys: no Hewn would install it.
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { USER, WEB_USER } from "@hewntools/core/auth.ts";
 import type { FileEntry } from "@hewntools/core/platform.ts";
-import { installSeed, SEED, setup } from "./helpers.ts";
+import { OWN_KEY_FOUND } from "@hewntools/core/platform/validation.ts";
+import { installFrom, installSeed, SEED, setup } from "./helpers.ts";
 
 /** A GitHub token's shape, made here so that no file in this repository holds one. */
 const TOKEN = `ghp_${"A1b2C3d4".repeat(5)}`;
@@ -87,4 +91,95 @@ describe("the secret scan", () => {
     assert.deepEqual(held.review!.warnings?.map((w) => [w.check, w.file, w.line]), [["secret-scan", "tests/notes.txt", 2]]);
     assert.ok(held.log.some((l) => /warning: secret-scan: a long random string.*\(tests\/notes\.txt:2\)/.test(l)), held.log.join("\n"));
   });
+});
+
+/** One of the owner's stored keys: nothing shaped like a key, as a password or an account's own token may be. */
+const STORED = "correct-horse-battery-staple-42";
+const LABEL = "your Site Connection key (API_KEY)";
+
+describe("the owner's stored keys", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(async () => {
+    t = setup();
+    await installSeed(t.platform);
+    await installFrom(t.platform, resolve(import.meta.dirname, "fixtures/site-connection"));
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", STORED);
+  });
+  afterEach(() => t.cleanup());
+  const holding = () => plus("tests/notes.txt", "a fixture", `password: ${STORED}`);
+
+  test("a client's check never looks for them: it can't answer whether a guess is one", async () => {
+    const r = await t.platform.checkFiles(t.claude, { files: holding(), capabilityId: "running-log" });
+    assert.equal(r.passed, true, r.text);
+    assert.ok(!JSON.stringify(r).includes("notes.txt:2") && !JSON.stringify(r).includes("Site Connection"), r.text);
+  });
+
+  test("a client's submission fails, telling the agent only that one is there; the owner's build log says where and which, never the value", async () => {
+    const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding(), capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.equal(b.status, "failed");
+    const seen = JSON.stringify(t.platform.getBuild(t.claude, b.buildId));
+    assert.ok(seen.includes(OWN_KEY_FOUND), seen);
+    for (const leak of [STORED, "notes.txt:2", "Site Connection", "API_KEY"]) assert.ok(!seen.includes(leak), `${leak} in ${seen}`);
+    const log = (await t.platform.buildTranscript(USER, b.buildId)) ?? "";
+    assert.ok(log.includes(`tests/notes.txt:2: ${LABEL}`), log);
+    assert.ok(!log.includes(STORED), "never the value, not even in the owner's log");
+    assert.equal(t.platform.registry.getCapability("running-log")!.activeVersion, 1);
+  });
+
+  test("Hewn's builder on an agent's request: its check doesn't look; validation fails it the same way", async () => {
+    const seen: string[] = [];
+    t.queue((async (ws: string, job: { check?: (id: string) => Promise<unknown> }) => {
+      writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`);
+      seen.push(JSON.stringify(await job.check!("1")));
+    }) as never);
+    const b = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.ok(!seen[0].includes("notes.txt:2") && !seen[0].includes("Site Connection"), seen[0]);
+    assert.equal(b.status, "failed");
+    const view = JSON.stringify(t.platform.getBuild(t.claude, b.buildId));
+    assert.ok(view.includes(OWN_KEY_FOUND) && !view.includes("notes.txt:2"), view);
+  });
+
+  test("the owner's own build: its check and its failure name the file, the line and which key, never the value", async () => {
+    const seen: string[] = [];
+    t.queue((async (ws: string, job: { check?: (id: string) => Promise<unknown> }) => {
+      writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`);
+      seen.push(JSON.stringify(await job.check!("1")));
+    }) as never);
+    const b = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.ok(seen[0].includes(`tests/notes.txt:2: ${LABEL}`) && !seen[0].includes(STORED), seen[0]);
+    assert.equal(b.status, "failed");
+    const log = b.log.join("\n");
+    assert.match(log, /one of the owner's stored keys is in its files/);
+    assert.ok(log.includes(`tests/notes.txt:2: ${LABEL}`) && !log.includes(STORED), log);
+  });
+
+  test("settings' values are never looked for: a city in a tool's files is no key", async () => {
+    t.platform.registry.setConfig("running-log", "CITY", "Bergen city centre", "user");
+    const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: plus("tests/notes.txt", "Runs around Bergen city centre"), capabilityId: "running-log", request: "a note" })).buildId);
+    assert.equal(b.status, "review", b.log.join("\n"));
+  });
+});
+
+test("sharing refuses a key shape, naming its file and line, as it refuses the owner's own keys", async () => {
+  const t = setup();
+  try {
+    await installSeed(t.platform);
+    // Validation leaves npm's lockfile alone (its hashes look random); sharing reads every file.
+    const lock = JSON.stringify({ name: "running-log", lockfileVersion: 3, packages: { "": { name: "running-log" } }, note: TOKEN });
+    const b = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "running-log", request: "a lockfile" }),
+      (ws) => {
+        writeFileSync(join(ws, "package-lock.json"), lock);
+        writeFileSync(join(ws, "sample", "calls.json"), JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }]));
+      },
+    );
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+    const check = await t.platform.shareCheck(USER, "running-log");
+    assert.deepEqual(check.blocked, { kind: "key", file: "package-lock.json", line: 1, label: "Looks like a GitHub token" });
+    assert.ok(check.findings.find((f) => f.file === "package-lock.json")?.blocks);
+    await assert.rejects(t.platform.shareBundle(USER, "running-log"), /package-lock\.json:1 looks like a GitHub token\. Remove it, then share again \(a tool with a key in it doesn't install anywhere\)/);
+    await assert.rejects(t.platform.createShareLink(USER, "running-log", {}), /looks like a GitHub token/);
+  } finally {
+    t.cleanup();
+  }
 });
