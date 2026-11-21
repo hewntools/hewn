@@ -15,9 +15,14 @@ export function watchHealth(o: {
   intervalMs: number;
   stallMs: number;
   check: (timeoutMs: number) => Promise<boolean>;
-  /** Called with how long it went without an answer, and how long the next stall may last before it's called again. */
-  onStall: (seconds: number, nextAllowedMs: number) => Promise<void> | void;
+  /**
+   * Called with how long it went without an answer, how long the next stall may last before it's called again, and
+   * whether it was restarted before (and hasn't answered for a minute since).
+   */
+  onStall: (seconds: number, nextAllowedMs: number, again: boolean) => Promise<void> | void;
   backoff?: boolean;
+  /** While false, a silence isn't counted (the process is starting: it hasn't answered since it started). */
+  ready?: () => boolean;
   now?: () => number;
 }): ReturnType<typeof setInterval> {
   const now = o.now ?? Date.now;
@@ -38,14 +43,17 @@ export function watchHealth(o: {
         failing = false;
         lastOk = now();
         if (strikes && now() - okSince >= BACKOFF_WINDOW_MS) strikes = 0;
+      } else if (o.ready && !o.ready()) {
+        lastOk = now();
       } else {
         failing = true;
         const allowed = o.backoff ? allowedStall(o.stallMs, strikes) : o.stallMs;
         if (now() - lastOk > allowed) {
           const seconds = Math.round((now() - lastOk) / 1000);
+          const again = strikes > 0;
           if (o.backoff) strikes++;
           lastOk = now() + 5000;
-          await o.onStall(seconds, o.backoff ? allowedStall(o.stallMs, strikes) : o.stallMs);
+          await o.onStall(seconds, o.backoff ? allowedStall(o.stallMs, strikes) : o.stallMs, again);
         }
       }
     } finally {

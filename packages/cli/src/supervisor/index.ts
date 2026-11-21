@@ -753,6 +753,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const keep = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
     return { ...Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), TZ: process.env.TZ ?? timezone, HEWN_TOOLS_TOKEN: toolsToken };
   };
+  /** Set from a tools process's start until it has answered (or given up): the watchdog doesn't count it as stalled. */
+  let toolsStarting = false;
   const tools = workerdProcess({
     label: "tools: ",
     command: toolsCommand,
@@ -763,7 +765,13 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     // The platform holds its calls while the tools are away, and sends them once a new process answers: never to a
     // socket nothing listens on yet.
     onExit: () => void admin("tools-gone", {}, 2000).catch(() => {}),
-    onStarted: () => void waitFor(toolsHealthy, "the tools' workerd").then(() => admin("tools-back", {}, 2000)).catch(() => {}),
+    onStarted: () => {
+      toolsStarting = true;
+      void waitFor(toolsHealthy, "the tools' workerd")
+        .finally(() => (toolsStarting = false))
+        .then(() => admin("tools-back", {}, 2000))
+        .catch(() => {});
+    },
   });
   const healthy = async (timeoutMs: number) => {
     try {
@@ -877,9 +885,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   const timers: ReturnType<typeof setInterval>[] = [];
   if (o.watchdog !== false) {
     const { intervalMs, stallMs } = o.watchdog ?? WATCHDOG;
-    timers.push(watchHealth({ intervalMs, stallMs, check: toolsHealthy, onStall: (seconds) => toolsStalled(`no answer for ${seconds} s`) }));
-    timers.push(watchHealth({ intervalMs, stallMs, backoff: true, check: healthy, onStall: (seconds, next) => {
-      log(`workerd unresponsive for ${seconds}s; restarting it${next > stallMs ? ` (restarted again before it answered for a minute: the next restart waits for ${Math.round(next / 1000)}s without an answer)` : ""}`);
+    // A tools process that's starting (after a stall, or with the platform) isn't stalled: on a machine short of CPU
+    // its start can take longer than the stall rule, and restarting it then would only start it again.
+    timers.push(watchHealth({ intervalMs, stallMs, check: toolsHealthy, ready: () => !toolsStarting, onStall: (seconds) => toolsStalled(`no answer for ${seconds} s`) }));
+    timers.push(watchHealth({ intervalMs, stallMs, backoff: true, check: healthy, onStall: (seconds, next, again) => {
+      log(`workerd unresponsive for ${seconds}s; restarting it${again ? ` (restarted again before it answered for a minute: the next restart waits for ${Math.round(next / 1000)}s without an answer)` : ""}`);
       platform.child?.kill("SIGKILL");
     } }));
   }
@@ -965,7 +975,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   }
 
   const status = async (afterSeconds?: number) => {
-    const { result } = (await admin("call", { method: "idleActivity" })) as { result: ActivityView };
+    // Bounded: a platform that doesn't answer may stay up a while (the watchdog backs off), and a host asks every minute.
+    const { result } = (await admin("call", { method: "idleActivity" }, 5000)) as { result: ActivityView };
     const backups = listBackups(backupDir());
     const lastAt = backups.length ? Math.max(...backups.map((b) => Date.parse(b.at))) : null;
     return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, { afterSeconds, resumedAt });

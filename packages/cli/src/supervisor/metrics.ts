@@ -107,7 +107,7 @@ export function startMetrics(o: { port: number; url: string; adminToken: string;
     if (req.method !== "GET" || req.url !== "/metrics") return answer(res, 404, undefined);
     let body: string;
     try {
-      const r = await fetch(`${o.url}/_admin/call`, { method: "POST", headers: { "x-hewn-admin": o.adminToken, "content-type": "application/json" }, body: JSON.stringify({ method: "metrics" }) });
+      const r = await fetch(`${o.url}/_admin/call`, { method: "POST", headers: { "x-hewn-admin": o.adminToken, "content-type": "application/json" }, body: JSON.stringify({ method: "metrics" }), signal: AbortSignal.timeout(5000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { result } = (await r.json()) as { result: Snapshot };
       const idle = await o.status().catch(() => undefined);
