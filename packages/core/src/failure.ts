@@ -73,7 +73,7 @@ function explainLog(log: string[]): BuildFailure {
   // Paused by the builder's host (the last word on the build): its own message says why and what's kept.
   const last = [...log].reverse().find((l) => /^(FAILED|PAUSED): /.test(l));
   if (last?.startsWith("PAUSED: ")) return { ...say("Paused", last.slice("PAUSED: ".length).trim() || "The builder paused it."), paused: true };
-  if (/interrupted by platform restart; not started again: schedules are off/.test(msg)) return say("Interrupted by a restart", "Hewn restarted while this was building, and didn't start it again: schedules are off in this Hewn (a copy), so it starts no build by itself.");
+  if (/interrupted by platform restart; not started again: schedules are off/.test(msg)) return say("Interrupted by a restart", "Hewn restarted before this finished, and didn't start it again: schedules are off in this Hewn (a copy), so it starts no build by itself.");
   if (/interrupted by platform restart/.test(msg)) return say("Interrupted by a restart", "The platform restarted while this was building.");
   // The stall rule (since 0.4.13): the operation and what it ran on, as validation said it.
   const stalled = /^(.+ worked for more than \d+ seconds without a pause.*?), so Hewn's tools were restarted/.exec(msg);

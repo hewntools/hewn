@@ -263,13 +263,13 @@ export class Builds extends Domain {
     for (const id of this.registry.failInterruptedBuilds()) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
+      // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
+      if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       if (this.copy) {
         this.registry.updateBuild(id, { log: [...b.log.slice(0, -1), `FAILED: interrupted by platform restart; ${NOT_IN_A_COPY}`] });
         this.logger(`build ${id} not retried: schedules are off (HEWN_SCHEDULES=off)`);
         continue;
       }
-      // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
-      if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
       // An agent's retry sees only the tools it may use now: the owner may have switched it off for this one since.
       const now = owner ? undefined : this.agentStore.get(b.requestedBy);
@@ -283,7 +283,12 @@ export class Builds extends Domain {
       }
     }
     if (this.copy) {
-      for (const b of this.registry.waitingBuilds()) this.logger(`build ${b.id} left waiting: schedules are off (HEWN_SCHEDULES=off)`);
+      // Nothing would release them (what they wait for won't run here), and a Retry or a new change would queue behind
+      // them: they fail as the interrupted ones do. Not through failBuild, which would start their own dependents.
+      for (const b of this.registry.waitingBuilds()) {
+        this.registry.updateBuild(b.id, { status: "failed", log: [...b.log, `FAILED: interrupted by platform restart; ${NOT_IN_A_COPY}`] });
+        this.logger(`build ${b.id} (waiting) not started: schedules are off (HEWN_SCHEDULES=off)`);
+      }
     } else await this.resumeWaitingBuilds();
     return retried;
   }
