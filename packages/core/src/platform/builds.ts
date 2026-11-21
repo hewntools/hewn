@@ -22,7 +22,7 @@ import { attachmentRefs } from "./attachments.ts";
 import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import { type Candidate, reviewShotKey, warningText } from "./validation.ts";
+import { byOwner, type Candidate, reviewShotKey, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
@@ -161,6 +161,8 @@ type RetryMarks = { retryOf?: string; autoRetryOf?: string; fixOf?: string; fixF
 export const MAX_RUNNING_BUILDS = 5;
 /** What an agent is told while its last build, which held one of the owner's stored keys, waits for the owner's look. */
 export const KEY_LOCKED = "the owner needs to look at your last build first";
+/** The most builds and submissions an agent may start in an hour (counted in memory: a restart starts afresh). */
+export const BUILDS_PER_HOUR = 30;
 
 /** An agent whose build held one of the owner's stored keys: which build, of which tool, and when. */
 export interface KeyLock {
@@ -235,6 +237,8 @@ export class Builds extends Domain {
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
   private aborts = new Map<string, AbortController>();
+  /** When each agent started its builds and submissions this past hour (`notKeyLocked`). */
+  private buildsBy = new Map<string, number[]>();
   /** Retries that carry on from the build they retry (its workspace), by why that one ended: their builder's first attempt is told so. */
   private carriedOn = new Map<string, "failed" | "stopped" | "held">();
   private progress = new Map<
@@ -1622,6 +1626,9 @@ export class Builds extends Domain {
       const v = await this.validateCandidate(build, submitter, { measure: passes[0] === "craft" });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (!v.candidate) {
+        // An agent's build that held one of the owner's keys (or ran into the lock) has no more attempts. Its last
+        // ends as any build's does, so the build itself says nothing the lock doesn't.
+        if (attempt < max && this.lockedOut(build)) return this.endRun(run, { end: KEY_LOCKED });
         feedback = v.log.join("\n");
         continue;
       }
@@ -1817,6 +1824,7 @@ export class Builds extends Domain {
       const v = await this.validateCandidate(run.build, `builder ${run.builder}`, { pass, measure });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (v.candidate) return { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
+      if (this.lockedOut(run.build)) return { end: KEY_LOCKED };
       feedback = v.log.join("\n");
     }
     return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
@@ -1831,13 +1839,46 @@ export class Builds extends Domain {
    * The owner's own builds lock nobody.
    */
   lockForKey(build: BuildRow) {
-    if (build.requestedBy === USER.id || build.requestedBy === WEB_USER.id) return;
+    if (byOwner(build)) return;
     const locks = this.keyLocks();
     if (locks[build.requestedBy]) return;
+    // Synchronously, before anything awaits: another validation of its builds sees the lock at once.
     this.registry.setKv("keylocks", { ...locks, [build.requestedBy]: { buildId: build.id, capabilityId: build.capabilityId, at: new Date().toISOString() } });
     const name = this.agentStore.list().find((a) => a.id === build.requestedBy)?.name ?? build.requestedBy;
     this.registry.addLifecycleEvent(build.capabilityId, "key-lock", `${name}'s build held one of your stored keys: it can't build until you look`, build.requestedBy);
     this.logger(`agent ${build.requestedBy} locked out of building: its build ${build.id} held one of the owner's stored keys`);
+    // Its other builds in flight stop (queued, waiting, building); one already validating meets the lock there.
+    for (const id of this.registry.recentBuilds(500)) {
+      const other = this.registry.getBuild(id);
+      if (!other || other.id === build.id || other.requestedBy !== build.requestedBy || !["open", "waiting", "building"].includes(other.status)) continue;
+      try {
+        this.cancelBuild(USER, other.id);
+      } catch {
+        // ended meanwhile
+      }
+    }
+  }
+
+  /** Whether a build is an agent's, and that agent is locked out (`lockForKey`). */
+  lockedOut(build: BuildRow): boolean {
+    return !byOwner(build) && !!this.keyLocks()[build.requestedBy];
+  }
+
+  /**
+   * Whether a build carries on from an agent's (a retry, a fix, a fix of held work, at any remove): the owner's
+   * builder on it doesn't learn where the owner's keys are, since the agent can follow the chain and read what the
+   * builder did.
+   */
+  fromAnAgent(build: BuildRow): boolean {
+    const seen = new Set<string>();
+    for (let b: BuildRow | undefined = build; b && !seen.has(b.id); ) {
+      if (!byOwner(b)) return true;
+      seen.add(b.id);
+      const r = b.request as RetryMarks & { autoRetryOf?: string };
+      const from = r.retryOf ?? r.fixOf ?? r.autoRetryOf;
+      b = from ? this.registry.getBuild(from) : undefined;
+    }
+    return false;
   }
 
   /** The agents locked out, by id (`lockForKey`). */
@@ -1861,9 +1902,18 @@ export class Builds extends Domain {
     this.registry.addLifecycleEvent(lock.capabilityId, "key-lock", `${name} may build again: you looked`, owner.id);
   }
 
-  /** Refused, with nothing about why, while the agent is locked out. */
+  /**
+   * Refused, with nothing about why, while the agent is locked out; and past BUILDS_PER_HOUR of its builds and
+   * submissions (a build that fails costs it nothing else, so without a cap a sweep of them could still search).
+   */
   private notKeyLocked(agent: Agent) {
-    if (agent.kind !== "user" && this.keyLocks()[agent.id]) throw new PlatformError("forbidden", KEY_LOCKED);
+    if (agent.kind === "user") return;
+    if (this.keyLocks()[agent.id]) throw new PlatformError("forbidden", KEY_LOCKED);
+    const now = Date.now();
+    const recent = (this.buildsBy.get(agent.id) ?? []).filter((t) => now - t < 3600_000);
+    const limit = this.platform.buildsPerHour;
+    if (recent.length >= limit) throw new PlatformError("conflict", `No builds left this hour (${limit}). The next one frees up in ${Math.ceil((recent[0] + 3600_000 - now) / 60_000)} min.`);
+    this.buildsBy.set(agent.id, [...recent, now]);
   }
 
   /** Builds waiting for the owner's review (owner only). */

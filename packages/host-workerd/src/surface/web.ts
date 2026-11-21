@@ -1048,8 +1048,8 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   // An agent's destructive call blocks that agent: the most urgent.
   for (const c of platform.confirmations(owner))
     needs.push({ kind: "confirmation", id: c.id, capabilityId: c.capabilityId, agentId: c.agentId, title: nameOf(c.capabilityId), detail: `${who(c.agentId)} wants to run ${c.operation.split("@")[0]}`, severity: "danger", action: "Review", at: c.createdAt });
-  // An agent whose build held one of your stored keys builds nothing until you look.
-  for (const [agentId, l] of Object.entries(platform.keyLocks(owner)))
+  // An agent whose build held one of your stored keys builds nothing until you look (disconnected: nothing to look at).
+  for (const [agentId, l] of Object.entries(platform.keyLocks(owner)).filter(([a]) => agents.has(a)))
     needs.push({ kind: "key-lock", id: agentId, agentId, buildId: l.buildId, capabilityId: l.capabilityId, title: nameOf(l.capabilityId), detail: `${who(agentId)} put one of your stored keys in it: it can't build until you look`, severity: "danger", action: "Look…", at: l.at });
   for (const p of platform.pendingAgents(owner))
     needs.push({ kind: "agent", id: p.id, title: p.clientName, detail: p.reconnects ? `wants to connect again as ${p.reconnects}` : "wants to connect", severity: "warn", action: "Review", at: p.createdAt });

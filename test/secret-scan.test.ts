@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -18,7 +18,7 @@ import { bytes, contentHash, decodeVersion, encodeVersion } from "@hewntools/cor
 import type { FileEntry } from "@hewntools/core/platform.ts";
 import { OWN_KEY_FOUND } from "@hewntools/core/platform/validation.ts";
 import { KEY_LOCKED } from "@hewntools/core/platform/builds.ts";
-import { installFrom, installSeed, SEED, setup } from "./helpers.ts";
+import { installFrom, installSeed, platformWith, SEED, serve, setup } from "./helpers.ts";
 
 const CLI = fileURLToPath(new URL("../packages/cli/src/cli.ts", import.meta.url));
 
@@ -205,6 +205,101 @@ describe("the owner's stored keys", () => {
     const own = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a fixture" })).buildId);
     assert.equal(own.status, "failed");
     assert.deepEqual(t.platform.keyLocks(USER), {});
+  });
+
+  test("builds already in flight when the lock comes: of several submissions at once, one at most finds the key; the rest meet the lock", async () => {
+    const counter = (n: number) => entriesOf(resolve(import.meta.dirname, "fixtures/ui-counter")).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace('"ui-counter"', `"keyed-${n}"`).replace("UI Counter", `Keyed ${n}`) } : f)).concat([{ path: "tests/notes.txt", content: `password: ${STORED}\n` }]);
+    const started = await Promise.all([1, 2, 3, 4].map((n) => t.platform.submitFiles(t.claude, { files: counter(n), request: "a counter" })));
+    const ended = await Promise.all(started.map((b) => t.platform.settle(b.buildId)));
+    const views = ended.map((b) => JSON.stringify(t.platform.getBuild(t.claude, b.buildId)));
+    assert.equal(views.filter((v) => v.includes(OWN_KEY_FOUND)).length, 1, views.join("\n"));
+    for (const [i, v] of views.entries()) if (!v.includes(OWN_KEY_FOUND)) assert.ok(v.includes(KEY_LOCKED) || ended[i].status === "cancelled", v);
+  });
+
+  test("the build that found one ends there: no further attempt runs its builder", async () => {
+    t.cleanup();
+    t = setup({ attempts: 3 });
+    await installSeed(t.platform);
+    await installFrom(t.platform, resolve(import.meta.dirname, "fixtures/site-connection"));
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", STORED);
+    let ran = 0;
+    const write = (ws: string) => (ran++, writeFileSync(join(ws, "tests", "notes.txt"), `password: ${STORED}\n`));
+    t.queue(write, write, write);
+    const b = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.equal(b.status, "failed");
+    assert.equal(ran, 1, "one attempt, then the lock");
+    assert.match(b.log.join("\n"), new RegExp(`FAILED: ${KEY_LOCKED}`));
+  });
+
+  test("the owner's fix of an agent's build: its builder's check doesn't learn where the key is; the owner's log still has it", async () => {
+    t.queue((ws: string) => writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`));
+    const agents = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    assert.equal(agents.status, "failed");
+    const seen: string[] = [];
+    t.queue((async (_ws: string, job: { check?: (id: string) => Promise<unknown> }) => seen.push(JSON.stringify(await job.check!("1")))) as never);
+    const fix = await t.platform.settle((await t.platform.retryBuild(USER, agents.buildId, { fix: true })).buildId);
+    assert.ok(!seen[0].includes("notes.txt:2") && !seen[0].includes(LABEL), seen[0]);
+    assert.equal(fix.status, "failed");
+    assert.ok(JSON.stringify(t.platform.getBuild(t.claude, fix.buildId)).includes(OWN_KEY_FOUND));
+    assert.ok(((await t.platform.buildTranscript(USER, fix.buildId)) ?? "").includes(`tests/notes.txt:2: ${LABEL}`));
+  });
+
+  test("locked out: create, add widgets and an automatic retry are refused too; the lock holds across a restart", async () => {
+    const hit = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding(), capabilityId: "running-log", request: "a fixture" })).buildId);
+    const locked = (e: unknown) => (e as Error).message === KEY_LOCKED;
+    await assert.rejects(t.platform.create(t.claude, { name: "Another", purpose: "x", requirements: "x" }), locked);
+    await assert.rejects(t.platform.addWidgets(t.claude, { capabilityId: "running-log", request: "a widget" }), locked);
+    await assert.rejects(t.platform.retryBuild(t.claude, hit.buildId, { auto: true }), locked);
+    const again = platformWith(t.home, () => ({ name: "script", build: async () => {} }));
+    try {
+      assert.deepEqual(Object.keys(again.keyLocks(USER)), ["claude-code"]);
+    } finally {
+      again.close();
+    }
+  });
+
+  test("the Inbox names the agent and the tool; DELETE /api/agents/:id/key-lock lifts it, the owner's only; disconnecting the agent clears the item", async () => {
+    await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding(), capabilityId: "running-log", request: "a fixture" })).buildId);
+    const server = await serve(t.platform, t.home);
+    const port = (server.address() as AddressInfo).port;
+    let cookie = "";
+    const http = (path: string, method = "GET") =>
+      new Promise<{ status: number; body: string }>((res, rej) => {
+        const r = request({ host: "127.0.0.1", port, path, method, headers: { host: `hewn.localhost:${port}`, ...(cookie ? { cookie } : {}), "x-hewn-ui": "1" } }, (m) => {
+          let body = "";
+          m.on("data", (d) => (body += d));
+          m.on("end", () => res({ status: m.statusCode!, body }));
+        });
+        r.on("error", rej);
+        r.end();
+      });
+    try {
+      cookie = String((await new Promise<{ headers: Record<string, unknown> }>((res) => request({ host: "127.0.0.1", port, path: `/auth?ticket=${t.platform.createWebTicket(USER)}`, headers: { host: `hewn.localhost:${port}` } }, (m) => (m.resume(), res({ headers: m.headers }))).end())).headers["set-cookie"]).split(";")[0];
+      const needs = JSON.parse((await http("/api/inbox")).body).needs as { kind: string; title: string; detail: string }[];
+      const item = needs.find((n) => n.kind === "key-lock")!;
+      assert.equal(item.title, "Running Log");
+      assert.match(item.detail, /put one of your stored keys in it/);
+      assert.equal((await http("/api/agents/claude-code/key-lock", "DELETE")).status, 200);
+      assert.deepEqual(t.platform.keyLocks(USER), {});
+      // Locked again, then disconnected: nothing left to look at.
+      await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding().map((f) => (f.path === "tests/notes.txt" ? { ...f, content: f.content + "again\n" } : f)), capabilityId: "running-log", request: "a fixture" })).buildId);
+      assert.ok(Object.keys(t.platform.keyLocks(USER)).includes("claude-code"));
+      t.platform.updateAgent(USER, "claude-code", "revoke");
+      const after = JSON.parse((await http("/api/inbox")).body).needs as { kind: string }[];
+      assert.ok(!after.some((n) => n.kind === "key-lock"));
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test("an agent starts at most so many builds and submissions an hour", async () => {
+    t.platform.buildsPerHour = 2;
+    const other = () => entriesOf(SEED).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace("durable", `lasting ${Math.random()}`) } : f));
+    for (let i = 0; i < 2; i++) {
+      const b = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: other(), capabilityId: "running-log", request: "x" })).buildId);
+      if (b.status === "review") await t.platform.rejectBuild(USER, b.buildId);
+    }
+    await assert.rejects(t.platform.submitFiles(t.claude, { files: other(), capabilityId: "running-log", request: "x" }), /No builds left this hour \(2\)/);
   });
 
   test("settings' values are never looked for: a city in a tool's files is no key", async () => {

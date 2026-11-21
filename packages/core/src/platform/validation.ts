@@ -13,6 +13,7 @@ import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
+import { KEY_LOCKED } from "./builds.ts";
 import { wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
 import { breather, Domain } from "./context.ts";
@@ -197,16 +198,22 @@ export class Validation extends Domain {
     const found = scanFiles(files);
     const shapes = found.filter((f) => f.kind === "key" && f.label !== LONG_RANDOM);
     const random = found.filter((f) => f.kind === "key" && f.label === LONG_RANDOM && !LOCKFILES.includes(f.file));
-    const own = !opts.check || byOwner(build) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
+    // An agent locked out (its build held one before) gets the lock's answer, whatever its files hold: nothing more
+    // is learned from a build of its, in flight or not. Checked and set with nothing awaited between, so of its
+    // builds validating at once, one at most can find one.
+    const locked = !opts.check && this.d.builds.lockedOut(build);
+    // The owner's builder learns where one is from its check, unless the build carries on from an agent's, whose
+    // agent could read what the builder did with it.
+    const own = !locked && (!opts.check || (byOwner(build) && !this.d.builds.fromAnAgent(build))) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
     const stored = ownValuesIn(files, own);
-    let storedFailure: string | undefined;
+    if (stored.length && !opts.check) this.d.builds.lockForKey(build);
+    let storedFailure: string | undefined = locked ? KEY_LOCKED : undefined;
     if (stored.length) {
       const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));
       if (opts.check) storedFailure = detail;
       else {
         await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${detail}`).catch(() => {});
         storedFailure = OWN_KEY_FOUND;
-        this.d.builds.lockForKey(build);
       }
     }
     if (shapes.length) softFail(`a key in its files (a tool gets its keys from its connection's secrets, never from its files; a test's fake is a word like "fake")`, shapes.map((f) => `${f.file}:${f.line}: ${f.label[0].toLowerCase()}${f.label.slice(1)}`));
@@ -739,7 +746,7 @@ export function matches(expected: unknown, actual: unknown): boolean {
 }
 
 /** A build the owner started (the web client or the CLI): never held, and its log says things as they are. */
-const byOwner = (build: BuildRow) => build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
+export const byOwner = (build: BuildRow) => build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
 
 /** An agent's new tool held for the owner: everything in it is new. */
 const newToolReview = (manifest: CapabilityManifest, contentHash: string, views: Map<string, unknown>): BuildReview => ({ contentHash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" });

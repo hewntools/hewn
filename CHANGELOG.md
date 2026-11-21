@@ -7,7 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
-- **A scan for keys.** Anything shaped like a key in a tool's files, or one of the keys you stored in Hewn, fails it, named by file and line (where your key is goes to the build's log only, and an agent that put one there can't build again until you've looked); a long random string warns. Sharing refuses a key shape too, and the share scan's long random strings are read the same tighter way. See [The build](docs/building-tools.md#the-build).
+- **A scan for keys.** Anything shaped like a key in a tool's files, or one of the keys you stored in Hewn, fails it, named by file and line (where your key is goes to the builder's log only, and an agent that put one there can't build again until you've looked; an agent starts at most 30 builds an hour); a long random string warns. Sharing refuses a key shape too, and the share scan's long random strings are read the same tighter way. See [The build](docs/building-tools.md#the-build).
 
 ### Safety and limits
 
