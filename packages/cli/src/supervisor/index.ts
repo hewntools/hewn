@@ -753,8 +753,14 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const keep = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
     return { ...Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), TZ: process.env.TZ ?? timezone, HEWN_TOOLS_TOKEN: toolsToken };
   };
-  /** Set from a tools process's start until it has answered (or given up): the watchdog doesn't count it as stalled. */
-  let toolsStarting = false;
+  /**
+   * Tools processes started, and the latest that has answered (or been given up on): until the one running now has,
+   * the watchdog doesn't count it as stalled. Its first answer to any health check ends that, not only the start's own
+   * wait: a tool that loops right after a start must still be cut off at the stall rule's time.
+   */
+  let toolsStarts = 0;
+  let toolsAnswered = 0;
+  const toolsStarting = () => toolsAnswered !== toolsStarts;
   const tools = workerdProcess({
     label: "tools: ",
     command: toolsCommand,
@@ -766,9 +772,13 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     // socket nothing listens on yet.
     onExit: () => void admin("tools-gone", {}, 2000).catch(() => {}),
     onStarted: () => {
-      toolsStarting = true;
+      const start = ++toolsStarts;
       void waitFor(toolsHealthy, "the tools' workerd")
-        .finally(() => (toolsStarting = false))
+        .catch((e) => {
+          // Never answered: the stall rule counts it from here.
+          if (toolsStarts === start) toolsAnswered = start;
+          throw e;
+        })
         .then(() => admin("tools-back", {}, 2000))
         .catch(() => {});
     },
@@ -783,8 +793,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   /** The tools process's /health, on its socket. */
   const toolsHealthy = (timeoutMs: number) =>
     new Promise<boolean>((done) => {
+      // An answer to a check sent before the latest start (the old process's) doesn't count for the new one.
+      const start = toolsStarts;
       const req = httpRequest({ ...toolsAt, path: "/health", timeout: timeoutMs }, (res) => {
         res.resume();
+        if (res.statusCode === 200 && toolsStarts === start) toolsAnswered = start;
         done(res.statusCode === 200);
       });
       req.on("timeout", () => (req.destroy(), done(false)));
@@ -887,7 +900,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const { intervalMs, stallMs } = o.watchdog ?? WATCHDOG;
     // A tools process that's starting (after a stall, or with the platform) isn't stalled: on a machine short of CPU
     // its start can take longer than the stall rule, and restarting it then would only start it again.
-    timers.push(watchHealth({ intervalMs, stallMs, check: toolsHealthy, ready: () => !toolsStarting, onStall: (seconds) => toolsStalled(`no answer for ${seconds} s`) }));
+    timers.push(watchHealth({ intervalMs, stallMs, check: toolsHealthy, ready: () => !toolsStarting(), onStall: (seconds) => toolsStalled(`no answer for ${seconds} s`) }));
     timers.push(watchHealth({ intervalMs, stallMs, backoff: true, check: healthy, onStall: (seconds, next, again) => {
       log(`workerd unresponsive for ${seconds}s; restarting it${again ? ` (restarted again before it answered for a minute: the next restart waits for ${Math.round(next / 1000)}s without an answer)` : ""}`);
       platform.child?.kill("SIGKILL");
