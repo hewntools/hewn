@@ -22,11 +22,12 @@ export function builderPrompt(job: BuildJob): string {
     `Only change files inside this directory. Do not try to start, call or promote anything on the platform. When the candidate is complete, stop. The platform validates it automatically.`,
   ];
   // Read the context that determines identity first; retries and passes keep the candidate's icon.
-  if (job.kind === "create" && job.attempt === 1 && !job.retryOf && !job.pass) lines.push(`After reading BUILDER.md, BRIEF.md, and any OWNERS_WORDS.md and OTHER_TOOLS.md, write ui/icon.svg and set "hue" in capability.json as your first implementation changes (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
+  if (job.kind === "create" && job.attempt === 1 && !job.retryOf && !job.pass && !job.carriesOn) lines.push(`After reading BUILDER.md, BRIEF.md, and any OWNERS_WORDS.md and OTHER_TOOLS.md, write ui/icon.svg and set "hue" in capability.json as your first implementation changes (see "Icon" in BRIEF.md): the owner's Home shows the icon while you build.`);
   // A pass on a candidate already built (a fresh session: it couldn't resume the one that built it).
   if (job.pass) lines.push(`\nThe candidate in this workspace is built and passed validation: don't start over. Read BUILDER.md for the request and BRIEF.md for the contract, then do this ${job.pass.name} pass on it:\n\n${job.pass.request}`);
   // A retry carrying on from a failed build: its work is here (BUILDER.md says why it failed, if asked to fix that).
-  if (job.carriesOn && job.attempt === 1) lines.push(`\nThis build carries on from an earlier build of the same request that ${job.carriesOn === "stopped" ? "the owner stopped before it finished" : "didn't finish"}: the workspace holds its work. Look at what's there before you write anything, and carry on from it rather than starting over.`);
+  if (job.carriesOn === "held" && job.attempt === 1) lines.push(`\nThis build carries on from work that waits for the owner's review: the workspace holds it, its icon and hue too. Look at what's there before you write anything, make the change BUILDER.md asks for to it, and keep the rest.`);
+  else if (job.carriesOn && job.attempt === 1) lines.push(`\nThis build carries on from an earlier build of the same request that ${job.carriesOn === "stopped" ? "the owner stopped before it finished" : "didn't finish"}: the workspace holds its work. Look at what's there before you write anything, and carry on from it rather than starting over.`);
   if (job.feedback) {
     lines.push(`\nAttempt ${job.attempt}. The previous candidate FAILED platform validation:\n\n${job.feedback}\n\nFix the candidate.`);
   }

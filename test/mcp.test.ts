@@ -276,6 +276,7 @@ describe("a client writes a tool over MCP: pack, check, submit", () => {
     assert.match(content[0].text!, /^PASS/);
     assert.equal(content.filter((c) => c.type === "image" && c.mimeType === "image/png").length, 0, "Running Log has no screen to render");
     assert.equal((checked.structuredContent as { passed: boolean }).passed, true);
+    assert.deepEqual((checked.structuredContent as { warnings: unknown[] }).warnings, [], "no warnings");
 
     const refused = await claude.callTool({ name: "capabilities_submit", arguments: { files: [...files, { path: "PLATFORM_UI.css", content: "x" }], capabilityId: "running-log", request: "reword" } });
     assert.equal(refused.isError, true);

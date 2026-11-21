@@ -4,6 +4,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.13 (unreleased)
 
+### New
+
+- **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+
 ### Changes
 
 - **A changed tool lets go of its old version.** Until now each version of a tool kept its memory until Hewn restarted, so a tool changed often held one copy per change; now a tool holds its current version only, and Hewn lets the old one's memory go a few seconds after the change. The first call on a new version stops one still running on the old, as before. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).

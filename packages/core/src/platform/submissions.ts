@@ -8,7 +8,7 @@ import { MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, writeZip } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { bytes, CONTRACTS_DIR, fromBase64, isArtefact, isBuilderConfig, isWorkspaceOnly, OWNER_INSTRUCTIONS_DIR, toBase64 } from "../files.ts";
 import { randomToken, sha256 } from "../sha256.ts";
-import type { CheckResult, Files } from "../ports.ts";
+import type { CheckResult, CheckWarning, Files } from "../ports.ts";
 import type { BuildRow } from "../registry.ts";
 import { archivedConflict, type BuildView } from "./builds.ts";
 import { Domain } from "./context.ts";
@@ -69,6 +69,8 @@ export interface ClientCheck {
   passed: boolean;
   text: string;
   failures: string[];
+  /** What the checks found that doesn't fail it. */
+  warnings: CheckWarning[];
   defects: string[];
   images: { name: string; png: Uint8Array }[];
 }
@@ -285,7 +287,7 @@ export class Submissions extends Domain {
       }
       this.logger(`check by ${agent.id} of ${cap ? `a change to ${id}` : `new tool ${id}`}: ${r.passed ? "passed" : `${r.failures.length} problem(s)`}`);
       const later = cap && (await this.runtime.hasState({ capabilityId: cap.id })) ? `\n\nNot in a check: the upgrade dry run, your migrations on a copy of ${cap.id}'s data. It runs when you submit.` : "";
-      return { passed: r.passed, text: r.text + later, failures: r.failures, defects: r.defects, images: shots === "none" ? [] : shots === "all" ? [...r.images, ...(r.parts ?? [])] : r.images };
+      return { passed: r.passed, text: r.text + later, failures: r.failures, warnings: r.warnings, defects: r.defects, images: shots === "none" ? [] : shots === "all" ? [...r.images, ...(r.parts ?? [])] : r.images };
     };
     const prev = this.checking.get(agent.id) ?? Promise.resolve();
     const next = prev.then(run, run);
