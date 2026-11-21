@@ -66,7 +66,7 @@ The proposal for a change is a short brief too: what changes, what must keep wor
 
 Changes to one tool take turns: ask for another while one builds (or an agent does) and it waits, then starts from the version the first one leaves, whether that one goes live or fails. An agent's change waiting for your approval doesn't hold the next one up. The box and your agents see the changes on their way, so the next one builds on them instead of asking for the same thing again.
 
-Text Hewn puts in the box for you (**+ Ask for one** under Widgets puts "Suggest some widgets.", **Polish…** "Polish it.", **Ask builder to fix this** what failed) waits there for you to add to and send; nothing goes to the intake until you do.
+Text Hewn puts in the box for you (**+ Ask for one** under Widgets puts "Suggest some widgets.", **Polish…** "Polish it.", **Ask builder to fix this** what failed, a failed build's **Ask builder to fix** why it failed) waits there for you to add to and send; nothing goes to the intake until you do.
 
 A tool without a screen of its own shows its operations as forms. **Give it a proper screen** asks for one.
 
@@ -96,7 +96,7 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 ## When a build fails
 
-The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
+The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** opens the change panel (for a new tool, New) with why it failed in the box; add to it or cut it, and nothing starts until you send it. The build that makes carries on from the failed one's files. Your tool, if it already existed, keeps running the version it had.
 
 **Discard** puts a failed build aside, when you'd rather not try again: it leaves the Inbox, and Activity keeps it, marked discarded. Nothing about the tool changes (a failed new tool installed nothing; a failed change left your tool on its version), and the files the build left go with it.
 

@@ -108,7 +108,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   // A build on held work (its card's "Ask builder to fix"): the intake sees what it is, the build carries on from it.
   // A held new tool's text waits under the build's id (the New page has no tool yet).
   let held = q?.get("held") || null;
-  const fixKey = capId ? `hewn.fix.${capId}` : held ? `hewn.fix.${held}` : null;
+  // A failed build's "Ask builder to fix": why it failed waits in the box, and the build carries on from its files.
+  let fixing = q?.get("failed") || null;
+  const fixKey = capId ? `hewn.fix.${capId}` : held || fixing ? `hewn.fix.${held ?? fixing}` : null;
   const failure = fixKey && q?.get("fix") ? sessionStorage.getItem(fixKey) : null;
   const prefilled = !!(q?.get("m") || failure);
   // Whether this view keeps its conversation now: one put in, from its first send; not once it's built from.
@@ -130,7 +132,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const stopKeeping = () => (finish(), (keeps = false));
   // Built from: the page goes to the build, the drawer shows it. A reply still on its way (Build was pressed
   // while one was) is dropped, not kept again.
-  const built = (b) => (stopKeeping(), shownViews.get(keepKey) === me && shownViews.delete(keepKey), held && doneWithHeld(), onBuilt(b));
+  const built = (b) => (stopKeeping(), shownViews.get(keepKey) === me && shownViews.delete(keepKey), (held || fixing) && doneWithHeld(), onBuilt(b));
   if (from) continueFrom(from).catch(fail);
   // A change to a tool with a conversation behind it: a card in the chat offers to pick it up.
   const offer = h("div", { class: "card continue-card", hidden: true });
@@ -233,30 +235,34 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
   const startOver = h("button", { type: "button", class: "ghost sm", hidden: true, "aria-label": "New conversation", onclick: () => askNew().catch(fail) }, "+ New");
   const heading = embedded
     ? h("div", { class: "drawer-title" }, widgetsMode ? "What should its widgets show?" : polishMode ? `Polish ${cap?.name ?? "it"}` : "What should change?")
-    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : held ? "New tool · fix" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : held ? "What should change?" : "What should it do?"));
+    : h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, connection ? "New connection" : held || fixing ? "New tool · fix" : "New tool"), startOver), h("div", { class: "display" }, connection ? `Connect ${connection}` : held || fixing ? "What should change?" : "What should it do?"));
   // Built on held work ("Ask builder to fix" on its card): what it continues, above the box, with the way back to its card.
-  const heldRow = held && h("div", { class: "notice info held-context", hidden: true });
+  // Or on a failed build: the same row, saying so.
+  const heldRow = (held || fixing) && h("div", { class: "notice info held-context", hidden: true });
   if (heldRow)
-    Promise.all([api(`/builds/${enc(held)}`), caps().catch(() => all)])
+    Promise.all([api(`/builds/${enc(held ?? fixing)}`), caps().catch(() => all)])
       .then(([b, m]) => {
         const c = m.get(b.capabilityId);
-        const what = b.kind === "create" ? `${actorLabel(b.requestedBy, m)}'s new tool, ` : `${actorLabel(b.requestedBy, m)}'s change to `;
-        const waiting = b.status === "review";
-        heldRow.classList.toggle("warn", !waiting);
-        heldRow.classList.toggle("info", waiting);
-        put(heldRow, h("span", { class: "grow" }, `Continues ${what}`, capRef(c, b.capabilityId), waiting ? " · waiting for you" : " · no longer waiting for you"), h("a", { href: `#/b/${enc(held)}` }, "View ›"));
+        const who = actorLabel(b.requestedBy, m);
+        const whose = who === "You" ? "your" : `${who}'s`;
+        const what = b.kind === "create" ? `${whose} new tool, ` : `${whose} change to `;
+        const still = held ? b.status === "review" : b.status === "failed" && !b.retriedAs;
+        heldRow.classList.toggle("warn", !still);
+        heldRow.classList.toggle("info", still);
+        const state = held ? (still ? " · waiting for you" : " · no longer waiting for you") : still ? " · it failed" : " · fixed or retried since";
+        put(heldRow, h("span", { class: "grow" }, held ? `Continues ${what}` : `Fixes ${what}`, capRef(c, b.capabilityId), state), h("a", { href: `#/b/${enc(held ?? fixing)}` }, "View ›"));
         heldRow.hidden = false;
       })
       .catch(() => {});
   // Built from the held work: this view and the address forget it, so the next change ("Change more") is an ordinary one.
   const doneWithHeld = () => {
-    held = null;
-    for (const k of ["held", "fix"]) q?.delete?.(k);
+    held = fixing = null;
+    for (const k of ["held", "fix", "failed"]) q?.delete?.(k);
     heldRow?.remove();
     const [path, query = ""] = location.hash.split("?");
     const p = new URLSearchParams(query);
-    if (!p.has("held") && !p.has("fix")) return;
-    for (const k of ["held", "fix"]) p.delete(k);
+    if (!p.has("held") && !p.has("fix") && !p.has("failed")) return;
+    for (const k of ["held", "fix", "failed"]) p.delete(k);
     history.replaceState(null, "", `${path}${[...p].length ? `?${p}` : ""}`);
   };
   // Q1 New: or install one: one of Hewn's tools, or a file or link someone shared (gone once you're talking).
@@ -265,6 +271,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     mode === "create" &&
     !connection &&
     !held &&
+    !fixing &&
     h(
       "div",
       { class: "start-from" },
@@ -312,7 +319,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
     // again on return, nor for a reply that came while no view was looking (the rules are saved all the same).
     if (live) for (const [what, list] of [["remember", reply.saved?.remember ?? []], ["forget", reply.saved?.forget ?? []]]) for (const x of list) thread.append(memoryNotice(what, x, cap));
     // Schedules set here (the drawer stays on the conversation) or from the page: done, not kept any more.
-    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, held, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
+    const ctx = { mode, cap, all, connection, keepTalking, onBuilt: built, embedded, nextVersion, messages, held, failedBuild: fixing, modelAsk: chip.choice, done: (text) => (stopKeeping(), thread.append(h("div", { class: "notice ok" }, h("span", {}, text)))), finished: stopKeeping };
     if (reply.kind === "questions") {
       messages.push(turnOf(reply));
       say("them", chatText(reply.message, reply.questions));
@@ -387,7 +394,7 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       let reply = null;
       let failure = null;
       const progress = (data) => ((flight.last = { ...flight.last, ...data }), flight.listeners.forEach((f) => f(data)));
-      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from || held ? { earlier: { buildId: from ?? held } } : {}) }, stop.signal);
+      await postStream("/intake", (name, data) => (name === "progress" ? progress(data) : name === "reply" ? (reply = data) : name === "error" && (failure = data.message)), { mode, capabilityId: capId, ...(focus ? { widget: focus.name } : {}), ...(polishMode ? { polish: true } : {}), messages, session, ...(from || held || fixing ? { earlier: { buildId: from ?? held ?? fixing } } : {}) }, stop.signal);
       if (failure || !reply) throw new Error(failure ?? "The intake didn't answer");
       result = { reply };
     } catch (err) {
@@ -887,7 +894,7 @@ function scheduleTicks(list = []) {
  * build the draft (and its connection) waits for too. `schedules`: the ones the owner left ticked,
  * set up once the draft's build promotes. `conversation`: the chat that led here, kept with each build.
  */
-async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {}, held } = {}) {
+async function startDraft(mode, d, cap, { connections = new Map(), after, schedules = [], conversation, ask = {}, held, failed } = {}) {
   // What every build it starts carries (a connection first, then the tool): the conversation, and the chip's model.
   const carried = { ...(conversation?.length ? { conversation } : {}), ...ask };
   const conn = d.connection;
@@ -904,7 +911,7 @@ async function startDraft(mode, d, cap, { connections = new Map(), after, schedu
   }
   const wait = first?.buildId ?? after;
   const w = { ...(wait ? { after: wait } : {}), ...(schedules.length ? { schedules } : {}), ...carried };
-  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w, ...(held ? { held } : {}) } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w, ...(held ? { held } : {}) } });
+  return mode === "create" ? api("/capabilities", { method: "POST", body: { name: d.name, purpose: d.purpose, requirements: d.requirements, ...w, ...(held ? { held } : {}), ...(failed ? { failed } : {}) } }) : api(`/capabilities/${enc(cap.id)}/modify`, { method: "POST", body: { request: d.request, ...w, ...(held ? { held } : {}), ...(failed ? { failed } : {}) } });
 }
 
 /** The id the platform gives a new tool with this name (the intake names ideas it builds on this way). */
@@ -939,7 +946,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
  */
 function proposalCard(kind, list, ctx) {
   // `readOnly`: a card from a kept conversation: as it was, nothing to tick or build.
-  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, held, done, finished, readOnly = false } = ctx;
+  const { mode, cap, all, connection, keepTalking, onBuilt, embedded, messages, held, failedBuild, done, finished, readOnly = false } = ctx;
   const ideas = kind === "ideas";
   const plan = ideas ? buildPlan(list) : null;
   const byId = new Map();
@@ -1115,14 +1122,14 @@ function proposalCard(kind, list, ctx) {
         return onBuilt(b);
       }
       if (mode === "modify") {
-        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask, held });
+        const b = await startDraft("modify", list[0], cap, { schedules: rows[0].ticks.chosen(), conversation: messages, ask, held, failed: failedBuild });
         invalidateCaps();
         return onBuilt(b);
       }
       // New tools: side by side, or after the ones they build on.
       const p = buildPlan(chosen().map((r) => r.d));
       // Made on a held new tool: one tool takes its place, never several.
-      if (held && p.order.length > 1) throw new Error("This continues one held tool: tick just that one here, and ask for the others from New.");
+      if ((held || failedBuild) && p.order.length > 1) throw new Error(`This ${held ? "continues one held tool" : "fixes one tool that failed"}: tick just that one here, and ask for the others from New.`);
       const connections = new Map();
       const builds = new Map();
       const started = [];
@@ -1136,7 +1143,7 @@ function proposalCard(kind, list, ctx) {
         try {
           const ticks = rows.find((x) => x.d === d).ticks;
           // Made on a held new tool: it takes the held one's place.
-          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask, held });
+          const b = await startDraft("create", d, null, { connections, after: p.serial ? started.at(-1)?.buildId : dep[0]?.buildId, schedules: ticks.chosen(), conversation: messages, ask, held, failed: failedBuild });
           builds.set(capabilityId(d.name), b);
           started.push(b);
         } catch (e) {

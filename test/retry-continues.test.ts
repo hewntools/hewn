@@ -145,4 +145,55 @@ describe("a retry carries on from the failed build's workspace", () => {
     assert.ok(carried, "its first attempt saw the failed build's code");
     assert.match(await opened(done.buildId), new RegExp(`^opened \\(retry of ${failed.buildId}\\), carrying on from its workspace, builder: script$`));
   });
+
+  test("Ask builder to fix, sent from the box: the owner's words go on a retry of the failed build (retryOf: it stays traceable), which carries on from it", async () => {
+    // An agent's change that failed, then the owner's fix of it from the Change drawer.
+    const failed = await t.build(() => t.platform.modify(t.claude, { capabilityId: "running-log", request: "add a half" }), halfDone);
+    assert.equal(failed.status, "failed");
+    let half = false;
+    let builder = "";
+    const fixed = await t.build(
+      () => t.platform.modify(USER, { capabilityId: "running-log", request: "The test expects 99 runs; it should expect 0.", failed: failed.buildId }),
+      (ws, job) => ((half = existsSync(join(ws, "src", "half.ts")) && job.carriesOn === "failed"), (builder = readFileSync(join(ws, "BUILDER.md"), "utf8")), finish(ws)),
+    );
+    assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
+    assert.ok(half, "it carried on from the failed build's workspace");
+    const b = t.platform.getBuild(USER, fixed.buildId);
+    assert.equal(b.requestedBy, "user", "the owner's build");
+    assert.equal((b.request as { retryOf?: string }).retryOf, failed.buildId, "a retry of the agent's build: the chain is there to follow");
+    assert.match(String((b.request as { request?: string }).request), /^add a half\n\n--- Fix request ---\nThe test expects 99 runs; it should expect 0\.$/);
+    assert.match(builder, /The test expects 99 runs; it should expect 0\./);
+    // Once: the failed build was retried.
+    await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "again", failed: failed.buildId }), /already retried/);
+  });
+
+  test("Ask builder to fix from the box is the owner's, on a failed build of that tool, with something in the box", async () => {
+    const failed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
+    await assert.rejects(t.platform.modify(t.claude, { capabilityId: "running-log", request: "fix it", failed: failed.buildId }), (e: any) => e.code === "forbidden");
+    await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "   ", failed: failed.buildId }), (e: any) => e.code === "invalid_request");
+    await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "fix it", failed: "b-nope" }), (e: any) => e.code === "conflict");
+    await assert.rejects(t.platform.create(USER, { name: "x", purpose: "x", requirements: "fix it", failed: failed.buildId }), (e: any) => e.code === "conflict" && /isn't a new tool that failed/.test(e.message));
+  });
+
+  test("a new tool's Ask builder to fix, sent from the New page: carries on from the failed create, keeping its name", async () => {
+    const draft = (ws: string) => {
+      editJson(join(ws, "capability.json"), (m) => (m.operations = [{ name: "ping", description: "ping", version: 1, sideEffect: "read", inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: { type: "object" } }]));
+      writeFileSync(join(ws, "src", "index.ts"), 'export const operations = { "ping@1": () => ({ pong: true }) };\n');
+      writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "ping", operation: "ping", input: {}, expect: { pong: false } }]));
+    };
+    const failed = await t.build(() => t.platform.create(USER, { name: "Pinger", purpose: "pings", requirements: "answer ping" }), draft);
+    assert.equal(failed.status, "failed");
+    let carried = false;
+    const done = await t.build(
+      () => t.platform.create(USER, { name: "whatever the intake named it", purpose: "-", requirements: "ping should answer pong: true", failed: failed.buildId }),
+      (ws, job) => {
+        carried = !!job.carriesOn && readFileSync(join(ws, "src", "index.ts"), "utf8").includes("pong");
+        writeFileSync(join(ws, "tests", "cases.json"), JSON.stringify([{ name: "ping", operation: "ping", input: {}, expect: { pong: true } }]));
+      },
+    );
+    assert.equal(done.status, "promoted", done.log.join("\n"));
+    assert.ok(carried);
+    assert.equal(done.capabilityId, failed.capabilityId);
+    assert.equal((t.platform.getBuild(USER, done.buildId).request as { retryOf?: string }).retryOf, failed.buildId);
+  });
 });

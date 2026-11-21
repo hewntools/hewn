@@ -176,7 +176,7 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
   const setUrl = (open) => {
     const p = new URLSearchParams(q);
     if (open) p.set("change", "1");
-    else for (const k of ["change", "m", "send", "widget", "from", "fix", "polish", "held"]) p.delete(k);
+    else for (const k of ["change", "m", "send", "widget", "from", "fix", "polish", "held", "failed"]) p.delete(k);
     history.replaceState(null, "", `#/${noUi ? "run" : "app"}/${enc(c.id)}${[...p].length ? `?${p}` : ""}`);
   };
   // Closing the drawer hides it: the conversation (and a build in progress) is there again on Change.
@@ -194,9 +194,9 @@ function withDrawer(c, q, main, { reload, noUi = false, api: drawerApi = {} }) {
     else if (!want && shown()) {
       drawer.el.style.display = "none";
       change.setAttribute("aria-pressed", "false");
-      // Opened on held work and closed unsent: the next Change is an ordinary one, not built on it.
-      const onHeld = q.has("held");
-      for (const k of ["m", "send", "widget", "from", "fix", "polish", "held"]) q.delete(k);
+      // Opened on held work, or a failed build, and closed unsent: the next Change is an ordinary one, not built on it.
+      const onHeld = q.has("held") || q.has("failed");
+      for (const k of ["m", "send", "widget", "from", "fix", "polish", "held", "failed"]) q.delete(k);
       if (onHeld) (drawer.el.remove(), (drawer = null));
       setUrl(false);
       // Closed without Reload on a version it said was ready: the page says it now.

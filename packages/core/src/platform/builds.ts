@@ -470,7 +470,9 @@ export class Builds extends Domain {
    * for, e.g. the connection this capability will call; it starts once that one promotes.
    * `schedules`: the owner's approved schedules, set up once the build promotes (owner only).
    */
-  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
+  async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string; failed?: string } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
+    // The owner's words on a new tool that failed to build (its "Ask builder to fix", sent from the New page).
+    if (req.failed !== undefined) return this.fixFailed(agent, req.failed, { kind: "create", text: req.requirements, ask: pickAsk(req) });
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
@@ -935,8 +937,10 @@ export class Builds extends Domain {
   }
 
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). `marks`: a retry's, from `retryBuild`. */
-  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
+  async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string; failed?: string } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
+    // The owner's words on a change that failed (its "Ask builder to fix", sent from the Change drawer).
+    if (req.failed !== undefined) return this.fixFailed(agent, req.failed, { kind: "change", capabilityId: req.capabilityId, text: req.request, ask: pickAsk(req) });
     await this.checkEffort(agent, req);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
     const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
@@ -1213,7 +1217,21 @@ export class Builds extends Domain {
    * Re-run a failed build with the same request (e.g. after the builder's login expired),
    * from the capability's current state. Returns the new build.
    */
-  async retryBuild(agent: Agent, buildId: string, opts: { fix?: boolean; auto?: boolean } = {}): Promise<BuildView> {
+  /**
+   * The owner's "Ask builder to fix" on a failed build: their words from the box (prefilled with why it failed), on a
+   * retry of it (`retryOf`, so it carries on from its files, and whose build it was stays traceable). Never started
+   * without them: the button fills the box, and Send is this.
+   */
+  private async fixFailed(agent: Agent, failedId: unknown, want: { kind: "create"; text: unknown; ask: ModelAsk } | { kind: "change"; capabilityId: string; text: unknown; ask: ModelAsk }): Promise<BuildView> {
+    requireOwner(agent);
+    const old = typeof failedId === "string" ? this.registry.getBuild(failedId) : undefined;
+    const fits = !!old && old.status === "failed" && (want.kind === "create" ? old.kind === "create" : old.kind !== "create" && old.capabilityId === want.capabilityId);
+    if (!fits) throw new PlatformError("conflict", `${String(failedId)} isn't ${want.kind === "create" ? "a new tool" : `a change to ${want.kind === "change" ? want.capabilityId : ""}`} that failed`);
+    if (typeof want.text !== "string" || !want.text.trim()) throw new PlatformError("invalid_request", "what to fix: the box is empty");
+    return this.retryBuild(agent, old!.id, { fix: true, text: want.text, ask: want.ask });
+  }
+
+  async retryBuild(agent: Agent, buildId: string, opts: { fix?: boolean; auto?: boolean; text?: string; ask?: ModelAsk } = {}): Promise<BuildView> {
     const old = this.visibleBuild(agent, buildId);
     requireScope(agent, scopeOf(old.kind));
     if (old.status !== "failed" && old.status !== "cancelled") throw new PlatformError("conflict", `only failed or cancelled builds can be retried (this one is ${old.status})`);
@@ -1241,10 +1259,12 @@ export class Builds extends Domain {
     // again, so a model the owner has unticked since isn't used.
     if (opts.auto) this.trustedAsks.add(req);
     if (opts.fix) {
-      // "Ask builder to fix": the same request plus why the last build failed.
-      const context = `${FIX_MARK}\n${failedChecks(old.log)}`;
+      // "Ask builder to fix": the same request plus why the last build failed, in the owner's words from the box (they
+      // started as that) or, for an agent's or the CLI's fix, as Hewn words it.
+      const context = `${FIX_MARK}\n${opts.text?.trim() ?? failedChecks(old.log)}`;
       const field = old.kind === "create" ? "requirements" : old.request.polish ? "note" : "request";
       req[field] = `${String(req[field] ?? "").split(FIX_MARK)[0].trimEnd()}\n\n${context}`;
+      if (opts.ask) Object.assign(req, opts.ask);
     }
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
     return (async () => {
