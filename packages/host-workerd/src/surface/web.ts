@@ -248,7 +248,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   const n = Number(url.searchParams.get("n") ?? 100);
 
   if (resource === "capabilities" && !id) {
-    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation"]) as any);
+    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation", "held"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
     return withEtag(req, await capabilityList(platform, owner));
   }
@@ -281,7 +281,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         return { lines: platform.setInstructions(owner, id, (await readJson(req)).text) };
       case "POST modify": {
         const body = await readJson(req);
-        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...pick(body, ["model", "effort", "conversation"]) });
+        // `held`: a change to the held change with that build id (its card's "Ask builder to fix"), not to the live version.
+        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...(body.held !== undefined ? { held: body.held } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
       // Polish: the passes on a tool already live (owner only). `realData`: the builder sees a copy of the tool's own data.
       case "POST polish": {
@@ -856,7 +857,13 @@ async function readBundle(platform: Platform, host: SurfaceHost, owner: Agent, t
 function earlierConversation(platform: Platform, owner: Agent, buildId: unknown): NonNullable<IntakeRequest["earlier"]> {
   if (typeof buildId !== "string") throw new PlatformError("invalid_request", "earlier.buildId must be a build id");
   const b = platform.getBuild(owner, buildId);
-  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages: platform.buildContext(owner, buildId).conversation ?? [] };
+  // An agent's build has no conversation with the intake (held work being fixed): what it asked for goes alongside,
+  // labelled as the agent's words; a new tool's is its name, purpose and requirements.
+  const conversation = platform.buildContext(owner, buildId).conversation ?? [];
+  const r = (b.request ?? {}) as Record<string, unknown>;
+  const said = (k: string) => (typeof r[k] === "string" && (r[k] as string).trim() ? (r[k] as string) : "");
+  const asked = conversation.length ? "" : said("request") || [said("name"), said("purpose"), said("requirements")].filter(Boolean).join("\n");
+  return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages: conversation, ...(asked ? { asked: { by: b.requestedBy, text: asked } } : {}) };
 }
 
 /** Server-sent events: replay the build transcript, then follow live until promoted/failed. */

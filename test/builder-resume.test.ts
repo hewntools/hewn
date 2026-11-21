@@ -288,6 +288,11 @@ test("a retry carries on from the failed build's workspace, the new request over
   assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "stopped" })), /an earlier build of the same request that the owner stopped before it finished: the workspace holds its work/);
   assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "failed" })), /\nThis build carries on from an earlier build of the same request that didn't finish: the workspace holds its work\. Look at what's there before you write anything/);
   assert.doesNotMatch(builderPrompt(job({ buildId: "b-new", attempt: 2, carriesOn: "failed" })), /carries on from an earlier build/, "its first attempt only");
+  // A create on a held new tool ("Ask builder to fix" on its warnings): its icon is there already.
+  const onHeld = builderPrompt(job({ buildId: "b-new", attempt: 1, carriesOn: "held" }));
+  assert.match(onHeld, /\nThis build carries on from work that waits for the owner's review: the workspace holds it, its icon and hue too\./);
+  assert.doesNotMatch(onHeld, /write ui\/icon\.svg and set "hue"/, "not told to start with the icon");
+  assert.match(builderPrompt(job({ buildId: "b-new", attempt: 1 })), /write ui\/icon\.svg and set "hue"/, "a fresh create still is");
   // Nothing kept (the workspace cleaned up after a day): the retry opens afresh.
   assert.equal(await wb.carryOver("b-gone", "b-other", {}), false);
   for (const b of ["b-old", "b-new"]) await wb.remove(b);
