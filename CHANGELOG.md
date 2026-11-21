@@ -4,6 +4,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.13 (unreleased)
 
+### Safety and limits
+
+- **A call may not work for more than 10 seconds without a pause.** Until now Hewn's tools were restarted after about 5 seconds of a call's code never letting go; now it's a rule at 10, and a build that breaks it fails saying which operation and on which test or sample call ("`import_feed@1` worked for more than 10 seconds without a pause, on test 'big feed'"). See [Runtime](spec/tools.md#runtime).
+
 ### Fixes
 
 - With `HEWN_SCHEDULES=off`, a restored copy no longer starts the builds that were running or waiting when the backup was made: they stay stopped, saying why.
