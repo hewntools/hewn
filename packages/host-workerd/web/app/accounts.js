@@ -18,10 +18,11 @@ const HEALTH = {
 };
 
 /** I1 Accounts: one row per connection; a button only when it needs you. */
-async function accountsPage() {
+/** `auto`: redrawn by the page's own poll (a connection's build moved on), not by the owner: its requests are the page's own. */
+async function accountsPage({ auto = false } = {}) {
   const here = stillHere();
   page("accounts", 720, h("h1", { class: "flush" }, "Accounts"), skeleton("60%", "90%", "70%"));
-  const [{ connections }, all] = await Promise.all([api("/accounts"), caps(true)]);
+  const [{ connections }, all] = await Promise.all([api("/accounts", { refresh: auto }), caps(true, { poll: auto })]);
   if (!here()) return;
   setWallpaper(await hues([260, 200]));
   if (!here()) return;
@@ -78,7 +79,7 @@ async function accountsPage() {
   const poll = async () => {
     if (!location.hash.startsWith("#/accounts")) return;
     const now = [...(await caps(true, { poll: true }).catch(() => new Map())).values()].filter((c) => c.kind === "connection");
-    if (signature(now) !== last) return accountsPage();
+    if (signature(now) !== last) return accountsPage({ auto: true });
     timer = setTimeout(poll, 2500);
   };
   let timer = setTimeout(poll, 2500);
