@@ -27,7 +27,15 @@ describe("plain-language build failures", () => {
     assert.equal(breaking.detail, "record_run@1 input $.date: type changed");
   });
 
-  test("code that never let go: today's log line and one from before the tools ran in a process of their own", () => {
+  test("the stall rule: the operation and what it ran on, or loading the code", () => {
+    const say = (line: string) => explainFailure([line]);
+    const t = say("FAILED: import_feed@1 worked for more than 10 seconds without a pause, on sample call 2, so Hewn's tools were restarted; not retried");
+    assert.equal(t.title, "It worked too long without a pause");
+    assert.match(t.detail, /^import_feed@1 worked for more than 10 seconds without a pause, on sample call 2, so Hewn's tools were restarted\. Split the work across calls\. It wasn't tried again/);
+    assert.match(say("FAILED: Its code worked for more than 10 seconds without a pause while loading, so Hewn's tools were restarted; not retried").detail, /^Its code worked for more than 10 seconds without a pause while loading, so/);
+  });
+
+  test("code that never let go: log lines from before the stall rule (0.4.12, and before the tools ran in a process of their own)", () => {
     for (const line of ["FAILED: its code kept Hewn's tools from responding (running tick@1), so Hewn's tools were restarted; not retried", "FAILED: its code kept Hewn from responding (running tick@1), so Hewn was restarted; not retried"]) {
       assert.equal(explainFailure([line]).title, "Its code kept Hewn's tools from responding", line);
     }

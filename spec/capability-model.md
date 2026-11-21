@@ -468,6 +468,7 @@ Images: at most 20 per request, 5 MB and 8000 px a side each. Text: at most 400 
 
 - The input is validated against the operation's `inputSchema` before the handler runs, and the output against `outputSchema` after it returns.
 - A call chain (a call and every `ctx.call` it makes) has 30 seconds. Time spent waiting on `ctx.model` is added back, up to 120 seconds per chain. A widget's run has 15 seconds. Past it the call's code is stopped, and so is anything a call leaves pending when it returns.
+- A call may not work for more than 10 seconds without a pause (an `await` on a fetch, `ctx.call` or `ctx.model`). Code that never yields holds up every tool, so the host restarts them; the call fails, and a build that does it fails naming the operation.
 - An agent's call to a `destructive` operation runs only once the owner confirms it.
 - **Read-only runs** (since 2.3): a widget's operation runs read-only. `ctx.db` refuses any statement that would write before it runs, secret updates are dropped, `ctx.call` reaches read operations only, and there is no `ctx.model`.
 

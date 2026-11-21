@@ -435,7 +435,7 @@ try {
     }
     await page.goto(`${web}/#/`);
     await page.locator(".tile", { hasText: "Runaway" }).click();
-    const sheet = page.locator("dialog", { hasText: /Suspended: it kept Hewn's tools from responding 3 times within an hour \(spin@1 at .*\)\. Its calls, schedules and widgets are refused until you resume it\./ });
+    const sheet = page.locator("dialog", { hasText: /Suspended: it worked for more than 10 seconds without a pause 3 times within an hour \(spin@1 at .*\)\. Its calls, schedules and widgets are refused until you resume it\./ });
     await sheet.waitFor();
     if (await page.locator("dialog", { hasText: "is allowed to" }).count()) throw new Error("the grants sheet came up instead");
     await sheet.getByRole("button", { name: "Ask builder to fix" }).waitFor();

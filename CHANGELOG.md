@@ -4,6 +4,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ## 0.4.13 (unreleased)
 
+### Safety and limits
+
+- **A call may not work for more than 10 seconds without a pause.** Until now Hewn's tools were restarted after about 5 seconds of a call's code never letting go; now it's a rule at 10, and a build that breaks it fails saying which operation and on which test or sample call ("`import_feed@1` worked for more than 10 seconds without a pause, on test 'big feed'"). See [Runtime](spec/tools.md#runtime).
+
 ### Fixes
 
 - An open Home redrawing itself after its poll found a change no longer counts as your activity, so it doesn't delay Hewn giving memory back or a host suspending it.
