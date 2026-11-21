@@ -186,6 +186,9 @@ async function main() {
       };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);
+      // The terminal or the SSH session closing: the workerds are in process groups of their own, so it doesn't reach
+      // them, and Node would exit without its exit handlers. Stop them as on Ctrl-C.
+      process.on("SIGHUP", stop);
       await new Promise(() => {});
       return;
     }

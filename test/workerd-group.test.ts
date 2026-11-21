@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { signalChild } from "@hewntools/cli/supervisor/group.ts";
+import { signalChild, stopLeftover } from "@hewntools/cli/supervisor/group.ts";
 import { sandboxed } from "@hewntools/cli/supervisor/index.ts";
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -77,4 +77,21 @@ test("Linux: a SIGKILL to the tools' bwrap sandbox as a group leaves no process 
   // Recorded, not required: whether this bwrap leaves the inner process behind on its own (it did on the machine
   // the fix came from; --die-with-parent covers some kernels and bwrap versions, not all).
   t.diagnostic(`outer bwrap killed alone left ${leftOver.length} process(es) behind`);
+});
+
+test("a previous run's leftover: its group goes even when its leader is already gone (an outer bwrap killed alone)", async () => {
+  const m = marker();
+  const leader = spawn("sh", ["-c", `sleep ${m} & wait`], { detached: true, stdio: "ignore" });
+  await gone(() => (sleepers(m).length ? [] : [0]));
+  const [inner] = sleepers(m);
+  // The leader goes, the process it started stays: the group (its pid recorded in the pid file) still has it.
+  leader.kill("SIGKILL");
+  await exited(leader);
+  assert.ok(alive(inner));
+  assert.equal(stopLeftover(leader.pid!, `sleep ${m}`), true);
+  assert.deepEqual(await gone(() => sleepers(m)), []);
+  // Nothing of it left: nothing to stop. A pid that isn't one (nothing matches): left alone.
+  assert.equal(stopLeftover(leader.pid!, `sleep ${m}`), false);
+  assert.equal(stopLeftover(process.pid, "no-such-command-line"), false);
+  assert.ok(alive(process.pid));
 });

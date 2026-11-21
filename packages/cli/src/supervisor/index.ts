@@ -41,7 +41,7 @@ import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
-import { signalChild, signalGroup } from "./group.ts";
+import { signalChild, signalGroup, stopLeftover } from "./group.ts";
 
 /** The watchdog an owner's Hewn runs: a health check a second, and a restart past the stall rule's 10 s. */
 export const WATCHDOG = { intervalMs: 1000, stallMs: STALL_MS };
@@ -731,14 +731,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   for (const pidFile of Object.values(pidFiles)) {
     if (!existsSync(pidFile)) continue;
     const old = Number(readFileSync(pidFile, "utf8"));
-    try {
-      if (old && spawnSync("ps", ["-p", String(old), "-o", "command="], { encoding: "utf8" }).stdout.includes("workerd")) {
-        signalGroup(old, "SIGKILL");
-        log(`stopped a workerd left over from a previous run (pid ${old})`);
-      }
-    } catch {
-      // already gone
-    }
+    if (stopLeftover(old)) log(`stopped a workerd left over from a previous run (pid ${old})`);
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const platform = workerdProcess({
@@ -823,12 +816,19 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     tunnel.halt();
     // The platform first, so nothing calls the tools meanwhile; the tools when it has gone (or after a moment).
     const toolsChild = tools.child;
-    if (platform.child && platform.child.exitCode === null && platform.child.signalCode === null) {
-      const gone = new Promise((r) => platform.child!.once("exit", r));
-      signalChild(platform.child, "SIGTERM");
+    const platformChild = platform.child;
+    /** SIGTERM, then up to 2 s for it to go. */
+    const end = async (c: typeof toolsChild) => {
+      if (!c || c.exitCode !== null || c.signalCode !== null) return;
+      const gone = new Promise((r) => c.once("exit", r));
+      signalChild(c, "SIGTERM");
       await Promise.race([gone, new Promise((r) => setTimeout(r, 2000))]);
-    }
-    signalChild(toolsChild, "SIGTERM");
+    };
+    await end(platformChild);
+    await end(toolsChild);
+    // Nothing of either outlives this: a tools workerd stuck in a loop ignores SIGTERM, and a sandbox's inner processes
+    // may still be going. Their groups only: a leader's pid may be another process's by now.
+    for (const c of [platformChild, toolsChild]) if (c?.pid) signalGroup(c.pid, "SIGKILL", true);
     await new Promise((r) => supervisorServer.close(r));
   };
   process.on("exit", killOnExit);
