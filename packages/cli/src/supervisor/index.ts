@@ -41,6 +41,7 @@ import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
+import { signalChild, signalGroup } from "./group.ts";
 
 /** The watchdog an owner's Hewn runs: a health check a second, and a restart past the stall rule's 10 s. */
 export const WATCHDOG = { intervalMs: 1000, stallMs: STALL_MS };
@@ -684,6 +685,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
           cwd: o.cwd,
           env: { ...o.env(), PWD: o.cwd },
           stdio: ["ignore", "pipe", "pipe"],
+          // A process group of its own, signalled as one: its sandbox's processes go with it (group.ts).
+          detached: true,
         });
         p.child = child;
         if (child.pid) writeFileSync(o.pidFile, String(child.pid));
@@ -692,6 +695,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         child.stderr!.on("data", forward);
         o.onStarted?.();
         child.on("exit", (code, signal) => {
+          // Whatever it started and left (the inner bwrap and its workerd, when the outer one went first) goes too.
+          if (child.pid) signalGroup(child.pid, "SIGKILL", true);
           if (stopping || p.held) return;
           // A crash loop (e.g. a bad config) backs off instead of spinning.
           p.quickExits = Date.now() - startedAt < 3000 ? p.quickExits + 1 : 0;
@@ -711,7 +716,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
           if (then === "hold") p.held = true;
           else p.restartNow = true;
           c.once("exit", () => done());
-          c.kill(signal);
+          signalChild(c, signal);
         });
       },
       resume() {
@@ -728,7 +733,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const old = Number(readFileSync(pidFile, "utf8"));
     try {
       if (old && spawnSync("ps", ["-p", String(old), "-o", "command="], { encoding: "utf8" }).stdout.includes("workerd")) {
-        process.kill(old, "SIGKILL");
+        signalGroup(old, "SIGKILL");
         log(`stopped a workerd left over from a previous run (pid ${old})`);
       }
     } catch {
@@ -806,8 +811,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   };
   // This process exiting (a crash, a forced exit) takes workerd with it; after a kill -9, the pid files above.
   const killOnExit = () => {
-    platform.child?.kill("SIGKILL");
-    tools.child?.kill("SIGKILL");
+    signalChild(platform.child, "SIGKILL");
+    signalChild(tools.child, "SIGKILL");
   };
   /** Stop both for good (and a restart they had coming) and close the supervisor's channel. */
   const shutdown = async () => {
@@ -820,10 +825,10 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const toolsChild = tools.child;
     if (platform.child && platform.child.exitCode === null && platform.child.signalCode === null) {
       const gone = new Promise((r) => platform.child!.once("exit", r));
-      platform.child.kill("SIGTERM");
+      signalChild(platform.child, "SIGTERM");
       await Promise.race([gone, new Promise((r) => setTimeout(r, 2000))]);
     }
-    toolsChild?.kill("SIGTERM");
+    signalChild(toolsChild, "SIGTERM");
     await new Promise((r) => supervisorServer.close(r));
   };
   process.on("exit", killOnExit);
@@ -896,7 +901,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     watch(toolsHealthy, (seconds) => toolsStalled(`no answer for ${seconds} s`));
     watch(healthy, (seconds) => {
       log(`workerd unresponsive for ${seconds}s; restarting it`);
-      platform.child?.kill("SIGKILL");
+      signalChild(platform.child, "SIGKILL");
     });
   }
 
@@ -1048,8 +1053,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     status,
     async restart() {
       const before = { platform: platform.restarts, tools: tools.restarts };
-      platform.child?.kill("SIGTERM");
-      tools.child?.kill("SIGTERM");
+      signalChild(platform.child, "SIGTERM");
+      signalChild(tools.child, "SIGTERM");
       while (platform.restarts === before.platform || tools.restarts === before.tools) await new Promise((r) => setTimeout(r, 50));
       await waitHealthy().catch(() => {
         throw new Error("workerd did not come back");
