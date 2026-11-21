@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CapabilityBuilder } from "@hewntools/cli/builders/types.ts";
 import type { HostModels } from "@hewntools/core/models.ts";
-import { Platform } from "@hewntools/core/platform.ts";
+import { Platform, type PlatformOptions } from "@hewntools/core/platform.ts";
 import type { SecretStore } from "@hewntools/core/ports.ts";
 import type { Home } from "@hewntools/cli/home.ts";
 import type { VisualCheck } from "@hewntools/cli/visual.ts";
@@ -46,6 +46,9 @@ export interface NodePlatformOptions {
   schedulesOff?: boolean;
   /** How long a carry-over waits for a stopped build's builder to exit (default 10 s). */
   stopWaitMs?: number;
+  /** The reader on a submission's code, and whether it reads by itself (default: none here). */
+  readCode?: PlatformOptions["readCode"];
+  readsCode?: PlatformOptions["readsCode"];
 }
 
 export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platform {
@@ -77,5 +80,7 @@ export function nodePlatform(home: Home, opts: NodePlatformOptions = {}): Platfo
     modelEfforts: async (builder, model) => (await (opts.models ?? offlineCatalog)(builder)).models.find((m) => m.id === model)?.efforts,
     maxRunningBuilds: opts.maxRunningBuilds,
     schedulesOff: opts.schedulesOff,
+    readCode: opts.readCode,
+    readsCode: opts.readsCode,
   });
 }

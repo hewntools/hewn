@@ -8,7 +8,7 @@ import type { Deadline } from "./deadline.ts";
 import type { CapabilityManifest, ModelRequirement, WidgetManifest } from "./manifest.ts";
 import type { HostModels, ModelSettings } from "./models.ts";
 import type { Blobs, CapabilityRuntime, Files, SecretStore, Sql, Workbench } from "./ports.ts";
-import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildRow, type BuildTurn, type Confirmation, Registry, type ShareLink } from "./registry.ts";
+import { type AttachmentRef, type BuildContext, type BuildFeedback, type BuildKind, type BuildReading, type BuildRow, type BuildTurn, type Confirmation, Registry, type ShareLink } from "./registry.ts";
 import type { AssertionResponse, RegistrationResponse } from "./webauthn.ts";
 import { type Schedule, ScheduleStore } from "./schedules.ts";
 import { Discovery, type CapabilitySummary } from "./platform/discovery.ts";
@@ -24,7 +24,7 @@ import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
 import type { BundleSummary, ShelfTool } from "./bundle.ts";
 import { type BundleOrigin, type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck } from "./platform/sharing.ts";
-import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
+import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, READ_MS, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
 import { CHECKS_PER_HOUR, type ClientCheck, type Pack, PACK_LINK_MS, PACK_PAGE_BYTES, Submissions } from "./platform/submissions.ts";
 import type { CodeFile, CodeText } from "./code.ts";
 import { Validation } from "./platform/validation.ts";
@@ -49,6 +49,7 @@ export { LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 export { type ApprovedSchedule } from "./platform/schedules.ts";
 export { type Suspension, STALL_MS, STALLS_TO_SUSPEND, STALL_WINDOW_MS } from "./platform/stalls.ts";
 export { type SummaryInput } from "./platform/sharing.ts";
+import type { SummaryInput } from "./platform/sharing.ts";
 export { type BuildView, type BuildProgress, type BuildStep, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReportRow, type BuildReport, slugify, RESERVED_IDS, type SubmitEntry } from "./platform/builds.ts";
 export { CHECKS_PER_HOUR, type ClientCheck, type FileEntry, type Pack, candidateFiles, PACK_PATH } from "./platform/submissions.ts";
 export { matches } from "./platform/validation.ts";
@@ -109,6 +110,13 @@ export interface PlatformOptions {
   version?: string;
   /** `capabilities_check` calls a client may make in an hour. Default 30. */
   checksPerHour?: number;
+  /**
+   * The reader: the owner's builder reading a tool's code (the intake's "summarize"), to say what it does
+   * with the owner's data and what it found. Throws when the read is refused or fails. Absent: nothing reads code here.
+   */
+  readCode?: (input: SummaryInput, signal: AbortSignal) => Promise<BundleSummary>;
+  /** Whether Hewn reads code by itself (Settings › AI: every time, the default) or only when the owner asks. */
+  readsCode?: () => boolean;
 }
 
 /** Secrets kept in memory (tests, and until the host provides a store). */
@@ -148,10 +156,15 @@ export class Platform {
   version?: string;
   /** `capabilities_check` calls a client may make in an hour (PlatformOptions.checksPerHour). */
   checksPerHour: number;
+  /** The reader and whether it reads by itself (PlatformOptions.readCode, readsCode). */
+  readCode?: (input: SummaryInput, signal: AbortSignal) => Promise<BundleSummary>;
+  readsCode: () => boolean;
   /** The most of the pack's files one `capabilities_pack` call sends, in bytes (tests make it small). */
   packPageBytes = PACK_PAGE_BYTES;
   /** How long a pack's download link works (once). */
   packLinkMs = PACK_LINK_MS;
+  /** The most a submission's read may take (tests make it short). */
+  readMs = READ_MS;
   /** Heartbeat interval for builder liveness logging. */
   heartbeatMs = 10_000;
   /** How long a build waits after losing its builder connection before counting the attempt. */
@@ -188,6 +201,8 @@ export class Platform {
     this.hostModels = opts.hostModels;
     this.version = opts.version;
     this.checksPerHour = opts.checksPerHour ?? CHECKS_PER_HOUR;
+    this.readCode = opts.readCode;
+    this.readsCode = opts.readsCode ?? (() => true);
     // The domains share the facade, the ports and the event bus, and reach each other through `d`.
     const d = (this.d = {} as Domains);
     const s: Shared = { platform: this, events: this.events, loaded: new Map(), d };
@@ -426,6 +441,7 @@ export class Platform {
   buildReport(owner: Agent, opts?: { days?: number }): BuildReport { return this.d.builds.buildReport(owner, opts); }
   buildTranscript(owner: Agent, buildId: string): Promise<string | undefined> { return this.d.builds.buildTranscript(owner, buildId); }
   buildsInReview(owner: Agent): BuildView[] { return this.d.builds.buildsInReview(owner); }
+  readHeldBuild(owner: Agent, buildId: string): Promise<BuildReading> { return this.d.builds.readHeldBuild(owner, buildId); }
   approveBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.approveBuild(owner, buildId); }
   rejectBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.rejectBuild(owner, buildId); }
   reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number | null; files: CodeFile[] }> { return this.d.builds.reviewCode(owner, buildId); }

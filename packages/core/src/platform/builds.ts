@@ -8,14 +8,14 @@ import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
 import { bytes, contentHash, CONTRACTS_DIR, decodeVersion, text, versionFiles } from "../files.ts";
 import { cellsFromSvg, glyphSvg } from "../glyph.ts";
-import type { BundleSummary } from "../bundle.ts";
+import { type BundleSummary, readSummary } from "../bundle.ts";
 import { ABI, callableOperations, type CapabilityManifest, DEFAULT_ABI, isConnection, newestByName, offeredOperations, type OperationManifest, opKey, SIDE_EFFECTS, stampSource, type ToolSource } from "../manifest.ts";
 import { saneCharge } from "../models.ts";
 import { EFFORT, MODEL_NAME } from "../build-models.ts";
 import type { BuildPass, Files } from "../ports.ts";
 import { isPolish, type Pass, PASS_TRIES, PASSES, POLISH_KEEPS, passRequest } from "../passes.ts";
 import { SAMPLE_FILE } from "../bundle.ts";
-import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReview, BuildRow, BuildTurn } from "../registry.ts";
+import type { BuildContext, BuildFeedback, BuildKind, BuildModel, BuildReading, BuildReview, BuildRow, BuildTurn } from "../registry.ts";
 import { sha256 } from "../sha256.ts";
 import { MAX_SATURATION } from "./presentation.ts";
 import { attachmentRefs } from "./attachments.ts";
@@ -24,6 +24,7 @@ import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
 import { type Candidate, reviewShotKey, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
+import { placed, readable, type SummaryInput } from "./sharing.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
 import spec from "@hewntools/spec/package.json" with { type: "json" };
@@ -53,6 +54,8 @@ export interface BuildView {
   screenshot?: boolean;
   /** Where the build is in its pipeline, while in flight. */
   step?: BuildStepState;
+  /** The owner's review list only: what the reader said of a held submission's code, or why it wasn't read. */
+  reading?: BuildReading;
   /** Test cases of the latest validation. */
   tests?: { passed: number; total: number };
   /** Plain-language reason, when failed. */
@@ -159,6 +162,10 @@ type RetryMarks = { retryOf?: string; autoRetryOf?: string; fixOf?: string; fixF
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
+/** The most a submission's read may take (usually under a minute): past it, the code wasn't read. */
+export const READ_MS = 5 * 60_000;
+/** The most submissions of one agent's read in an hour (each a model call the owner pays for); past it, unread. */
+export const READS_PER_HOUR = 10;
 
 /** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
 export type ModelAsk = {
@@ -226,6 +233,12 @@ export class Builds extends Domain {
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
   private aborts = new Map<string, AbortController>();
+  /** Builds whose code is being read now (`readSubmission`): a cancel stops the read. */
+  private reading = new Set<string>();
+  /** When each agent's submissions were read this past hour (in memory: a restart starts afresh). */
+  private readsBy = new Map<string, number[]>();
+  /** Check it yourself reads running now, by build: asking again gets the one running. */
+  private heldReads = new Map<string, Promise<BuildReading>>();
   /** Retries that carry on from the build they retry (its workspace), by why that one ended: their builder's first attempt is told so. */
   private carriedOn = new Map<string, "failed" | "stopped" | "held">();
   private progress = new Map<
@@ -1280,12 +1293,13 @@ export class Builds extends Domain {
     const build = this.mustBuild(buildId);
     requireScope(agent, scopeOf(build.kind));
     if (agent.kind !== "user" && agent.id !== build.requestedBy) throw new PlatformError("forbidden", `only the owner or ${build.requestedBy} can cancel this build`);
-    if (build.status === "validating") throw new PlatformError("conflict", "the candidate is being validated; it finishes in a moment");
+    // Its code being read (one model call, up to minutes) can be stopped; the rest of validation finishes first.
+    if (build.status === "validating" && !this.reading.has(buildId)) throw new PlatformError("conflict", "the candidate is being validated; it finishes in a moment");
     // Paused (its host kept the work for a Continue): Stop ends it, unless it was continued.
     const paused = isPaused(build);
     const continued = paused ? this.registry.retryOf(build.id) : undefined;
     if (continued) throw new PlatformError("conflict", `build ${buildId} was continued as ${continued}`);
-    if (!paused && build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review") throw new PlatformError("conflict", `build is already ${build.status}`);
+    if (!paused && build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review" && !(build.status === "validating" && this.reading.has(buildId))) throw new PlatformError("conflict", `build is already ${build.status}`);
     const line = paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
     this.registry.updateBuild(buildId, { status: "cancelled", log: [...build.log, line] });
     this.buildEvent(buildId, line, `build ${buildId} [${build.kind} ${build.capabilityId}]`);
@@ -1480,6 +1494,9 @@ export class Builds extends Domain {
     const log: string[] = [];
     const step = this.stepLog(build, submitter, log);
     try {
+      // A client's submission is read before it's held or goes live; the read never holds it. Cancelled meanwhile: no more.
+      if (build.builder === "submitted") await this.readSubmission(build, candidate, step);
+      if (this.mustBuild(build.id).status === "cancelled") return { log };
       const r = await this.d.validation.promote(build, candidate, step);
       if ("review" in r) {
         step(`passed; waiting for the owner's review before it goes live (${reviewReason(r.review, build.kind, !!(build.request as RetryMarks).fixOf)})`);
@@ -1632,6 +1649,7 @@ export class Builds extends Domain {
     if ("end" in best) return void this.endRun(run, best);
     const { version, review, log } = await this.promoteCandidate(build, `builder ${run.builder}`, best);
     run.history.push(...log.map((l) => `${best.label}: ${l}`));
+    if (this.mustBuild(build.id).status === "cancelled") return undefined;
     if (review) {
       this.registry.updateBuild(build.id, { status: "review", review, log: run.history });
       this.logger(`${run.tag} waits for the owner's review (${reviewReason(review, build.kind, !!(build.request as RetryMarks).fixOf)})`);
@@ -1808,10 +1826,101 @@ export class Builds extends Domain {
     return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
   }
 
-  /** Builds waiting for the owner's review (owner only). */
+  /** Builds waiting for the owner's review (owner only), each with what the reader said of its code. */
   buildsInReview(owner: Agent): BuildView[] {
     requireOwner(owner);
-    return this.registry.buildsInReview().map((b) => this.buildView(b));
+    return this.registry.buildsInReview().map((b) => {
+      const reading = this.registry.buildContext(b.id)?.reading;
+      return { ...this.buildView(b), ...(reading ? { reading } : {}) };
+    });
+  }
+
+  /**
+   * A client's submission read by the owner's reader before it's held or goes live, as a tool from a file is before
+   * it's installed: what it does with the owner's data and what it found. Kept for the owner only
+   * (`build_context`): shown to the agent, it could write its code to the reader. It describes and warns, never
+   * gates: a read that's off, refused, failed, stopped or over its bounds is kept as why the code wasn't read, and
+   * the build carries on. Each read is a model call the owner pays for: the same files are read once
+   * (`codeReads`, by content hash), and an agent gets at most READS_PER_HOUR. Cancelling the build stops it.
+   */
+  private async readSubmission(build: BuildRow, candidate: Candidate, step: (message: string) => void) {
+    const at = new Date().toISOString();
+    let reading: BuildReading;
+    this.reading.add(build.id);
+    try {
+      const earlier = this.registry.getKv<Record<string, BuildReading>>("code-reads")?.[contentHash(versionFiles(candidate.files), "")];
+      const recent = (this.readsBy.get(build.requestedBy) ?? []).filter((t) => Date.now() - t < 3600_000);
+      if (!this.platform.readsCode()) reading = { unread: "Hewn reads code only when you ask (Settings › AI)", at };
+      else if (earlier && "summary" in earlier) reading = earlier;
+      else if (recent.length >= READS_PER_HOUR) reading = { unread: `it handed over more than ${READS_PER_HOUR} tools to read this hour`, at };
+      else {
+        this.readsBy.set(build.requestedBy, [...recent, Date.now()]);
+        step("reading the code (usually under a minute)");
+        const said = typeof build.request.requirements === "string" ? build.request.requirements : typeof build.request.request === "string" ? build.request.request : "";
+        const changed = candidate.base ? changedPaths(candidate.base.files, candidate.files) : undefined;
+        reading = await this.readCode(candidate.manifest, candidate.files, { asked: false, buildId: build.id, submitted: { by: String(build.request.submittedBy ?? build.requestedBy), says: said, ...(changed ? { changed } : {}) } });
+      }
+    } catch (e) {
+      reading = { unread: `the read didn't finish: ${(e as Error).message.slice(0, 200)}`, at };
+    } finally {
+      this.reading.delete(build.id);
+    }
+    this.registry.setBuildContext(build.id, { reading });
+    step("summary" in reading ? "code read by the owner's reader" : "the code wasn't read");
+  }
+
+  /**
+   * The owner's reader on a held build's code, asked for (*Check it yourself*): whatever the setting, read once and
+   * kept; one read at a time a build (asking again while one runs gets that one). A read that fails leaves an
+   * earlier one as it was, and that's what's returned. Owner only.
+   */
+  async readHeldBuild(owner: Agent, buildId: string): Promise<BuildReading> {
+    const b = this.heldBuild(owner, buildId);
+    const running = this.heldReads.get(b.id);
+    if (running) return running;
+    const read = (async () => {
+      const { files } = await this.loadCandidate(b.review.contentHash);
+      const reading = await this.readCode(JSON.parse(text(files["capability.json"])) as CapabilityManifest, files, { asked: true });
+      const before = this.registry.buildContext(b.id)?.reading;
+      if (!("summary" in reading) && before && "summary" in before) return before;
+      this.registry.setBuildContext(b.id, { reading });
+      return reading;
+    })().finally(() => this.heldReads.delete(b.id));
+    this.heldReads.set(b.id, read);
+    return read;
+  }
+
+  /**
+   * The reader on a tool's files: its reading, placed in them, with what it couldn't read (`cut`), or why the code
+   * wasn't read. `asked`: the owner asked, whatever the setting. `buildId`: the build whose cancel stops it.
+   * `submitted`: an agent's, and what it says the tool is or changes. Bounded at READ_MS here, whatever the host does.
+   */
+  private async readCode(manifest: CapabilityManifest, files: Files, o: { asked: boolean; buildId?: string; submitted?: SummaryInput["submitted"] }): Promise<BuildReading> {
+    const at = new Date().toISOString();
+    const unread = (why: string): BuildReading => ({ unread: why, at });
+    if (!o.asked && !this.platform.readsCode()) return unread("Hewn reads code only when you ask (Settings › AI)");
+    const read = this.platform.readCode;
+    if (!read) return unread("no builder is set up to read it (Settings › AI)");
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(new Error(`it took longer than ${Math.round(this.platform.readMs / 60_000) || "a few"} minutes`)), this.platform.readMs);
+    const cancelled = o.buildId ? this.aborts.get(o.buildId)?.signal : undefined;
+    const signal = cancelled ? AbortSignal.any([stop.signal, cancelled]) : stop.signal;
+    try {
+      const input = { manifest, ...readable(versionFiles(files)), ...(o.submitted ? { submitted: o.submitted } : {}) };
+      const gone = new Promise<never>((_, no) => signal.addEventListener("abort", () => no(signal.reason instanceof Error ? signal.reason : new Error("the build was cancelled")), { once: true }));
+      const summary = readSummary(await Promise.race([read(input, signal), gone]));
+      if (!summary) return unread("the reading came back empty");
+      const reading: BuildReading = { summary: placed(summary, files), ...(input.cut.length ? { cut: input.cut } : {}), at };
+      // The same files aren't read twice (a resubmission, a retried check): the last 50 readings, by content hash.
+      const hash = contentHash(versionFiles(files), "");
+      const kept = Object.entries(this.registry.getKv<Record<string, BuildReading>>("code-reads") ?? {}).slice(-49);
+      this.registry.setKv("code-reads", Object.fromEntries([...kept, [hash, reading]]));
+      return reading;
+    } catch (e) {
+      return unread(`the read didn't finish: ${(e as Error).message.slice(0, 200)}`);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -2193,6 +2302,12 @@ const failedChecks = (log: string[]) => {
   // Not the warnings (they come before the failure, and would push it out of the tail).
   return `The previous build failed: ${f.title}. ${f.detail}\nIts validation log ended with:\n${log.filter((l) => !/(^|: )warning: /.test(l)).slice(-8).join("\n")}`;
 };
+
+/** The files that differ between a version and its change (added, changed or removed), for the reader. */
+function changedPaths(before: Files, after: Files): string[] {
+  const same = (a?: Uint8Array, b?: Uint8Array) => !!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]);
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((p) => !same(before[p], after[p])).sort();
+}
 
 const noBuilderRuns = (builder: string) => builder === "keep" || builder === "bundle" || builder === "submitted" || builder.startsWith("copy:");
 

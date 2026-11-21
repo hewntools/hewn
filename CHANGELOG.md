@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **What an agent's tool does, before you allow it.** A tool an agent wrote itself is read by the agent that builds your tools, as a tool from a file is, and its card says what it does with your data; the reading is yours alone, and a read that fails never holds it. **Reading code** in Settings › AI (Every time, or When I ask) covers these and tools from a file or a link. See [Tools an agent writes itself](docs/agents.md#tools-an-agent-writes-itself).
 
 ### Safety and limits
 

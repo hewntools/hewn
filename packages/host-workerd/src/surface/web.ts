@@ -534,6 +534,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
+    // Check it yourself, on a held submission: your builder reads its code now, whatever Settings › AI says, and it's kept.
+    if (sub === "read" && method === "POST") return platform.readHeldBuild(owner, id);
     // A held build's review card: its files against the version it was built on (or one file, ?path=), and its four renders.
     if (sub === "code" && method === "GET") {
       const path = url.searchParams.get("path");
@@ -793,7 +795,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
 const readings = new Map<string, AbortController>();
 
 /** The intake's agent isn't there: none set up, none by that name, or its CLI isn't installed (the sandbox can't start it). */
-const NO_READER = /intake is not configured|no intake named|intake isn't configured|execvp.*No such file/i;
+export const NO_READER = /intake is not configured|no intake named|intake isn't configured|execvp.*No such file/i;
 const NO_BUILDER = "No builder is set up (Settings › AI)";
 
 /**

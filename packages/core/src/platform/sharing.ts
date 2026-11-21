@@ -122,6 +122,15 @@ export interface SummaryInput {
   manifest: CapabilityManifest;
   files: { path: string; text: string }[];
   cut: string[];
+  /** An agent wrote it and handed it over: who, what it says the tool is or changes (its own words), and for a change the files that differ. */
+  submitted?: { by: string; says: string; changed?: string[] };
+}
+
+/** A reading with each finding's place kept only when it's in `files` (a file it has, a line that file has): Show never opens somewhere the reading made up. */
+export function placed(summary: BundleSummary, files: Files): BundleSummary {
+  const lines = (path: string) => (files[path] ? text(files[path]).split("\n").length : 0);
+  const findings = summary.findings?.map(({ file, line, ...f }) => (file && lines(file) >= (line ?? 1) ? { ...f, file, ...(line ? { line } : {}) } : f));
+  return { ...summary, ...(findings ? { findings } : {}) };
 }
 
 /** What the intake reads, at most, counted as it's sent (numbered): 40 KB of a file, 200 KB in all. */
@@ -133,7 +142,7 @@ const SUMMARY_TOTAL_BYTES = 200_000;
  * 40 KB of each and 200 KB in all as sent; `cut` names what was left out (a file that isn't text, or
  * no room left) or cut short (and where).
  */
-function readable(all: Files): Omit<SummaryInput, "manifest"> {
+export function readable(all: Files): Omit<SummaryInput, "manifest"> {
   const rank = (p: string) => ["capability.json", "migrations/", "src/", "sample/", "tests/", "ui/"].findIndex((d) => p.startsWith(d)) + 1 || 9;
   const paths = Object.keys(all).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
   const files: SummaryInput["files"] = [];
@@ -345,9 +354,7 @@ export class Sharing extends Domain {
   async keepSummary(owner: Agent, token: string, summary: BundleSummary): Promise<BundleSummary> {
     requireOwner(owner);
     const s = await this.loadStaged(token);
-    const lines = (path: string) => (s.files[path] ? text(s.files[path]).split("\n").length : 0);
-    const findings = summary.findings?.map(({ file, line, ...f }) => (file && lines(file) >= (line ?? 1) ? { ...f, file, ...(line ? { line } : {}) } : f));
-    const kept = { ...summary, ...(findings ? { findings } : {}) };
+    const kept = placed(summary, s.files);
     const staged = this.registry.getKv<Record<string, Staged>>("bundles:staged") ?? {};
     if (staged[token]) staged[token].summary = kept;
     this.registry.setKv("bundles:staged", staged);

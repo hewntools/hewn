@@ -161,6 +161,13 @@ async function aiSection() {
     h("div", { class: "grow" }, h("span", { class: "strong" }, "Instructions for building"), h("span", { class: "sub clip-1" }, rules.length ? `${plural(rules.length, "rule")} · ${rules.join(" · ")}` : "None yet · tell the intake a rule, or write one here")),
     h("button", { class: "sm", onclick: () => instructionsSheet().then((saved) => saved && route()) }, "Edit…"),
   );
+  // When your builder reads code by itself (an agent's tool, a file or a link you install) or only when you ask: each read is a model call.
+  const reading = h(
+    "div",
+    { class: "setting" },
+    h("div", { class: "grow" }, h("span", { class: "strong" }, "Reading code"), h("span", { class: "sub" }, "Your builder says what an agent's tool, or one from a file or a link, does with your data before you allow or install it")),
+    segmented([["always", "Every time"], ["asked", "When I ask"]], s.codeReading ?? "always", (v) => saveSettings({ codeReading: v }, v === "asked" ? "Code is read when you ask" : "Code is read every time"), { label: "Reading code" }),
+  );
   if (!here()) return;
   settingsFrame(
     "ai",
@@ -169,6 +176,7 @@ async function aiSection() {
       h("div", { class: "setting-with-extra" }, builds, h("div", { class: "row tight attempts" }, h("span", { class: "small faint" }, "Build attempts"), attempts)),
       asks,
       instructions,
+      reading,
       h(
         "div",
         { class: "setting" },

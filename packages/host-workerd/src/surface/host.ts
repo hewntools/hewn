@@ -35,6 +35,11 @@ export interface Settings {
   toolDataLimitMB: number;
   /** One tool's own limit instead, in MB, by tool id: `{ "plant-log": 500 }`. */
   toolDataLimitsMB?: Record<string, number>;
+  /**
+   * When the reader reads code: "always" (the default), an agent's submission and a tool installed from a file or
+   * a link, each by itself; "asked", only when the owner asks (*Check it yourself*). Each read is a model call.
+   */
+  codeReading?: "always" | "asked";
 }
 
 /** Each tool's data limit unless the owner changes it, in MB. */
@@ -198,6 +203,7 @@ export function settingsProblems(next: Record<string, unknown>, opts: { remote?:
   if (typeof next.sandbox !== "boolean") bad.push("sandbox must be true or false");
   if (next.buildPasses !== undefined && (!Array.isArray(next.buildPasses) || next.buildPasses.some((p) => !(PASSES as readonly unknown[]).includes(p)))) bad.push(`buildPasses must be a list of ${PASSES.map((p) => `"${p}"`).join(" and ")}, or [] for none`);
   if (next.firstRunDone !== undefined && typeof next.firstRunDone !== "boolean") bad.push("firstRunDone must be true or false");
+  if (next.codeReading !== undefined && next.codeReading !== "always" && next.codeReading !== "asked") bad.push('codeReading must be "always" or "asked"');
   const days = next.logRetentionDays as number;
   if (!Number.isInteger(days) || days < 0 || days > 3650) bad.push("logRetentionDays must be 0 (forever) to 3650");
   const dataMB = (n: unknown) => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= MAX_TOOL_DATA_MB;

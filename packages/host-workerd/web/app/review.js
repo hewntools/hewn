@@ -2,7 +2,7 @@
 // Review of an agent's change: what's new, and what else changes.
 import { actorLabel, andList, capRef, h } from "../kit.js";
 
-export { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, reviewWarnings, warnedWords, warningsAsk };
+export { changeList, reviewChanges, reviewOp, reviewReading, reviewRequest, reviewTitle, reviewWarnings, warnedWords, warningsAsk };
 
 // ---------- review of agents' changes ----------
 
@@ -83,6 +83,33 @@ const reviewWarnings = (ws = [], { openAt } = {}) =>
       }),
     ),
   ];
+/**
+ * What your builder read in a submission's code, as the install sheet says it: what it does, what it keeps and
+ * where data goes, then the hosts its checks saw it try (`tried`: what was measured, beside what was read), then
+ * its warnings, each opening its file at its line (`openAt`). Unread: why, and `check` (Check it yourself).
+ * Nothing yet (`reading` undefined): only the eyebrow and `check`.
+ */
+const reviewReading = (reading, { openAt, check, tried = [] } = {}) => {
+  const s = reading?.summary;
+  const triedLine = tried.length > 0 && h("div", { class: "small muted" }, `Its checks saw it try ${tried.join(", ")}, which it doesn't declare.`);
+  const found = (s?.findings ?? [])
+    .filter((f) => f.kind === "warn")
+    .map((f) => {
+      const where = f.file && `${f.file}${f.line ? `:${f.line}` : ""}`;
+      const at = where && openAt ? h("button", { class: "link mono review-warning-at", type: "button", title: `Open ${f.file}${f.line ? ` at line ${f.line}` : ""}`, onclick: () => openAt(f) }, where) : where && h("span", { class: "mono faint" }, where);
+      return h("div", { class: "notice warn" }, h("span", { class: "grow" }, f.title, at && [h("span", { class: "faint" }, " · "), at]));
+    });
+  return h(
+    "div",
+    { class: "stack-sm" },
+    h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), check),
+    s ? [h("div", { class: "pretty" }, s.message), s.keeps && h("div", { class: "small muted" }, s.keeps), s.reaches && h("div", { class: "small muted" }, s.reaches)] : reading?.unread && h("div", { class: "small muted" }, `The code wasn't read: ${reading.unread}.`),
+    // What the reading left out or cut short, as the install sheet says it.
+    reading?.cut?.length > 0 && h("div", { class: "notice info-notice" }, h("span", { class: "grow" }, `Not read: ${reading.cut.slice(0, 5).join(", ")}${reading.cut.length > 5 ? ` and ${reading.cut.length - 5} more` : ""}. The reading covers the rest; open the files for these.`)),
+    triedLine,
+    found,
+  );
+};
 /** "Ask builder to fix" on a held change's warnings: what goes in the Change drawer's box (the owner sends it, and may add to it first). */
 const warningsAsk = (b, all) =>
   `Fix what Hewn's checks warned about in ${b.request?.fixOf ? "this" : `${actorLabel(b.requestedBy, all)}'s`} ${b.kind === "create" ? "new tool" : "change"}, and change nothing else:\n${(b.review.warnings ?? []).map((w) => `- ${w.message}${w.file ? ` (${w.file}${w.line ? `:${w.line}` : ""})` : ""}`).join("\n")}`;

@@ -92,7 +92,8 @@ async function installFromFileOrLink() {
  * reading (one of Hewn's tools) goes straight to the sheet, where Check it yourself reads it again.
  */
 async function readThenInstall(p, { from }) {
-  if (p.summaryBy === "hewn") return installSheet(p, { from });
+  // Hewn's own reading, or code read only when you ask (Settings › AI): the sheet, where Check it yourself reads it.
+  if (p.summaryBy === "hewn" || settings?.codeReading === "asked") return installSheet(p, { from });
   const read = await readingSheet(p, { from });
   // Cancelled (Cancel, Escape, a click outside): the staged file goes (it would anyway, after a day).
   if (!read) return void api(`/bundles/${enc(p.token)}`, { method: "DELETE" }).catch(() => {});
@@ -255,11 +256,12 @@ function installSheet(p, { from }) {
         }
       });
       const flags = (p.summary?.findings ?? []).filter((f) => f.kind === "warn");
-      // Hewn's own reading ships with one of Hewn's tools; Check it yourself has your builder read it too.
-      const check = p.summaryBy === "hewn" && h("button", { class: "link sm", onclick: () => ((checking = true), close()) }, "Check it yourself");
+      // Hewn's own reading ships with one of Hewn's tools; Check it yourself has your builder read it too, as it does
+      // a file or a link nobody read (code is read only when you ask).
+      const check = (p.summaryBy === "hewn" || !p.summary) && h("button", { class: "link sm", onclick: () => ((checking = true), close()) }, "Check it yourself");
       return [
         installHead(p, from),
-        h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), check), whatItDoes(p, p.summary)),
+        h("div", { class: "stack-sm" }, h("div", { class: "row between" }, h("div", { class: "eyebrow" }, "What it does"), check), whatItDoes(p, p.summary), !p.summary && p.summaryBy !== "hewn" && settings?.codeReading === "asked" && h("div", { class: "small muted" }, "The code wasn't read: Hewn reads code only when you ask (Settings › AI). This is what the tool says of itself.")),
         flags.map((f) => h("div", { class: "notice warn" }, h("span", { class: "grow" }, f.title, f.file && h("span", { class: "mono faint" }, ` · ${findingAt(f)}`)))),
         p.summaryBy === "yours" && unreadNote(p.unread),
         sourceLink(p),

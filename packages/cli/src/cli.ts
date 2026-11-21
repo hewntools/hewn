@@ -431,6 +431,12 @@ async function main() {
           const r = b.review;
           const what = b.kind === "create" ? (b.submittedBy ? `${b.submittedBy} wrote and submitted a new tool,` : `${b.requestedBy} asked for a new tool,`) : b.submittedBy ? `${b.submittedBy} wrote and submitted a change to` : `${b.requestedBy} wants to ${r.newOperations.length ? "add to" : "change"}`;
           console.log(`${b.buildId}  ${what} ${b.capabilityId}`);
+          // What your builder read in an agent's own code, or why it wasn't read.
+          const read = b.reading;
+          if (read?.summary) {
+            console.log(`    what it does: ${read.summary.message}`);
+            for (const f of (read.summary.findings ?? []).filter((x: any) => x.kind === "warn")) console.log(`    ! ${f.title}${f.file ? `  (${f.file}${f.line ? `:${f.line}` : ""})` : ""}`);
+          } else if (read?.unread) console.log(`    the code wasn't read: ${read.unread}`);
           if (r.connection) console.log("    it's a connection: this code holds your sign-in for that service");
           for (const o of r.newOperations) {
             console.log(`    + ${o.key}: agents can then ${verb[o.sideEffect] ?? o.sideEffect}: ${o.description}`);
