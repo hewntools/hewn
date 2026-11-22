@@ -121,8 +121,8 @@ export class Schedules extends Domain {
    * the one capability. A missed time (host was off) runs once, then the next is computed from now.
    * Repeated failures pause the schedule.
    */
-  async runDueSchedules(now = Date.now()): Promise<{ id: string; ok: boolean }[]> {
-    const ran: { id: string; ok: boolean }[] = [];
+  async runDueSchedules(now = Date.now()): Promise<{ id: string; ok: boolean; what: string }[]> {
+    const ran: { id: string; ok: boolean; what: string }[] = [];
     if (this.off) return ran;
     const breathe = breather();
     for (const listed of this.schedules.due(now)) {
@@ -137,7 +137,7 @@ export class Schedules extends Domain {
       const suspended = this.platform.suspension(s.capabilityId);
       if (suspended) {
         this.schedules.update(s.id, { lastRunAt: new Date().toISOString(), lastOutcome: `not_ready: ${s.capabilityId} is suspended: ${suspended.reason}. It runs again once the owner resumes it` });
-        ran.push({ id: s.id, ok: false });
+        ran.push({ id: s.id, ok: false, what: `${s.capabilityId}/${s.operation}` });
         continue;
       }
       const outcome = await this.runOnce(s);
@@ -154,7 +154,7 @@ export class Schedules extends Domain {
         this.registry.addLifecycleEvent(s.capabilityId, "schedule", `paused ${s.id} after ${failures} failures`, `schedule:${s.id}`);
         this.logger(`schedule ${s.id} paused after ${failures} failures: ${outcome}`);
       }
-      ran.push({ id: s.id, ok });
+      ran.push({ id: s.id, ok, what: `${s.capabilityId}/${s.operation}` });
     }
     if (ran.length) this.onSchedulesChanged();
     return ran;
