@@ -14,6 +14,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- With `HEWN_SCHEDULES=off`, a restored copy no longer starts the builds that were running or waiting when the backup was made: they stay stopped, saying why.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
 
 ## 0.4.12 (2026-11-19)
