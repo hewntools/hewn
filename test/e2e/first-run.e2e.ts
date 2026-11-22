@@ -35,6 +35,8 @@ const port = await freePort();
 
 // The builder: the Running Log seed, renamed to whatever was asked for; a change adds a line to it. It waits for `hold`.
 let hold = Promise.resolve();
+// Set: the next build's tests fail (on every attempt), and it's cleared.
+let failNext = false;
 const builder: CapabilityBuilder = {
   name: "claude",
   build: async (job) => {
@@ -45,6 +47,7 @@ const builder: CapabilityBuilder = {
       m.name = job.capabilityId.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
     });
     if (job.kind === "modify") appendFileSync(join(job.workspace, "src", "index.ts"), "// Changed by request.\n");
+    if (failNext) editJson(join(job.workspace, "tests", "cases.json"), (cases) => (cases[0].expect = { never: "this" }));
   },
 };
 const real = process.env.E2E_REAL_BUILDER === "1";
@@ -887,6 +890,43 @@ export const operations = {
         await ctx.close();
       }
     });
+
+  await step("a failed change: Ask builder to fix opens the Change drawer with why it failed in the box, says what it fixes and starts nothing; closed unsent, the next Change is an ordinary one", async () => {
+    failNext = true;
+    const b = await sv.admin("modify", { capabilityId: "reading-list", request: "A change whose tests fail", wait: true });
+    failNext = false;
+    if (b.status !== "failed") throw new Error(`expected a failed build, got ${b.status}`);
+    let sent = 0;
+    // Anything that would start a build, or ask the intake: the intake, fix or retry, a new tool, a change.
+    const count = (r: any) => void (/\/api\/(intake|builds\/[^/]+\/(fix|retry)|capabilities|capabilities\/[^/]+\/modify)$/.test(new URL(r.url()).pathname) && r.method() === "POST" && sent++);
+    page.on("request", count);
+    try {
+      await page.goto(`${web}/#/b/${b.buildId}`);
+      await page.getByRole("button", { name: "Ask builder to fix" }).click();
+      await page.waitForURL(new RegExp(`#/(app|run)/reading-list\\?.*failed=${b.buildId}`));
+      await page.waitForFunction(() => /Fix what made the last build fail/.test((document.querySelector(".drawer textarea") as HTMLTextAreaElement | null)?.value ?? ""));
+      const text = await page.locator(".drawer textarea").first().inputValue();
+      if (!/test cases failed|didn't pass/.test(text)) throw new Error(`the box: ${text}`);
+      await page.locator(".drawer .held-context", { hasText: "it failed" }).waitFor();
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: "/tmp/e2e-fr-failed-fix.png" });
+      if (sent) throw new Error(`${sent} request(s) to the intake or the build before Send`);
+      const now = await page.evaluate(async (id: string) => (await (await fetch(`/api/builds/${id}`, { headers: { "x-hewn-ui": "1" } })).json()).retriedAs ?? null, b.buildId);
+      if (now) throw new Error(`a build started: ${now}`);
+      // Closed unsent: the next Change is an ordinary one.
+      await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+      await page.getByRole("button", { name: /^Change/ }).first().click();
+      await page.locator(".drawer textarea").first().waitFor();
+      if (await page.locator(".drawer .held-context").count()) throw new Error("the failed build's row came back");
+      if ((await page.locator(".drawer textarea").first().inputValue()).trim()) throw new Error("the box kept the fix");
+      if (/failed=/.test(page.url())) throw new Error(page.url());
+      await page.locator(".drawer").getByRole("button", { name: "Close" }).click();
+    } finally {
+      page.off("request", count);
+    }
+    // Off the Inbox for the steps after.
+    await page.evaluate(async (id: string) => fetch(`/api/builds/${id}/discard`, { method: "POST", headers: { "x-hewn-ui": "1" } }), b.buildId);
+  });
 
   await step("a failed build: Discard takes it off the Inbox; Activity keeps it, marked discarded", async () => {
     // A tool whose own tests fail: installed from a directory, it fails on its own (no builder to ask).

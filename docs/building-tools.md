@@ -45,7 +45,7 @@ Then Hewn:
 - **Reviewing the design:** it writes down the five biggest problems it sees, as a demanding designer would (what the eye lands on first, how generic it looks, how the data is drawn, the phone, dark mode), and fixes them. It holds the screen against what you said and against your other tools' looks too.
 - **Fixing details:** fresh screenshots, with what Hewn measured on them (what sticks out past the phone's edge, text cut short, things drawn over each other, buttons that break the page): it fixes those without redesigning anything.
 
-Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** or **Ask builder to fix** builds it again. A build the host pauses during one is paused as at any other point. Changes and installs don't get one; a tool you already have gets one when you [polish it](#polishing-a-tool). The build's steps show each as it runs ([A build](using-hewn.md#a-build)).
+Each goes through the same checks again, with a second try if it doesn't pass them. If it still doesn't, the build fails like any other: it says which step and what failed ("Reviewing the design: 1 of 6 tests didn't pass"), nothing goes live, and **Retry** builds it again, or **Ask builder to fix** puts why it failed in the box for you to send. A build the host pauses during one is paused as at any other point. Changes and installs don't get one; a tool you already have gets one when you [polish it](#polishing-a-tool). The build's steps show each as it runs ([A build](using-hewn.md#a-build)).
 What you ask for goes live right after the checks. A change an agent makes to a tool you have waits for your approval first: see [Changes made by agents](#changing-a-tool).
 
 Builds show in Activity and the Inbox while they run, with their milestones. A build usually takes a few minutes; a new tool's second look adds about as much again, in time and in your builder's usage.
@@ -66,7 +66,7 @@ The proposal for a change is a short brief too: what changes, what must keep wor
 
 Changes to one tool take turns: ask for another while one builds (or an agent does) and it waits, then starts from the version the first one leaves, whether that one goes live or fails. An agent's change waiting for your approval doesn't hold the next one up. The box and your agents see the changes on their way, so the next one builds on them instead of asking for the same thing again.
 
-Text Hewn puts in the box for you (**+ Ask for one** under Widgets puts "Suggest some widgets.", **Polish…** "Polish it.", **Ask builder to fix this** what failed) waits there for you to add to and send; nothing goes to the intake until you do.
+Text Hewn puts in the box for you (**+ Ask for one** under Widgets puts "Suggest some widgets.", **Polish…** "Polish it.", **Ask builder to fix this** what failed, a failed build's **Ask builder to fix** why it failed) waits there for you to add to and send; nothing goes to the intake until you do.
 
 A tool without a screen of its own shows its operations as forms. **Give it a proper screen** asks for one.
 
@@ -86,7 +86,7 @@ A tool without sample data gets some first: the builder writes `sample/calls.jso
 
 **Show the builder my own data**, on the proposal of a tool with data of its own, is off unless you tick it. Ticked, the screenshots show the tool filled with a copy of your own entries instead of its sample data, which can say more about a tool you use every day; the builder's AI model then sees them, as it sees everything else in the build. It's told they're private and to keep them out of the tool's files (its sample data, tests and text stay made up). Its own checks while it works still use the sample data, and your data itself isn't touched.
 
-If a pass fails, the build fails like any other: nothing goes live, the tool stays on the version it had, and **Retry** or **Ask builder to fix** polishes it again. Polish needs a tool with a screen, and only you can start it, since it costs more than a change and the choice about your data is yours: agents can't, though they can still ask for a change.
+If a pass fails, the build fails like any other: nothing goes live, the tool stays on the version it had, and **Retry** polishes it again, or **Ask builder to fix** puts why it failed in the box for you to send. Polish needs a tool with a screen, and only you can start it, since it costs more than a change and the choice about your data is yours: agents can't, though they can still ask for a change.
 
 ## Instructions
 
@@ -96,7 +96,7 @@ They're yours to read and edit, one rule per line: Settings › AI › **Instruc
 
 ## When a build fails
 
-The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** starts a new attempt that gets the failure as context. Your tool, if it already existed, keeps running the version it had.
+The build says why: a failing test, an invalid manifest, an error on its screen (with a screenshot of it as it broke). Its log is open below. **Ask builder to fix** opens the change panel (for a new tool, New) with why it failed in the box; add to it or cut it, and nothing starts until you send it. What you send carries on from the failed build's files. It can't once you've discarded the build, or once the tool has another version: ask for the change again then. Your tool, if it already existed, keeps running the version it had.
 
 **Discard** puts a failed build aside, when you'd rather not try again: it leaves the Inbox, and Activity keeps it, marked discarded. Nothing about the tool changes (a failed new tool installed nothing; a failed change left your tool on its version), and the files the build left go with it.
 

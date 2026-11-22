@@ -15,6 +15,14 @@ import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, review
 import { openCapability, openChange } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
+/** What a failed build's "Ask builder to fix" puts in the box: why it failed, as its log said it (else in words). */
+const failedAsk = (b, f) => {
+  const lines = b.log.map((l) => l.replace(/^attempt \d+: /, ""));
+  const at = lines.findLastIndex((l) => /^FAILED: /.test(l) && !/^FAILED: no valid candidate after/.test(l));
+  const why = at < 0 ? [] : lines.slice(at).filter((l) => !/^FAILED: no valid candidate after/.test(l));
+  return `Fix what made the last build fail (${f.title}):\n${why.length ? why.join("\n").replace(/^FAILED: /, "") : f.detail}`;
+};
+
 export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, installedFrom, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
 
 // ---------- B3 / B4 / H2–H6: a build (its page, or in the change drawer) ----------
@@ -352,7 +360,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
       // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
       const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
-      const fix = !refused && !noBuilder(b) && h("button", { class: "primary" }, "Ask builder to fix");
+      // Not on one put aside: its files went with it.
+      const fix = !refused && !noBuilder(b) && !b.discardedAt && h("button", { class: "primary" }, "Ask builder to fix");
       const retry = retryable(b) && h("button", { class: refused || !fix ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {
         btn.disabled = true;
@@ -367,7 +376,15 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
           if (now?.retriedAs) (b = now), failed();
         }
       };
-      if (fix) fix.addEventListener("click", again("fix", fix));
+      // "Ask builder to fix": why it failed goes in the box (the Change drawer; a new tool's, the New page), as a held
+      // build's does; nothing starts until you send it. What that builds carries on from this one's files.
+      if (fix)
+        fix.addEventListener("click", () => {
+          const create = b.kind === "create";
+          // The box picks it up (once) from here: too long for the address.
+          sessionStorage.setItem(`hewn.fix.${create ? id : b.capabilityId}`, JSON.stringify({ text: failedAsk(b, f) }));
+          create ? go(`#/new?${new URLSearchParams({ fix: "1", failed: id })}`) : openChange(cap(), { fix: "1", failed: id });
+        });
       if (retry) retry.addEventListener("click", again("retry", retry));
       // Discard: off the Inbox, kept in Activity. Nothing about the tool changes.
       const discard = !b.discardedAt && h("button", {}, "Discard");

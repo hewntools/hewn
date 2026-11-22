@@ -248,7 +248,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
   const n = Number(url.searchParams.get("n") ?? 100);
 
   if (resource === "capabilities" && !id) {
-    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation", "held"]) as any);
+    if (method === "POST") return platform.create(owner, pick(await readJson(req), ["name", "purpose", "requirements", "kind", "after", "widgets", "schedules", "model", "effort", "conversation", "held", "failed"]) as any);
     if (url.searchParams.get("archived") === "1") return platform.archived(owner);
     return withEtag(req, await capabilityList(platform, owner));
   }
@@ -282,7 +282,7 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       case "POST modify": {
         const body = await readJson(req);
         // `held`: a change to the held change with that build id (its card's "Ask builder to fix"), not to the live version.
-        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...(body.held !== undefined ? { held: body.held } : {}), ...pick(body, ["model", "effort", "conversation"]) });
+        return platform.modify(owner, { capabilityId: id, request: body.request, ...(body.after ? { after: String(body.after) } : {}), ...(body.schedules !== undefined ? { schedules: body.schedules } : {}), ...(body.held !== undefined ? { held: body.held } : {}), ...(body.failed !== undefined ? { failed: body.failed } : {}), ...pick(body, ["model", "effort", "conversation"]) });
       }
       // Polish: the passes on a tool already live (owner only). `realData`: the builder sees a copy of the tool's own data.
       case "POST polish": {

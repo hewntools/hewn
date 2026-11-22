@@ -8,6 +8,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
 
+### Changes
+
+- **Ask builder to fix on a failed build puts why it failed in the box,** in the change panel (for a new tool, New), and starts nothing until you send it. Until now it started a build at once. What you send carries on from the failed build's files. See [When a build fails](docs/building-tools.md#when-a-build-fails).
+
 ### Safety and limits
 
 - **A call may not work for more than 10 seconds without a pause.** Until now Hewn's tools were restarted after about 5 seconds of a call's code never letting go; now it's a rule at 10, and a build that breaks it fails saying which operation and on which test or sample call ("`import_feed@1` worked for more than 10 seconds without a pause, on test 'big feed'"). See [Runtime](spec/tools.md#runtime).
