@@ -31,7 +31,7 @@ HEWN_HOME=~/hewn-try HEWN_PORT=7727 hewn backup restore ~/hewn-backups/hewn-back
 HEWN_HOME=~/hewn-try HEWN_PORT=7727 HEWN_SCHEDULES=off HEWN_NETWORK=off hewn serve
 ```
 
-`HEWN_NETWORK=get` lets your tools read from the sites they're allowed (GET and HEAD only). Its secrets were stored with your Hewn's key, so connections need signing in again there: skip that to keep it from touching your accounts. A build that was running when the backup was made starts again there, on your builder and your plan: stop it on its card if you don't want that. `HEWN_HOME=~/hewn-try hewn status` shows the switches: `schedules off · network off` (or `network GET only`).
+`HEWN_NETWORK=get` lets your tools read from the sites they're allowed (GET and HEAD only). Its secrets were stored with your Hewn's key, so connections need signing in again there: skip that to keep it from touching your accounts. With `HEWN_SCHEDULES=off`, a build that was running when the backup was made stays stopped there, saying so, and one waiting behind another doesn't start: either would run on your builder and your plan. Without it, they start again. `HEWN_HOME=~/hewn-try hewn status` shows the switches: `schedules off · network off` (or `network GET only`).
 
 ## Export
 
