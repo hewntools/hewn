@@ -398,7 +398,7 @@ export class Platform {
   deleteSchedule(owner: Agent, id: string) { return this.d.schedules.deleteSchedule(owner, id); }
   runScheduleNow(owner: Agent, id: string): Promise<{ ok: boolean; outcome: string }> { return this.d.schedules.runScheduleNow(owner, id); }
   nextScheduleAt(): number | null { return this.d.schedules.nextScheduleAt(); }
-  runDueSchedules(now?: number): Promise<{ id: string; ok: boolean }[]> { return this.d.schedules.runDueSchedules(now); }
+  runDueSchedules(now?: number): Promise<{ id: string; ok: boolean; what: string }[]> { return this.d.schedules.runDueSchedules(now); }
 
   // ---------- builds (platform/builds.ts) ----------
 
