@@ -368,8 +368,9 @@ function intakeView({ mode, cap, q, embedded = false, connection = null, onBuilt
       history.replaceState(null, "", `${path}${params.size ? `?${params}` : ""}`);
     }
     if (focus === null && widgetParam && !widgetsMode && capId) focus = ((await api(`/capabilities/${enc(capId)}`).catch(() => null))?.widgets ?? []).find((w) => w.name === widgetParam) ?? false;
-    // A new conversation is kept from its first message (one put in replaces the conversation kept before).
-    if (!messages.length) keeps = keepable && !from;
+    // A new conversation is kept from its first message (one put in replaces the conversation kept before). Not one on
+    // held work or a failed build: brought back later without it, its Build would make an ordinary change.
+    if (!messages.length) keeps = keepable && !from && !held && !fixing;
     // What was attached goes with this turn, as refs (the bytes are already up).
     const attachments = pending.splice(0).map(({ ref, kind, name, mediaType, bytes, width, height }) => ({ ref, kind, name, mediaType, bytes, width, height }));
     syncChips();

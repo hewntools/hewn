@@ -360,7 +360,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const attempt = f.attempt && f.maxAttempts ? ` · attempt ${f.attempt} of ${f.maxAttempts}` : "";
       // Refused by the builder's host (e.g. over the month's builds): asking it to fix can't help.
       const refused = /^refused: /.test([...b.log].reverse().find((l) => /FAILED: /.test(l))?.split("FAILED: ")[1] ?? "");
-      const fix = !refused && !noBuilder(b) && h("button", { class: "primary" }, "Ask builder to fix");
+      // Not on one put aside: its files went with it.
+      const fix = !refused && !noBuilder(b) && !b.discardedAt && h("button", { class: "primary" }, "Ask builder to fix");
       const retry = retryable(b) && h("button", { class: refused || !fix ? "primary" : "" }, "Retry");
       const again = (path, btn) => async () => {
         btn.disabled = true;

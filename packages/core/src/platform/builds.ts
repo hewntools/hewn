@@ -493,7 +493,7 @@ export class Builds extends Domain {
    */
   async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string; failed?: string } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
     // The owner's words on a new tool that failed to build (its "Ask builder to fix", sent from the New page).
-    if (req.failed !== undefined) return this.fixFailed(agent, req.failed, { kind: "create", text: req.requirements, ask: pickAsk(req) });
+    if (req.failed !== undefined) return this.fixFailed(agent, req.failed, { kind: "create", text: req.requirements, ask: pickAsk(req), with: { after: req.after, schedules: req.schedules, conversation: req.conversation } });
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
@@ -961,7 +961,7 @@ export class Builds extends Domain {
   async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string; failed?: string } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
     // The owner's words on a change that failed (its "Ask builder to fix", sent from the Change drawer).
-    if (req.failed !== undefined) return this.fixFailed(agent, req.failed, { kind: "change", capabilityId: req.capabilityId, text: req.request, ask: pickAsk(req) });
+    if (req.failed !== undefined) return this.fixFailed(agent, req.failed, { kind: "change", capabilityId: req.capabilityId, text: req.request, ask: pickAsk(req), with: { after: req.after, schedules: req.schedules, conversation: req.conversation } });
     await this.checkEffort(agent, req);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
     const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
@@ -1235,24 +1235,34 @@ export class Builds extends Domain {
   }
 
   /**
-   * Re-run a failed build with the same request (e.g. after the builder's login expired),
-   * from the capability's current state. Returns the new build.
-   */
-  /**
    * The owner's "Ask builder to fix" on a failed build: their words from the box (prefilled with why it failed), on a
    * retry of it (`retryOf`, so it carries on from its files, and whose build it was stays traceable). Never started
-   * without them: the button fills the box, and Send is this.
+   * without them: the button fills the box, and Send is this. What the drawer decided goes with it (`with`: a build to
+   * wait for, the schedules ticked, the conversation). Not on a build put aside (its files are gone), nor on a change
+   * the tool has moved on from (it would open on the new version, not carry on).
    */
-  private async fixFailed(agent: Agent, failedId: unknown, want: { kind: "create"; text: unknown; ask: ModelAsk } | { kind: "change"; capabilityId: string; text: unknown; ask: ModelAsk }): Promise<BuildView> {
+  private async fixFailed(
+    agent: Agent,
+    failedId: unknown,
+    want: ({ kind: "create" } | { kind: "change"; capabilityId: string }) & { text: unknown; ask: ModelAsk; with: { after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } },
+  ): Promise<BuildView> {
     requireOwner(agent);
     const old = typeof failedId === "string" ? this.registry.getBuild(failedId) : undefined;
     const fits = !!old && old.status === "failed" && (want.kind === "create" ? old.kind === "create" : old.kind !== "create" && old.capabilityId === want.capabilityId);
     if (!fits) throw new PlatformError("conflict", `${String(failedId)} isn't ${want.kind === "create" ? "a new tool" : `a change to ${want.kind === "change" ? want.capabilityId : ""}`} that failed`);
+    if (old!.discardedAt) throw new PlatformError("conflict", `${old!.id} was put aside, and its files with it: ask for the change again`);
+    // (Fixed already: retryBuild says by which build.)
+    if (want.kind === "change" && !this.registry.retryOf(old!.id) && old!.baseVersion !== (this.registry.getCapability(old!.capabilityId)?.activeVersion ?? null)) throw new PlatformError("conflict", `${old!.capabilityId} changed since that was built: ask for the change again`);
     if (typeof want.text !== "string" || !want.text.trim()) throw new PlatformError("invalid_request", "what to fix: the box is empty");
-    return this.retryBuild(agent, old!.id, { fix: true, text: want.text, ask: want.ask });
+    this.d.schedules.checkApprovedSchedules(agent, want.with.schedules);
+    return this.retryBuild(agent, old!.id, { fix: true, text: want.text, ask: want.ask, with: want.with });
   }
 
-  async retryBuild(agent: Agent, buildId: string, opts: { fix?: boolean; auto?: boolean; text?: string; ask?: ModelAsk } = {}): Promise<BuildView> {
+  /**
+   * Re-run a failed build with the same request (e.g. after the builder's login expired),
+   * from the capability's current state. Returns the new build.
+   */
+  async retryBuild(agent: Agent, buildId: string, opts: { fix?: boolean; auto?: boolean; text?: string; ask?: ModelAsk; with?: { after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[] } } = {}): Promise<BuildView> {
     const old = this.visibleBuild(agent, buildId);
     requireScope(agent, scopeOf(old.kind));
     if (old.status !== "failed" && old.status !== "cancelled") throw new PlatformError("conflict", `only failed or cancelled builds can be retried (this one is ${old.status})`);
@@ -1286,12 +1296,17 @@ export class Builds extends Domain {
       const field = old.kind === "create" ? "requirements" : old.request.polish ? "note" : "request";
       req[field] = `${String(req[field] ?? "").split(FIX_MARK)[0].trimEnd()}\n\n${context}`;
       if (opts.ask) Object.assign(req, opts.ask);
+      // The drawer's: a build to wait for (a connection it needs), the schedules ticked now.
+      if (opts.with?.after !== undefined) req.after = opts.with.after;
+      if (opts.with?.schedules !== undefined) req.schedules = opts.with.schedules;
     }
+    // The drawer's conversation goes with the build; else the one the failed build kept.
+    const kept = this.checkConversation(agent, opts.with?.conversation);
     if (old.kind === "modify" && old.request.manifestOnly) throw new PlatformError("conflict", "this was a model replacement; replace the model again instead of retrying");
     return (async () => {
       // A Polish again, with its conversation (`polish` takes it from the build it retries).
       if (old.kind === "modify" && isPolish(old.request)) return this.polish(agent, { capabilityId: old.capabilityId, ...(typeof req.note === "string" ? { note: req.note } : {}), ...(req.realData ? { realData: true } : {}), ...pickAsk(req) }, marks);
-      if (old.kind === "modify") return this.modify(agent, req as { capabilityId: string; request: string; after?: string }, marks);
+      if (old.kind === "modify") return this.modify(agent, { ...(req as { capabilityId: string; request: string; after?: string }), ...(kept ? { conversation: kept } : {}) }, marks);
       if (old.kind === "widgets") return this.addWidgets(agent, req as { capabilityId: string; request?: string; after?: string }, marks);
       const cap = this.registry.getCapability(old.capabilityId);
       if (cap?.activeVersion) throw new PlatformError("conflict", `${old.capabilityId} has been created since; request a modification instead`);
@@ -1309,7 +1324,7 @@ export class Builds extends Domain {
       if (!dependsOn) delete req.after;
       else req.after = dependsOn;
       Object.assign(req, marks);
-      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn, this.retried(marks));
+      return this.openCreateBuild(agent, old.capabilityId, req as CreateRequest, !cap, builder, undefined, dependsOn, kept ?? this.retried(marks));
     })();
   }
 

@@ -173,6 +173,24 @@ describe("a retry carries on from the failed build's workspace", () => {
     await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "   ", failed: failed.buildId }), (e: any) => e.code === "invalid_request");
     await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "fix it", failed: "b-nope" }), (e: any) => e.code === "conflict");
     await assert.rejects(t.platform.create(USER, { name: "x", purpose: "x", requirements: "fix it", failed: failed.buildId }), (e: any) => e.code === "conflict" && /isn't a new tool that failed/.test(e.message));
+    // Put aside: its files went with it.
+    await t.platform.discardBuild(USER, failed.buildId);
+    await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "fix it", failed: failed.buildId }), (e: any) => e.code === "conflict" && /put aside/.test(e.message));
+  });
+
+  test("Ask builder to fix from the box: not once the tool moved on; with the drawer's conversation and schedules", async () => {
+    const failed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
+    // Another change went live meanwhile: the fix would open on it, not carry on.
+    const other = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "another" }), () => {});
+    assert.equal(other.status, "promoted", other.log.join("\n"));
+    await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "fix it", failed: failed.buildId }), (e: any) => e.code === "conflict" && /changed since/.test(e.message));
+    // On the version it was built on: what the drawer decided goes with it.
+    const next = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "add a half" }), halfDone);
+    const turns = [{ role: "user" as const, content: "Fix what made the last build fail" }, { role: "intake" as const, content: "On it." }];
+    const fixed = await t.build(() => t.platform.modify(USER, { capabilityId: "running-log", request: "Expect 0 runs.", failed: next.buildId, conversation: turns, schedules: [] }), finish);
+    assert.equal(fixed.status, "promoted", fixed.log.join("\n"));
+    assert.deepEqual(t.platform.buildContext(USER, fixed.buildId).conversation, turns);
+    assert.deepEqual((t.platform.getBuild(USER, fixed.buildId).request as { schedules?: unknown }).schedules, []);
   });
 
   test("a new tool's Ask builder to fix, sent from the New page: carries on from the failed create, keeping its name", async () => {

@@ -897,7 +897,8 @@ export const operations = {
     failNext = false;
     if (b.status !== "failed") throw new Error(`expected a failed build, got ${b.status}`);
     let sent = 0;
-    const count = (r: any) => void (/\/api\/(intake|builds\/[^/]+\/(fix|retry))$/.test(new URL(r.url()).pathname) && sent++);
+    // Anything that would start a build, or ask the intake: the intake, fix or retry, a new tool, a change.
+    const count = (r: any) => void (/\/api\/(intake|builds\/[^/]+\/(fix|retry)|capabilities|capabilities\/[^/]+\/modify)$/.test(new URL(r.url()).pathname) && r.method() === "POST" && sent++);
     page.on("request", count);
     try {
       await page.goto(`${web}/#/b/${b.buildId}`);
