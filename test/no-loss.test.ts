@@ -11,7 +11,7 @@ import { USER } from "@hewntools/core/auth.ts";
 import { keysSince, lostRows, markKeys } from "@hewntools/core/abi.ts";
 import { explainFailure } from "@hewntools/core/failure.ts";
 import { migrationProblems } from "@hewntools/core/migrations.ts";
-import { DRY_RUN_FAILED, NO_LOSS_FAILED } from "@hewntools/core/platform/validation.ts";
+import { DRY_RUN_FAILED, idsIn, NO_LOSS_FAILED, type Validation } from "@hewntools/core/platform/validation.ts";
 import { abiDb } from "@hewntools/test-host/runtime.ts";
 import { DatabaseSync } from "node:sqlite";
 import { prometheusText } from "@hewntools/cli/supervisor/metrics.ts";
@@ -57,6 +57,19 @@ test("the no-loss rules see through a rename, and compare counts where the key i
   const { lost, since } = measured("CREATE VIRTUAL TABLE s_fts USING fts5(body); INSERT INTO s_fts (body) VALUES ('a'), ('b'), ('c');", "INSERT INTO s_fts(s_fts) VALUES('optimize');");
   assert.deepEqual(lost, [], "an FTS index and its shadow tables aren't the tool's rows");
   assert.deepEqual(Object.keys(since.tables), []);
+});
+
+test("the no-loss rules after the second review: each key as often as before, NULL its own, renames followed by their pages, a table beside an FTS index", () => {
+  assert.deepEqual(measured("CREATE TABLE d (id PRIMARY KEY, v); INSERT INTO d VALUES (1, 'a'), ('1', 'b');", "UPDATE OR REPLACE d SET id = 1 WHERE v = 'b';").lost, ["`d` would lose 1 of its 2 rows", "1 fewer rows across its tables (2 before, 1 after)"], "1 and '1' read alike, each as often as before");
+  assert.deepEqual(measured("CREATE TABLE n (k TEXT PRIMARY KEY, v); INSERT INTO n VALUES (NULL, 'a'), (NULL, 'b'), ('', 'c');", "UPDATE OR REPLACE n SET k = '' WHERE v = 'a';").lost, ["`n` would lose 1 of its 3 rows", "1 fewer rows across its tables (3 before, 2 after)"], "NULL keys aren't ''");
+  assert.deepEqual(measured(runs(4, "notes"), "ALTER TABLE notes RENAME TO notes2; UPDATE OR REPLACE notes2 SET id = 'r1' WHERE id = 'r2'; CREATE TABLE labels (id TEXT PRIMARY KEY, km REAL); INSERT INTO labels VALUES ('r1', 1), ('r2', 2), ('r3', 3), ('r4', 4);").lost, ["`notes` would lose 1 of its 4 rows"], "a renamed table is followed by its page, not matched to a new one with the same key");
+  assert.deepEqual(measured("CREATE VIRTUAL TABLE search USING fts5(body); CREATE TABLE search_history (id TEXT PRIMARY KEY); INSERT INTO search_history VALUES ('a'), ('b');", "UPDATE search_history SET id = id || '-x';").lost, ["`search_history` would lose 2 of its 2 rows (their keys change)"], "a table named like the FTS index is measured");
+  assert.deepEqual(measured("CREATE TABLE r (v); INSERT INTO r VALUES ('a'), ('b'), ('c'); DELETE FROM r WHERE v = 'a'; INSERT INTO r VALUES ('d');", "ALTER TABLE r RENAME TO r_v1; CREATE TABLE r (v); INSERT INTO r (v) SELECT v FROM r_v1;").lost, [], "a table without a key rebuilt, its rowids renumbered: counted");
+  assert.deepEqual(measured("CREATE TABLE p (id INT PRIMARY KEY, v); INSERT INTO p VALUES (1, 'a'), (2, 'b');", "ALTER TABLE p RENAME TO p_v1; CREATE TABLE p (id REAL PRIMARY KEY, v); INSERT INTO p SELECT * FROM p_v1;").lost, [], "whole numbers keep their keys as REAL");
+});
+
+test("a read's ids are compared up to 10,000", () => {
+  assert.equal(idsIn({ items: Array.from({ length: 12_000 }, (_, i) => ({ id: i })) }).size, 10_000);
 });
 
 describe("Hewn's no-loss check", () => {
@@ -173,7 +186,7 @@ describe("the no-loss check, after review", () => {
     const b = await change(migration(rebuild(" WHERE NOT (distance_km < 5 AND date = '2026-10-01')")), t.claude);
     assert.equal(b.status, "failed", b.log.join("\n"));
     const log = b.log.join("\n");
-    assert.match(log, /the migrations would lose data on a copy of the tool's data: rows would be gone or their keys changed/);
+    assert.match(log, /the migrations would lose data on a copy of the tool's data: rows gone or their keys changed/);
     assert.doesNotMatch(log, /`runs`|would lose \d|of its \d|rows kept/);
     assert.deepEqual([b.failure?.title, b.failure?.caught], ["Stopped before it went live", true]);
     assert.match((await t.platform.workbench.transcript(b.buildId)) ?? "", /`runs` would lose 2 of its 3 rows/);
@@ -206,6 +219,38 @@ describe("the no-loss check, after review", () => {
     }
   });
 
+  test("an agent's build isn't told which read failed after the migrations, nor its error: the owner's build log has them", async () => {
+    await run(5, "boom");
+    const b = await change(all(migration("ALTER TABLE runs ADD COLUMN shoes TEXT;\n", "002_shoes.sql"), (ws) => editText(join(ws, "src/index.ts"), (s) => s.replace(`"get_summary@1"(input: Range, { db }: Ctx) {`, `"get_summary@1"(input: Range, { db }: Ctx) {\n    if (db.prepare("SELECT 1 FROM runs WHERE notes = 'boom'").get()) throw new Error("bad row");`))), t.claude);
+    assert.equal(b.status, "failed", b.log.join("\n"));
+    assert.doesNotMatch(b.log.join("\n"), /bad row|get_summary@1 fails|boom/);
+    assert.match(b.log.join("\n"), /rows gone or their keys changed, or a read that fails or returns fewer records/);
+    assert.match((await t.platform.workbench.transcript(b.buildId)) ?? "", /get_summary@1 fails after the migrations: get_summary@1 failed: bad row/);
+  });
+
+  test("an FTS index rewritten by a migration isn't lost data", async () => {
+    for (const km of [3, 4]) await run(km, `run ${km}`);
+    const v2 = await change(migration("CREATE VIRTUAL TABLE notes_fts USING fts5(body);\nINSERT INTO notes_fts (body) SELECT coalesce(notes, '') FROM runs;\n", "002_fts.sql"));
+    assert.equal(v2.status, "promoted", v2.log.join("\n"));
+    const b = await change(migration("INSERT INTO notes_fts(notes_fts) VALUES('optimize');\n", "003_optimize.sql"));
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+  });
+
+  test("an agent's builder checks its work on sample data: only each attempt's validation meets the owner's", async () => {
+    const validation = (t.platform as any).d.validation as Validation;
+    const seen: unknown[] = [];
+    validation.check = async (_b, opts = {}) => {
+      seen.push(opts);
+      return { passed: true, text: "PASS", failures: [], warnings: [], defects: [], images: [] };
+    };
+    for (const requestedBy of [t.claude.id, USER.id]) {
+      const checks = validation.checksFor({ id: "b", capabilityId: "running-log", requestedBy } as any, new AbortController().signal, () => {});
+      await checks.run("c1");
+      await checks.settled();
+    }
+    assert.deepEqual(seen, [{ liveData: false }, {}]);
+  });
+
   test("a migration that doesn't apply to the old version's sample data (a client's check) says so, and isn't caught", async () => {
     const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
     const files = pack.files.filter((f) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path));
@@ -229,6 +274,11 @@ test("the migration lint reads past comments, and a '--' in a string doesn't hid
   const lint = (sql: string) => migrationProblems([{ name: "002_x.sql", sql }], []);
   assert.match(lint("DELETE/**/FROM runs;").join(), /destructive/);
   assert.match(lint("INSERT INTO notes VALUES ('--'); DELETE FROM runs;").join(), /destructive/);
+  assert.match(lint("INSERT INTO notes VALUES ('--'); DELETE/**/FROM runs;").join(), /destructive/);
+  assert.match(lint("SELECT '--'; DROP/**/TABLE runs;").join(), /destructive/);
+  assert.match(lint("UPDATE _hewn_keys_before SET k = '1';").join(), /_hewn_ in them are Hewn's own/, "the no-loss check's snapshot is out of reach");
+  assert.match(lint('CREATE TABLE "_HEWN_KEYS_BEFORE_k" (x);').join(), /_hewn_ in them are Hewn's own/);
+  assert.deepEqual(lint("INSERT INTO t VALUES ('/* not a comment */');"), []);
   assert.deepEqual(lint("-- shoes per run\nALTER TABLE runs ADD COLUMN shoes TEXT;"), []);
 });
 

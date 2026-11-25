@@ -410,9 +410,19 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
       if (runsCode) tools.otherWork.running--;
     }
   };
+  /**
+   * A state's size limit: the tool's, but three times it for a build's copy of the tool's data (`dryrun:`), where the
+   * no-loss check writes its snapshot of the keys beside the data (dropped with the copy). Every op on a state uses
+   * the same limit, as its isolate is keyed by it.
+   */
+  const limitOf = (state: StateRef) => {
+    const limit = data.limit(state.capabilityId);
+    return limit > 0 && (state.scratch ?? "").startsWith("dryrun:") ? limit * 3 : limit;
+  };
   /** Run against a state with its limit; a write past it fails saying so. */
-  const limited = async <T>(capabilityId: string, what: string, run: (limit: number) => Promise<T>): Promise<T> => {
-    const limit = data.limit(capabilityId);
+  const limited = async <T>(state: StateRef, what: string, run: (limit: number) => Promise<T>): Promise<T> => {
+    const capabilityId = state.capabilityId;
+    const limit = limitOf(state);
     try {
       return await toTools(what, () => run(limit), true);
     } catch (e) {
@@ -457,7 +467,7 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
           });
         throw e;
       });
-      const limit = data.limit(target.capabilityId);
+      const limit = limitOf(target.state);
       const hosts = target.hosts ?? [];
       // A call on the live state with other hosts (sample data replayed, nothing granted yet) gets an isolate of its own.
       const live = liveOf(target.state, target.code);
@@ -482,16 +492,16 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
     },
     // Describing only loads code (in an isolate of its own, gone once described); any capability id's host can do it.
     describe: (code) => toTools("loading it", () => host("_describe").describe({ code }), true),
-    migrate: (state, migrations, code) => limited(state.capabilityId, "migrating", (limit) => host(state.capabilityId).migrate({ scratch: state.scratch ?? null, migrations, code, limit, ...dataIsolate(state, code) })),
+    migrate: (state, migrations, code) => limited(state, "migrating", (limit) => host(state.capabilityId).migrate({ scratch: state.scratch ?? null, migrations, code, limit, ...dataIsolate(state, code) })),
     hasState: (state) => toTools("reading its data", () => host(state.capabilityId).hasState({ scratch: state.scratch ?? null })),
     copyState: (from, to) => toTools("copying its data", () => host(from.capabilityId).copyState({ from: from.scratch ?? null, to: to.scratch ?? null })),
     dropState: (state) => toTools("dropping its data", () => host(state.capabilityId).dropState({ scratch: state.scratch ?? null })),
     listStates: (capabilityId, prefix) => toTools("reading its data", () => host(capabilityId).listStates({ prefix })),
-    dumpState: (state, code) => toTools("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
-    countState: (state, code) => toTools("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
-    markKeys: async (state, code) => void (await toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code), since: false }), true)),
-    keysSince: async (state, code) => (await toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code), since: true }), true)) as KeysSince,
-    loadState: (state, tables, code) => limited(state.capabilityId, "loading its data", (limit) => host(state.capabilityId).load({ scratch: state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code) })),
+    dumpState: (state, code) => toTools("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: limitOf(state), ...dataIsolate(state, code) }), true),
+    countState: (state, code) => toTools("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: limitOf(state), ...dataIsolate(state, code) }), true),
+    markKeys: async (state, code) => void (await toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: limitOf(state), ...dataIsolate(state, code), since: false }), true)),
+    keysSince: async (state, code) => (await toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: limitOf(state), ...dataIsolate(state, code), since: true }), true)) as KeysSince,
+    loadState: (state, tables, code) => limited(state, "loading its data", (limit) => host(state.capabilityId).load({ scratch: state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code) })),
   };
 }
 

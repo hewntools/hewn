@@ -6,7 +6,7 @@
 // them (the host rules out what was waiting, when it can) is told so in its log and in Activity, and one
 // that does it 3 times within an hour is suspended until the owner resumes it. A build whose own code
 // did it fails, and isn't retried.
-import { type Agent, requireOwner } from "../auth.ts";
+import { type Agent, requireOwner, USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { Domain } from "./context.ts";
 
@@ -146,7 +146,12 @@ export class Stalls extends Domain {
         continue;
       }
       if (build) {
-        const line = stallLine(r.what, r.caller);
+        // Which of its reads stalled on the owner's data is the owner's to know: an agent's build, whose reads they are,
+        // is told only that one did (the owner's build log has which).
+        const requester = this.registry.getBuild(build)?.requestedBy;
+        const hide = r.caller === NO_LOSS_VIA && requester !== undefined && requester !== USER.id && requester !== WEB_USER.id;
+        if (hide) void this.workbench.note(build, `${new Date().toTimeString().slice(0, 8)} [platform] ${stallLine(r.what, r.caller)}`).catch(() => {});
+        const line = stallLine(hide ? "a read of it" : r.what, r.caller);
         this.runs.set(build, line);
         this.stalledBuild(build, line);
         if (!out.builds.includes(build)) out.builds.push(build);

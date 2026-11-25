@@ -99,6 +99,15 @@ describe("stalls", () => {
     assert.deepEqual([...(p as any).d.stalls.stalledOps("runaway")], [], "the live version's read isn't marked for it");
   });
 
+  test("a stall in an agent's build's own read in the no-loss check doesn't name the read: the owner's build log does", async () => {
+    t.platform.registry.insertBuild({ id: "b-2", capabilityId: "runaway", kind: "modify", request: { request: "x" } as any, requestedBy: t.claude.id, baseVersion: 1, builder: "script" });
+    code(t.platform, "runaway", "spin@1", "dryrun:b-2", NO_LOSS_VIA);
+    const { p } = restart(min(0));
+    assert.equal((p as any).d.stalls.stalledRun("b-2"), "a read of it worked for more than 10 seconds without a pause, in the no-loss check");
+    await new Promise((r) => setTimeout(r, 50));
+    assert.match((await p.workbench.transcript("b-2")) ?? "", /spin@1 worked for more than 10 seconds without a pause, in the no-loss check/);
+  });
+
   test("a live call that stalls is remembered past the stall window, for the no-loss check to leave out", () => {
     code(t.platform, "runaway", "spin@1");
     const { p } = restart(min(0));

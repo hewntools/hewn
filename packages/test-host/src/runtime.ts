@@ -187,7 +187,7 @@ export function inProcessRuntime(home: { root: string; capabilities: string }): 
       if (existsSync(statePathOf(home.capabilities, state))) withDb(state, (db) => markKeys(db));
     },
     async keysSince(state) {
-      if (!existsSync(statePathOf(home.capabilities, state))) return { tables: {}, added: {} };
+      if (!existsSync(statePathOf(home.capabilities, state))) return { tables: {}, added: {}, rows: { before: 0, now: 0 } };
       return withDb(state, (db) => keysSince(db));
     },
   };

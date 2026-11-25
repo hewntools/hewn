@@ -175,15 +175,17 @@ export function loadTables(db: AbiDb, tables: Record<string, Record<string, unkn
 }
 
 /** The no-loss check's snapshots of a copy's keys (markKeys, keysSince), kept in the copy itself. */
+const KEYS_META = "_hewn_keys_meta";
 const KEYS_BEFORE = "_hewn_keys_before";
 const KEYS_NOW = "_hewn_keys_now";
+const SNAPSHOTS = new Set([KEYS_META, KEYS_BEFORE, KEYS_NOW]);
 /** A state's own tables (not SQLite's, the host's, the migrations record or the no-loss check's snapshots), by name. */
 const userTables = (db: AbiDb) =>
   db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != '_hewn_migrations' ORDER BY name")
     .all()
     .map((r) => String(r.name))
-    .filter((n) => n !== KEYS_BEFORE && n !== KEYS_NOW);
+    .filter((n) => !SNAPSHOTS.has(n));
 const quoted = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 /** Every user table as JSON rows (BLOBs as base64). */
@@ -197,18 +199,32 @@ export function dumpTables(db: AbiDb): Record<string, Record<string, unknown>[]>
   return out;
 }
 
+/** The tables SQLite's own virtual tables keep beside them (FTS3/4/5, R*Tree): their names end so. */
+const SHADOW = ["_data", "_idx", "_content", "_docsize", "_config", "_segments", "_segdir", "_stat", "_node", "_parent", "_rowid"];
+/** One key column as text, the same whatever number type holds it (1, 1.0 and '1' alike, so a type change keeps it); NULL its own. */
+const keyText = (column: string) => {
+  const c = quoted(column);
+  return `CASE WHEN ${c} IS NULL THEN char(0) WHEN typeof(${c}) = 'real' AND ${c} = CAST(${c} AS INTEGER) THEN CAST(CAST(${c} AS INTEGER) AS TEXT) ELSE CAST(${c} AS TEXT) END`;
+};
+
 /**
- * The tables whose rows the no-loss check counts, each with its key: its primary key's columns (`cols`; "" for none,
- * where the rowid is the key), as text, so a column whose type changes keeps its keys. Not a virtual table nor its
- * shadow tables (an FTS index rewrites those as it likes).
+ * The tables whose rows the no-loss check counts: each with its primary key's columns (`cols`) and that key as text
+ * (`key`; none where the table has no primary key: its rowids may be renumbered, so only its rows are counted), and
+ * its root page (`root`: a rename keeps it). Not a virtual table nor its shadow tables (an FTS index rewrites them).
  */
-function keyedTables(db: AbiDb): { name: string; cols: string; key: string }[] {
+function keyedTables(db: AbiDb): { name: string; cols: string; key: string | null; root: number | null }[] {
   const virtual = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")
     .all()
     .map((r) => String(r.name));
+  const roots = new Map(
+    db
+      .prepare("SELECT name, rootpage FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((r) => [String(r.name), Number(r.rootpage) || null]),
+  );
   return userTables(db)
-    .filter((name) => !virtual.some((v) => name === v || name.startsWith(`${v}_`)))
+    .filter((name) => !virtual.some((v) => name === v || SHADOW.some((s) => name === `${v}${s}`)))
     .map((name) => {
       const pk = db
         .prepare(`PRAGMA table_info(${quoted(name)})`)
@@ -216,78 +232,121 @@ function keyedTables(db: AbiDb): { name: string; cols: string; key: string }[] {
         .filter((c) => Number(c.pk) > 0)
         .sort((a, b) => Number(a.pk) - Number(b.pk))
         .map((c) => String(c.name));
-      const key = pk.length ? pk.map((c) => `coalesce(CAST(${quoted(c)} AS TEXT), '')`).join(" || char(31) || ") : "CAST(rowid AS TEXT)";
-      return { name, cols: pk.join(","), key };
+      return { name, cols: pk.join(","), key: pk.length ? pk.map(keyText).join(" || char(31) || ") : null, root: roots.get(name) ?? null };
     });
 }
 
-/** Every keyed table's keys, written into `into` in the state itself. */
-function snapshotKeys(db: AbiDb, into: string) {
-  db.exec(`DROP TABLE IF EXISTS ${quoted(into)}`);
-  db.exec(`CREATE TABLE ${quoted(into)} (tbl TEXT NOT NULL, cols TEXT NOT NULL, k TEXT NOT NULL)`);
-  for (const t of keyedTables(db)) db.prepare(`INSERT INTO ${quoted(into)} (tbl, cols, k) SELECT ?, ?, ${t.key} FROM ${quoted(t.name)}`).run(t.name, t.cols);
-  db.exec(`CREATE INDEX ${quoted(`${into}_k`)} ON ${quoted(into)} (tbl, k)`);
+/** Drop the no-loss check's snapshots. */
+function dropSnapshots(db: AbiDb) {
+  for (const t of SNAPSHOTS) db.exec(`DROP TABLE IF EXISTS ${quoted(t)}`);
+}
+
+/** Every keyed table's rows and keys, written into the state itself as `snap` (KEYS_BEFORE or KEYS_NOW). */
+function snapshotKeys(db: AbiDb, snap: string) {
+  const [M, S] = [quoted(KEYS_META), quoted(snap)];
+  db.exec(`CREATE TABLE IF NOT EXISTS ${M} (snap TEXT NOT NULL, t INTEGER NOT NULL, tbl TEXT NOT NULL, cols TEXT NOT NULL, root INTEGER, n INTEGER NOT NULL, PRIMARY KEY (snap, t))`);
+  db.prepare(`DELETE FROM ${M} WHERE snap = ?`).run(snap);
+  db.exec(`DROP TABLE IF EXISTS ${S}`);
+  db.exec(`CREATE TABLE ${S} (t INTEGER NOT NULL, k TEXT NOT NULL)`);
+  keyedTables(db).forEach((x, t) => {
+    const n = Number(db.prepare(`SELECT count(*) AS n FROM ${quoted(x.name)}`).get()?.n ?? 0);
+    db.prepare(`INSERT INTO ${M} (snap, t, tbl, cols, root, n) VALUES (?, ?, ?, ?, ?, ?)`).run(snap, t, x.name, x.cols, x.root, n);
+    if (x.key && n) db.prepare(`INSERT INTO ${S} (t, k) SELECT ?, ${x.key} FROM ${quoted(x.name)}`).run(t);
+  });
+  db.exec(`CREATE INDEX ${quoted(`${snap}_k`)} ON ${S} (t, k)`);
 }
 
 /**
- * The no-loss check's first measurement, on a copy: every keyed table's keys, kept in the copy itself (no key ever
- * leaves the state, however many rows), for `keysSince` after the migrations.
+ * The no-loss check's first measurement, on a copy: every keyed table's rows and keys, kept in the copy itself (no key
+ * ever leaves the state, however many rows), for `keysSince` after the migrations. A failure (no room left) leaves no
+ * snapshot behind.
  */
 export function markKeys(db: AbiDb): void {
-  snapshotKeys(db, KEYS_BEFORE);
+  try {
+    snapshotKeys(db, KEYS_BEFORE);
+  } catch (e) {
+    dropSnapshots(db);
+    throw e;
+  }
 }
 
 /**
  * What became of the rows `markKeys` saw, per table that had some: how many it had (`before`), has now (`after`), and
- * how many of its keys are still there (`kept`; null when its key columns changed, so only the counts compare). A
- * table that's gone (`gone`) is looked for in the new tables with the same key columns (a rename, a merge, a split);
- * `after` is then their rows. `added`: the rows of tables it didn't see. Counts only; the snapshots are dropped.
+ * how many of its keys are still there (`kept`, each key as often as before; null where it has no primary key, or its
+ * key columns changed, so only the counts compare). A table renamed (its root page under another name) is followed
+ * (`renamed`). One that's gone (`gone`) is looked for in the new tables with the same key columns (a merge, a split);
+ * `after` is then their rows. `added`: the rows of tables it didn't see; `rows`: all rows, before and now. Counts only;
+ * the snapshots are dropped.
  */
 export interface KeysSince {
-  tables: Record<string, { before: number; after: number | null; kept: number | null; gone?: true }>;
+  tables: Record<string, { before: number; after: number | null; kept: number | null; gone?: true; renamed?: string }>;
   added: Record<string, number>;
+  rows: { before: number; now: number };
 }
 export function keysSince(db: AbiDb): KeysSince {
-  snapshotKeys(db, KEYS_NOW);
-  const counts = (table: string) => db.prepare(`SELECT tbl, cols, count(*) AS n FROM ${quoted(table)} GROUP BY tbl, cols`).all() as { tbl: string; cols: string; n: number }[];
-  const one = (sql: string, ...params: unknown[]) => Number(db.prepare(sql).get(...params)?.n ?? 0);
-  const before = counts(KEYS_BEFORE);
-  const now = new Map(counts(KEYS_NOW).map((r) => [r.tbl, Number(r.n)]));
-  const exists = new Map(keyedTables(db).map((t) => [t.name, t.cols]));
-  const seen = new Set(before.map((r) => r.tbl));
-  const out: KeysSince = { tables: {}, added: {} };
-  const [B, N] = [quoted(KEYS_BEFORE), quoted(KEYS_NOW)];
-  for (const b of before) {
-    const cols = exists.get(b.tbl);
-    if (cols !== undefined) {
-      const kept = cols === b.cols ? one(`SELECT count(*) AS n FROM ${B} b JOIN ${N} a ON a.tbl = b.tbl AND a.k = b.k WHERE b.tbl = ?`, b.tbl) : null;
-      out.tables[b.tbl] = { before: Number(b.n), after: now.get(b.tbl) ?? 0, kept };
-      continue;
+  try {
+    snapshotKeys(db, KEYS_NOW);
+    type Meta = { t: number; tbl: string; cols: string; root: number | null; n: number };
+    const meta = (snap: string): Meta[] =>
+      db
+        .prepare(`SELECT t, tbl, cols, root, n FROM ${quoted(KEYS_META)} WHERE snap = ? ORDER BY t`)
+        .all(snap)
+        .map((r) => ({ t: Number(r.t), tbl: String(r.tbl), cols: String(r.cols), root: r.root === null ? null : Number(r.root), n: Number(r.n) }));
+    const [before, now] = [meta(KEYS_BEFORE), meta(KEYS_NOW)];
+    const [B, N] = [quoted(KEYS_BEFORE), quoted(KEYS_NOW)];
+    // Each key of `t` before, counted as many times as it's still there in `into` now (at most as often as before).
+    const kept = (t: number, into: number[]) =>
+      Number(
+        db
+          .prepare(`SELECT coalesce(sum(min(b.n, coalesce(a.n, 0))), 0) AS n FROM (SELECT k, count(*) AS n FROM ${B} WHERE t = ? GROUP BY k) b LEFT JOIN (SELECT k, count(*) AS n FROM ${N} WHERE t IN (${into.map(() => "?").join(", ")}) GROUP BY k) a ON a.k = b.k`)
+          .get(t, ...into)?.n ?? 0,
+      );
+    const had = new Set(before.map((x) => x.tbl));
+    const byName = new Map(now.map((x) => [x.tbl, x]));
+    const byRoot = new Map(now.filter((x) => x.root !== null && !had.has(x.tbl)).map((x) => [x.root, x]));
+    const out: KeysSince = { tables: {}, added: {}, rows: { before: before.reduce((n, x) => n + x.n, 0), now: now.reduce((n, x) => n + x.n, 0) } };
+    const followed = new Set<string>();
+    const gone: Meta[] = [];
+    for (const b of before) {
+      const there = byName.get(b.tbl) ?? (b.root !== null ? byRoot.get(b.root) : undefined);
+      if (!there) {
+        gone.push(b);
+        continue;
+      }
+      followed.add(there.tbl);
+      if (!b.n) continue;
+      out.tables[b.tbl] = { before: b.n, after: there.n, kept: b.cols && b.cols === there.cols ? kept(b.t, [there.t]) : null, ...(there.tbl !== b.tbl ? { renamed: there.tbl } : {}) };
     }
-    const into = [...exists].filter(([name, c]) => !seen.has(name) && c === b.cols && c !== "").map(([name]) => name);
-    const kept = into.length ? one(`SELECT count(*) AS n FROM ${B} b WHERE b.tbl = ? AND EXISTS (SELECT 1 FROM ${N} a WHERE a.tbl IN (${into.map(() => "?").join(", ")}) AND a.k = b.k)`, b.tbl, ...into) : null;
-    out.tables[b.tbl] = { before: Number(b.n), after: into.length ? into.reduce((n, t) => n + (now.get(t) ?? 0), 0) : null, kept, gone: true };
+    const fresh = now.filter((x) => !had.has(x.tbl) && !followed.has(x.tbl));
+    for (const b of gone) {
+      if (!b.n) continue;
+      const into = fresh.filter((x) => b.cols && x.cols === b.cols);
+      out.tables[b.tbl] = { before: b.n, after: into.length ? into.reduce((n, x) => n + x.n, 0) : null, kept: into.length ? kept(b.t, into.map((x) => x.t)) : null, gone: true };
+    }
+    for (const x of fresh) out.added[x.tbl] = x.n;
+    return out;
+  } finally {
+    dropSnapshots(db);
   }
-  for (const name of exists.keys()) if (!seen.has(name)) out.added[name] = now.get(name) ?? 0;
-  db.exec(`DROP TABLE IF EXISTS ${B}`);
-  db.exec(`DROP TABLE IF EXISTS ${N}`);
-  return out;
 }
 
-/** Rows `keysSince` saw, before and now (a gone table's rows counted where they went, once). */
-export function rowsSince(k: KeysSince): { before: number; now: number } {
-  const tables = Object.values(k.tables);
-  return {
-    before: tables.reduce((n, t) => n + t.before, 0),
-    now: tables.reduce((n, t) => n + (t.gone ? 0 : (t.after ?? 0)), 0) + Object.values(k.added).reduce((n, c) => n + c, 0),
-  };
+/** `keysSince`'s answer from rows counted per table (countTables, before and after), where no keys could be kept. */
+export function countsSince(before: Record<string, number>, after: Record<string, number>): KeysSince {
+  const tables: KeysSince["tables"] = {};
+  for (const [t, n] of Object.entries(before)) if (n) tables[t] = t in after ? { before: n, after: after[t], kept: null } : { before: n, after: null, kept: null, gone: true };
+  const sum = (m: Record<string, number>) => Object.values(m).reduce((a, b) => a + b, 0);
+  return { tables, added: Object.fromEntries(Object.entries(after).filter(([t]) => !(t in before))), rows: { before: sum(before), now: sum(after) } };
 }
+
+/** Rows `keysSince` saw, before and now. */
+export const rowsSince = (k: KeysSince) => k.rows;
 
 /**
- * The no-loss invariant's rules on what `keysSince` saw: a table keeps every key it had, or, gone, has them in a new
- * table with the same key columns (a lost or renumbered one is lost; where its key columns changed, its count must
- * hold); and the rows across all tables never drop (a gone table's rows must reappear elsewhere: a rename, a merge or
- * a split passes). In words, names and counts only.
+ * The no-loss invariant's rules on what `keysSince` saw: a table keeps every key it had, as often as it had it (a
+ * renamed one under its new name; a gone one in new tables with the same key columns), and where only its rows can be
+ * counted, keeps its count; and the rows across all tables never drop (a gone table's rows must reappear elsewhere).
+ * In words, names and counts only. It catches a migration's mistakes, not an adversary: an UPDATE that blanks every
+ * row's content keeps every key.
  */
 export function lostRows(k: KeysSince): string[] {
   const problems: string[] = [];
@@ -296,7 +355,7 @@ export function lostRows(k: KeysSince): string[] {
     if (t.kept !== null && t.kept < t.before) problems.push(`\`${table}\` would lose ${t.before - t.kept} of its ${t.before} rows${t.after !== null && t.after >= t.before ? " (their keys change)" : ""}`);
     else if (t.kept === null && !t.gone && t.after !== null && t.after < t.before) problems.push(`\`${table}\` would lose ${t.before - t.after} of its ${t.before} rows`);
   }
-  const { before, now } = rowsSince(k);
+  const { before, now } = k.rows;
   if (now < before) problems.push(`${before - now} fewer rows across its tables (${before} before, ${now} after)`);
   return problems;
 }

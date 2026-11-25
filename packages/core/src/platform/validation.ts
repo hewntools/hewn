@@ -5,7 +5,8 @@
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
-import { lostRows, rowsSince } from "../abi.ts";
+import { countsSince, lostRows, rowsSince } from "../abi.ts";
+import { deadlineOf } from "../deadline.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -56,15 +57,18 @@ export const REVIEW_SHOTS = ["desktop-light", "desktop-dark", "mobile-light", "m
 export const reviewShotKey = (buildId: string, name: string) => `screenshots/${buildId}/${name}.png`;
 
 /**
- * What an agent's build says when its migrations don't apply to the tool's data. The error itself may
- * quote that data, so it goes to the build's transcript, which only the owner reads.
+ * What an agent's build that would lose the owner's data is told: rows gone or their keys changed, or a read that no
+ * longer works or returns fewer records. Which and how many go to the build's transcript, which only the owner reads.
  */
-/** An agent's build that would lose rows of the owner's data: what it's told (the owner's build log has the rest). */
-export const NO_LOSS_FAILED = "the migrations would lose data on a copy of the tool's data: rows would be gone or their keys changed (make each one keep every row with its key; the owner's build log has which and how many)";
-/** How long the no-loss check's reads may take in all, before and after the migrations; past it, the rest aren't called. */
+export const NO_LOSS_FAILED = "the migrations would lose data on a copy of the tool's data: rows gone or their keys changed, or a read that fails or returns fewer records after them (make each one keep every row with its key; the owner's build log has which and how many)";
+/** How long the no-loss check's reads may take in all; those before the migrations get two thirds, unless they leave more. */
 export const NO_LOSS_READS_MS = 30_000;
 /** At most this many ids of one read are compared. */
 const NO_LOSS_MAX_IDS = 10_000;
+/**
+ * What an agent's build says when its migrations don't apply to the tool's data. The error itself may
+ * quote that data, so it goes to the build's transcript, which only the owner reads.
+ */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
 
 /** How many times a builder may check its work in one attempt. */
@@ -417,9 +421,21 @@ export class Validation extends Domain {
       const measured = changesData && (ownData || (base ? await this.fillWithSample(base, dryRun) : false));
       if (ownData || measured) {
         const where = ownData ? "a copy of the tool's data" : "its sample data in the version it replaces";
-        if (measured) await this.runtime.markKeys(dryRun, code);
-        const reads = { budget: Date.now() + NO_LOSS_READS_MS };
-        const readsBefore = measured && base ? await this.readIds(base.row.manifest, base.code, dryRun, { via: NO_LOSS_BASE_VIA, twice: true, budget: reads, onSkip: (line) => tell(`no-loss check: ${line}`) }) : new Map<string, ReadIds>();
+        // The migrations Hewn sees as new (not what the candidate's code says it applied).
+        const added = migrations.filter((m) => !shipped.has(m.name)).map((m) => m.name);
+        // The keys are measured with the code of the version it replaces, never the candidate's (its isolate could
+        // answer anything), into the copy itself; with no room left there, only the rows are counted.
+        const keysCode = base?.code ?? code;
+        let counted: Record<string, number> | undefined;
+        if (measured)
+          try {
+            await this.runtime.markKeys(dryRun, keysCode);
+          } catch (e) {
+            counted = await this.runtime.countState(dryRun, keysCode);
+            await tell(`no-loss check: rows counted, not their keys (${(e as Error).message})`);
+          }
+        const start = Date.now();
+        const readsBefore = measured && base ? await this.readIds(base.row.manifest, base.code, dryRun, { via: NO_LOSS_BASE_VIA, twice: true, until: start + (NO_LOSS_READS_MS * 2) / 3, onSkip: (line) => tell(`no-loss check: ${line}`) }) : new Map<string, ReadIds>();
         let applied: string[] | undefined;
         try {
           applied = await this.runtime.migrate(dryRun, migrations, code);
@@ -429,10 +445,11 @@ export class Validation extends Domain {
           if (!opts.check) throw new Error(message);
           softFail(message);
         }
-        if (measured && applied?.length) {
-          const since = await this.runtime.keysSince(dryRun, code);
+        if (measured && applied) {
+          const since = counted ? countsSince(counted, await this.runtime.countState(dryRun, keysCode)) : await this.runtime.keysSince(dryRun, keysCode);
           const lost = lostRows(since);
-          const readsAfter = readsBefore.size ? await this.readIds(manifest, code, dryRun, { via: NO_LOSS_VIA, only: new Set(readsBefore.keys()), budget: reads, onSkip: (line) => tell(`no-loss check: ${line}`) }) : new Map<string, ReadIds>();
+          const until = Math.max(start + NO_LOSS_READS_MS, Date.now() + NO_LOSS_READS_MS / 3);
+          const readsAfter = readsBefore.size ? await this.readIds(manifest, code, dryRun, { via: NO_LOSS_VIA, only: new Set(readsBefore.keys()), until, onSkip: (line) => tell(`no-loss check: ${line}`) }) : new Map<string, ReadIds>();
           for (const [op, was] of readsBefore) {
             const now = readsAfter.get(op);
             if (!now || !("ids" in was)) continue;
@@ -445,14 +462,14 @@ export class Validation extends Domain {
             const gone = [...was.ids].filter((x) => !now.ids.has(x)).length;
             if (gone && now.ids.size < was.ids.size) lost.push(`${op} would no longer return ${gone} of the ${was.ids.size} records it returned`);
           }
-          const what = `${applied.length === 1 ? `migration ${applied[0]}` : `migrations ${applied.join(", ")}`} would lose data on ${where}`;
+          const what = `${added.length === 1 ? `migration ${added[0]}` : `migrations ${added.join(", ")}`} would lose data on ${where}`;
           if (lost.length && hidden) softFail(await this.ownersDetail(build, listed(what, lost), NO_LOSS_FAILED, { note: !opts.check }));
           else if (lost.length) softFail(what, lost);
           else {
-            if (ownData) step(`upgrade dry-run ok (${applied.join(", ")})`);
+            if (ownData) step(`upgrade dry-run ok (${added.join(", ")})`);
             step(`no data lost by the migrations on ${where}${hidden ? "" : ` (${rowsSince(since).before} rows kept)`}`);
           }
-        } else if (applied && ownData) step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
+        } else if (applied && ownData) step(`upgrade dry-run ok (${added.length ? added.join(", ") : "no new migrations"})`);
       }
       stopIfStalled();
     } finally {
@@ -528,7 +545,8 @@ export class Validation extends Domain {
         if (signal.aborted) return refused("The build was cancelled.");
         if (++used > MAX_CHECKS) return refused(`No checks left: this attempt has had its ${MAX_CHECKS}. Fix what the last one showed and stop; Hewn validates your work when you do.`);
         note(`Checking its work (${used} of ${MAX_CHECKS})`);
-        const r = await this.check(build);
+        // An agent's build checks on sample data: only each attempt's validation meets the owner's (validation.ts step 6).
+        const r = await this.check(build, byOwner(build) ? {} : { liveData: false });
         note(r.passed ? `Check passed${r.warnings.length ? ` with ${counted(r.warnings.length, "warning")}` : ""}${r.defects.length ? `, ${counted(r.defects.length, "thing")} measured on the screen to fix` : ""}` : `Check: ${counted(r.failures.length, "problem")} to fix`);
         return r;
       });
@@ -672,11 +690,12 @@ export class Validation extends Domain {
    * (a read that picks at random keeps none). One that ever stalled isn't called (`onSkip` says so): it would restart
    * Hewn's tools, the live ones with them. One that stalls now (on workerd;
    * `via` says whose code it is, stalls.ts) is left out with the reads after it, so the check restarts them once at
-   * most; one past its deadline, or held up by another tool, is left out. Past `budget`, the rest aren't called.
+   * most; one past its deadline, or held up by another tool, is left out. Each call ends by `until` (its deadline), and past it the rest aren't called. Read-only is the
+   * isolate's own wrapper (abi.ts readOnlyDb): it keeps honest code from writing, not an adversary.
    */
-  private async readIds(manifest: CapabilityManifest, code: CodeRef, state: StateRef, opts: { via: string; only?: Set<string>; twice?: boolean; budget: { budget: number }; onSkip?: (line: string) => Promise<void> | void }): Promise<Map<string, ReadIds>> {
+  private async readIds(manifest: CapabilityManifest, code: CodeRef, state: StateRef, opts: { via: string; only?: Set<string>; twice?: boolean; until: number; onSkip?: (line: string) => Promise<void> | void }): Promise<Map<string, ReadIds>> {
     const out = new Map<string, ReadIds>();
-    const target: ExecutionTarget = { capabilityId: state.capabilityId, code, state, secrets: {}, config: {}, caller: { kind: "test", id: "no-loss" }, ...(opts.twice ? { readOnly: true } : {}) };
+    const target: ExecutionTarget = { capabilityId: state.capabilityId, code, state, secrets: {}, config: {}, caller: { kind: "test", id: "no-loss" }, deadline: deadlineOf(opts.until, 0), ...(opts.twice ? { readOnly: true } : {}) };
     const stalled = this.d.stalls.stalledOps(state.capabilityId);
     const reads = manifest.operations
       .filter((op) => {
@@ -685,16 +704,19 @@ export class Validation extends Domain {
       })
       .map((op) => ({ op, key: opKey(op.name, op.version) }))
       .filter((r) => !opts.only || opts.only.has(r.key));
-    /** One call: its ids, its error, or why it's left out (`skip`; `stop`: a stall, nothing more is called). */
-    const call = async (op: OperationManifest): Promise<{ ids: Set<string> } | { error: string } | { skip: true; stop?: true }> => {
+    /** One call: its ids, its error, or why it's left out (`skip`, saying why; `stop`: a stall, nothing more is called). */
+    const call = async (op: OperationManifest): Promise<{ ids: Set<string> } | { error: string } | { skip: string; stop?: true }> => {
       try {
         const r = await this.replayCall(manifest, target, { operation: op.name, version: op.version }, opts.via);
         return { ids: idsIn(r.result) };
       } catch (e) {
         const details = (e instanceof PlatformError ? e.details : undefined) as { stalled?: boolean; heldUp?: boolean } | undefined;
-        if (details?.stalled) return { skip: true, stop: true };
-        if (details?.heldUp || /timed out \(call chain deadline\)$/.test((e as Error).message)) return { skip: true };
-        return { error: (e as Error).message };
+        const message = (e as Error).message;
+        if (details?.stalled) return { skip: "stalled", stop: true };
+        if (details?.heldUp) return { skip: "another tool held Hewn's tools up while it ran" };
+        if (/timed out \(call chain deadline\)$/.test(message)) return { skip: `the reads' ${NO_LOSS_READS_MS / 1000} s were up` };
+        if (opts.twice && /read-only: refused/.test(message)) return { skip: "it writes when it reads" };
+        return { error: message };
       }
     };
     for (const [i, { op, key }] of reads.entries()) {
@@ -702,13 +724,13 @@ export class Validation extends Domain {
         await opts.onSkip?.(`${key} left out (it stalled before)`);
         continue;
       }
-      if (Date.now() >= opts.budget.budget) {
+      if (Date.now() >= opts.until) {
         await opts.onSkip?.(`${reads.slice(i).map((x) => x.key).join(", ")} not called (its reads' ${NO_LOSS_READS_MS / 1000} s were up)`);
         break;
       }
       let r = await call(op);
       if (opts.twice && "ids" in r) {
-        const again = await call(op);
+        const again = Date.now() < opts.until ? await call(op) : { skip: `the reads' ${NO_LOSS_READS_MS / 1000} s were up` };
         r = "ids" in again ? { ids: new Set([...r.ids].filter((x) => again.ids.has(x))) } : again;
       }
       if ("stop" in r && r.stop) {
@@ -716,7 +738,10 @@ export class Validation extends Domain {
         await opts.onSkip?.(`${key} left out (it worked for more than ${STALL_MS / 1000} seconds without a pause, so Hewn's tools were restarted)${rest.length ? `, and ${rest.join(", ")} not called` : ""}`);
         break;
       }
-      if ("skip" in r) continue;
+      if ("skip" in r) {
+        await opts.onSkip?.(`${key} left out (${r.skip})`);
+        continue;
+      }
       // Before the migrations a read that fails has nothing to compare (one that worked is called after, if only to see it still works).
       if (opts.twice && "error" in r) continue;
       out.set(key, r);
@@ -913,13 +938,11 @@ function installedFrom(build: BuildRow): ToolSource | undefined {
   return build.builder === "bundle" ? (build.request as { source?: ToolSource }).source : undefined;
 }
 
-/** A message with its list under it, as validation reports a failure. */
-/** Every `id` in a result (any depth), as strings: the records a read returned. */
 /** A read's ids for the no-loss check, or the error it failed with. */
 type ReadIds = { ids: Set<string> } | { error: string };
 
-/** The `id`s in a read's result, at most NO_LOSS_MAX_IDS. */
-function idsIn(v: unknown, out = new Set<string>()): Set<string> {
+/** Every `id` in a result (any depth), as strings: the records a read returned; at most NO_LOSS_MAX_IDS. */
+export function idsIn(v: unknown, out = new Set<string>()): Set<string> {
   if (out.size >= NO_LOSS_MAX_IDS) return out;
   if (Array.isArray(v)) for (const x of v) idsIn(x, out);
   else if (v && typeof v === "object")
@@ -931,6 +954,7 @@ function idsIn(v: unknown, out = new Set<string>()): Set<string> {
   return out;
 }
 
+/** A message with its list under it, as validation reports a failure. */
 const listed = (msg: string, problems: string[]) => (problems.length ? `${msg}:\n  - ${problems.join("\n  - ")}` : msg);
 /** "1 problem", "3 problems". */
 const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;

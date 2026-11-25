@@ -96,7 +96,7 @@ function explainLog(log: string[]): BuildFailure {
     return say("The builder isn't available", `${name} couldn't start. Check that it's installed and signed in.`);
   }
   // An agent's build told only that (the owner's build log has which rows): still the copy saving the owner's data.
-  if (/^the migrations would lose data on a copy of the tool's data: rows would be gone/.test(msg)) return { ...say("Stopped before it went live", "Rows of the tool's data would have been lost or changed their keys; its build log says which."), caught: true };
+  if (/^the migrations would lose data on a copy of the tool's data: rows gone or their keys changed/.test(msg)) return { ...say("Stopped before it went live", "Rows of the tool's data would have been lost or changed, or one of its reads broken; the owner's build log says which."), caught: true };
   // Caught on a copy: what the tool's data would have suffered, in words.
   const lost = /would lose data on /.test(msg) ? first(msg) : "";
   if (lost) {
