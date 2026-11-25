@@ -47,7 +47,7 @@ const SWAPS: [string, string][] = [
   ["Write a **candidate** in this workspace; the platform owns validation and promotion.", "Write a **candidate** in your workspace; Hewn owns validation and promotion."],
   ["{{SUBMIT}} If you have a `check` tool, you must run it before you stop (see the end): what you leave is validated the same way; a failure costs an attempt.", SUBMIT],
   // The Skill's client submits creates and changes, never a widgets build.
-  ["only in a widgets build or when a tool without a UI adds or changes `widgets` in capability.json", "only when a tool without a UI adds or changes `widgets` in capability.json"],
+  ["whenever a build adds or changes `widgets` in capability.json", "whenever you add or change `widgets` in capability.json"],
   ["Keep `id` equal to the capability id in `BUILDER.md`.", 'Keep `id` equal to the tool\'s id: for a change, the `capabilityId` you packed; for a new tool, its name in lowercase letters, digits and dashes ("Plant Care" → `plant-care`).'],
   ["after reading `BUILDER.md`, this brief, and any `OWNERS_WORDS.md` and `OTHER_TOOLS.md`,", "after reading this brief and the pack's `OTHER_TOOLS.md`,"],
   ["The owner's other capabilities are named at the end of `BUILDER.md`; `CONTRACTS.md` lists their operations,", "The owner's other capabilities are in the pack's `CONTRACTS.md`, which lists their operations,"],

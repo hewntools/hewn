@@ -37,6 +37,9 @@ export interface Candidate {
   /** The build page's screenshot of it (light, dark): written again when it's promoted, so the page shows this candidate. */
   screenshot?: Uint8Array;
   screenshotDark?: Uint8Array;
+  /** The widget sheet, when the UI's screenshot was taken too (else it's the screenshot). */
+  widgetSheet?: Uint8Array;
+  widgetSheetDark?: Uint8Array;
   /** With `check`: what failed (validation stops at the first). Such a candidate is never promoted. */
   failures?: string[];
   /** What the checks found that doesn't fail it: kept on the build, and on its review card when it's held. */
@@ -192,7 +195,7 @@ export class Validation extends Domain {
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
     let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean; real?: boolean } = {};
-    let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
+    let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array; widgetSheet?: Uint8Array; widgetSheetDark?: Uint8Array } = {};
     try {
       // One for all its loops of calls, so the time between them counts too.
       const breathe = breather();
@@ -283,8 +286,14 @@ export class Validation extends Domain {
       // what broke). "(screenshot attached" in the log is what tells the build page there's one.
       const keep = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
         if (opts.check) return;
-        kept = { screenshot: v.screenshot, screenshotDark: v.screenshotDark };
+        kept = { ...kept, screenshot: v.screenshot, screenshotDark: v.screenshotDark };
         await this.keepScreenshots(build, v);
+      };
+      // The widget sheet beside the UI's screenshot: kept on its own. "(widget sheet attached" tells the build page.
+      const keepSheet = async (v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) => {
+        if (opts.check) return;
+        kept = { ...kept, widgetSheet: v.screenshot, widgetSheetDark: v.screenshotDark };
+        await this.keepScreenshots(build, { widgetSheet: v.screenshot, widgetSheetDark: v.screenshotDark });
       };
 
       // 5b. the UI renders without errors on an empty tool, with a screenshot for the owner; with sample
@@ -356,11 +365,11 @@ export class Validation extends Domain {
         }
       }
 
-      // 5c. changed widgets, drawn in every size they offer (the screenshot, unless the UI's was taken):
-      // with sample data, what each shows on a tool filled with it; else its test case's output
+      // 5c. changed widgets, drawn in every size they offer (the screenshot; a sheet of its own when the UI's was
+      // taken): with sample data, what each shows on a tool filled with it; else its test case's output
       stopIfStalled();
       const widgetsChanged = !!manifest.widgets?.length && (build.kind === "widgets" || JSON.stringify(manifest.widgets) !== JSON.stringify(base?.row.manifest.widgets));
-      if (widgetsChanged && !shot && visualCheck && abiAtLeast(manifest, "2.3")) {
+      if (widgetsChanged && visualCheck && abiAtLeast(manifest, "2.3")) {
         const sampled = new Map<string, unknown>();
         if (sample)
           for (const w of manifest.widgets!) {
@@ -374,12 +383,13 @@ export class Validation extends Domain {
         const v = await visualCheck(build.id, { manifest, widgets, invoke: async () => ({ result: null }) });
         if (v.skipped) step(`widget check skipped: ${v.skipped}`);
         else {
-          await keep(v);
+          await (shot ? keepSheet(v) : keep(v));
           const filled = sampled.size ? ", with the sample data" : "";
+          const attached = shot ? "widget sheet attached" : "screenshot attached";
           if (v.errors.length) {
-            if (v.screenshot) step(`widgets rendered with errors (screenshot attached${filled})`);
+            if (v.screenshot) step(`widgets rendered with errors (${attached}${filled})`);
             softFail("widgets didn't render cleanly", v.errors);
-          } else step(`widgets render in every size (screenshot attached${filled})`);
+          } else step(`widgets render in every size (${attached}${filled})`);
         }
       }
 
@@ -413,6 +423,8 @@ export class Validation extends Domain {
       ...(rendered.real ? { real: true } : {}),
       ...(kept.screenshot ? { screenshot: kept.screenshot } : {}),
       ...(kept.screenshotDark ? { screenshotDark: kept.screenshotDark } : {}),
+      ...(kept.widgetSheet ? { widgetSheet: kept.widgetSheet } : {}),
+      ...(kept.widgetSheetDark ? { widgetSheetDark: kept.widgetSheetDark } : {}),
       ...(opts.check ? { failures } : {}),
       warnings,
     };
@@ -492,10 +504,12 @@ export class Validation extends Domain {
     return generic;
   }
 
-  /** The build page's screenshot of a build, light and dark. */
-  private async keepScreenshots(build: BuildRow, v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array }) {
+  /** The build page's screenshot of a build, light and dark, and its widget sheet when it has its own. */
+  private async keepScreenshots(build: BuildRow, v: { screenshot?: Uint8Array; screenshotDark?: Uint8Array; widgetSheet?: Uint8Array; widgetSheetDark?: Uint8Array }) {
     if (v.screenshot) await this.blobs.put(`screenshots/${build.id}.png`, v.screenshot);
     if (v.screenshotDark) await this.blobs.put(`screenshots/${build.id}-dark.png`, v.screenshotDark);
+    if (v.widgetSheet) await this.blobs.put(`screenshots/${build.id}-widgets.png`, v.widgetSheet);
+    if (v.widgetSheetDark) await this.blobs.put(`screenshots/${build.id}-widgets-dark.png`, v.widgetSheetDark);
   }
 
   /**

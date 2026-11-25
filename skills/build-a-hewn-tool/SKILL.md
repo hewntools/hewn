@@ -213,7 +213,7 @@ Name the operation `widget_<name>`, with `"outputSchema": { "type": "object" }` 
 },
 ```
 
-- `sizes`: `small` (1×1, ~110 px) holds one number; `medium` (2×1): a number with context, 3 list rows, a short chart; `large` (2×2): 5 rows or a taller chart. Offer only sizes the content fits (one is fine) and size each view yourself: Hewn draws them, and **fails one whose content (or revealed text) is cut off**, only when a tool without a UI adds or changes `widgets` in capability.json. Use the room: a large widget repeating the medium's two lines wastes it. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short.
+- `sizes`: `small` (1×1, ~110 px) holds one number; `medium` (2×1): a number with context, 3 list rows, a short chart; `large` (2×2): 5 rows or a taller chart. Offer only sizes the content fits (one is fine) and size each view yourself: Hewn draws them, and **fails one whose content (or revealed text) is cut off**, whenever you add or change `widgets` in capability.json. Use the room: a large widget repeating the medium's two lines wastes it. An interactive card (reveal, grading, buttons) suits `["large"]`, plus medium only if its text is short.
 - `refresh.every`: 5m–24h, while Home is open (default 30m).
 - `open` (needs a UI): where a tap lands; `"ui#section"` opens the UI with `location.hash` set to `#section`. Default: the capability.
 - Views (every template takes optional `buttons`; stat, list and text also take `reveal`):

@@ -7,8 +7,11 @@ export { applyTheme, isDark, shotUrl, THEME_KEY, themeNow, withTheme };
 // ---------- appearance (client-only) ----------
 /** Dark mode now: the owner's choice in Settings, else the system's. */
 const isDark = () => (document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches);
-/** A build's validation screenshot in the current appearance. */
-const shotUrl = (buildId) => `/api/builds/${enc(buildId)}/screenshot${isDark() ? "?scheme=dark" : ""}`;
+/** A build's screenshot (`sheet`: "widgets", its widgets' sheet beside the UI's), in the page's scheme. */
+const shotUrl = (buildId, sheet) => {
+  const q = new URLSearchParams({ ...(sheet ? { sheet } : {}), ...(isDark() ? { scheme: "dark" } : {}) });
+  return `/api/builds/${enc(buildId)}/screenshot${[...q].length ? `?${q}` : ""}`;
+};
 
 const THEME_KEY = "hewn.theme";
 function applyTheme(t = localStorage.getItem(THEME_KEY) ?? "system") {
