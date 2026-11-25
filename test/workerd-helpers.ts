@@ -95,7 +95,7 @@ export interface TestHost {
   stop: () => Promise<void>;
 }
 
-export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; proxyClientIp?: boolean; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[]; resume?: SupervisorOptions["resume"]; watchdog?: SupervisorOptions["watchdog"]; disk?: SupervisorOptions["disk"]; idleGc?: SupervisorOptions["idleGc"]; sandbox?: boolean; prepare?: (root: string) => void; schedulesOff?: boolean; network?: SupervisorOptions["network"] } = {}): Promise<TestHost> {
+export async function startTestHost(opts: { attempts?: number; publicListen?: string; proxySecret?: string; proxyClientIp?: boolean; remote?: RemoteJobs; hosted?: Hosted; intake?: Intake; passes?: Pass[]; resume?: SupervisorOptions["resume"]; watchdog?: SupervisorOptions["watchdog"]; disk?: SupervisorOptions["disk"]; idleGc?: SupervisorOptions["idleGc"]; sandbox?: boolean; prepare?: (root: string) => void; schedulesOff?: boolean; network?: SupervisorOptions["network"]; log?: (line: string) => void } = {}): Promise<TestHost> {
   const root = mkdtempSync(join(tmpdir(), "hewn-workerd-"));
   // A home as an earlier Hewn left it, say.
   opts.prepare?.(root);
@@ -109,7 +109,7 @@ export async function startTestHost(opts: { attempts?: number; publicListen?: st
     },
   };
   // A host that doesn't start leaves nothing behind: the suite's after() has no host to stop.
-  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", proxyClientIp: !!opts.proxyClientIp, builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, ...(opts.intake ? { intake: () => opts.intake! } : {}), log, watchdog: opts.watchdog ?? { intervalMs: 200, stallMs: 1500 }, ...(opts.resume !== undefined ? { resume: opts.resume } : {}), ...(opts.disk ? { disk: opts.disk } : {}), ...(opts.idleGc !== undefined ? { idleGc: opts.idleGc } : {}), ...(opts.sandbox ? { sandbox: true } : {}), ...(opts.schedulesOff ? { schedulesOff: true } : {}), ...(opts.network ? { network: opts.network } : {}), keySource: "file" })).catch((e) => {
+  const { sv, port } = await onFreePorts((ports, log) => startSupervisor({ home: openHome(root), ...ports, publicListen: opts.publicListen, proxySecret: opts.proxySecret ?? "", proxyClientIp: !!opts.proxyClientIp, builders: { claude: scripted }, remote: opts.remote, hosted: opts.hosted, ...(opts.intake ? { intake: () => opts.intake! } : {}), log: (l) => (log(l), opts.log?.(l)), watchdog: opts.watchdog ?? { intervalMs: 200, stallMs: 1500 }, ...(opts.resume !== undefined ? { resume: opts.resume } : {}), ...(opts.disk ? { disk: opts.disk } : {}), ...(opts.idleGc !== undefined ? { idleGc: opts.idleGc } : {}), ...(opts.sandbox ? { sandbox: true } : {}), ...(opts.schedulesOff ? { schedulesOff: true } : {}), ...(opts.network ? { network: opts.network } : {}), keySource: "file" })).catch((e) => {
     rmSync(root, { recursive: true, force: true });
     throw e;
   });
