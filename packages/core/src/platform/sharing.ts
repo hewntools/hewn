@@ -11,7 +11,7 @@ import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, typ
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, contentHash, text } from "../files.ts";
-import { abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, newestByName, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
+import { abiBelow, abiOf, abiUnsupported, type CapabilityManifest, isConnection, MODEL_PROVIDERS, newestByName, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import type { Files } from "../ports.ts";
 import type { BuildRow, ShareLink } from "../registry.ts";
 import { randomToken, sha256 } from "../sha256.ts";
@@ -20,6 +20,7 @@ import { breather, Domain } from "./context.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { MODEL_KEYS } from "./models.ts";
 import { candidateFiles } from "./submissions.ts";
+import { KEPT_LICENSE, LICENSE_CHOICES, licenseFile, NO_LICENSE, noticeLine } from "../licenses.ts";
 
 /** A staged bundle (uploaded, not installed) is dropped after a day. */
 const STAGED_MS = 24 * 3600_000;
@@ -28,6 +29,11 @@ const STAGED_MS = 24 * 3600_000;
 const LINK_DAYS = { "1d": 1, "7d": 7, "30d": 30, never: null } as const;
 type LinkExpiry = keyof typeof LINK_DAYS;
 const isLinkExpiry = (e: string): e is LinkExpiry => Object.hasOwn(LINK_DAYS, e);
+/** The license the owner chose for a tool's shares (platform_kv), and the name for its copyright line (one, Hewn-wide). */
+export const licenseKey = (capabilityId: string) => `share:license:${capabilityId}`;
+const HOLDER_KEY = "share:copyright-holder";
+/** ", MIT" for Activity; ", all rights reserved". */
+const licenseWords = (id: string) => (id === NO_LICENSE ? ", all rights reserved" : `, ${id}`);
 /** A share link's token: Hewn makes 24 random bytes as base64url (32 characters); a token of another shape is no link. */
 const SHARE_TOKEN = /^[A-Za-z0-9_-]{32,64}$/;
 
@@ -46,6 +52,31 @@ export interface ShareCheck {
    * would install: validation fails it), the first (`findings` has every one); or no sample data.
    */
   blocked: { kind: "secret" | "key"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
+  license: ShareLicense;
+}
+
+/**
+ * The license a shared tool goes with (Share… › License): written into the bundle when it's packed, never a new
+ * version of the tool. Preselected by origin, never locked: the owner's earlier choice for this tool, else what its
+ * manifest says, else MIT for a tool built on this Hewn and all rights reserved for one that came from elsewhere.
+ */
+export interface ShareLicense {
+  /** An SPDX id, or "none": all rights reserved (no `license`, no LICENSE file). */
+  id: string;
+  why: "chosen" | "manifest" | "built-here" | "arrived-without" | "hewn";
+  /** The five on the sheet, each with its line; a manifest's other id is offered as it is. */
+  choices: { id: string; label: string; line: string }[];
+  /** The LICENSE file's first line, as it would be written: the copyright line (CC0: its waiver). */
+  copyright: string;
+  /** The name the owner gave for the copyright line, kept on this Hewn for all their tools; null: "the <tool> authors". */
+  holder: string | null;
+  /**
+   * It came from elsewhere (a file, a link, Hewn's tools): someone else's work, so the owner's name never goes on it, and
+   * a LICENSE it came with travels on, never replaced.
+   */
+  elsewhere: boolean;
+  /** It came from elsewhere (not one of Hewn's tools) with no license: the row says so, whatever is chosen. */
+  arrivedWithout: boolean;
 }
 
 /** A card in Hewn's tools (Q2): enough to choose, and whether you have it. */
@@ -99,6 +130,8 @@ export interface BundlePreview {
   asks: { hosts: string[]; model: { tier?: string; model?: string; images: boolean } | null; tools: { id: string; operations: string[] }[]; secrets: string[]; config: string[] };
   /** Sample calls it ships with. */
   sample: number | null;
+  /** The license it comes with (its manifest's SPDX id); null: none, all rights reserved. */
+  license: string | null;
   files: number;
   /** Its name, or the first free "Name 2", "Name 3"… */
   suggestedName: string;
@@ -185,21 +218,71 @@ export class Sharing extends Domain {
       sample: sample ? { calls: sample.length } : null,
       connection,
       blocked: secret ? { kind: secret.kind === "secret" ? "secret" : "key", file: secret.file, line: secret.line, label: secret.label } : !sample && !connection ? { kind: "no-sample" } : null,
+      license: this.shareLicense(capabilityId, v),
     };
+  }
+
+  /** The license a version would be shared under, and the choices. */
+  private shareLicense(capabilityId: string, version: number): ShareLicense {
+    const m = this.registry.getVersion(capabilityId, version)!.manifest;
+    const chosen = this.registry.getKv<string>(licenseKey(capabilityId));
+    const own = m.license;
+    // Hewn's own tools are Apache-2.0 (seeds/LICENSE), also those installed before their manifests said so.
+    const hewn = m.source?.from === "hub";
+    const id = chosen ?? own ?? (hewn ? "Apache-2.0" : m.source ? NO_LICENSE : "MIT");
+    const why = chosen ? "chosen" : own ? "manifest" : hewn ? "hewn" : m.source ? "arrived-without" : "built-here";
+    const holder = this.registry.getKv<string>(HOLDER_KEY) ?? null;
+    const elsewhere = !!m.source;
+    const other = [own, chosen].find((x) => x && !LICENSE_CHOICES.some((c) => c.id === x));
+    const copyright = noticeLine(id, { year: new Date().getUTCFullYear(), toolName: m.name, ...(holder && !elsewhere ? { holder } : {}) });
+    return { id, why, choices: [...LICENSE_CHOICES, ...(other ? [{ id: other, label: other, line: "The license its manifest names." }] : [])], copyright, holder, elsewhere, arrivedWithout: elsewhere && !hewn && !own };
+  }
+
+  /**
+   * Share… › License (owner only): the license this tool is shared under from now on, and the name for the copyright
+   * line (on this Hewn, for every tool; empty: "the <tool> authors"). Remembered; no new version is made.
+   */
+  setShareLicense(owner: Agent, capabilityId: string, req: { license?: string; holder?: string | null }): ShareLicense {
+    requireOwner(owner);
+    const cap = this.visibleActive(owner, capabilityId);
+    if (req.license !== undefined) {
+      const own = this.registry.getVersion(capabilityId, cap.activeVersion!)!.manifest.license;
+      if (typeof req.license !== "string" || (!LICENSE_CHOICES.some((c) => c.id === req.license) && req.license !== own)) throw new PlatformError("invalid_request", `license must be one of ${LICENSE_CHOICES.map((c) => c.id).join(", ")}${own ? `, or ${own}` : ""}`);
+      this.registry.setKv(licenseKey(capabilityId), req.license);
+    }
+    if (req.holder !== undefined) {
+      const name = typeof req.holder === "string" ? req.holder.trim() : "";
+      if (name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) throw new PlatformError("invalid_request", "the name must be one line of at most 80 characters");
+      if (name) this.registry.setKv(HOLDER_KEY, name);
+      else this.registry.deleteKv(HOLDER_KEY);
+    }
+    return this.shareLicense(capabilityId, cap.activeVersion!);
   }
 
   /** The bundle (`<id>.hewn.zip`): refused while the check blocks it. */
   async shareBundle(owner: Agent, capabilityId: string, version?: number): Promise<{ name: string; bundle: Uint8Array }> {
     const check = refuseBlocked(await this.shareCheck(owner, capabilityId, version));
-    this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a file`, owner.id);
+    this.registry.setKv(licenseKey(capabilityId), check.license.id);
+    this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a file${licenseWords(check.license.id)}`, owner.id);
     return this.packShare(capabilityId, check.version);
   }
 
-  /** A version as a bundle, with the sidecar saying which tool and version it is. */
+  /**
+   * A version as a bundle, with the sidecar saying which tool and version it is, under its license: the manifest's
+   * `license` (with ABI 2.7) and a LICENSE file with the copyright line; all rights reserved writes neither.
+   */
   private async packShare(capabilityId: string, version: number): Promise<{ name: string; bundle: Uint8Array }> {
     const files = await this.shareFiles(capabilityId, version);
     const row = this.registry.getVersion(capabilityId, version)!;
-    const manifest = JSON.parse(text(files["capability.json"])) as CapabilityManifest;
+    const license = this.shareLicense(capabilityId, version);
+    const { license: _, ...unlicensed } = JSON.parse(text(files["capability.json"])) as CapabilityManifest;
+    const manifest: CapabilityManifest = license.id === NO_LICENSE ? unlicensed : { ...unlicensed, ...(abiBelow(abiOf(unlicensed), "2.7") ? { abi: "2.7" } : {}), license: license.id };
+    files["capability.json"] = bytes(JSON.stringify(manifest, null, 2) + "\n");
+    // A LICENSE the version came with (from elsewhere) is someone's notice: it travels on, never dropped or replaced.
+    // Shared under the same license, it goes as it is; under another, the new one comes first and it follows, as it was.
+    const original = files.LICENSE ? text(files.LICENSE) : undefined;
+    const file = license.id === NO_LICENSE ? undefined : licenseFile(license.id, { year: new Date().getUTCFullYear(), toolName: manifest.name, ...(license.holder && !license.elsewhere ? { holder: license.holder } : {}) });
+    if (file && (!original || license.id !== row.manifest.license)) files.LICENSE = bytes(original ? `${file}\n\n${KEPT_LICENSE}\n\n${original}` : file);
     const sidecar: Sidecar = { format: BUNDLE_FORMAT, hewn: this.platform.version ?? "dev", abi: abiOf(manifest), exportedAt: new Date().toISOString(), tool: { id: capabilityId, version, hash: row.contentHash } };
     return { name: `${capabilityId}.hewn.zip`, bundle: packBundle(files, sidecar) };
   }
@@ -219,7 +302,8 @@ export class Sharing extends Domain {
     const token = randomToken(24);
     const id = randomToken(9);
     this.registry.insertShareLink({ id, tokenHash: sha256(token), capabilityId, version: check.version, expiresAt: days === null ? null : new Date(Date.now() + days * 86400_000).toISOString() });
-    this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a link (${days === null ? "until revoked" : `${days} ${days === 1 ? "day" : "days"}`})`, owner.id);
+    this.registry.setKv(licenseKey(capabilityId), check.license.id);
+    this.registry.addLifecycleEvent(capabilityId, "share", `v${check.version} as a link (${days === null ? "until revoked" : `${days} ${days === 1 ? "day" : "days"}`})${licenseWords(check.license.id)}`, owner.id);
     return { token, link: this.registry.shareLinks(capabilityId).find((l) => l.id === id)! };
   }
 
@@ -418,6 +502,7 @@ export class Sharing extends Domain {
         config: (m.config ?? []).map((x) => x.name),
       },
       sample: sample?.length ?? null,
+      license: m.license ?? null,
       files: Object.keys(files).length,
       suggestedName: this.freeName(m.name),
       operations: newestOperations(m),

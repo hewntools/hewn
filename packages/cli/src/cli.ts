@@ -491,6 +491,8 @@ async function main() {
       for (const f of check.findings) console.log(`  ${f.blocks ? "✖" : "!"} ${f.file}:${f.line}  ${f.label}: ${f.masked}`);
       if (!check.findings.length) console.log("  nothing personal or key-shaped found");
       console.log("  never in it: your data, keys, settings, conversations, logs");
+      // The license it goes under (Share… in Hewn picks another; it's remembered for the tool).
+      if (check.license) console.log(`  license: ${check.license.id === "none" ? "all rights reserved (no license)" : `${check.license.id}, ${check.license.copyright}`}`);
       // One of your own keys, or anything shaped like a key: no Hewn would install it.
       if (check.blocked && check.blocked.kind !== "no-sample") {
         process.exitCode = 1;

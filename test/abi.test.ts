@@ -19,7 +19,7 @@ const manifest = (extra: Partial<CapabilityManifest> & Record<string, unknown> =
 });
 
 describe("ABI versions", () => {
-  test("this Hewn implements 2.6", () => assert.equal(ABI, "2.6"));
+  test("this Hewn implements 2.7", () => assert.equal(ABI, "2.7"));
 
   test("a capability may need the same or an older minor, never a newer one or another major", () => {
     assert.equal(abiUnsupported("2.0", "2.0"), undefined);
@@ -87,7 +87,7 @@ describe("ABI on install and run", () => {
     const started = await t.platform.install(USER, { name: "Running Log", purpose: "p", builder: `copy:${dir}` });
     const result = await t.platform.settle(started.buildId);
     assert.equal(result.status, "failed");
-    assert.match(result.log.join("\n"), /needs Hewn ABI 2\.9; this Hewn has 2\.6/);
+    assert.match(result.log.join("\n"), /needs Hewn ABI 2\.9; this Hewn has 2\.7/);
   });
 
   test("an installed version that needs a newer ABI (Hewn downgraded) is not ready", async () => {
@@ -101,7 +101,7 @@ describe("ABI on install and run", () => {
     t.platform = nodePlatform(t.home);
     const st = t.platform.readiness("running-log");
     assert.equal(st.ready, false);
-    assert.equal(st.unsupportedAbi, "needs Hewn ABI 2.9; this Hewn has 2.6");
+    assert.equal(st.unsupportedAbi, "needs Hewn ABI 2.9; this Hewn has 2.7");
     assert.match(st.userAction!, /upgrade Hewn/);
     await assert.rejects(t.platform.invoke(t.claude, { capabilityId: "running-log", operation: "list_runs" }), /not ready/);
   });

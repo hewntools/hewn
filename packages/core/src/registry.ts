@@ -566,6 +566,10 @@ export class Registry {
     return (this.db.prepare("SELECT value FROM platform_kv WHERE key = ?").get(key) as Row | undefined)?.value as string | undefined;
   }
 
+  deleteKv(key: string) {
+    this.db.prepare("DELETE FROM platform_kv WHERE key = ?").run(key);
+  }
+
   setKv(key: string, value: unknown) {
     this.db.prepare("INSERT INTO platform_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, JSON.stringify(value));
   }
@@ -1340,8 +1344,8 @@ export class Registry {
       }
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
       this.versionRows.delete(id);
-      // Its failed calls (for "Ask builder to fix this") and the owner's rules for it go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`);
+      // Its failed calls (for "Ask builder to fix this"), the owner's rules for it and the license it was shared under go with it: a new tool under the id starts clean.
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`, `share:license:${id}`);
     });
   }
 

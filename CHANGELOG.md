@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **A shared tool carries a license.** Share… has a License row: MIT (a tool built on your Hewn starts there), Apache 2.0, GPL 3.0 or later, CC0 or all rights reserved, each in a line of plain words. Hewn writes it into the file as the manifest's `license` (ABI 2.7) and a `LICENSE` file with a copyright line, never as a new version, and the install sheet shows it. See [License](docs/sharing.md#license).
 - **A scan for keys.** Anything shaped like a key in a tool's files, or one of the keys you stored in Hewn, fails it, named by file and line (where your key is goes to the builder's log only, and an agent that put one there can't build again until you've looked; an agent starts at most 30 builds an hour); a long random string warns. Sharing refuses a key shape too, and the share scan's long random strings are read the same tighter way. See [The build](docs/building-tools.md#the-build).
 
 ### Safety and limits
@@ -15,6 +16,9 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- Hewn notices a Mac's wake from sleep (it went unnoticed before), and `hewn.log` says what the catch-up ran.
+- With `HEWN_SCHEDULES=off`, a restored copy no longer starts the builds that were running or waiting when the backup was made: they stay stopped, saying why.
+- An open Home redrawing itself after its poll found a change no longer counts as your activity, so it doesn't delay Hewn giving memory back or a host suspending it.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
 
 ## 0.4.12 (2026-11-19)
