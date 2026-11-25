@@ -27,6 +27,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - On a machine short of CPU, an unresponsive workerd is restarted at growing intervals, up to 2 minutes, instead of about every 15 seconds. See [Troubleshooting](docs/troubleshooting.md#tools).
 - On Linux, a restart of Hewn's tools no longer leaves the old tools' workerd running in the background. See [Troubleshooting](docs/troubleshooting.md#tools).
 - Reading, copying or dropping a tool's data no longer fails with "Hewn's tools stopped (Network connection lost.)" when a kept-alive connection to the tools closes as the request goes out: it's sent once more. See [Troubleshooting](docs/troubleshooting.md#tools).
+- A build's cancel answers once the build's live log has ended, so the build page closing it no longer races its last lines (a "Broken pipe" error line in `hewn.log`). See [Troubleshooting](docs/troubleshooting.md#building).
 
 ## 0.4.12 (2026-11-19)
 

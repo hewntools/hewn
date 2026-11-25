@@ -23,15 +23,18 @@ export const errorBody = (e: unknown) =>
 
 /**
  * Server-sent events as a Response. `run` writes events; the stream ends when it settles.
- * `signal` aborts when the client goes away.
+ * `signal` aborts when the client goes away, and nothing more is written then (a write to a stream the client closed
+ * is an error line in workerd's log). `closed` settles once the stream has ended on this side.
  */
-export function sse(headers: Record<string, string>, run: (event: (name: string, data: unknown) => void, signal: AbortSignal) => Promise<void>, clientSignal?: AbortSignal): Response {
+export function sse(headers: Record<string, string>, run: (event: (name: string, data: unknown) => void, signal: AbortSignal) => Promise<void>, clientSignal?: AbortSignal, closed?: () => void): Response {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const enc = new TextEncoder();
   const abort = new AbortController();
-  clientSignal?.addEventListener("abort", () => abort.abort(), { once: true });
   let open = true;
+  const gone = () => ((open = false), abort.abort());
+  if (clientSignal?.aborted) gone();
+  else clientSignal?.addEventListener("abort", gone, { once: true });
   const event = (name: string, data: unknown) => {
     if (!open) return;
     writer.write(enc.encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {
@@ -43,7 +46,7 @@ export function sse(headers: Record<string, string>, run: (event: (name: string,
     .catch((e) => event("error", { message: (e as Error).message }))
     .finally(() => {
       open = false;
-      writer.close().catch(() => {});
+      writer.close().catch(() => {}).finally(() => closed?.());
     });
   return new Response(readable, { status: 200, headers: { "content-type": "text/event-stream", "cache-control": "no-store", ...headers } });
 }
