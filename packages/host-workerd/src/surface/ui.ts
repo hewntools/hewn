@@ -14,6 +14,8 @@ import type { Site } from "./site.ts";
 
 /** What a UI page may do: run its scripts and forms, open links and downloads. Never allow-same-origin. */
 export const UI_SANDBOX = "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals";
+/** A held build's Try it (try.ts): code the owner hasn't allowed yet, so no popups, which could carry what its calls return off Hewn. */
+export const TRY_SANDBOX = "allow-scripts allow-forms allow-downloads allow-modals";
 
 /**
  * The UI may load and call only its own files and API and the design system, and may be framed

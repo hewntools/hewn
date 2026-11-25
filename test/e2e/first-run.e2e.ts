@@ -649,6 +649,44 @@ export const operations = {
     if (rejected !== 200) throw new Error(`reject: ${rejected}`);
   });
 
+  await step("Try it on a held change: its screen on a copy of your data; a write stays in the copy; gone once you decide", async () => {
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${await agentToken()}` } } }));
+    const parse = (r: any) => JSON.parse(r.content[0].text);
+    const pack = parse(await client.callTool({ name: "capabilities_pack", arguments: { kind: "modify", capabilityId: "ui-counter" } }));
+    const files = pack.files
+      .filter((f: { path: string }) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path))
+      .map((f: { path: string; content: string }) => (f.path === "capability.json" ? { ...f, content: f.content.replace(/"purpose": "([^"]*)"/, '"purpose": "$1, to try"') } : f));
+    const b = parse(await client.callTool({ name: "capabilities_submit", arguments: { files, capabilityId: "ui-counter", request: "Reword its purpose, to try", baseVersion: pack.baseVersion } }));
+    const held = parse(await client.callTool({ name: "builds_wait", arguments: { buildId: b.buildId, timeoutSeconds: 120 } }, undefined, { timeout: 150_000 }));
+    if (held.status !== "review") throw new Error(held.log?.join("\n") ?? JSON.stringify(held));
+    await client.close();
+    const live = async () => (await sv.admin("invoke", { capabilityId: "ui-counter", operation: "get", input: {} })).result.count as number;
+    const before = await live();
+    await page.goto(`${web}/#/b/${held.buildId}`);
+    await page.getByRole("button", { name: "Try it" }).click();
+    await page.waitForURL(new RegExp(`#/b/${held.buildId}/try$`));
+    await page.locator(".try-bar", { hasText: "on a copy of your data" }).waitFor();
+    const app = page.frameLocator("iframe.app-frame");
+    await app.locator("#inc").click();
+    await app.locator("#inc").click();
+    await app.locator("#n", { hasText: String(before + 2) }).waitFor({ timeout: 10_000 });
+    await page.screenshot({ path: "/tmp/e2e-fr-try-it.png" });
+    // No popups for code the owner hasn't allowed, in the frame's attribute and in its page's CSP.
+    if (/allow-popups/.test((await page.locator("iframe.app-frame").getAttribute("sandbox")) ?? "")) throw new Error("Try it's frame allows popups");
+    // A reload goes on with the same copy: it doesn't make a new one.
+    await page.reload();
+    await page.frameLocator("iframe.app-frame").locator("#n", { hasText: String(before + 2) }).waitFor({ timeout: 10_000 });
+    if ((await live()) !== before) throw new Error("a write in Try it reached the owner's data");
+    // Decided: the copy goes, and its address with it.
+    await page.getByRole("link", { name: "Back to the review" }).click();
+    await page.getByRole("button", { name: "Don't allow" }).click();
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(async (id: string) => (await fetch(`/api/builds/${id}/try`, { method: "POST", headers: { "x-hewn-ui": "1" } })).status, held.buildId);
+    if (after !== 409) throw new Error(`Try it after the decision: ${after}`);
+    if ((await live()) !== before) throw new Error("the owner's data changed");
+  });
+
   await step("a tool from a file: Share… shows its sample data, and opens on the version on screen", async () => {
     const files = { ...readTree(SEED), "sample/calls.json": Buffer.from(JSON.stringify([{ operation: "record_run", input: { distanceKm: 5, durationSeconds: 1500 } }])) };
     const zip = packBundle(files, { format: 1, hewn: "e2e", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "running-log", version: 1, hash: "d".repeat(64) } });

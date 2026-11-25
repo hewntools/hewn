@@ -14,6 +14,7 @@ import type { McpSessions } from "./mcp-sessions.ts";
 import { challenge, handleOAuth, OAUTH_PATHS, originOf } from "./oauth.ts";
 import { CLIENT_IP_HEADER, loggedPath, PUBLIC_HEADER, PUBLIC_PATHS, RateLimiter, ROBOTS_TXT, SHARE_PREFIX, SHARE_ROBOTS } from "./public.ts";
 import { localSite, publicSite, requestHost, type Site, uiPath } from "./site.ts";
+import { handleTry, tryPath } from "./try.ts";
 import { handleUi } from "./ui.ts";
 import { handleWeb, PUBLIC_FILES, skillResponse } from "./web.ts";
 import { SKILL_URL } from "@hewntools/core/skill.ts";
@@ -34,6 +35,9 @@ export async function handle(platform: Platform, sessions: McpSessions, host: Su
 /** A page's own refresh (Home's widgets, a poll): the web client marks it, and the idle report ignores it. What a page can't mark (an EventSource, an <img>) is PAGE_OWN_FETCHES. */
 export const REFRESH_HEADER = "x-hewn-refresh";
 
+/** Opening a held build's Try it (POST): the owner's activity, but nothing a backup should keep. */
+const TRY_OPEN = /^\/api\/builds\/[^/]+\/try$/;
+
 /** A build's events, and a tool's or a build's icon: fetched by an open page on its own (see counted()). */
 const PAGE_OWN_FETCHES = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/icon)$/;
 
@@ -50,7 +54,8 @@ function counted(activity: Platform["activity"], req: Request, url: URL, res: Re
   if (res.status >= 400 || OAUTH_PATHS.has(url.pathname) || url.pathname.startsWith("/.well-known/") || url.pathname === SKILL_URL || url.pathname === "/robots.txt" || PUBLIC_FILES.has(url.pathname.slice(1))) return res;
   if (req.method === "GET" && PAGE_OWN_FETCHES.test(url.pathname)) return res;
   activity.request();
-  if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD") activity.changed();
+  // Opening a Try it isn't one: it works on a copy that goes.
+  if (url.pathname.startsWith("/api/") && req.method !== "GET" && req.method !== "HEAD" && !TRY_OPEN.test(url.pathname)) activity.changed();
   if (!res.body || !/^(text\/event-stream|application\/x-ndjson)/.test(res.headers.get("content-type") ?? "")) return res;
   const reader = res.body.getReader();
   const body = new ReadableStream<Uint8Array>({
@@ -160,8 +165,10 @@ async function shareLink(platform: Platform, host: SurfaceHost, req: Request, ur
   }
 }
 
-/** A browser on a site: a capability UI under /tools/<id>/, else the web client. */
+/** A browser on a site: a capability UI under /tools/<id>/, a held build's Try it under /try/<build>/, else the web client. */
 function browser(platform: Platform, host: SurfaceHost, site: Site, req: Request, url: URL): Promise<Response> {
+  const t = tryPath(url.pathname);
+  if (t) return handleTry(platform, host, site, t.buildId, t.path, req);
   const ui = uiPath(url.pathname);
   return ui ? handleUi(platform, host, site, ui.capabilityId, ui.path, req) : handleWeb(platform, host, site, req);
 }

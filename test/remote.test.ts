@@ -266,7 +266,7 @@ describe("remote web access: the public listener on the public URL", () => {
     assert.equal((await web("/api/remote", { cookie, origin: "http://hewn.example.com" })).status, 403, "not over plain http");
     const page = await web("/", { cookie });
     assert.equal(page.status, 200);
-    assert.match(String(page.headers["content-security-policy"]), /frame-src https:\/\/hewn\.example\.com\/tools\/;/);
+    assert.match(String(page.headers["content-security-policy"]), /frame-src https:\/\/hewn\.example\.com\/tools\/ https:\/\/hewn\.example\.com\/try\/;/);
   });
 
   test("add a passkey from the device, then sign in with it", async () => {
@@ -317,7 +317,7 @@ describe("remote web access: the public listener on the public URL", () => {
     assert.match(auth.body, /#hewn_session=/);
     assert.equal((await http(pub, `/tools/ui-counter/~${t.platform.uiKey("ui-counter")}/`, { host: "ui-counter.hewn.example.com" })).status, 404, "no subdomains");
     assert.equal((await http(pub, "/tools/ui-counter/", { host: "hewn.example.com" })).status, 404, "not without the UI key");
-    assert.match(String((await web("/", { cookie })).headers["content-security-policy"]), /frame-src https:\/\/hewn\.example\.com\/tools\/;/);
+    assert.match(String((await web("/", { cookie })).headers["content-security-policy"]), /frame-src https:\/\/hewn\.example\.com\/tools\/ https:\/\/hewn\.example\.com\/try\/;/);
   });
 
   test("other hosts on the public listener: MCP and OAuth only; admin never", async () => {

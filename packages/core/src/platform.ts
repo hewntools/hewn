@@ -32,6 +32,7 @@ import { Widgets, type HomeEntryView, type WidgetResult } from "./platform/widge
 import { Housekeeping, LOG_RETENTION_DAYS } from "./platform/housekeeping.ts";
 import { Activity, type ActivityView } from "./platform/activity.ts";
 import { type StallRole, Stalls, type Suspension } from "./platform/stalls.ts";
+import { type TryOpened, Trying } from "./platform/trying.ts";
 import { type Pass, passesIn } from "./passes.ts";
 import { Events, type Shared, type Domains, type LoadedVersion } from "./platform/context.ts";
 
@@ -207,6 +208,7 @@ export class Platform {
     d.sessions = new Sessions(s);
     d.submissions = new Submissions(s);
     d.stalls = new Stalls(s);
+    d.trying = new Trying(s, opts.onSchedulesChanged);
     d.validation = new Validation(s);
     d.widgets = new Widgets(s);
   }
@@ -310,6 +312,19 @@ export class Platform {
   redeemUiTicket(ticket: string, capabilityId: string): string | undefined { return this.d.sessions.redeemUiTicket(ticket, capabilityId); }
   uiAgent(session: string | undefined, capabilityId: string): Agent | undefined { return this.d.sessions.uiAgent(session, capabilityId); }
   createWebTicket(owner: Agent): string { return this.d.sessions.createWebTicket(owner); }
+
+  // ---------- Try it on a held build (platform/trying.ts) ----------
+  tryBuild(owner: Agent, buildId: string, opts?: { reopen?: boolean }): Promise<TryOpened | { open: false }> { return this.d.trying.start(owner, buildId, opts); }
+  redeemTryTicket(ticket: string, buildId: string): Promise<string | undefined> { return this.d.trying.redeem(ticket, buildId); }
+  tryKey(buildId: string): Promise<string | undefined> { return this.d.trying.key(buildId); }
+  trySignedIn(session: string | undefined, buildId: string): Promise<boolean> { return this.d.trying.signedIn(session, buildId); }
+  tryFile(buildId: string, path: string): Promise<{ path: string; data: Uint8Array } | undefined> { return this.d.trying.file(buildId, path); }
+  tryManifest(buildId: string): Promise<CapabilityManifest> { return this.d.trying.manifest(buildId); }
+  tryInvoke(buildId: string, req: { operation: string; operationVersion?: number; input?: unknown }) { return this.d.trying.invoke(buildId, req); }
+  /** Try its past their hour end (at start, after a resume, with each alarm). */
+  sweepTries(now?: number): Promise<void> { return this.d.trying.sweep(now); }
+  /** When the next Try it ends (the host's alarm covers it as well as the next schedule). */
+  nextTryEndAt(): number | null { return this.d.trying.nextEndAt(); }
   redeemWebTicket(ticket: string, userAgent?: string): string | undefined { return this.d.sessions.redeemWebTicket(ticket, userAgent); }
   webPrincipal(session: string | undefined): Agent | undefined { return this.d.sessions.webPrincipal(session); }
   webSessions(owner: Agent, currentSession?: string) { return this.d.sessions.webSessions(owner, currentSession); }

@@ -81,6 +81,8 @@ export class Housekeeping extends Domain {
    */
   async cleanup(now = Date.now()): Promise<{ workspaces: number; transcripts: number; releasedIds: string[]; logs: number }> {
     const iso = (days: number) => new Date(now - days * 86400_000).toISOString();
+    // A Try it past its hour (Hewn was down or suspended through it) goes first.
+    await this.d.trying.sweep(now);
     let workspaces = 0;
     let transcripts = 0;
     for (const b of this.registry.finishedBuildsBefore(iso(1))) {

@@ -114,6 +114,12 @@ export class Stalls extends Domain {
         if (!r.state && this.registry.getCapability(r.capabilityId)) this.registry.addLifecycleEvent(r.capabilityId, "held-up", detail, "hewn");
         continue;
       }
+      // A held build's Try it (try:<build>): it ends, its card says so, and the tool isn't struck for it.
+      const tried = /^try:(.+)$/.exec(r.state)?.[1];
+      if (tried) {
+        this.d.trying.stalled(tried, stallLine(r.what, r.caller));
+        continue;
+      }
       const build = BUILD_STATE.exec(r.state)?.[1];
       if (build) {
         const line = stallLine(r.what, r.caller);

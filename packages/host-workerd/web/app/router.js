@@ -8,7 +8,7 @@ import { accountsPage } from "./accounts.js";
 import { activityPage } from "./activity.js";
 import { passkeyPage } from "./add-passkey.js";
 import { agentsPage } from "./agents.js";
-import { buildPage } from "./build.js";
+import { buildPage, tryPage } from "./build.js";
 import { home } from "./home.js";
 import { pollInbox } from "./inbox.js";
 import { infoPage } from "./info.js";
@@ -66,6 +66,7 @@ async function route() {
     if (p === "new" && id === "tools" && sub) return await hubToolPage(sub);
     if (p === "new" && id === "tools") return await hubPage(q);
     if (p === "new") return await intakePage(q);
+    if (p === "b" && sub === "try") return await tryPage(id);
     if (p === "b") return await buildPage(id);
     if (p === "activity") return await activityPage(q);
     if (p === "agents") return await agentsPage();

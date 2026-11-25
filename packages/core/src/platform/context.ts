@@ -28,6 +28,7 @@ import type { Validation } from "./validation.ts";
 import type { Widgets } from "./widgets.ts";
 import type { Housekeeping } from "./housekeeping.ts";
 import type { Stalls } from "./stalls.ts";
+import type { Trying } from "./trying.ts";
 import type { Platform } from "../platform.ts";
 
 /** Minimal event emitter (no node:events in the core). */
@@ -73,6 +74,7 @@ export interface Domains {
   sessions: Sessions;
   submissions: Submissions;
   stalls: Stalls;
+  trying: Trying;
   validation: Validation;
   widgets: Widgets;
 }
