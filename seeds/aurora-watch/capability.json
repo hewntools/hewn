@@ -2,7 +2,8 @@
   "id": "aurora-watch",
   "name": "Aurora Watch",
   "purpose": "Tell the owner each evening whether it's worth looking for the aurora where they are, combining NOAA's Kp forecast, MET Norway's cloud cover and whether it is actually dark. The owner chooses the place (a name, coordinates and its time zone).",
-  "abi": "2.3",
+  "abi": "2.7",
+  "license": "Apache-2.0",
   "hue": 150,
   "ui": {
     "available": true

@@ -4,7 +4,7 @@
 // and runs every minor up to its own. Minor versions only add; anything else is a new major.
 
 /** The ABI this spec describes. */
-export const ABI = "2.6";
+export const ABI = "2.7";
 
 /** What a manifest without `abi` needs. */
 export const DEFAULT_ABI = "2.0";
@@ -25,4 +25,5 @@ export const ABI_HISTORY: { version: string; added: string[] }[] = [
     ],
   },
   { version: "2.6", added: ["manifest `config[].suggested`: the value a setting's field opens with in the setup form; the owner confirms it by saving"] },
+  { version: "2.7", added: ["manifest `license`: the SPDX id a shared tool carries, with a LICENSE file (written by the host when the owner shares it)"] },
 ];

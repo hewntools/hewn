@@ -4,7 +4,7 @@ A tool is a small program its owner keeps: typed operations over its own private
 
 This page is for writing one by hand. On Hewn, a builder agent usually writes tools from a description; it gets the same contract as a prompt, [`builder-brief.md`](builder-brief.md). The concepts and invariants behind it are in [`capability-model.md`](capability-model.md). The exact types are in [`src/`](src) and the JSON Schemas in [`schemas/`](schemas).
 
-Everything here is [ABI](README.md#versions) 2.6. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
+Everything here is [ABI](README.md#versions) 2.7. Anything added after 2.0 is marked with the version that added it ("since 2.1"); a tool may use it only if its manifest declares at least that version.
 
 ## Layout
 
@@ -40,6 +40,7 @@ Widgets have no files of their own: they are declared in the manifest and backed
 | `hue` | no | 2.0 | Tile colour for the icon: an OKLCH hue, integer 0–359. |
 | `saturation` | no | 2.4 | How colourful the tile is: percent of the design system's chroma, integer 0–150, default 100. `0` draws the icon black or white on grey (for a black-and-white brand). |
 | `source` | no | 2.5 | Where an installed tool came from: `{ id, name, version, hash, from }` (`from`: `"file"`, `"link"` with its `host`, or `"hub"`). The host writes it when it installs a tool from outside and keeps it on every later version. Leave it out: a value you write is replaced. |
+| `license` | no | 2.7 | The license the tool is shared under: an SPDX id (`"MIT"`, `"Apache-2.0"`) or an expression of them. Missing means all rights reserved. The host writes it when the owner shares the tool, with a `LICENSE` file beside the manifest; leave both as they are. |
 | `tags` | no | 2.0 | Strings agents can filter on. |
 | `requires` | no | 2.0 | Authority the code needs: `secrets`, `hosts`, `capabilities`, and `model` (since 2.2). See [Grants](#grants). |
 | `operations` | yes | 2.0 | At least one. See [Operations](#operations). |
@@ -70,6 +71,7 @@ The `abi` field says which version of the contract the tool is written against. 
 | 2.4 | `saturation` |
 | 2.5 | `source`, `requires.capabilities[]` `hub` and `minVersion` (both the host's to write), `sample/calls.json` |
 | 2.6 | `config[].suggested` |
+| 2.7 | `license` (the host's to write, when the owner shares the tool) |
 
 Declare the lowest version whose features you use. The history is also in [`src/abi.ts`](src/abi.ts) (`ABI_HISTORY`).
 
