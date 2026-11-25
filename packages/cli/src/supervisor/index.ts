@@ -39,9 +39,11 @@ import { networkMode, type NetworkMode } from "@hewntools/host-workerd/egress.ts
 import { readShelf, shelfImage } from "../shelf.ts";
 import { DATA_FORMAT, STORAGE_KEYS, VERSION } from "./format.ts";
 import { afterParam, idleStatus, type IdleStatus } from "./idle.ts";
+import { watchHealth } from "./watch.ts";
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 import type { HostAllowance } from "@hewntools/core/models.ts";
 import { workerdBinary } from "../app-dir.ts";
+import { signalChild, signalGroup, stopLeftover } from "./group.ts";
 
 /** The watchdog an owner's Hewn runs: a health check a second, and a restart past the stall rule's 10 s. */
 export const WATCHDOG = { intervalMs: 1000, stallMs: STALL_MS };
@@ -697,6 +699,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
           cwd: o.cwd,
           env: { ...o.env(), PWD: o.cwd },
           stdio: ["ignore", "pipe", "pipe"],
+          // A process group of its own, signalled as one: its sandbox's processes go with it (group.ts).
+          detached: true,
         });
         p.child = child;
         if (child.pid) writeFileSync(o.pidFile, String(child.pid));
@@ -705,6 +709,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
         child.stderr!.on("data", forward);
         o.onStarted?.();
         child.on("exit", (code, signal) => {
+          // Whatever it started and left (the inner bwrap and its workerd, when the outer one went first) goes too.
+          if (child.pid) signalGroup(child.pid, "SIGKILL", true);
           if (stopping || p.held) return;
           // A crash loop (e.g. a bad config) backs off instead of spinning.
           p.quickExits = Date.now() - startedAt < 3000 ? p.quickExits + 1 : 0;
@@ -724,7 +730,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
           if (then === "hold") p.held = true;
           else p.restartNow = true;
           c.once("exit", () => done());
-          c.kill(signal);
+          signalChild(c, signal);
         });
       },
       resume() {
@@ -736,17 +742,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   };
   // A workerd left behind by a supervisor that died (macOS has no die-with-parent) would hold the port.
   const pidFiles = { platform: join(data, "workerd.pid"), tools: join(data, "workerd-tools.pid") };
-  for (const pidFile of Object.values(pidFiles)) {
+  // Each found by its own config, this home's: never another Hewn's on the machine.
+  for (const [pidFile, config] of [[pidFiles.platform, platformBase.at(-1)!], [pidFiles.tools, toolsBase.at(-1)!]]) {
     if (!existsSync(pidFile)) continue;
     const old = Number(readFileSync(pidFile, "utf8"));
-    try {
-      if (old && spawnSync("ps", ["-p", String(old), "-o", "command="], { encoding: "utf8" }).stdout.includes("workerd")) {
-        process.kill(old, "SIGKILL");
-        log(`stopped a workerd left over from a previous run (pid ${old})`);
-      }
-    } catch {
-      // already gone
-    }
+    if (stopLeftover(old, config)) log(`stopped a workerd left over from a previous run (pid ${old})`);
   }
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const platform = workerdProcess({
@@ -765,6 +765,14 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     const keep = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
     return { ...Object.fromEntries(keep.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]])), TZ: process.env.TZ ?? timezone, HEWN_TOOLS_TOKEN: toolsToken };
   };
+  /**
+   * Tools processes started, and the latest that has answered (or been given up on): until the one running now has,
+   * the watchdog doesn't count it as stalled. Its first answer to any health check ends that, not only the start's own
+   * wait: a tool that loops right after a start must still be cut off at the stall rule's time.
+   */
+  let toolsStarts = 0;
+  let toolsAnswered = 0;
+  const toolsStarting = () => toolsAnswered !== toolsStarts;
   const tools = workerdProcess({
     label: "tools: ",
     command: toolsCommand,
@@ -775,7 +783,17 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     // The platform holds its calls while the tools are away, and sends them once a new process answers: never to a
     // socket nothing listens on yet.
     onExit: () => void admin("tools-gone", {}, 2000).catch(() => {}),
-    onStarted: () => void waitFor(toolsHealthy, "the tools' workerd").then(() => admin("tools-back", {}, 2000)).catch(() => {}),
+    onStarted: () => {
+      const start = ++toolsStarts;
+      void waitFor(toolsHealthy, "the tools' workerd")
+        .catch((e) => {
+          // Never answered: the stall rule counts it from here.
+          if (toolsStarts === start) toolsAnswered = start;
+          throw e;
+        })
+        .then(() => admin("tools-back", {}, 2000))
+        .catch(() => {});
+    },
   });
   const healthy = async (timeoutMs: number) => {
     try {
@@ -787,8 +805,11 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   /** The tools process's /health, on its socket. */
   const toolsHealthy = (timeoutMs: number) =>
     new Promise<boolean>((done) => {
+      // An answer to a check sent before the latest start (the old process's) doesn't count for the new one.
+      const start = toolsStarts;
       const req = httpRequest({ ...toolsAt, path: "/health", timeout: timeoutMs }, (res) => {
         res.resume();
+        if (res.statusCode === 200 && toolsStarts === start) toolsAnswered = start;
         done(res.statusCode === 200);
       });
       req.on("timeout", () => (req.destroy(), done(false)));
@@ -819,8 +840,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   };
   // This process exiting (a crash, a forced exit) takes workerd with it; after a kill -9, the pid files above.
   const killOnExit = () => {
-    platform.child?.kill("SIGKILL");
-    tools.child?.kill("SIGKILL");
+    signalChild(platform.child, "SIGKILL");
+    signalChild(tools.child, "SIGKILL");
   };
   /** Stop both for good (and a restart they had coming) and close the supervisor's channel. */
   const shutdown = async () => {
@@ -831,12 +852,19 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     tunnel.halt();
     // The platform first, so nothing calls the tools meanwhile; the tools when it has gone (or after a moment).
     const toolsChild = tools.child;
-    if (platform.child && platform.child.exitCode === null && platform.child.signalCode === null) {
-      const gone = new Promise((r) => platform.child!.once("exit", r));
-      platform.child.kill("SIGTERM");
+    const platformChild = platform.child;
+    /** SIGTERM, then up to 2 s for it to go. */
+    const end = async (c: typeof toolsChild) => {
+      if (!c || c.exitCode !== null || c.signalCode !== null) return;
+      const gone = new Promise((r) => c.once("exit", r));
+      signalChild(c, "SIGTERM");
       await Promise.race([gone, new Promise((r) => setTimeout(r, 2000))]);
-    }
-    toolsChild?.kill("SIGTERM");
+    };
+    await end(platformChild);
+    await end(toolsChild);
+    // Nothing of either outlives this: a tools workerd stuck in a loop ignores SIGTERM, and a sandbox's inner processes
+    // may still be going. Their groups only: a leader's pid may be another process's by now.
+    for (const c of [platformChild, toolsChild]) if (c?.pid) signalGroup(c.pid, "SIGKILL", true);
     await new Promise((r) => supervisorServer.close(r));
   };
   process.on("exit", killOnExit);
@@ -883,34 +911,19 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // ---------- watchdog ----------
   // Each process answers /health; one that stops answering for `stallMs` (the stall rule's 10 s) is restarted. The tools stop
   // answering when a tool's code never yields (the platform is told what was running, then they're restarted);
-  // the platform is restarted alone.
+  // the platform is restarted alone, and backs off: on a machine short of CPU a restart only costs more of it, so each
+  // one doubles the wait before the next (up to 2 minutes) until workerd has answered for a minute (watch.ts). The
+  // tools don't back off: a tool stuck in a loop is cut off at the stall rule's time, every time.
   const timers: ReturnType<typeof setInterval>[] = [];
   if (o.watchdog !== false) {
     const { intervalMs, stallMs } = o.watchdog ?? WATCHDOG;
-    const watch = (check: (ms: number) => Promise<boolean>, onStall: (seconds: number) => Promise<void> | void) => {
-      let lastOk = Date.now();
-      let checking = false;
-      const t = setInterval(async () => {
-        if (checking) return;
-        checking = true;
-        // A ping that timed out may have been this process's own pause (a long synchronous step, a laptop
-        // waking), not workerd's: one more, with a fresh timeout, before it counts.
-        if ((await check(intervalMs)) || (await check(intervalMs))) lastOk = Date.now();
-        else if (Date.now() - lastOk > stallMs) {
-          const seconds = Math.round((Date.now() - lastOk) / 1000);
-          lastOk = Date.now() + 5000;
-          await onStall(seconds);
-        }
-        checking = false;
-      }, intervalMs);
-      t.unref();
-      timers.push(t);
-    };
-    watch(toolsHealthy, (seconds) => toolsStalled(`no answer for ${seconds} s`));
-    watch(healthy, (seconds) => {
-      log(`workerd unresponsive for ${seconds}s; restarting it`);
-      platform.child?.kill("SIGKILL");
-    });
+    // A tools process that's starting (after a stall, or with the platform) isn't stalled: on a machine short of CPU
+    // its start can take longer than the stall rule, and restarting it then would only start it again.
+    timers.push(watchHealth({ intervalMs, stallMs, check: toolsHealthy, ready: () => !toolsStarting(), onStall: (seconds) => toolsStalled(`no answer for ${seconds} s`) }));
+    timers.push(watchHealth({ intervalMs, stallMs, backoff: true, check: healthy, onStall: (seconds, next, again) => {
+      log(`workerd unresponsive for ${seconds}s; restarting it${again ? ` (restarted again before it answered for a minute: the next restart waits for ${Math.round(next / 1000)}s without an answer)` : ""}`);
+      signalChild(platform.child, "SIGKILL");
+    } }));
   }
 
   // The resume check: time passed by the wall clock while this process didn't run (the machine was suspended, or asleep). Due schedules run
@@ -1004,7 +1017,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   }
 
   const status = async (afterSeconds?: number) => {
-    const { result } = (await admin("call", { method: "idleActivity" })) as { result: ActivityView };
+    // Bounded: a platform that doesn't answer may stay up a while (the watchdog backs off), and a host asks every minute.
+    const { result } = (await admin("call", { method: "idleActivity" }, 5000)) as { result: ActivityView };
     const backups = listBackups(backupDir());
     const lastAt = backups.length ? Math.max(...backups.map((b) => Date.parse(b.at))) : null;
     return idleStatus(result, { lastAt, backedUpToday: backedUpToday(backupDir()) }, { afterSeconds, resumedAt });
@@ -1071,8 +1085,8 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
     status,
     async restart() {
       const before = { platform: platform.restarts, tools: tools.restarts };
-      platform.child?.kill("SIGTERM");
-      tools.child?.kill("SIGTERM");
+      signalChild(platform.child, "SIGTERM");
+      signalChild(tools.child, "SIGTERM");
       while (platform.restarts === before.platform || tools.restarts === before.tools) await new Promise((r) => setTimeout(r, 50));
       await waitHealthy().catch(() => {
         throw new Error("workerd did not come back");
