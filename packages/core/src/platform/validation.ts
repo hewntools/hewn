@@ -300,8 +300,7 @@ export class Validation extends Domain {
       if (manifest.ui?.available && visualCheck && build.kind !== "widgets") {
         await this.runtime.dropState(visualState);
         await this.runtime.migrate(visualState, migrations, code);
-        const secrets = cases.find((c) => c.secrets)?.secrets ?? Object.fromEntries((manifest.requires?.secrets ?? []).map((x) => [x.name, "visual-check"]));
-        const config = cases.find((c) => c.config)?.config ?? Object.fromEntries((manifest.config ?? []).map((x) => [x.name, "visual-check"]));
+        const { secrets, config } = standIns(manifest, cases, "visual-check");
         const check = (state: StateRef, measure: boolean) =>
           visualCheck(build.id, {
             ...(measure ? { measure } : {}),
@@ -315,11 +314,7 @@ export class Validation extends Domain {
                 async (call) => {
                   throw new PlatformError("operation_failed", `calls to ${call.capabilityId} aren't available in the visual check`);
                 },
-                manifest.requires?.model && abiAtLeast(manifest, "2.2")
-                  ? async () => {
-                      throw new PlatformError("operation_failed", "model calls aren't available in the visual check");
-                    }
-                  : undefined,
+                refusedModel(manifest, "model calls aren't available in the visual check"),
                 "in the visual check",
               );
               return { result };
@@ -683,7 +678,26 @@ function undeclaredDelete(op: OperationManifest, call: { before: Record<string, 
 const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
   m.operations.filter((o) => o.name === c.operation && (c.version === undefined || o.version === c.version)).sort((a, b) => b.version - a.version)[0];
 
-function readCases(files: Files): TestCase[] {
+/**
+ * The settings and secrets a candidate's screen runs with where nothing of the owner's is given (the visual check, Try
+ * it): the test cases' own, else a placeholder for each it declares.
+ */
+export function standIns(manifest: CapabilityManifest, cases: TestCase[], word: string): { secrets: Record<string, string>; config: Record<string, string> } {
+  return {
+    secrets: cases.find((c) => c.secrets)?.secrets ?? Object.fromEntries((manifest.requires?.secrets ?? []).map((x) => [x.name, word])),
+    config: cases.find((c) => c.config)?.config ?? Object.fromEntries((manifest.config ?? []).map((x) => [x.name, word])),
+  };
+}
+
+/** A model handler that refuses, for a candidate that declares the model (ABI 2.2 on); none for one that doesn't. */
+export const refusedModel = (manifest: CapabilityManifest, why: string): ModelHandler | undefined =>
+  manifest.requires?.model && abiAtLeast(manifest, "2.2")
+    ? async () => {
+        throw new PlatformError("operation_failed", why);
+      }
+    : undefined;
+
+export function readCases(files: Files): TestCase[] {
   const raw = files["tests/cases.json"];
   if (!raw) return [];
   const cases = JSON.parse(text(raw));

@@ -664,7 +664,7 @@ export const operations = {
     const live = async () => (await sv.admin("invoke", { capabilityId: "ui-counter", operation: "get", input: {} })).result.count as number;
     const before = await live();
     await page.goto(`${web}/#/b/${held.buildId}`);
-    await page.getByRole("link", { name: "Try it" }).click();
+    await page.getByRole("button", { name: "Try it" }).click();
     await page.waitForURL(new RegExp(`#/b/${held.buildId}/try$`));
     await page.locator(".try-bar", { hasText: "on a copy of your data" }).waitFor();
     const app = page.frameLocator("iframe.app-frame");
@@ -672,6 +672,11 @@ export const operations = {
     await app.locator("#inc").click();
     await app.locator("#n", { hasText: String(before + 2) }).waitFor({ timeout: 10_000 });
     await page.screenshot({ path: "/tmp/e2e-fr-try-it.png" });
+    // No popups for code the owner hasn't allowed, in the frame's attribute and in its page's CSP.
+    if (/allow-popups/.test((await page.locator("iframe.app-frame").getAttribute("sandbox")) ?? "")) throw new Error("Try it's frame allows popups");
+    // A reload goes on with the same copy: it doesn't make a new one.
+    await page.reload();
+    await page.frameLocator("iframe.app-frame").locator("#n", { hasText: String(before + 2) }).waitFor({ timeout: 10_000 });
     if ((await live()) !== before) throw new Error("a write in Try it reached the owner's data");
     // Decided: the copy goes, and its address with it.
     await page.getByRole("link", { name: "Back to the review" }).click();

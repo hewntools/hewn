@@ -664,9 +664,13 @@ export class HewnDO extends DurableObject<Env> {
     return message;
   }
 
-  /** One DO alarm for the next due schedule (re-armed whenever that may change). */
+  /** One DO alarm for the next due schedule or the end of a Try it, whichever is first (re-armed whenever that may change). */
   private async armAlarm() {
-    const next = this.platform.nextScheduleAt();
+    // A Try it's end no sooner than a minute from now: one whose copy couldn't be dropped stays ended (0) until a drop
+    // works, and mustn't wake this over and over.
+    const tryEnd = this.platform.nextTryEndAt();
+    const ends = [this.platform.nextScheduleAt(), tryEnd === null ? null : Math.max(tryEnd, Date.now() + 60_000)].filter((t): t is number => t !== null);
+    const next = ends.length ? Math.min(...ends) : null;
     if (next === null) await this.ctx.storage.deleteAlarm();
     else await this.ctx.storage.setAlarm(Math.max(next, Date.now()));
   }
@@ -682,9 +686,9 @@ export class HewnDO extends DurableObject<Env> {
   private runDue() {
     this.idleGc.work();
     const pass = this.catchingUp.then(async () => {
-      // A Try it past its hour (by the wall clock, also across a suspend) goes before anything else runs.
-      await this.platform.sweepTries();
       const ran = await this.platform.runDueSchedules();
+      // A Try it past its hour (by the wall clock, also across a suspend) goes; one looked at goes before it's served anyway.
+      await this.platform.sweepTries().catch((e) => console.log(`[${new Date().toISOString()}] Try it sweep: ${(e as Error).message}`));
       await this.secrets.flush();
       await this.armAlarm();
       return ran;

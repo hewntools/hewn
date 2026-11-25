@@ -537,7 +537,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
     // Try it: a held build's screen on a copy of the owner's data, for an hour (core platform/trying.ts).
-    if (sub === "try" && method === "POST") return platform.tryBuild(owner, id);
+    // `reopen`: its page (a reload) goes on with one already open, never makes a new copy; only the button does.
+    if (sub === "try" && method === "POST") return platform.tryBuild(owner, id, { reopen: (await readJson(req)).reopen === true });
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
     if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);

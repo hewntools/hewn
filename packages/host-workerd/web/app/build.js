@@ -104,18 +104,37 @@ async function buildPage(id) {
   view(...moment({ left: "-60px", bottom: "-20px" }, topBar(""), sandboxNotice(), h("div", { class: "build-center" }, panel.el)));
 }
 
+/** Try it (the review card's, and an ended Try it's page): the only way a new copy is made; then its page. */
+function tryButton(id) {
+  const btn = h("button", {}, "Try it");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await api(`/builds/${enc(id)}/try`, { method: "POST" });
+      go(`#/b/${enc(id)}/try`);
+    } catch (e) {
+      btn.disabled = false;
+      fail(e);
+    }
+  });
+  return btn;
+}
+
 /**
  * Try it: a held build's screen on a copy of the owner's data, for an hour (core platform/trying.ts). Framed as a
- * tool's own screen is (sandboxed, an opaque origin); what's done in it stays in the copy, which goes when the owner
- * decides or the hour is up.
+ * tool's own screen is (sandboxed, an opaque origin, no popups); what's done in it stays in the copy, which goes when
+ * the owner decides or the hour is up. The page goes on with the open one (a reload, a restored tab) and never makes
+ * a copy itself: with none open, it has the card's Try it button.
  */
 async function tryPage(id) {
+  const back = () => h("a", { class: "btn", href: `#/b/${enc(id)}` }, "Back to the review");
   let t;
   try {
-    t = await api(`/builds/${enc(id)}/try`, { method: "POST" });
+    t = await api(`/builds/${enc(id)}/try`, { method: "POST", body: { reopen: true } });
   } catch (e) {
     return view(topBar(""), h("main", { class: "try-layout" }, errorBox(e), h("a", { class: "btn self-center", href: `#/b/${enc(id)}` }, "Back to the review")));
   }
+  if (!t.ticket) return view(topBar(""), h("main", { class: "try-layout" }, h("div", { class: "notice info try-bar" }, h("span", { class: "grow" }, "This Try it has ended. Nothing done in it was kept."), tryButton(id), back())));
   const [b, all] = await Promise.all([api(`/builds/${enc(id)}`), caps().catch(() => new Map())]);
   const c = all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.request?.name ?? b.capabilityId };
   const left = h("span", { class: "small muted" });
@@ -123,8 +142,8 @@ async function tryPage(id) {
     const min = Math.ceil((t.endsAt - Date.now()) / 60_000);
     put(left, min > 0 ? `Ends in ${min} min` : "Ended");
   };
-  const frame = h("iframe", { class: "app-frame", src: withTheme(`/try/${enc(id)}/auth?ticket=${enc(t.ticket)}`), title: `${c.name}, to try`, sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals" });
-  const bar = h("div", { class: "notice info try-bar" }, h("span", { class: "grow" }, `Trying ${b.kind === "create" ? "the new tool" : "the change"} on a copy of your data. Nothing you do here is kept.`), left, h("a", { class: "btn", href: `#/b/${enc(id)}` }, "Back to the review"));
+  const frame = h("iframe", { class: "app-frame", src: withTheme(`/try/${enc(id)}/auth?ticket=${enc(t.ticket)}`), title: `${c.name}, to try`, sandbox: "allow-scripts allow-forms allow-downloads allow-modals" });
+  const bar = h("div", { class: "notice info try-bar" }, h("span", { class: "grow" }, `Trying ${b.kind === "create" ? "the new tool" : "the change"} on a copy of your data. Nothing you do here is kept.`), left, back());
   view(topBar(""), h("main", { class: "try-layout" }, bar, frame));
   tick();
   const timer = setInterval(tick, 30_000);
@@ -469,7 +488,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       const yes = h("button", { class: "primary" }, "Allow");
       const no = h("button", {}, "Don't allow");
       // Its screen in your hands, on a copy of your data, before you decide.
-      const tryIt = (b.review.shots?.length > 0 || b.screenshot) && h("a", { class: "btn", href: `#/b/${enc(id)}/try` }, "Try it");
+      const tryIt = (b.review.shots?.length > 0 || b.screenshot) && tryButton(id);
       yes.addEventListener("click", decide(true, yes));
       no.addEventListener("click", decide(false, no));
       const changes = reviewChanges(b.review);

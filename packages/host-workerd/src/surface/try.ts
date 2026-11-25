@@ -8,7 +8,7 @@ import type { Platform } from "@hewntools/core/platform.ts";
 import type { SurfaceHost } from "./host.ts";
 import { body, errorBody, json, readJson, typeOf } from "./http.ts";
 import type { Site } from "./site.ts";
-import { UI_SANDBOX, withShim } from "./ui.ts";
+import { TRY_SANDBOX, withShim } from "./ui.ts";
 
 /** /try/<build>/…: the build's id and the rest of the path. */
 export function tryPath(pathname: string): { buildId: string; path: string } | undefined {
@@ -16,12 +16,15 @@ export function tryPath(pathname: string): { buildId: string; path: string } | u
   return m ? { buildId: m[1], path: m[2] ?? "" } : undefined;
 }
 
-/** As uiCsp, with the Try it's own path in place of the tool's. */
+/** As uiCsp, with the Try it's own path in place of the tool's, and its own sandbox (no popups). */
 const tryCsp = (web: string, buildId: string) => {
   const own = `${web}/try/${buildId}/`;
   const files = `${own} ${web}/_platform/`;
-  return `sandbox ${UI_SANDBOX}; default-src 'none'; script-src ${files} 'unsafe-inline'; style-src ${files} 'unsafe-inline'; img-src ${files} data: blob:; font-src ${files}; media-src ${own} blob:; connect-src ${own}; frame-ancestors ${web}; form-action ${own}; base-uri 'none'`;
+  return `sandbox ${TRY_SANDBOX}; default-src 'none'; script-src ${files} 'unsafe-inline'; style-src ${files} 'unsafe-inline'; img-src ${files} data: blob:; font-src ${files}; media-src ${own} blob:; connect-src ${own}; frame-ancestors ${web}; form-action ${own}; base-uri 'none'`;
 };
+
+/** A page of Try it's opens only in Hewn's frame (Sec-Fetch-Dest): never as a tab of its own, outside the sandbox attribute. */
+const framed = (req: Request) => req.headers.get("sec-fetch-dest") === "iframe";
 
 const sessionToken = (req: Request) => /^Hewn\s+(\S+)$/.exec(req.headers.get("authorization") ?? "")?.[1];
 const CORS_FILES = { "access-control-allow-origin": "*" };
@@ -36,6 +39,7 @@ export async function handleTry(platform: Platform, host: SurfaceHost, site: Sit
   const base = `${site.web}/try/${buildId}/~${key}/`;
 
   if (path === "/auth") {
+    if (!framed(req)) return send(403, { error: "Try it opens in Hewn's page only" });
     const session = key ? await platform.redeemTryTicket(url.searchParams.get("ticket") ?? "", buildId) : undefined;
     if (!session) return send(401, { error: "this Try it has ended, or the link was used; open it again from the build" });
     const theme = /^(?:light|dark)$/.exec(url.searchParams.get("theme") ?? "")?.[0];
@@ -71,8 +75,9 @@ export async function handleTry(platform: Platform, host: SurfaceHost, site: Sit
   } catch {
     return send(404, { error: "not found" });
   }
-  const found = await platform.tryFile(buildId, file);
+  const found = await platform.tryFile(buildId, file).catch(() => undefined);
   if (!found) return send(404, { error: "not found" });
   const type = typeOf(found.path);
+  if (type.startsWith("text/html") && !framed(req)) return send(403, { error: "Try it opens in Hewn's page only" });
   return new Response(body(type.startsWith("text/html") ? withShim(text(found.data)) : found.data), { status: 200, headers: headers({ "content-type": type, ...CORS_FILES }) });
 }

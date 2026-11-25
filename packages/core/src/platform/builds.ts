@@ -301,14 +301,22 @@ export class Builds extends Domain {
    * restart interrupted (a new tool's, too: its host was made when its validation began, or is made empty here). A
    * build's, its builder's check's (`<build>-check`) and a client's check's (`chk-…`) are each a copy of tool data, a
    * Polish's of the owner's. Each is listed first and dropped unless its run is going on (a build, a check started
-   * since). Nothing else is named `<kind>:<id>`.
+   * since). A Try it's copy (`try:<build>`) stays only while its Try it is open. Nothing else is named `<kind>:<id>`.
    */
   private async sweepScratch(alsoTools: string[]) {
-    const tools = new Set([...this.registry.listActiveCapabilities().map((c) => c.id), ...alsoTools]);
+    const tools = new Set([...this.registry.listActiveCapabilities().map((c) => c.id), ...alsoTools, ...this.d.trying.tools()]);
     const scratch = new RegExp(`^(?:${SCRATCH_KINDS.join("|")}):(.+?)(?:-check)?$`);
     for (const id of tools) {
       const names = await this.runtime.listStates(id, "").catch(() => [] as string[]);
       for (const name of names) {
+        // A Try it's copy (try:<build>): kept while its Try it is open and within its hour, else it goes with its entry.
+        const tried = /^try:(.+)$/.exec(name)?.[1];
+        if (tried) {
+          if (this.d.trying.keeps(tried)) continue;
+          await this.runtime.dropState({ capabilityId: id, scratch: name }).catch(() => {});
+          await this.d.trying.end(tried, "it was over when Hewn started").catch(() => {});
+          continue;
+        }
         const run = scratch.exec(name)?.[1];
         if (!run || this.d.submissions.isChecking(run) || ["building", "validating"].includes(this.registry.getBuild(run)?.status ?? "")) continue;
         await this.runtime.dropState({ capabilityId: id, scratch: name }).catch(() => {});
@@ -1336,6 +1344,8 @@ export class Builds extends Domain {
     this.aborts.get(buildId)?.abort();
     // A stopped fix: what it carried on from goes (kept while the held build still waits, as when it hadn't opened yet).
     void this.dropFixSource(build);
+    // A held build stopped: as a decision, its renders and its Try it go.
+    if (build.status === "review") void this.dropReviewShots(build).catch(() => {});
     if (!this.running.has(buildId)) {
       // Not running (waiting): nothing else will announce the end.
       this.steps.delete(buildId);
