@@ -2,7 +2,8 @@
 // Which isolate a tool's code runs in, on the real workerd host: the owner's data ops share the live
 // tool's (so they never stop a call in progress), and a build's code runs in isolates of its own.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -72,5 +73,116 @@ describe("a tool's isolates (workerd)", () => {
     const failed = await h.sv.admin("modify", { capabilityId: "counter", request: "break its tests", wait: true });
     assert.equal(failed.status, "failed", failed.log.join("\n"));
     assert.equal(await bump("counter"), 3);
+  });
+});
+
+/**
+ * The tools process's isolates (a target each on its inspector), once a change's release had its time: CapabilityHost
+ * runs a GC of the main isolate itself, a few seconds after it lets one go (tools-worker.ts, `flush`). Nothing here
+ * forces a GC or calls anything: what's counted is what Hewn keeps on its own.
+ */
+async function isolatesHeld(inspector: string): Promise<number> {
+  await new Promise((r) => setTimeout(r, FLUSHED_MS));
+  return ((await (await fetch(`http://${inspector}/json/list`)).json()) as unknown[]).length;
+}
+/** Past tools-worker.ts's FLUSH_DELAY_MS (5 s) and the host's run after the GC. */
+const FLUSHED_MS = 7000;
+
+const freePort = () =>
+  new Promise<number>((ok) => {
+    const s = createServer().listen(0, "127.0.0.1", () => {
+      const port = (s.address() as AddressInfo).port;
+      s.close(() => ok(port));
+    });
+  });
+
+describe("a replaced version's isolate is released (workerd)", () => {
+  let h: TestHost;
+  let dirs: string;
+  let inspector: string;
+  before(async () => {
+    inspector = `127.0.0.1:${await freePort()}`;
+    h = await startTestHost({ toolsInspector: inspector });
+    dirs = mkdtempSync(join(tmpdir(), "hewn-isolates-"));
+  });
+  after(async () => {
+    await h?.stop();
+    rmSync(dirs, { recursive: true, force: true });
+  });
+
+  test("a tool holds one isolate: changed three times, its data limit changed, and after an idle spell", { timeout: 240_000 }, async () => {
+    const before = await isolatesHeld(inspector);
+    const build = await h.sv.admin("install", { name: "counter", purpose: "counts", dir: toolDir(dirs, "counter", []), wait: true });
+    assert.equal(build.status, "promoted", build.log.join("\n"));
+    const bump = async () => (await h.invoke("counter", "bump", {})).result.calls as number;
+    assert.equal(await bump(), 1);
+    const one = await isolatesHeld(inspector);
+    // Listed at all (the count would pass empty otherwise).
+    assert.ok(one > before, `the inspector lists the tool's isolates (${before} before the install, ${one} after)`);
+    for (const n of [2, 3, 4]) {
+      h.queue((ws) => appendFileSync(join(ws, "src", "index.ts"), `\n// version ${n}\n`));
+      const changed = await h.sv.admin("modify", { capabilityId: "counter", request: `version ${n}`, wait: true });
+      assert.equal(changed.status, "promoted", changed.log.join("\n"));
+      assert.equal(await bump(), 1, "a new version starts in an isolate of its own");
+      assert.equal(await isolatesHeld(inspector), one, `v${n}: the replaced version's isolate is gone`);
+    }
+    // Another data limit is another isolate (its key): the old one goes the same way.
+    await h.sv.admin("settings", { toolDataLimitsMB: { counter: 50 } });
+    assert.equal(await bump(), 1, "the new limit runs in an isolate of its own");
+    assert.equal(await isolatesHeld(inspector), one, "the old limit's isolate is gone");
+    // Idle past workerd's eviction of a tool's host (~10 s): the next call runs in the same isolate (its module state
+    // kept), not one compiled again.
+    const calls = await bump();
+    await new Promise((r) => setTimeout(r, 15_000));
+    assert.equal(await bump(), calls + 1, "the same isolate after an idle spell");
+    assert.equal(await isolatesHeld(inspector), one);
+  });
+
+  test("a tool's code can't reach the tools process's gc(): by name, globalThis, assignment, redefinition, eval and new Function at load, ShadowRealm, node:vm", async () => {
+    const dir = join(dirs, "gc-probe");
+    for (const d of ["src", "migrations", "tests"]) mkdirSync(join(dir, d), { recursive: true });
+    const look = { name: "look", description: "Looks for gc", version: 1, sideEffect: "read", inputSchema: { type: "object", additionalProperties: false, properties: {} }, outputSchema: { type: "object" } };
+    writeFileSync(join(dir, "capability.json"), JSON.stringify({ id: "gc-probe", name: "GC Probe", purpose: "Looks.", description: "Looks for gc.", abi: "2.0", operations: [look] }, null, 2));
+    writeFileSync(join(dir, "migrations", "001_init.sql"), "CREATE TABLE t (id INTEGER PRIMARY KEY);\n");
+    writeFileSync(
+      join(dir, "src", "index.ts"),
+      `import * as vm from "node:vm";
+const tried = (f: () => unknown) => { try { return String(f()); } catch (e) { return "refused: " + String((e as Error)?.message ?? e).slice(0, 80); } };
+// At load, where workerd still lets code be made from a string (at request time it refuses).
+const atLoad = {
+  bare: tried(() => typeof (globalThis as any).gc),
+  indirectEval: tried(() => (0, eval)("typeof gc")),
+  fromString: tried(() => new Function("return typeof gc")()),
+  shadowRealm: typeof (globalThis as any).ShadowRealm,
+  vm: tried(() => vm.runInContext("typeof gc", vm.createContext({}))),
+};
+export const operations = {
+  "look@1"() {
+    const g = globalThis as any;
+    return {
+      atLoad,
+      global: typeof g.gc,
+      assigned: tried(() => ((g.gc = () => 1), typeof g.gc)),
+      redefined: tried(() => (Object.defineProperty(g, "gc", { value: () => 1 }), typeof g.gc)),
+      descriptor: JSON.stringify(Object.getOwnPropertyDescriptor(g, "gc") ?? null),
+    };
+  },
+};
+`,
+    );
+    writeFileSync(join(dir, "tests", "cases.json"), JSON.stringify([{ name: "look", operation: "look", input: {}, expect: { global: "undefined" } }]));
+    const build = await h.sv.admin("install", { name: "GC Probe", purpose: "looks", dir, wait: true });
+    assert.equal(build.status, "promoted", build.log.join("\n"));
+    const r = (await h.invoke("gc-probe", "look", {})).result;
+    assert.equal(r.atLoad.bare, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.indirectEval, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.fromString, "undefined", JSON.stringify(r));
+    assert.equal(r.atLoad.shadowRealm, "undefined", JSON.stringify(r));
+    assert.ok(r.atLoad.vm === "undefined" || r.atLoad.vm.startsWith("refused"), JSON.stringify(r));
+    assert.equal(r.global, "undefined", JSON.stringify(r));
+    for (const k of ["assigned", "redefined"]) assert.ok(r[k] === "undefined" || r[k].startsWith("refused"), `${k}: ${JSON.stringify(r)}`);
+    // Still there (V8 makes it non-configurable), with no value and read-only.
+    const d = JSON.parse(r.descriptor);
+    assert.deepEqual([d.writable, d.configurable, "value" in d ? d.value : undefined], [false, false, undefined], r.descriptor);
   });
 });

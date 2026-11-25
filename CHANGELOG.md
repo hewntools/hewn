@@ -10,6 +10,10 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - **A shared tool carries a license.** Share… has a License row: MIT (a tool built on your Hewn starts there), Apache 2.0, GPL 3.0 or later, CC0 or all rights reserved, each in a line of plain words. Hewn writes it into the file as the manifest's `license` (ABI 2.7) and a `LICENSE` file with a copyright line, never as a new version, and the install sheet shows it. See [License](docs/sharing.md#license).
 - **A scan for keys.** Anything shaped like a key in a tool's files, or one of the keys you stored in Hewn, fails it, named by file and line (where your key is goes to the builder's log only, and an agent that put one there can't build again until you've looked; an agent starts at most 30 builds an hour); a long random string warns. Sharing refuses a key shape too, and the share scan's long random strings are read the same tighter way. See [The build](docs/building-tools.md#the-build).
 
+### Changes
+
+- **A changed tool lets go of its old version.** Until now each version of a tool kept its memory until Hewn restarted, so a tool changed often held one copy per change; now a tool holds its current version only, and Hewn lets the old one's memory go a few seconds after the change. The first call on a new version stops one still running on the old, as before. See [What the server needs](docs/remote-access.md#0-hewn-and-a-builder-on-the-server).
+
 ### Safety and limits
 
 - **A call may not work for more than 10 seconds without a pause.** Until now Hewn's tools were restarted after about 5 seconds of a call's code never letting go; now it's a rule at 10, and a build that breaks it fails saying which operation and on which test or sample call ("`import_feed@1` worked for more than 10 seconds without a pause, on test 'big feed'"). See [Runtime](spec/tools.md#runtime).

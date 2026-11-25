@@ -56,12 +56,19 @@ describe("when the platform collects", () => {
     for (const [path, body] of [["/_admin/invoke", {}], ["/_admin/install", {}], ["/_admin/call", { method: "list" }], ["/_admin/resumed", {}]] as const) assert.ok(!tickCall(path, body), `${path} ${JSON.stringify(body)}`);
   });
 
-  test("gc() is in the platform's process only: never the tools'", () => {
+  test("gc() is in both processes: the platform's for this, the tools' for releasing replaced isolates (no tool sees it: workerd-isolates.test.ts)", () => {
     const channel = { tools: "unix:/h/run/tools.sock", calls: "unix:/h/run/calls.sock" };
     const platform = platformConfig({ dir: "/h", keys: STORAGE_KEYS, port: 7000, publicPort: 7001, supervisorPort: 1, data: "/h", assets: { web: "/w", ui: "/u", docs: "/d", spec: "/s" }, channel });
     assert.match(platform, /^\s*v8Flags = \["--expose-gc"\],$/m);
     const tools = toolsConfig({ keys: STORAGE_KEYS, data: "/h", channel });
-    assert.ok(!/v8Flags|expose-gc/.test(tools), tools);
+    assert.match(tools, /^\s*v8Flags = \["--expose-gc"\],$/m);
+  });
+
+  test("neither process's Durable Object is evicted when idle: the platform's (sessions, builds) nor a tool's host (its live isolate)", () => {
+    const channel = { tools: "unix:/h/run/tools.sock", calls: "unix:/h/run/calls.sock" };
+    const platform = platformConfig({ dir: "/h", keys: STORAGE_KEYS, port: 7000, publicPort: 7001, supervisorPort: 1, data: "/h", assets: { web: "/w", ui: "/u", docs: "/d", spec: "/s" }, channel });
+    assert.match(platform, /\(className = "HewnDO", [^)]*preventEviction = true\)/);
+    assert.match(toolsConfig({ keys: STORAGE_KEYS, data: "/h", channel }), /\(className = "CapabilityHost", [^)]*preventEviction = true\)/);
   });
 });
 

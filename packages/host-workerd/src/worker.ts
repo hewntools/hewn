@@ -369,8 +369,8 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
   /** The tool's calls' hosts when this is its live state running its active version (null: it isn't). */
   const liveOf = (state: StateRef, code: CodeRef) => (state.scratch ? null : liveHosts(state.capabilityId, code));
   // Data ops run with the hosts the tool's calls have, so on the live state they share the calls' isolate
-  // and never stop a call in progress; a build's states run with none, as validation's calls do. Only the
-  // live tool's own isolate is named (workerd keeps it): `named`.
+  // and never stop a call in progress; a build's states run with none, as validation's calls do. `named`: the
+  // live tool's own isolate, which its CapabilityHost holds (one per tool).
   const dataIsolate = (state: StateRef, code: CodeRef) => {
     const live = liveOf(state, code);
     return { hosts: live ?? [], named: live !== null };

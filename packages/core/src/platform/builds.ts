@@ -22,7 +22,7 @@ import { attachmentRefs } from "./attachments.ts";
 import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import { byOwner, type Candidate, reviewShotKey, warningText } from "./validation.ts";
+import { byOwner, type Candidate, reviewShotKey, SCRATCH_KINDS, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
@@ -278,7 +278,9 @@ export class Builds extends Domain {
    */
   async recoverInterruptedBuilds(): Promise<string[]> {
     const retried: string[] = [];
-    for (const id of this.registry.failInterruptedBuilds()) {
+    const interrupted = this.registry.failInterruptedBuilds();
+    await this.sweepScratch(interrupted.map((id) => this.mustBuild(id).capabilityId));
+    for (const id of interrupted) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
       // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
@@ -309,6 +311,27 @@ export class Builds extends Domain {
       }
     } else await this.resumeWaitingBuilds();
     return retried;
+  }
+
+  /**
+   * At start: the scratch states no validation runs on any more, on every live tool and on the tools of the builds the
+   * restart interrupted (a new tool's, too: its host was made when its validation began, or is made empty here). A
+   * build's, its builder's check's (`<build>-check`) and a client's check's (`chk-…`) are each a copy of tool data, a
+   * Polish's of the owner's. Each is listed first and dropped unless its run is going on (a build, a check started
+   * since). Nothing else is named `<kind>:<id>`.
+   */
+  private async sweepScratch(alsoTools: string[]) {
+    const tools = new Set([...this.registry.listActiveCapabilities().map((c) => c.id), ...alsoTools]);
+    const scratch = new RegExp(`^(?:${SCRATCH_KINDS.join("|")}):(.+?)(?:-check)?$`);
+    for (const id of tools) {
+      const names = await this.runtime.listStates(id, "").catch(() => [] as string[]);
+      for (const name of names) {
+        const run = scratch.exec(name)?.[1];
+        if (!run || this.d.submissions.isChecking(run) || ["building", "validating"].includes(this.registry.getBuild(run)?.status ?? "")) continue;
+        await this.runtime.dropState({ capabilityId: id, scratch: name }).catch(() => {});
+        this.logger(`dropped ${id}'s scratch state ${name}: its validation was cut off by a restart`);
+      }
+    }
   }
 
   /** Waiting builds whose dependency ended (or was retried) while Hewn was down: start, fail or re-point them. */

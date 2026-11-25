@@ -167,7 +167,8 @@ export function inProcessRuntime(home: { root: string; capabilities: string }): 
       const dir = join(home.capabilities, capabilityId);
       for (const [sub, kind] of [["backups", "backup:"], ["scratch", ""]] as const) {
         if (!existsSync(join(dir, sub))) continue;
-        for (const f of readdirSync(join(dir, sub))) if (f.endsWith(".db")) out.push(kind + f.slice(0, -3));
+        // A scratch state's file has its ":" as "_" (statePathOf): a validation run's kind gets it back.
+        for (const f of readdirSync(join(dir, sub))) if (f.endsWith(".db")) out.push(kind + f.slice(0, -3).replace(/^(test|visual|dryrun|sample|real)_/, "$1:"));
       }
       return out.filter((n) => n.startsWith(prefix));
     },
