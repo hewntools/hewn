@@ -6,6 +6,7 @@
 // alarm is armed hours ahead in real time, so it never fires: whatever runs, the resume check ran.
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { after, before, describe, test } from "node:test";
 import { ALARM_GRACE_MS } from "@hewntools/cli/supervisor/index.ts";
 import { FIXTURES } from "./helpers.ts";
@@ -24,10 +25,14 @@ async function until(fn: () => Promise<boolean>, ms: number): Promise<boolean> {
 describe("a schedule after the machine wakes from sleep (workerd host)", () => {
   let h: TestHost;
   let offset = 0;
-  // A look every 50 ms; a jump is a resume past 10 minutes (the wall clock is walked in smaller steps).
+  /** Event-loop busy time added to the real one: a gap the loop was busy for (a big backup, a debugger's pause). */
+  let busyOffset = 0;
+  // A look every 50 ms; a jump is a resume past 10 minutes (the wall clock is walked in smaller steps). The monotonic
+  // clock runs on with the wall clock, as macOS's may through a sleep: only the gap between looks shows one.
   const JUMP = 600_000;
+  const log: string[] = [];
   before(async () => {
-    h = await startTestHost({ resume: { intervalMs: 50, jumpMs: JUMP, recheckMs: HOUR, wall: () => Date.now() + offset } });
+    h = await startTestHost({ resume: { intervalMs: 50, jumpMs: JUMP, recheckMs: HOUR, wall: () => Date.now() + offset, mono: () => performance.now() + offset, busy: () => performance.eventLoopUtilization().active + busyOffset }, log: (l) => void log.push(l) });
     const r = await h.sv.admin("install", { name: "Runaway", purpose: "runs on", dir: join(FIXTURES, "runaway"), wait: true });
     assert.equal(r.status, "promoted", r.log.join("\n"));
   });
@@ -60,6 +65,10 @@ describe("a schedule after the machine wakes from sleep (workerd host)", () => {
       assert.equal(await rows("on-time"), 0, "not before its time");
       await walk(at + ALARM_GRACE_MS);
       assert.ok(await until(async () => (await rows("on-time")) === 1, 1000), "run within a look of its time and the grace");
+      // hewn.log: the wake (a gap between looks, by the wall clock and the monotonic one alike), and what the late alarm's look ran.
+      assert.ok(log.some((l) => /^tick gap: \d+s by the wall clock, \d+s by the monotonic one$/.test(l)), log.join("\n"));
+      assert.ok(log.some((l) => /^\d+s passed between two looks \(\d+s by the monotonic clock; the machine slept, or Hewn was suspended\): resumed; catching up$/.test(l)), log.join("\n"));
+      assert.ok(await until(async () => log.some((l) => l === `the schedule due ${new Date(at).toISOString()} ran by the wall clock (its alarm was late): runaway/tick (ok)`), 1000), log.join("\n"));
       // Due again (the platform's clock hasn't moved), while the next time the supervisor knows is that same time: no second run for it.
       await h.sv.admin("schedules/fire", { id: s.id, arm: false });
       await walk(at + 2 * HOUR);
@@ -85,5 +94,15 @@ describe("a schedule after the machine wakes from sleep (workerd host)", () => {
     await h.sv.admin("schedules/fire", { id: s.id, arm: false });
     await walk(later + ALARM_GRACE_MS);
     assert.ok(await until(async () => (await rows("changed")) === 1, 1000), "run at the new time: the old time's reply moved the supervisor's on");
+  });
+
+  test("a gap the event loop was busy for (a big backup, a debugger's pause) isn't a wake", async () => {
+    const before = log.length;
+    // The wall clock and the loop's busy time move on together: the process ran, it was only busy.
+    offset += 2 * JUMP;
+    busyOffset += 2 * JUMP;
+    await sleep(400);
+    const lines = log.slice(before);
+    assert.ok(!lines.some((l) => /passed between two looks|^tick gap/.test(l)), lines.join("\n"));
   });
 });

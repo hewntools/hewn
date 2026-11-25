@@ -368,6 +368,12 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
         const { name, bundle } = await platform.shareBundle(owner, id, version);
         return new Response(body(bundle), { status: 200, headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${name}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
       }
+      // Share… › License: the license this tool is shared under from now on, and the name for its copyright line. No new version.
+      case "PUT share": {
+        if (arg !== "license") throw new PlatformError("not_found", `no route PUT /api/capabilities/${id}/share/${arg ?? ""}`);
+        const b = await readJson(req);
+        return platform.setShareLicense(owner, id, { ...(b.license !== undefined ? { license: String(b.license) } : {}), ...(b.holder !== undefined ? { holder: b.holder === null ? null : String(b.holder) } : {}) });
+      }
       // Share… › Link: one version, for anyone with the link, until it expires or is revoked. Needs a public address.
       case "POST links": {
         const address = publicAddress(platform, await tunnelNow(host));

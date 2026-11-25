@@ -212,6 +212,8 @@ try {
     await code.waitFor({ state: "detached" });
     await page.locator(".info-head").getByRole("button", { name: "Install", exact: true }).click();
     const sheet = page.locator("dialog[open]", { hasText: "Install Plant Log" });
+    // Hewn's own tools are Apache-2.0: the sheet says so.
+    await sheet.getByText("License: Apache 2.0").waitFor();
     await sheet.getByText(/From Hewn's tools · Official/).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-hub-install.png" });
     await sheet.getByRole("button", { name: "Cancel" }).click();
@@ -662,6 +664,14 @@ export const operations = {
     await sheet.getByText(/sample\/calls\.json · \d+ calls? · /).waitFor();
     if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Info's Share… isn't on the live version");
     if (await sheet.getByRole("button", { name: "Download" }).isDisabled()) throw new Error("Download is off");
+    // From a file without a license: all rights reserved, and the row says why; picking MIT shows the copyright line, never the owner's name on it.
+    await sheet.getByText("It arrived without a license.", { exact: false }).waitFor();
+    if ((await sheet.getByLabel("License").inputValue()) !== "none") throw new Error("a tool from a file without a license isn't at all rights reserved");
+    await sheet.getByLabel("License").selectOption("MIT");
+    await sheet.getByText(/^Copyright \(c\) \d{4} the .+ authors$/).waitFor();
+    await sheet.getByText("Someone else's work: the notice it came with goes with it.").waitFor();
+    await sheet.getByLabel("License").selectOption("none");
+    await sheet.getByText("It arrived without a license.", { exact: false }).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-share.png" });
     await sheet.getByRole("button", { name: "Done" }).click();
     await page.goto(`${web}/#/c/shared-log/v/1`);
@@ -835,6 +845,42 @@ export const operations = {
       if (!refreshes.length) throw new Error("no refreshes after Reload");
       if (await p.locator(".toast", { hasText: "Hewn was updated" }).count()) throw new Error("the toast is still there after Reload");
     } finally {
+      await ctx.close();
+    }
+  });
+
+  await step("Home redrawn by its own poll (a tool added elsewhere) makes the page's own requests only: none counts as the owner's activity", async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await ctx.addCookies(await page.context().cookies());
+    const p = await ctx.newPage();
+    try {
+      // The owner's requests: an API request without the refresh header, but for what the server leaves out itself
+      // (surface/index.ts's PAGE_OWN_FETCHES: a build's events, a tool's or a build's icon).
+      const PAGE_OWN_FETCHES = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/icon)$/;
+      const owners: string[] = [];
+      p.on("request", (r: { url(): string; method(): string; headers(): Record<string, string> }) => {
+        const path = new URL(r.url()).pathname;
+        if (path.startsWith("/api/") && r.headers()["x-hewn-refresh"] !== "1" && !PAGE_OWN_FETCHES.test(path)) owners.push(`${r.method()} ${path}`);
+      });
+      await p.clock.install();
+      await p.goto(`${web}/#/`);
+      await p.locator(".home-grid").waitFor();
+      await p.waitForTimeout(1000);
+      owners.length = 0;
+      // A tool added elsewhere (an agent's, the CLI's): Home's next poll sees it and redraws.
+      const added = await sv.admin("install", { name: "Probe", purpose: "Probes", dir: join(FIX, "probe"), wait: true });
+      if (added.status !== "promoted") throw new Error(added.log.join("\n"));
+      for (let t = 0; t < 70_000; t += 5000) await p.clock.runFor(5000), await p.waitForTimeout(100);
+      await p.locator(".home-grid .tile", { hasText: "Probe" }).first().waitFor({ timeout: 5000 });
+      if (owners.length) throw new Error(`Home's own redraw asked as the owner: ${owners.join(", ")}`);
+      // The other way round: a redraw the owner causes (Edit Home, Done) asks as the owner.
+      await p.keyboard.press("e");
+      await p.getByRole("button", { name: "Done" }).click();
+      await p.waitForTimeout(1000);
+      if (!owners.includes("GET /api/home")) throw new Error(`the owner's redraw didn't ask as the owner: ${owners.join(", ")}`);
+    } finally {
+      // Gone again: the steps after this one see the tools they did before it.
+      await p.evaluate(() => fetch("/api/capabilities/probe", { method: "DELETE", headers: { "x-hewn-ui": "1" } })).catch(() => {});
       await ctx.close();
     }
   });
