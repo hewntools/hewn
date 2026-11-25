@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { format } from "node:util";
 import { pathToFileURL } from "node:url";
-import { type AbiDb, applyMigrations, CALL_TIMEOUT_MS, capLines, countTables, dumpTables, exportedOperations, keysSince, loadTables, markKeys, runOperation } from "@hewntools/core/abi.ts";
+import { type AbiDb, applyMigrations, CALL_TIMEOUT_MS, capLines, countTables, dumpTables, exportedOperations, keysSince, loadTables, markKeys, runOperation, thrownOf } from "@hewntools/core/abi.ts";
 import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { CapabilityRuntime, CodeRef, StateRef } from "@hewntools/core/ports.ts";
@@ -48,10 +48,18 @@ export function abiDb(db: DatabaseSync): AbiDb {
 
 // Route console output of a call to that call's log (concurrent calls stay apart).
 const logs = new AsyncLocalStorage<string[]>();
+/** The calls (their log sinks) that reached past their input, the network included: what one threw is read with that (abi.ts Thrown). */
+const reached = new WeakSet<string[]>();
 let consolePatched = false;
 function patchConsole() {
   if (consolePatched) return;
   consolePatched = true;
+  const fetchOf = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+    const sink = logs.getStore();
+    if (sink) reached.add(sink);
+    return fetchOf(...args);
+  }) as typeof fetch;
   for (const [method, prefix] of [["log", "| "], ["info", "| "], ["debug", "| "], ["warn", "! "], ["error", "! "]] as const) {
     const original = console[method].bind(console);
     console[method] = (...args: unknown[]) => {
@@ -121,6 +129,7 @@ export function inProcessRuntime(home: { root: string; capabilities: string }): 
             },
             ...(onModel ? { model: onModel } : {}),
             readOnly: target.readOnly,
+            reached: () => reached.add(lines),
           }),
         );
         const { output, secretUpdates, inserted } = await Promise.race([run, timer.expired]);
@@ -132,7 +141,7 @@ export function inProcessRuntime(home: { root: string; capabilities: string }): 
         }
         // Anything the capability throws (including a refused nested call) is its failure, as it
         // would be across an isolate boundary.
-        throw new PlatformError("operation_failed", `${key} failed: ${(e as Error).message}`, { logs: capLines(lines) });
+        throw new PlatformError("operation_failed", `${key} failed: ${(e as Error).message}`, { logs: capLines(lines), ...thrownOf(e, reached.has(lines)) });
       } finally {
         timer.clear();
         db.close();

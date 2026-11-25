@@ -30,6 +30,8 @@ export async function runOperation(
     model?: (req: GenerateRequest) => Promise<GenerateResult>;
     /** A widget's call: the state may only be read (writes throw), and secret updates are dropped. */
     readOnly?: boolean;
+    /** Told when its code reads a secret or a setting, or calls another tool or the model (abi.ts Thrown). */
+    reached?: () => void;
   },
 ): Promise<{ output: unknown; secretUpdates: Record<string, string>; inserted: string[] }> {
   const fn = mod.operations?.[key];
@@ -37,18 +39,36 @@ export async function runOperation(
   const secretUpdates: Record<string, string> = {};
   const updateSecret = (name: string, value: string) => void (env.readOnly || (secretUpdates[name] = value));
   const inserted = new Set<string>();
+  const reached = env.reached ?? (() => {});
+  /** Its secrets or settings, telling `reached` when code reads one. */
+  const watched = (values: Record<string, string>) =>
+    new Proxy(values, {
+      get(target, name, receiver) {
+        if (typeof name === "string") reached();
+        return Reflect.get(target, name, receiver);
+      },
+    });
   const ctx: AbiContext = {
     // Only validation's calls (tests, sample data) note what they insert: the delete check reads it; live calls skip it.
     db: env.readOnly ? readOnlyDb(env.db) : env.caller?.kind === "test" ? insertsInto(env.db, inserted) : env.db,
-    secrets: { ...(env.secrets ?? {}) },
-    config: { ...(env.config ?? {}) },
+    secrets: watched({ ...(env.secrets ?? {}) }),
+    config: watched({ ...(env.config ?? {}) }),
     updateSecret,
     update_secret: updateSecret,
-    call: (capabilityId, operation, callInput) => env.call(capabilityId, operation, callInput ?? {}),
+    call: (capabilityId, operation, callInput) => {
+      reached();
+      return env.call(capabilityId, operation, callInput ?? {});
+    },
     caller: env.caller,
   };
   const model = env.model;
-  if (model) ctx.model = { generate: (req) => model(req) };
+  if (model)
+    ctx.model = {
+      generate: (req) => {
+        reached();
+        return model(req);
+      },
+    };
   const output = await fn(input, ctx);
   // Outputs cross a process/isolate boundary as JSON.
   return { output: output === undefined ? null : JSON.parse(JSON.stringify(output)), secretUpdates, inserted: [...inserted] };
@@ -392,5 +412,23 @@ export function capLines(lines: unknown): string[] {
 
 /** A failed call's error, cut to ERROR_CHARS. */
 export const capError = (message: string) => cut(message, ERROR_CHARS);
+
+/**
+ * What a failed call's tool code threw, beside its message (which stays as it was): the error's name (`TypeError`),
+ * and whether the call reached past its input (`reached`: the network, a secret, a setting, another tool or the
+ * model). The schema fuzz reads them: an error the JS engine raises (ENGINE_ERRORS) on an input the schema accepts is
+ * a crash; an error the tool throws itself is its refusal. Its calls get none of those, so after reaching for one the
+ * fuzz can't tell a crash from the tool's handling of that.
+ */
+export interface Thrown {
+  thrown?: string;
+  reached?: true;
+}
+export function thrownOf(e: unknown, reached: boolean): Thrown {
+  const name = e instanceof Error && typeof e.name === "string" ? e.name : undefined;
+  return { ...(name ? { thrown: name } : {}), ...(reached ? { reached: true as const } : {}) };
+}
+/** The errors the JS engine raises in tool code (`null.x`, `JSON.parse("")`): in the schema fuzz, a crash. */
+export const ENGINE_ERRORS: readonly string[] = ["TypeError", "ReferenceError", "RangeError", "SyntaxError"];
 
 export const CALL_TIMEOUT_MS = 30_000;

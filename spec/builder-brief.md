@@ -336,6 +336,7 @@ Before you stop, answer these in a message (from your screenshots, when you have
 - A migration ends with its last statement's `;`: a comment or a second `;` after it fails ("SQL code did not contain a statement").
 - Before promotion, migrations dry-run on a copy of live state, and live state is backed up before they apply.
 - No row goes missing: around your migrations Hewn checks every table keeps each row's primary key (its `rowid` without one) and that no rows go in all, and that each `read` with no required input still returns every record (`id`) it did. Rebuild a table by copying every row with its key; a dedupe or a purge is a `destructive` operation, never a migration.
+- Any input your schema accepts may come: Hewn calls each operation with the edges of its `inputSchema` (`null` where allowed, `""`, a 10 KB string, unicode, 0, −1, the minimum and maximum, empty lists) and fails a crash (an uncaught `TypeError` and the like), an output that breaks `outputSchema`, a call past its deadline, and a `read` that changes data when called again. Refuse what you can't handle with `throw new Error("…")`, or narrow the schema (`minLength`, `minimum`, no `null`).
 
 ### tests/cases.json
 

@@ -477,7 +477,7 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
       const send = () => host(target.capabilityId).invoke({ code: target.code, scratch: target.state.scratch ?? null, key, input, secrets: target.secrets ?? {}, hosts, caller: target.caller, config: target.config ?? {}, readOnly: !!target.readOnly, limit, named, call: token, model: !!onModel }, { started });
       try {
         const r = await Promise.race([toolsAnswer().then(() => ((sentAt = Date.now()), send())), expired]);
-        if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs });
+        if (!r.ok) throw new PlatformError("operation_failed", isFull(r.error) ? data.full(target.capabilityId, limit) : `${key} failed: ${r.error}`, { logs: r.logs, ...(r.thrown ? { thrown: r.thrown } : {}), ...(r.reached ? { reached: true } : {}) });
         return { output: r.output, secretUpdates: r.secretUpdates, logs: r.logs, inserted: r.inserted };
       } catch (e) {
         // Out of time: whatever came back once it was stopped, it timed out.

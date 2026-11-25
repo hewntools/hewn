@@ -7,6 +7,7 @@ import { PlatformError } from "../errors.ts";
 import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
 import { countsSince, lostRows, rowsSince } from "../abi.ts";
 import { deadlineOf } from "../deadline.ts";
+import { fuzz } from "../fuzz.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -73,6 +74,8 @@ export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool'
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
+/** Hewn's schema fuzz found something (fuzz.ts): the first line of its failure, the problems listed under it. */
+export const FUZZ_FAILED = "Hewn's own tests called each operation with inputs its inputSchema accepts, and found problems";
 /** The most a check's further parts of long pages may weigh (PNG bytes): 18 MB or less as JSON with its images. A page's parts are rarely over 2 MB. */
 export const MAX_PARTS_BYTES = 10_000_000;
 
@@ -472,6 +475,29 @@ export class Validation extends Domain {
         } else if (applied && ownData) step(`upgrade dry-run ok (${added.length ? added.join(", ") : "no new migrations"})`);
       }
       stopIfStalled();
+
+      // 7. Hewn's schema fuzz: every operation called with inputs its schema accepts, the edges a tool's code most often
+      // forgets, on the candidate's sample data (a fresh state when it has none), a copy thrown away after. As for the
+      // sample calls nothing is granted: no secrets, settings, hosts, other tools or model (fuzz.ts doesn't judge an
+      // error after the call reached for one).
+      if (!sample) {
+        await this.runtime.dropState(sampleState);
+        await this.runtime.migrate(sampleState, migrations, code);
+      }
+      const fuzzTarget: ExecutionTarget = { ...sampleTarget, caller: { kind: "test", id: "fuzz" } };
+      const fuzzed = await fuzz(manifest.operations, {
+        call: (op, f) => this.replayCall(manifest, fuzzTarget, { operation: op.name, version: op.version, input: f.input }, `on ${f.label}`),
+        mark: () => this.runtime.markKeys(sampleState, code),
+        since: () => this.runtime.keysSince(sampleState, code),
+        between: async () => {
+          await breathe();
+          stopIfStalled();
+        },
+      });
+      stopIfStalled();
+      for (const n of fuzzed.notes) step(`schema fuzz: ${n}`);
+      if (fuzzed.problems.length) softFail(FUZZ_FAILED, fuzzed.problems);
+      else step(`schema fuzz: ${fuzzed.calls} calls on ${fuzzed.operations} operations, nothing found`);
     } finally {
       this.d.stalls.forgetRun(build.id);
       for (const s of buildStates(id, build.id)) await this.runtime.dropState(s).catch(() => {});
