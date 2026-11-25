@@ -32,5 +32,5 @@ export function checkFromJson(j: unknown): CheckResult {
 export function warningsFrom(v: unknown): CheckWarning[] {
   return (Array.isArray(v) ? v : [])
     .filter((w): w is Record<string, unknown> => !!w && typeof w.check === "string" && typeof w.message === "string")
-    .map((w) => ({ check: w.check as string, message: w.message as string, ...(typeof w.file === "string" ? { file: w.file } : {}), ...(typeof w.line === "number" ? { line: w.line } : {}) }));
+    .map((w) => ({ check: w.check as string, message: w.message as string, ...(typeof w.file === "string" ? { file: w.file } : {}), ...(typeof w.line === "number" ? { line: w.line } : {}), ...(typeof w.host === "string" ? { host: w.host } : {}) }));
 }

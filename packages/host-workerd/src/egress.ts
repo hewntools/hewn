@@ -23,21 +23,22 @@ const MAX_HOPS = 10;
  * redirect would otherwise take it anywhere). Redirects are followed here, one checked hop at a
  * time, as fetch would: 303 (and 301/302 after a POST) turn into a GET without a body; credentials
  * aren't carried to another origin. A capability that asked for `redirect: "manual"` gets the
- * redirect itself.
+ * redirect itself. `refused` is told each host a fetch was refused, before the refusal is answered.
  */
-export async function gatedFetch(request: Request, hosts: string[], fetchFn: (req: Request) => Promise<Response> = fetch, network?: NetworkMode): Promise<Response> {
+export async function gatedFetch(request: Request, hosts: string[], fetchFn: (req: Request) => Promise<Response> = fetch, network?: NetworkMode, refused: (host: string) => Promise<void> = async () => {}): Promise<Response> {
   const manual = request.redirect === "manual";
   let url = new URL(request.url);
+  const refuse = async (host: string, res: Response) => (await refused(host), res);
   // Before anything else: nothing is sent, the body isn't read.
-  if (network === "off") return new Response(`egress denied: the network is off in this Hewn (HEWN_NETWORK=off), so ${url.hostname} wasn't reached`, { status: 403 });
+  if (network === "off") return refuse(url.hostname, new Response(`egress denied: the network is off in this Hewn (HEWN_NETWORK=off), so ${url.hostname} wasn't reached`, { status: 403 }));
   if (network === "get" && request.method !== "GET" && request.method !== "HEAD") {
-    return new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); a ${request.method} to ${url.hostname} wasn't sent`, { status: 403 });
+    return refuse(url.hostname, new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); a ${request.method} to ${url.hostname} wasn't sent`, { status: 403 }));
   }
   // A GET that asks to become a WebSocket would be a channel both ways.
   if (network === "get" && request.headers.has("upgrade")) {
-    return new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); an upgrade to ${request.headers.get("upgrade")} at ${url.hostname} wasn't sent`, { status: 403 });
+    return refuse(url.hostname, new Response(`egress denied: only GET and HEAD go out from this Hewn (HEWN_NETWORK=get); an upgrade to ${request.headers.get("upgrade")} at ${url.hostname} wasn't sent`, { status: 403 }));
   }
-  if (!hostAllowed(url.hostname, hosts)) return denied(url.hostname);
+  if (!hostAllowed(url.hostname, hosts)) return refuse(url.hostname, denied(url.hostname));
   let method = request.method;
   const headers = new Headers(request.headers);
   // Buffered, so a 307/308 can send it again.
@@ -48,7 +49,7 @@ export async function gatedFetch(request: Request, hosts: string[], fetchFn: (re
     if (manual || !REDIRECTS.has(res.status) || !location) return res;
     if (hop >= MAX_HOPS) return new Response("egress: too many redirects", { status: 508 });
     const next = new URL(location, url);
-    if (!hostAllowed(next.hostname, hosts)) return denied(next.hostname);
+    if (!hostAllowed(next.hostname, hosts)) return refuse(next.hostname, denied(next.hostname));
     if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
       if (method !== "HEAD") method = "GET";
       body = undefined;

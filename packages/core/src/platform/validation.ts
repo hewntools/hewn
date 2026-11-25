@@ -13,7 +13,7 @@ import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
-import { wantedGrants } from "./grants.ts";
+import { hostOf, resolveHosts, wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
 import { breather, Domain } from "./context.ts";
 
@@ -58,6 +58,9 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  * quote that data, so it goes to the build's transcript, which only the owner reads.
  */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
+
+/** The most hosts the hosts report names, one warning each; the rest are counted in one more. */
+export const REPORTED_HOSTS = 20;
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
@@ -196,6 +199,19 @@ export class Validation extends Domain {
     const sampleTarget: ExecutionTarget = { capabilityId: id, code, state: sampleState, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
     // Each operation's first passing result in the tests: the widget sheet draws these, and a review shows them.
     const views = new Map<string, unknown>();
+    // The hosts its code tried that it doesn't declare (no fetch goes out here: the runtime says which hosts were
+    // refused), each with what tried it: an operation, or its screen. `config`: the call's, for a config:NAME host.
+    const tried = new Map<string, Set<string>>();
+    const triedBy = (what: string, config: Record<string, string> = {}) => (hosts: string[]) => {
+      const declared = resolveHosts(manifest, config);
+      // A config:NAME host whose value the call didn't have (a placeholder, or none) is that host all the same.
+      const unresolved = (manifest.requires?.hosts ?? []).filter((x) => x.startsWith("config:")).flatMap((x) => [config[x.slice(7)] ?? "undefined", hostOf(config[x.slice(7)] ?? "") ?? ""]);
+      for (const h of hosts) if (!declares(declared, h) && !unresolved.includes(h)) tried.set(h, (tried.get(h) ?? new Set()).add(what));
+    };
+    const opOf = (c: { operation: string; version?: number }) => {
+      const op = caseOperation(manifest, c);
+      return op ? opKey(op.name, op.version) : c.operation;
+    };
     let rendered: { shots?: VisualShot[]; defects?: string[]; sampled?: boolean; real?: boolean } = {};
     let kept: { screenshot?: Uint8Array; screenshotDark?: Uint8Array } = {};
     try {
@@ -230,7 +246,7 @@ export class Validation extends Domain {
         try {
           const op = caseOperation(manifest, c);
           const before = await this.runtime.countState(testState, code);
-          const { result, inserted } = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config }, c);
+          const { result, inserted } = await this.runCase(manifest, { capabilityId: id, code, state: testState, secrets: c.secrets, config: c.config, onRefusedHosts: triedBy(opOf(c), c.config) }, c);
           // A case that passed (one that expects an error is about the error, not what the call left behind).
           if (op && !c.expectError) undeclaredDelete(op, { before, after: await this.runtime.countState(testState, code), inserted }, `test '${c.name}'`);
           if (op && !c.expectError && !views.has(opKey(op.name, op.version))) views.set(opKey(op.name, op.version), result);
@@ -264,7 +280,7 @@ export class Validation extends Domain {
           const before = await this.runtime.countState(sampleState, code);
           let inserted: string[];
           try {
-            ({ inserted } = await this.replayCall(manifest, sampleTarget, c, `on sample call ${i + 1}`));
+            ({ inserted } = await this.replayCall(manifest, { ...sampleTarget, onRefusedHosts: triedBy(opOf(c)) }, c, `on sample call ${i + 1}`));
           } catch (e) {
             softFail(`${SAMPLE_FILE} doesn't replay`, [`call ${i + 1} (${c.operation}): ${(e as Error).message}`, "sample calls run before anything is granted: local operations only, no secrets, config values, network, other tools or model"]);
             replayed = false;
@@ -310,7 +326,7 @@ export class Validation extends Domain {
               stopIfStalled();
               const { result } = await this.d.invocation.execute(
                 manifest,
-                { capabilityId: id, code, state, secrets, config, caller: { kind: "test", id: "visual-check" } },
+                { capabilityId: id, code, state, secrets, config, caller: { kind: "test", id: "visual-check" }, onRefusedHosts: triedBy("its screen", config) },
                 { capabilityId: id, operation: body.operation, operationVersion: body.operationVersion, input: body.input },
                 async (call) => {
                   throw new PlatformError("operation_failed", `calls to ${call.capabilityId} aren't available in the visual check`);
@@ -372,7 +388,7 @@ export class Validation extends Domain {
             await breathe();
             stopIfStalled();
             const [operation, version] = w.operation.split("@");
-            const r = await this.replayCall(manifest, sampleTarget, { operation, version: Number(version) }, "in the widget sheet").catch(() => undefined);
+            const r = await this.replayCall(manifest, { ...sampleTarget, onRefusedHosts: triedBy(w.operation) }, { operation, version: Number(version) }, "in the widget sheet").catch(() => undefined);
             if (r && !viewErrors(r.result).length) sampled.set(w.operation, r.result);
           }
         const widgets = manifest.widgets!.map((w) => ({ name: w.name, title: w.title, sizes: w.sizes, view: sampled.get(w.operation) ?? views.get(w.operation) ?? null }));
@@ -404,6 +420,13 @@ export class Validation extends Domain {
       stopIfStalled();
     } finally {
       this.d.stalls.forgetRun(build.id);
+      // 6a. the hosts report, kept when a step above failed too: a host it tried beyond its declaration warns, never
+      // fails (a tool may come to be allowed a new host; when it runs, a fetch to a host it isn't allowed is refused
+      // anyway). What its code fetched without waiting, after its last call, is collected here. At most REPORTED_HOSTS.
+      triedBy("its code, after a call")(this.runtime.refusedHosts?.(build.id) ?? []);
+      const hosts = [...tried];
+      for (const [host, by] of hosts.slice(0, REPORTED_HOSTS)) warnings.push({ check: "hosts", host, message: `tried to reach ${host}, a host it doesn't declare (${[...by].slice(0, 5).join(", ")}${by.size > 5 ? ` and ${by.size - 5} more` : ""}): when it runs, that's refused` });
+      if (hosts.length > REPORTED_HOSTS) warnings.push({ check: "hosts", message: `and ${hosts.length - REPORTED_HOSTS} more hosts it doesn't declare` });
       for (const s of buildStates(id, build.id)) await this.runtime.dropState(s).catch(() => {});
     }
     return {
@@ -678,6 +701,9 @@ function undeclaredDelete(op: OperationManifest, call: { before: Record<string, 
   const fewer = Object.keys(before).filter((t) => (!(t in after) || after[t] < before[t]) && !added.has(t.toLowerCase()));
   if (fewer.length) throw new Error(`${label ? `${label}: ` : ""}${op.name} leaves ${fewer.join(", ")} with fewer rows and adds none: declare it destructive`);
 }
+
+/** Whether `declared` has `host` ("*.example.com": any name under it), as the egress gate reads a tool's hosts. */
+const declares = (declared: string[], host: string): boolean => declared.some((h) => (h.startsWith("*.") ? host.endsWith(h.slice(1)) && host.length > h.length - 1 : host === h));
 
 /** The operation a test case or sample call runs: its version, or the highest. */
 const caseOperation = (m: CapabilityManifest, c: { operation: string; version?: number }) =>
