@@ -536,7 +536,11 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "feedback" && method === "POST") return platform.setBuildFeedback(owner, id, pick(await readJson(req), ["score", "note"]));
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
-    if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
+    if (sub === "cancel" && method === "POST") {
+      const cancelled = platform.cancelBuild(owner, id);
+      await streamsEnded(id);
+      return cancelled;
+    }
     if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
     if (sub === "reject" && method === "POST") return platform.rejectBuild(owner, id);
@@ -868,9 +872,40 @@ function earlierConversation(platform: Platform, owner: Agent, buildId: unknown)
   return { buildId, ...(b.resultVersion ? { version: b.resultVersion } : {}), messages: conversation, ...(asked ? { asked: { by: b.requestedBy, text: asked } } : {}) };
 }
 
+/**
+ * Each build's events streams that are open: `ended` settles once one has ended on this side, `stop` ends it now. A
+ * cancel answers only once they have ended: a client that closes its stream when the cancel answers (the build page
+ * does) would otherwise race the stream's last events, and workerd logs each write to a closed stream as an error
+ * (Broken pipe, Connection reset). A running build's end comes once its builder has exited and its transcript is kept,
+ * which under load can take a while: after 2 s the streams are ended without it (the page has the cancel's answer).
+ */
+type OpenStream = { ended: Promise<void>; stop: () => void };
+const openStreams = new Map<string, Set<OpenStream>>();
+const within = (ms: number, p: Promise<unknown>) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return Promise.race([p, new Promise((r) => (timer = setTimeout(r, ms)))]).finally(() => timer !== null && clearTimeout(timer));
+};
+const streamsEnded = async (buildId: string) => {
+  const open = [...(openStreams.get(buildId) ?? [])];
+  if (!open.length) return;
+  const all = Promise.all(open.map((s) => s.ended));
+  await within(2000, all);
+  for (const s of open) s.stop();
+  await within(1000, all);
+};
+
 /** Server-sent events: replay the build transcript, then follow live until promoted/failed. */
 function streamBuild(platform: Platform, owner: Agent, buildId: string, clientSignal: AbortSignal): Response {
   platform.getBuild(owner, buildId); // exists
+  let ended!: () => void;
+  const stopped = new AbortController();
+  const entry: OpenStream = { ended: new Promise<void>((r) => (ended = r)), stop: () => stopped.abort() };
+  const open = openStreams.get(buildId) ?? new Set();
+  openStreams.set(buildId, open.add(entry));
+  void entry.ended.then(() => {
+    open.delete(entry);
+    if (!open.size && openStreams.get(buildId) === open) openStreams.delete(buildId);
+  });
   return sse(
     { "content-security-policy": WEB_CSP },
     async (event, signal) => {
@@ -887,7 +922,8 @@ function streamBuild(platform: Platform, owner: Agent, buildId: string, clientSi
       });
       if (!signal.aborted) event("done", final);
     },
-    clientSignal,
+    AbortSignal.any([clientSignal, stopped.signal]),
+    ended,
   );
 }
 

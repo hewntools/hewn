@@ -77,6 +77,15 @@ describe("web client (owner surface)", () => {
       name: "fake",
       build: async (job) => {
         if (job.capabilityId === "stops-early") throw new Error("hit the usage limit");
+        // Works until it's cancelled.
+        if (job.capabilityId === "until-cancelled" || job.capabilityId === "slow-to-stop") {
+          appendFileSync(job.logPath, "00:00:00 → Thinking\n");
+          job.onActivity?.("→ Thinking");
+          await new Promise((r) => (job.signal?.aborted ? r(null) : job.signal?.addEventListener("abort", r, { once: true })));
+          // Under load a builder can take seconds to exit once it's told to stop.
+          if (job.capabilityId === "slow-to-stop") await new Promise((r) => setTimeout(r, 4000));
+          throw new Error("cancelled");
+        }
         if (job.kind === "modify" && readFileSync(resolve(job.workspace, "BUILDER.md"), "utf8").includes("Fail this change")) throw new Error("the change didn't work out");
         appendFileSync(job.logPath, "00:00:00 → Write src/index.ts\n");
         job.onActivity?.("→ Write src/index.ts");
@@ -895,6 +904,56 @@ describe("web client (owner surface)", () => {
     test("cancel from the web", async () => {
       const r = await api("/builds/nope/cancel", { method: "POST" });
       assert.equal(r.status, 404);
+    });
+
+    test("cancel while the build's events stream is open: the stream has written done and ended before the cancel answers", async () => {
+      const b = await api("/capabilities", { method: "POST", body: { name: "Until Cancelled", purpose: "p", requirements: "r" } });
+      assert.equal(b.json.status, "building", JSON.stringify(b.json));
+      let body = "";
+      let ended = false;
+      let started!: () => void;
+      const streaming = new Promise<void>((r) => (started = r));
+      const stream = new Promise<void>((res, rej) => {
+        const r = request({ host: "127.0.0.1", port, path: `/api/builds/${b.json.buildId}/events`, headers: { host: `hewn.localhost:${port}`, cookie } }, (m) => {
+          m.on("data", (d) => ((body += d), body.includes("Thinking") && started()));
+          m.on("end", () => ((ended = true), res()));
+        });
+        r.on("error", rej);
+        r.end();
+      });
+      await streaming;
+      const c = await api(`/builds/${b.json.buildId}/cancel`, { method: "POST" });
+      assert.equal(c.status, 200, JSON.stringify(c.json));
+      assert.equal(c.json.status, "cancelled");
+      // A client that closes its stream on this answer (the build page) writes nothing more to a closed stream.
+      assert.ok(ended, "the stream ended before the cancel answered");
+      assert.match(body, /event: done\ndata: \{.*"status":"cancelled"/s);
+      await stream;
+    });
+
+    test("cancel of a build that takes seconds to stop: the cancel still answers after about 2 s, with its stream ended", async () => {
+      const b = await api("/capabilities", { method: "POST", body: { name: "Slow To Stop", purpose: "p", requirements: "r" } });
+      assert.equal(b.json.status, "building", JSON.stringify(b.json));
+      let body = "";
+      let ended = false;
+      let started!: () => void;
+      const streaming = new Promise<void>((r) => (started = r));
+      const stream = new Promise<void>((res, rej) => {
+        const r = request({ host: "127.0.0.1", port, path: `/api/builds/${b.json.buildId}/events`, headers: { host: `hewn.localhost:${port}`, cookie } }, (m) => {
+          m.on("data", (d) => ((body += d), body.includes("Thinking") && started()));
+          m.on("end", () => ((ended = true), res()));
+        });
+        r.on("error", rej);
+        r.end();
+      });
+      await streaming;
+      const t0 = Date.now();
+      const c = await api(`/builds/${b.json.buildId}/cancel`, { method: "POST" });
+      assert.equal(c.json.status, "cancelled");
+      assert.ok(Date.now() - t0 >= 1900 && Date.now() - t0 < 3500, `${Date.now() - t0} ms`);
+      assert.ok(ended, "the stream was ended before the cancel answered");
+      await stream;
+      await platform.settle(b.json.buildId).catch(() => {});
     });
 
     test("the builds list: newest first, with times; brief leaves the logs out", async () => {
