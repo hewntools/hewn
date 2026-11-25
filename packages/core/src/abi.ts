@@ -174,8 +174,16 @@ export function loadTables(db: AbiDb, tables: Record<string, Record<string, unkn
   return n;
 }
 
-/** A state's own tables (not SQLite's, the host's or the migrations record), by name. */
-const userTables = (db: AbiDb) => db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != '_hewn_migrations' ORDER BY name").all().map((r) => String(r.name));
+/** The no-loss check's snapshots of a copy's keys (markKeys, keysSince), kept in the copy itself. */
+const KEYS_BEFORE = "_hewn_keys_before";
+const KEYS_NOW = "_hewn_keys_now";
+/** A state's own tables (not SQLite's, the host's, the migrations record or the no-loss check's snapshots), by name. */
+const userTables = (db: AbiDb) =>
+  db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name != '_hewn_migrations' ORDER BY name")
+    .all()
+    .map((r) => String(r.name))
+    .filter((n) => n !== KEYS_BEFORE && n !== KEYS_NOW);
 const quoted = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 /** Every user table as JSON rows (BLOBs as base64). */
@@ -190,41 +198,106 @@ export function dumpTables(db: AbiDb): Record<string, Record<string, unknown>[]>
 }
 
 /**
- * Every user table's rows by key, for the no-loss invariant (validation): each row's primary key as JSON, or its
- * rowid where the table has none. Keys only, never the rest of a row; they stay in Hewn and are only counted.
+ * The tables whose rows the no-loss check counts, each with its key: its primary key's columns (`cols`; "" for none,
+ * where the rowid is the key), as text, so a column whose type changes keeps its keys. Not a virtual table nor its
+ * shadow tables (an FTS index rewrites those as it likes).
  */
-export function tableKeys(db: AbiDb): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  for (const name of userTables(db)) {
-    const pk = db
-      .prepare(`PRAGMA table_info(${quoted(name)})`)
-      .all()
-      .filter((c) => Number(c.pk) > 0)
-      .sort((a, b) => Number(a.pk) - Number(b.pk))
-      .map((c) => String(c.name));
-    const cols = pk.length ? pk.map(quoted).join(", ") : "rowid AS rowid";
-    out[name] = db.prepare(`SELECT ${cols} FROM ${quoted(name)}`).all().map((r) => JSON.stringify(pk.length ? pk.map((k) => r[k]) : [r.rowid]));
-  }
-  return out;
+function keyedTables(db: AbiDb): { name: string; cols: string; key: string }[] {
+  const virtual = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'")
+    .all()
+    .map((r) => String(r.name));
+  return userTables(db)
+    .filter((name) => !virtual.some((v) => name === v || name.startsWith(`${v}_`)))
+    .map((name) => {
+      const pk = db
+        .prepare(`PRAGMA table_info(${quoted(name)})`)
+        .all()
+        .filter((c) => Number(c.pk) > 0)
+        .sort((a, b) => Number(a.pk) - Number(b.pk))
+        .map((c) => String(c.name));
+      const key = pk.length ? pk.map((c) => `coalesce(CAST(${quoted(c)} AS TEXT), '')`).join(" || char(31) || ") : "CAST(rowid AS TEXT)";
+      return { name, cols: pk.join(","), key };
+    });
+}
+
+/** Every keyed table's keys, written into `into` in the state itself. */
+function snapshotKeys(db: AbiDb, into: string) {
+  db.exec(`DROP TABLE IF EXISTS ${quoted(into)}`);
+  db.exec(`CREATE TABLE ${quoted(into)} (tbl TEXT NOT NULL, cols TEXT NOT NULL, k TEXT NOT NULL)`);
+  for (const t of keyedTables(db)) db.prepare(`INSERT INTO ${quoted(into)} (tbl, cols, k) SELECT ?, ?, ${t.key} FROM ${quoted(t.name)}`).run(t.name, t.cols);
+  db.exec(`CREATE INDEX ${quoted(`${into}_k`)} ON ${quoted(into)} (tbl, k)`);
 }
 
 /**
- * The no-loss invariant's rules, before and after a version's migrations (`tableKeys` of each): a table there
- * both times keeps every key it had (a lost or renumbered one is lost), and the rows across all tables never
- * drop (a dropped table's rows must reappear elsewhere: a rename, a merge or a split passes). In words, names
- * and counts only.
+ * The no-loss check's first measurement, on a copy: every keyed table's keys, kept in the copy itself (no key ever
+ * leaves the state, however many rows), for `keysSince` after the migrations.
  */
-export function lostRows(before: Record<string, string[]>, after: Record<string, string[]>): string[] {
-  const problems: string[] = [];
-  for (const [table, keys] of Object.entries(before)) {
-    if (!(table in after) || !keys.length) continue;
-    const kept = new Set(after[table]);
-    const lost = keys.filter((k) => !kept.has(k)).length;
-    if (lost) problems.push(`\`${table}\` would lose ${lost} of its ${keys.length} rows${after[table].length >= keys.length ? " (their keys change)" : ""}`);
+export function markKeys(db: AbiDb): void {
+  snapshotKeys(db, KEYS_BEFORE);
+}
+
+/**
+ * What became of the rows `markKeys` saw, per table that had some: how many it had (`before`), has now (`after`), and
+ * how many of its keys are still there (`kept`; null when its key columns changed, so only the counts compare). A
+ * table that's gone (`gone`) is looked for in the new tables with the same key columns (a rename, a merge, a split);
+ * `after` is then their rows. `added`: the rows of tables it didn't see. Counts only; the snapshots are dropped.
+ */
+export interface KeysSince {
+  tables: Record<string, { before: number; after: number | null; kept: number | null; gone?: true }>;
+  added: Record<string, number>;
+}
+export function keysSince(db: AbiDb): KeysSince {
+  snapshotKeys(db, KEYS_NOW);
+  const counts = (table: string) => db.prepare(`SELECT tbl, cols, count(*) AS n FROM ${quoted(table)} GROUP BY tbl, cols`).all() as { tbl: string; cols: string; n: number }[];
+  const one = (sql: string, ...params: unknown[]) => Number(db.prepare(sql).get(...params)?.n ?? 0);
+  const before = counts(KEYS_BEFORE);
+  const now = new Map(counts(KEYS_NOW).map((r) => [r.tbl, Number(r.n)]));
+  const exists = new Map(keyedTables(db).map((t) => [t.name, t.cols]));
+  const seen = new Set(before.map((r) => r.tbl));
+  const out: KeysSince = { tables: {}, added: {} };
+  const [B, N] = [quoted(KEYS_BEFORE), quoted(KEYS_NOW)];
+  for (const b of before) {
+    const cols = exists.get(b.tbl);
+    if (cols !== undefined) {
+      const kept = cols === b.cols ? one(`SELECT count(*) AS n FROM ${B} b JOIN ${N} a ON a.tbl = b.tbl AND a.k = b.k WHERE b.tbl = ?`, b.tbl) : null;
+      out.tables[b.tbl] = { before: Number(b.n), after: now.get(b.tbl) ?? 0, kept };
+      continue;
+    }
+    const into = [...exists].filter(([name, c]) => !seen.has(name) && c === b.cols && c !== "").map(([name]) => name);
+    const kept = into.length ? one(`SELECT count(*) AS n FROM ${B} b WHERE b.tbl = ? AND EXISTS (SELECT 1 FROM ${N} a WHERE a.tbl IN (${into.map(() => "?").join(", ")}) AND a.k = b.k)`, b.tbl, ...into) : null;
+    out.tables[b.tbl] = { before: Number(b.n), after: into.length ? into.reduce((n, t) => n + (now.get(t) ?? 0), 0) : null, kept, gone: true };
   }
-  const total = (m: Record<string, string[]>) => Object.values(m).reduce((n, k) => n + k.length, 0);
-  const [was, is] = [total(before), total(after)];
-  if (is < was) problems.push(`${was - is} fewer rows across its tables (${was} before, ${is} after)`);
+  for (const name of exists.keys()) if (!seen.has(name)) out.added[name] = now.get(name) ?? 0;
+  db.exec(`DROP TABLE IF EXISTS ${B}`);
+  db.exec(`DROP TABLE IF EXISTS ${N}`);
+  return out;
+}
+
+/** Rows `keysSince` saw, before and now (a gone table's rows counted where they went, once). */
+export function rowsSince(k: KeysSince): { before: number; now: number } {
+  const tables = Object.values(k.tables);
+  return {
+    before: tables.reduce((n, t) => n + t.before, 0),
+    now: tables.reduce((n, t) => n + (t.gone ? 0 : (t.after ?? 0)), 0) + Object.values(k.added).reduce((n, c) => n + c, 0),
+  };
+}
+
+/**
+ * The no-loss invariant's rules on what `keysSince` saw: a table keeps every key it had, or, gone, has them in a new
+ * table with the same key columns (a lost or renumbered one is lost; where its key columns changed, its count must
+ * hold); and the rows across all tables never drop (a gone table's rows must reappear elsewhere: a rename, a merge or
+ * a split passes). In words, names and counts only.
+ */
+export function lostRows(k: KeysSince): string[] {
+  const problems: string[] = [];
+  for (const [table, t] of Object.entries(k.tables)) {
+    if (!t.before) continue;
+    if (t.kept !== null && t.kept < t.before) problems.push(`\`${table}\` would lose ${t.before - t.kept} of its ${t.before} rows${t.after !== null && t.after >= t.before ? " (their keys change)" : ""}`);
+    else if (t.kept === null && !t.gone && t.after !== null && t.after < t.before) problems.push(`\`${table}\` would lose ${t.before - t.after} of its ${t.before} rows`);
+  }
+  const { before, now } = rowsSince(k);
+  if (now < before) problems.push(`${before - now} fewer rows across its tables (${before} before, ${now} after)`);
   return problems;
 }
 

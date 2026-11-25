@@ -2,6 +2,7 @@
 // What the core needs from a host. Node (tests, dev) and workerd each implement these;
 // the core itself never touches a filesystem, a process or a socket.
 import type { Agent, Scope } from "./auth.ts";
+import type { KeysSince } from "./abi.ts";
 import type { Deadline } from "./deadline.ts";
 import type { Migration } from "./migrations.ts";
 import type { ModelHandler } from "./models.ts";
@@ -109,8 +110,12 @@ export interface CapabilityRuntime {
   dumpState(state: StateRef, code: CodeRef): Promise<Record<string, Record<string, unknown>[]>>;
   /** Rows per user table, without reading them (Info › Data). */
   countState(state: StateRef, code: CodeRef): Promise<Record<string, number>>;
-  /** Each user table's row keys (`tableKeys`): the no-loss invariant's measurement, around a candidate's migrations. */
-  keysState(state: StateRef, code: CodeRef): Promise<Record<string, string[]>>;
+  /**
+   * The no-loss invariant's measurement around a candidate's migrations, on a copy (abi.ts): `markKeys` snapshots
+   * every table's keys into the copy itself, `keysSince` compares them there and answers counts only (`KeysSince`).
+   */
+  markKeys(state: StateRef, code: CodeRef): Promise<void>;
+  keysSince(state: StateRef, code: CodeRef): Promise<KeysSince>;
 }
 
 // ---------- Workbench (where builders run: the Node process, or the supervisor) ----------

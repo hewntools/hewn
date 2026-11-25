@@ -8,7 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
-import { lostRows } from "@hewntools/core/abi.ts";
+import { keysSince, lostRows, markKeys } from "@hewntools/core/abi.ts";
+import { explainFailure } from "@hewntools/core/failure.ts";
+import { migrationProblems } from "@hewntools/core/migrations.ts";
+import { DRY_RUN_FAILED, NO_LOSS_FAILED } from "@hewntools/core/platform/validation.ts";
+import { abiDb } from "@hewntools/test-host/runtime.ts";
+import { DatabaseSync } from "node:sqlite";
 import { prometheusText } from "@hewntools/cli/supervisor/metrics.ts";
 import { editJson, editText, FIXTURES, installFrom, installSeed, setup } from "./helpers.ts";
 
@@ -21,14 +26,37 @@ INSERT INTO runs SELECT * FROM runs_v1${where};
 CREATE INDEX runs_on_date ON runs (date);
 `;
 
+/** The no-loss rules on a real database: `setup` before the snapshot, `migrate` after it; what lostRows says. */
+function measured(setupSql: string, migrateSql: string) {
+  const raw = new DatabaseSync(":memory:");
+  const db = abiDb(raw);
+  db.exec(setupSql);
+  markKeys(db);
+  db.exec(migrateSql);
+  const since = keysSince(db);
+  const left = raw.prepare("SELECT name FROM sqlite_master WHERE name LIKE '_hewn_keys%'").all();
+  raw.close();
+  assert.deepEqual(left, [], "the snapshots are dropped");
+  return { lost: lostRows(since), since };
+}
+const runs = (n: number, table = "runs") => `CREATE TABLE ${table} (id TEXT PRIMARY KEY, km REAL);\n${Array.from({ length: n }, (_, i) => `INSERT INTO ${table} VALUES ('r${i + 1}', ${i + 1});`).join("\n")}`;
+
 test("the no-loss rules: keys kept per table, no fewer rows in all; a rename, a merge or a split passes", () => {
-  const k = (...ids: number[]) => ids.map((i) => JSON.stringify([i]));
-  assert.deepEqual(lostRows({ runs: k(1, 2, 3) }, { runs: k(1, 2, 3, 4) }), [], "rows added");
-  assert.deepEqual(lostRows({ runs: k(1, 2) }, { run_entries: k(1, 2) }), [], "a rename");
-  assert.deepEqual(lostRows({ a: k(1), b: k(2) }, { ab: k(1, 2) }), [], "a merge");
-  assert.deepEqual(lostRows({ runs: k(1, 2, 3) }, { runs: k(1) }), ["`runs` would lose 2 of its 3 rows", "2 fewer rows across its tables (3 before, 1 after)"]);
-  assert.deepEqual(lostRows({ runs: k(1, 2) }, { runs: k(11, 12) }), ["`runs` would lose 2 of its 2 rows (their keys change)"], "renumbered");
-  assert.deepEqual(lostRows({ runs: k(1, 2), old: k(3) }, { runs: k(1, 2) }), ["1 fewer rows across its tables (3 before, 2 after)"], "a dropped table's rows gone");
+  assert.deepEqual(measured(runs(3), "INSERT INTO runs VALUES ('r4', 4);").lost, [], "rows added");
+  assert.deepEqual(measured(runs(2), "ALTER TABLE runs RENAME TO run_entries;").lost, [], "a rename");
+  assert.deepEqual(measured(`${runs(1, "a")}\nCREATE TABLE b (id TEXT PRIMARY KEY, km REAL); INSERT INTO b VALUES ('r9', 9);`, "CREATE TABLE ab (id TEXT PRIMARY KEY, km REAL); INSERT INTO ab SELECT * FROM a; INSERT INTO ab SELECT * FROM b; DROP TABLE a; DROP TABLE b;").lost, [], "a merge");
+  assert.deepEqual(measured(runs(3), "DELETE FROM runs WHERE id != 'r1';").lost, ["`runs` would lose 2 of its 3 rows", "2 fewer rows across its tables (3 before, 1 after)"]);
+  assert.deepEqual(measured(runs(2), "UPDATE runs SET id = id || '-x';").lost, ["`runs` would lose 2 of its 2 rows (their keys change)"], "renumbered");
+  assert.deepEqual(measured(`${runs(2)}\nCREATE TABLE old (id TEXT PRIMARY KEY); INSERT INTO old VALUES ('o');`, "DROP TABLE old;").lost, ["1 fewer rows across its tables (3 before, 2 after)"], "a dropped table's rows gone");
+});
+
+test("the no-loss rules see through a rename, and compare counts where the key itself changes", () => {
+  assert.deepEqual(measured(runs(2), "ALTER TABLE runs RENAME TO run_entries; UPDATE run_entries SET id = id || '-x';").lost, ["`runs` would lose 2 of its 2 rows (their keys change)"], "renamed, then renumbered");
+  assert.deepEqual(measured("CREATE TABLE n (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO n VALUES (1, 'a'), (2, 'b');", "ALTER TABLE n RENAME TO n_v1; CREATE TABLE n (id TEXT PRIMARY KEY, v TEXT); INSERT INTO n SELECT id, v FROM n_v1;").lost, [], "INTEGER keys as TEXT keep their keys");
+  assert.deepEqual(measured("CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('a'), ('b');", "ALTER TABLE notes RENAME TO notes_v1; CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO notes (body) SELECT body FROM notes_v1;").lost, [], "a key added to a table without one: its rows counted");
+  const { lost, since } = measured("CREATE VIRTUAL TABLE s_fts USING fts5(body); INSERT INTO s_fts (body) VALUES ('a'), ('b'), ('c');", "INSERT INTO s_fts(s_fts) VALUES('optimize');");
+  assert.deepEqual(lost, [], "an FTS index and its shadow tables aren't the tool's rows");
+  assert.deepEqual(Object.keys(since.tables), []);
 });
 
 describe("Hewn's no-loss check", () => {
@@ -119,4 +147,99 @@ describe("Hewn's no-loss check", () => {
     assert.match(b.log.join("\n"), /would lose data on a copy of the tool's data:\n {2}- list_runs@1 would no longer return \d+ of the \d+ records it returned/);
     assert.match(b.failure?.detail ?? "", /^list_runs@1 would no longer have returned \d+ of its records\.$/);
   });
+});
+
+describe("the no-loss check, after review", () => {
+  let t: ReturnType<typeof setup>;
+  beforeEach(async () => {
+    t = setup();
+    await installSeed(t.platform);
+  });
+  afterEach(() => t.cleanup());
+  const run = (km: number, notes?: string) => t.platform.invoke(USER, { capabilityId: "running-log", operation: "record_run", input: { distanceKm: km, durationSeconds: 1500, date: "2026-10-01", ...(notes ? { notes } : {}) } });
+  const change = async (edit: (ws: string) => void, by = USER) => {
+    t.queue(edit);
+    return t.platform.settle((await t.platform.modify(by, { capabilityId: "running-log", request: "change" })).buildId);
+  };
+  /** The running log with one read more (its manifest entry and its code). */
+  const withRead = (name: string, code: string) => (ws: string) => {
+    editJson(join(ws, "capability.json"), (m) => m.operations.push({ name, description: name, version: 1, sideEffect: "read", inputSchema: { type: "object" }, outputSchema: { type: "object" } }));
+    editText(join(ws, "src/index.ts"), (s) => s.replace(/\n};\s*$/, `\n  ${code}\n};\n`));
+  };
+  const all = (...edits: ((ws: string) => void)[]) => (ws: string) => edits.forEach((e) => e(ws));
+
+  test("an agent's build is told only that rows would be lost: which and how many are in the owner's build log", async () => {
+    for (const km of [3, 4, 8]) await run(km);
+    const b = await change(migration(rebuild(" WHERE NOT (distance_km < 5 AND date = '2026-10-01')")), t.claude);
+    assert.equal(b.status, "failed", b.log.join("\n"));
+    const log = b.log.join("\n");
+    assert.match(log, /the migrations would lose data on a copy of the tool's data: rows would be gone or their keys changed/);
+    assert.doesNotMatch(log, /`runs`|would lose \d|of its \d|rows kept/);
+    assert.deepEqual([b.failure?.title, b.failure?.caught], ["Stopped before it went live", true]);
+    assert.match((await t.platform.workbench.transcript(b.buildId)) ?? "", /`runs` would lose 2 of its 3 rows/);
+    const kept = await change(migration("ALTER TABLE runs ADD COLUMN shoes TEXT;\n", "002_shoes.sql"), t.claude);
+    assert.ok(kept.log.some((l) => /no data lost by the migrations on a copy of the tool's data$/.test(l)), kept.log.join("\n"));
+  });
+
+  test("the old version's reads run read-only: one that writes is left out, not blamed on the migration", async () => {
+    const v2 = await change(all(migration("CREATE TABLE cache (id TEXT PRIMARY KEY);\nINSERT INTO cache VALUES ('c1');\n", "002_cache.sql"), withRead("peek", `"peek@1"(_: unknown, { db }: Ctx) { db.prepare("DELETE FROM cache").run(); return {}; },`)));
+    assert.equal(v2.status, "promoted", v2.log.join("\n"));
+    const b = await change(migration("ALTER TABLE runs ADD COLUMN shoes TEXT;\n", "003_shoes.sql"));
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+  });
+
+  test("a read that worked before and fails after the migrations stops the build", async () => {
+    await run(5, "boom");
+    const b = await change(all(migration("ALTER TABLE runs ADD COLUMN shoes TEXT;\n", "002_shoes.sql"), (ws) => editText(join(ws, "src/index.ts"), (s) => s.replace(`"get_summary@1"(input: Range, { db }: Ctx) {`, `"get_summary@1"(input: Range, { db }: Ctx) {\n    if (db.prepare("SELECT 1 FROM runs WHERE notes = 'boom'").get()) throw new Error("bad row");`))));
+    assert.equal(b.status, "failed", b.log.join("\n"));
+    assert.match(b.log.join("\n"), /- get_summary@1 fails after the migrations: get_summary@1 failed: bad row/);
+    assert.equal(b.failure?.caught, true);
+  });
+
+  test("reads that pick at random or show the latest one don't fail a change that adds rows", async () => {
+    for (const km of [3, 4]) await run(km);
+    const v2 = await change(all(withRead("pick", `"pick@1"(_: unknown, { db }: Ctx) { return { runs: db.prepare("SELECT id FROM runs ORDER BY random() LIMIT 1").all() }; },`), withRead("latest", `"latest@1"(_: unknown, { db }: Ctx) { return { runs: db.prepare("SELECT id FROM runs ORDER BY date DESC, recorded_at DESC LIMIT 1").all() }; },`)));
+    assert.equal(v2.status, "promoted", v2.log.join("\n"));
+    for (let i = 0; i < 3; i++) {
+      const b = await change(migration(`INSERT INTO runs (id, date, distance_km, duration_seconds, notes, recorded_at) SELECT 'seeded-${i}', '2099-01-0${i + 1}', 1, 60, NULL, '2099-01-01T00:00:00Z' WHERE EXISTS (SELECT 1 FROM runs);\n`, `00${i + 2}_seed.sql`));
+      assert.equal(b.status, "promoted", b.log.join("\n"));
+    }
+  });
+
+  test("a migration that doesn't apply to the old version's sample data (a client's check) says so, and isn't caught", async () => {
+    const pack = await t.platform.pack(t.claude, { kind: "modify", capabilityId: "running-log" });
+    const files = pack.files.filter((f) => !/^(CONTRACTS\.md|OTHER_TOOLS\.md|PLATFORM_UI\.css|\.hewn-contracts\/)/.test(f.path));
+    const checked = await t.platform.checkFiles(t.claude, { files: [...files, { path: "migrations/002_one_a_day.sql", content: "CREATE UNIQUE INDEX one_a_day ON runs (date);\n" }], capabilityId: "running-log" });
+    assert.equal(checked.passed, false, checked.text);
+    assert.match(checked.failures.join("\n"), /the upgrade dry run failed on its sample data in the version it replaces: .*UNIQUE/);
+  });
+});
+
+test("caught: what the copy stopped for the tool's data, and what it didn't", () => {
+  const f = (msg: string) => explainFailure([`FAILED: ${msg}`]);
+  assert.deepEqual([f("the upgrade dry run failed: UNIQUE constraint failed: runs.date").detail, f("the upgrade dry run failed: x").caught], ["A migration didn't apply to the data the tool holds now: UNIQUE constraint failed: runs.date", true]);
+  assert.equal(f(DRY_RUN_FAILED).caught, true);
+  assert.equal(f(NO_LOSS_FAILED).caught, true);
+  assert.equal(f("record_run@1 leaves runs with fewer rows and adds none: declare it destructive").caught, true);
+  const sample = f("the upgrade dry run failed on its sample data in the version it replaces: UNIQUE constraint failed: runs.date");
+  assert.deepEqual([sample.title, sample.detail, sample.caught], ["A migration didn't apply", "To the tool's sample data: UNIQUE constraint failed: runs.date", undefined]);
+});
+
+test("the migration lint reads past comments, and a '--' in a string doesn't hide what follows", () => {
+  const lint = (sql: string) => migrationProblems([{ name: "002_x.sql", sql }], []);
+  assert.match(lint("DELETE/**/FROM runs;").join(), /destructive/);
+  assert.match(lint("INSERT INTO notes VALUES ('--'); DELETE FROM runs;").join(), /destructive/);
+  assert.deepEqual(lint("-- shoes per run\nALTER TABLE runs ADD COLUMN shoes TEXT;"), []);
+});
+
+test("purging a tool forgets which of its operations stalled", async () => {
+  const t = setup();
+  try {
+    await installSeed(t.platform);
+    t.platform.registry.setKv("stalled-ops:running-log", ["list_runs@1"]);
+    t.platform.registry.purgeCapability("running-log");
+    assert.equal(t.platform.registry.getKv("stalled-ops:running-log"), undefined);
+  } finally {
+    t.cleanup();
+  }
 });

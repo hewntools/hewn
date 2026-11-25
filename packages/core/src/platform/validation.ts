@@ -5,7 +5,7 @@
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
 import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
-import { lostRows } from "../abi.ts";
+import { lostRows, rowsSince } from "../abi.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -59,6 +59,12 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  * What an agent's build says when its migrations don't apply to the tool's data. The error itself may
  * quote that data, so it goes to the build's transcript, which only the owner reads.
  */
+/** An agent's build that would lose rows of the owner's data: what it's told (the owner's build log has the rest). */
+export const NO_LOSS_FAILED = "the migrations would lose data on a copy of the tool's data: rows would be gone or their keys changed (make each one keep every row with its key; the owner's build log has which and how many)";
+/** How long the no-loss check's reads may take in all, before and after the migrations; past it, the rest aren't called. */
+export const NO_LOSS_READS_MS = 30_000;
+/** At most this many ids of one read are compared. */
+const NO_LOSS_MAX_IDS = 10_000;
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
 
 /** How many times a builder may check its work in one attempt. */
@@ -392,19 +398,28 @@ export class Validation extends Domain {
 
       // 6. the upgrade on the tool's data, and Hewn's own no-loss check around it: after the candidate's migrations
       // every row keeps its key and none go in all, and the reads that take no input still return every record they
-      // did. On a copy of the owner's data when there is some (not a client's check: its migrations run there only once
-      // submitted), else on the version it replaces, filled with that version's sample data.
+      // did. On a copy of the tool's data in Hewn when there is some (not a client's check: its migrations run there
+      // only once submitted), else on the version it replaces, filled with that version's sample data.
       stopIfStalled();
       const ownData = opts.liveData !== false && (await this.runtime.hasState({ capabilityId: id }));
       if (ownData) await this.runtime.copyState({ capabilityId: id }, dryRun);
+      // What it measures on the owner's data stays the owner's: an agent's build says only that rows would be lost, and
+      // the owner's build log has which and how many (an agent writes both the migration and the reads, so counts and
+      // ids would let it read the owner's data a bit at a time).
+      const hidden = ownData && !byOwner(build);
+      const tell = async (line: string) => {
+        if (!hidden) step(line);
+        else if (!opts.check) await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${line}`).catch(() => {});
+      };
       // Measured only around new migrations (nothing else changes the data); a change without them calls none of its reads.
       const shipped = new Set(base ? migrationsOf(base.files).map((m) => m.name) : []);
       const changesData = migrations.some((m) => !shipped.has(m.name));
       const measured = changesData && (ownData || (base ? await this.fillWithSample(base, dryRun) : false));
       if (ownData || measured) {
         const where = ownData ? "a copy of the tool's data" : "its sample data in the version it replaces";
-        const keysBefore = measured ? await this.runtime.keysState(dryRun, code) : {};
-        const readsBefore = measured && base ? await this.readIds(base.row.manifest, base.code, dryRun, { via: NO_LOSS_BASE_VIA, onSkip: (line) => step(`no-loss check: ${line}`) }) : new Map<string, Set<string>>();
+        if (measured) await this.runtime.markKeys(dryRun, code);
+        const reads = { budget: Date.now() + NO_LOSS_READS_MS };
+        const readsBefore = measured && base ? await this.readIds(base.row.manifest, base.code, dryRun, { via: NO_LOSS_BASE_VIA, twice: true, budget: reads, onSkip: (line) => tell(`no-loss check: ${line}`) }) : new Map<string, ReadIds>();
         let applied: string[] | undefined;
         try {
           applied = await this.runtime.migrate(dryRun, migrations, code);
@@ -415,17 +430,27 @@ export class Validation extends Domain {
           softFail(message);
         }
         if (measured && applied?.length) {
-          const lost = lostRows(keysBefore, await this.runtime.keysState(dryRun, code));
-          const readsAfter = readsBefore.size ? await this.readIds(manifest, code, dryRun, { via: NO_LOSS_VIA, only: new Set(readsBefore.keys()) }) : new Map<string, Set<string>>();
-          for (const [op, ids] of readsBefore) {
+          const since = await this.runtime.keysSince(dryRun, code);
+          const lost = lostRows(since);
+          const readsAfter = readsBefore.size ? await this.readIds(manifest, code, dryRun, { via: NO_LOSS_VIA, only: new Set(readsBefore.keys()), budget: reads, onSkip: (line) => tell(`no-loss check: ${line}`) }) : new Map<string, ReadIds>();
+          for (const [op, was] of readsBefore) {
             const now = readsAfter.get(op);
-            const gone = now ? [...ids].filter((x) => !now.has(x)).length : 0;
-            if (gone) lost.push(`${op} would no longer return ${gone} of the ${ids.size} records it returned`);
+            if (!now || !("ids" in was)) continue;
+            // A read that worked before and fails after: the breakage the copy is there to find.
+            if ("error" in now) {
+              lost.push(`${op} fails after the migrations: ${now.error}`);
+              continue;
+            }
+            // Only a read that returns fewer records: one that shows the latest few shows others once rows are added.
+            const gone = [...was.ids].filter((x) => !now.ids.has(x)).length;
+            if (gone && now.ids.size < was.ids.size) lost.push(`${op} would no longer return ${gone} of the ${was.ids.size} records it returned`);
           }
-          if (lost.length) softFail(`${applied.length === 1 ? `migration ${applied[0]}` : `migrations ${applied.join(", ")}`} would lose data on ${where}`, lost);
+          const what = `${applied.length === 1 ? `migration ${applied[0]}` : `migrations ${applied.join(", ")}`} would lose data on ${where}`;
+          if (lost.length && hidden) softFail(await this.ownersDetail(build, listed(what, lost), NO_LOSS_FAILED, { note: !opts.check }));
+          else if (lost.length) softFail(what, lost);
           else {
             if (ownData) step(`upgrade dry-run ok (${applied.join(", ")})`);
-            step(`no data lost by the migrations on ${where} (${Object.values(keysBefore).reduce((n, k) => n + k.length, 0)} rows kept)`);
+            step(`no data lost by the migrations on ${where}${hidden ? "" : ` (${rowsSince(since).before} rows kept)`}`);
           }
         } else if (applied && ownData) step(`upgrade dry-run ok (${applied.length ? applied.join(", ") : "no new migrations"})`);
       }
@@ -610,13 +635,10 @@ export class Validation extends Domain {
   }
 
   /**
-   * One sample call (sample/calls.json), through the contract, with nothing granted: the target
-   * has no hosts (no network), and other tools and the model refuse. Validation and installs both
-   * replay sample data this way. `via`: what a stall names it by ("on sample call 2").
-   */
-  /**
    * The version a candidate replaces, its migrations applied and filled with its own sample data on `state`: the
-   * no-loss check's ground when the owner has no data yet. False when it has no sample data.
+   * no-loss check's ground when Hewn holds no data of the tool (a client's check). False when it has no sample data.
+   * That version's code, as the no-loss check's reads of it: a call of an operation that ever stalled isn't made, and
+   * one that stalls now isn't the build's (stalls.ts) and ends the filling there.
    */
   private async fillWithSample(base: { row: { manifest: CapabilityManifest }; files: Files; code: CodeRef }, state: StateRef): Promise<boolean> {
     let calls: SampleCall[] | null = null;
@@ -629,20 +651,32 @@ export class Validation extends Domain {
     await this.runtime.dropState(state);
     await this.runtime.migrate(state, migrationsOf(base.files), base.code);
     const target: ExecutionTarget = { capabilityId: state.capabilityId, code: base.code, state, secrets: {}, config: {}, caller: { kind: "test", id: "sample" } };
-    for (const c of calls) await this.replayCall(base.row.manifest, target, c).catch(() => {});
+    const stalled = this.d.stalls.stalledOps(state.capabilityId);
+    for (const c of calls) {
+      const op = caseOperation(base.row.manifest, c);
+      if (op && stalled.has(opKey(op.name, op.version))) continue;
+      const stalledNow = await this.replayCall(base.row.manifest, target, c, NO_LOSS_BASE_VIA).then(
+        () => false,
+        (e: unknown) => !!(e instanceof PlatformError && (e.details as { stalled?: boolean } | undefined)?.stalled),
+      );
+      if (stalledNow) break;
+    }
     return true;
   }
 
   /**
    * What each read that takes no input returns on `state`, as the `id`s in it (the no-loss check's second signal:
-   * a record a read returned before the migrations should still be there after); `only`: these reads. A read that
-   * fails is left out, and one that ever stalled isn't called (`onSkip` says so): it would restart Hewn's tools, the
-   * live ones with them. One that stalls now (on workerd; `via` says whose code it is, stalls.ts) is left out with the
-   * reads after it, so the check restarts them once at most.
+   * a record a read returned before the migrations should still be there after), or the error it failed with;
+   * `only`: these reads. `twice` (the old version's, between the keys' snapshot and the migrations): read-only, as a
+   * widget's call (a read that writes fails, and is left out), and called twice, keeping the ids both calls returned
+   * (a read that picks at random keeps none). One that ever stalled isn't called (`onSkip` says so): it would restart
+   * Hewn's tools, the live ones with them. One that stalls now (on workerd;
+   * `via` says whose code it is, stalls.ts) is left out with the reads after it, so the check restarts them once at
+   * most; one past its deadline, or held up by another tool, is left out. Past `budget`, the rest aren't called.
    */
-  private async readIds(manifest: CapabilityManifest, code: CodeRef, state: StateRef, opts: { via: string; only?: Set<string>; onSkip?: (line: string) => void }): Promise<Map<string, Set<string>>> {
-    const out = new Map<string, Set<string>>();
-    const target: ExecutionTarget = { capabilityId: state.capabilityId, code, state, secrets: {}, config: {}, caller: { kind: "test", id: "no-loss" } };
+  private async readIds(manifest: CapabilityManifest, code: CodeRef, state: StateRef, opts: { via: string; only?: Set<string>; twice?: boolean; budget: { budget: number }; onSkip?: (line: string) => Promise<void> | void }): Promise<Map<string, ReadIds>> {
+    const out = new Map<string, ReadIds>();
+    const target: ExecutionTarget = { capabilityId: state.capabilityId, code, state, secrets: {}, config: {}, caller: { kind: "test", id: "no-loss" }, ...(opts.twice ? { readOnly: true } : {}) };
     const stalled = this.d.stalls.stalledOps(state.capabilityId);
     const reads = manifest.operations
       .filter((op) => {
@@ -651,26 +685,50 @@ export class Validation extends Domain {
       })
       .map((op) => ({ op, key: opKey(op.name, op.version) }))
       .filter((r) => !opts.only || opts.only.has(r.key));
+    /** One call: its ids, its error, or why it's left out (`skip`; `stop`: a stall, nothing more is called). */
+    const call = async (op: OperationManifest): Promise<{ ids: Set<string> } | { error: string } | { skip: true; stop?: true }> => {
+      try {
+        const r = await this.replayCall(manifest, target, { operation: op.name, version: op.version }, opts.via);
+        return { ids: idsIn(r.result) };
+      } catch (e) {
+        const details = (e instanceof PlatformError ? e.details : undefined) as { stalled?: boolean; heldUp?: boolean } | undefined;
+        if (details?.stalled) return { skip: true, stop: true };
+        if (details?.heldUp || /timed out \(call chain deadline\)$/.test((e as Error).message)) return { skip: true };
+        return { error: (e as Error).message };
+      }
+    };
     for (const [i, { op, key }] of reads.entries()) {
       if (stalled.has(key)) {
-        opts.onSkip?.(`${key} left out (it stalled before)`);
+        await opts.onSkip?.(`${key} left out (it stalled before)`);
         continue;
       }
-      let stalledNow = false;
-      const r = await this.replayCall(manifest, target, { operation: op.name, version: op.version }, opts.via).catch((e: unknown) => {
-        stalledNow = !!(e instanceof PlatformError && (e.details as { stalled?: boolean } | undefined)?.stalled);
-        return undefined;
-      });
-      if (stalledNow) {
-        const rest = reads.slice(i + 1).map((x) => x.key);
-        opts.onSkip?.(`${key} left out (it worked for more than ${STALL_MS / 1000} seconds without a pause, so Hewn's tools were restarted)${rest.length ? `, and ${rest.join(", ")} not called` : ""}`);
+      if (Date.now() >= opts.budget.budget) {
+        await opts.onSkip?.(`${reads.slice(i).map((x) => x.key).join(", ")} not called (its reads' ${NO_LOSS_READS_MS / 1000} s were up)`);
         break;
       }
-      if (r) out.set(key, idsIn(r.result));
+      let r = await call(op);
+      if (opts.twice && "ids" in r) {
+        const again = await call(op);
+        r = "ids" in again ? { ids: new Set([...r.ids].filter((x) => again.ids.has(x))) } : again;
+      }
+      if ("stop" in r && r.stop) {
+        const rest = reads.slice(i + 1).map((x) => x.key);
+        await opts.onSkip?.(`${key} left out (it worked for more than ${STALL_MS / 1000} seconds without a pause, so Hewn's tools were restarted)${rest.length ? `, and ${rest.join(", ")} not called` : ""}`);
+        break;
+      }
+      if ("skip" in r) continue;
+      // Before the migrations a read that fails has nothing to compare (one that worked is called after, if only to see it still works).
+      if (opts.twice && "error" in r) continue;
+      out.set(key, r);
     }
     return out;
   }
 
+  /**
+   * One sample call (sample/calls.json), through the contract, with nothing granted: the target
+   * has no hosts (no network), and other tools and the model refuse. Validation and installs both
+   * replay sample data this way. `via`: what a stall names it by ("on sample call 2").
+   */
   async replayCall(manifest: CapabilityManifest, target: ExecutionTarget, c: SampleCall, via?: string) {
     return this.d.invocation.execute(
       manifest,
@@ -857,12 +915,18 @@ function installedFrom(build: BuildRow): ToolSource | undefined {
 
 /** A message with its list under it, as validation reports a failure. */
 /** Every `id` in a result (any depth), as strings: the records a read returned. */
+/** A read's ids for the no-loss check, or the error it failed with. */
+type ReadIds = { ids: Set<string> } | { error: string };
+
+/** The `id`s in a read's result, at most NO_LOSS_MAX_IDS. */
 function idsIn(v: unknown, out = new Set<string>()): Set<string> {
+  if (out.size >= NO_LOSS_MAX_IDS) return out;
   if (Array.isArray(v)) for (const x of v) idsIn(x, out);
   else if (v && typeof v === "object")
     for (const [k, x] of Object.entries(v)) {
-      if (k === "id" && (typeof x === "string" || typeof x === "number")) out.add(String(x));
-      else idsIn(x, out);
+      if (k === "id" && (typeof x === "string" || typeof x === "number")) {
+        if (out.size < NO_LOSS_MAX_IDS) out.add(String(x));
+      } else idsIn(x, out);
     }
   return out;
 }

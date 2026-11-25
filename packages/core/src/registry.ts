@@ -551,8 +551,11 @@ export class Registry {
     const model = one<{ usd: number | null; input: number | null; output: number | null; calls: number }>(`
       SELECT sum(cost_usd) AS usd, sum(input_tokens) AS input, sum(output_tokens) AS output, count(*) AS calls
       FROM model_calls WHERE month = ?`, month);
-    // Failed builds' logs, for the count of those Hewn's checks caught on a copy (`explainFailure(...).caught`).
-    const failedLogs = all<{ log: string }>("SELECT log FROM builds WHERE status = 'failed'").map((r) => JSON.parse(r.log) as string[]);
+    // Failed builds' logs, for the count of those Hewn's checks caught on a copy (`explainFailure(...).caught`): only
+    // those whose log has one of its causes (failure.ts), so a scrape doesn't read every failed build's log.
+    const failedLogs = all<{ log: string }>(
+      "SELECT log FROM builds WHERE status = 'failed' AND (log LIKE '%would lose data on %' OR log LIKE '%the upgrade dry run failed%' OR log LIKE '%declare it destructive%')",
+    ).map((r) => JSON.parse(r.log) as string[]);
     return { tools, builds, buildTime, calls24h: calls(since24h), calls7d: calls(since7d), model, failedLogs };
   }
 
@@ -1347,7 +1350,7 @@ export class Registry {
       this.db.prepare("DELETE FROM capabilities WHERE id = ?").run(id);
       this.versionRows.delete(id);
       // Its failed calls (for "Ask builder to fix this"), the owner's rules for it and the license it was shared under go with it: a new tool under the id starts clean.
-      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`, `share:license:${id}`);
+      this.db.prepare("DELETE FROM platform_kv WHERE key IN (?, ?, ?, ?, ?)").run(`failures:${id}`, `instructions:${id}`, `stalls:${id}`, `stalled-ops:${id}`, `share:license:${id}`);
     });
   }
 

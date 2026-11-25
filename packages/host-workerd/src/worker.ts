@@ -31,6 +31,7 @@ import BRIEF from "./builder-brief.md";
 import { type CallInFlight, stallRoles } from "./stall-blame.ts";
 import { IDLE_GC_BACKGROUND_EVERY_MS, IDLE_GC_QUIET_MS, IdleGc, tickCall } from "./idle-gc.ts";
 import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, EGRESS_PATH, type EgressMark, TOOLS_TOKEN_HEADER, toolsChannel, ToolsUnreachable } from "./tools-channel.ts";
+import type { KeysSince } from "@hewntools/core/abi.ts";
 
 interface Env {
   HEWN: DurableObjectNamespace;
@@ -488,7 +489,8 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
     listStates: (capabilityId, prefix) => toTools("reading its data", () => host(capabilityId).listStates({ prefix })),
     dumpState: (state, code) => toTools("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
     countState: (state, code) => toTools("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
-    keysState: (state, code) => toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
+    markKeys: async (state, code) => void (await toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code), since: false }), true)),
+    keysSince: async (state, code) => (await toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code), since: true }), true)) as KeysSince,
     loadState: (state, tables, code) => limited(state.capabilityId, "loading its data", (limit) => host(state.capabilityId).load({ scratch: state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code) })),
   };
 }

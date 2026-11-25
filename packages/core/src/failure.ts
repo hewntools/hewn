@@ -95,6 +95,8 @@ function explainLog(log: string[]): BuildFailure {
     const name = /builder (\S+) is unavailable/.exec(msg)?.[1] ?? "The builder";
     return say("The builder isn't available", `${name} couldn't start. Check that it's installed and signed in.`);
   }
+  // An agent's build told only that (the owner's build log has which rows): still the copy saving the owner's data.
+  if (/^the migrations would lose data on a copy of the tool's data: rows would be gone/.test(msg)) return { ...say("Stopped before it went live", "Rows of the tool's data would have been lost or changed their keys; its build log says which."), caught: true };
   // Caught on a copy: what the tool's data would have suffered, in words.
   const lost = /would lose data on /.test(msg) ? first(msg) : "";
   if (lost) {
@@ -104,6 +106,11 @@ function explainLog(log: string[]): BuildFailure {
     const words = table ? `${table[2]} ${table[2] === "1" ? "row" : "rows"} of ${table[1]} would have been lost.` : total ? `${total[1]} rows would have been lost.` : read ? `${read[1]} would no longer have returned ${read[2]} of its records.` : `${lost}.`;
     return { ...say("Stopped before it went live", words), caught: true };
   }
+  // On the old version's sample data (Hewn holds none of the tool's): the migration's fault, but no data was at risk.
+  const sampleRun = /^the upgrade dry run failed on its sample data in the version it replaces: ([\s\S]*)$/.exec(msg);
+  if (sampleRun) return say("A migration didn't apply", `To the tool's sample data: ${first(sampleRun[1])}`);
+  const dryRun = /^the upgrade dry run failed: ([\s\S]*)$/.exec(msg);
+  if (dryRun) return { ...say("Stopped before it went live", `A migration didn't apply to the data the tool holds now: ${first(dryRun[1])}`), caught: true };
   if (/the upgrade dry run failed/.test(msg)) return { ...say("Stopped before it went live", "A migration didn't apply to the data the tool holds now."), caught: true };
   const deletes = /(\S+) leaves .+ with fewer rows and adds none: declare it destructive/.exec(msg);
   if (deletes) return { ...say("Stopped before it went live", `${deletes[1]} deletes rows without saying so: it must be declared destructive, so the owner confirms it.`), caught: true };

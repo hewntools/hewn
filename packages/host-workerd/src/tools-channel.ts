@@ -31,7 +31,7 @@ export interface HostCalls {
   migrate: { scratch: string | null; migrations: Migration[]; code: SentCode; limit: number; hosts: string[]; named: boolean };
   dump: { scratch: string | null; code: SentCode; limit: number; hosts: string[]; named: boolean };
   count: { scratch: string | null; code: SentCode; limit: number; hosts: string[]; named: boolean };
-  keys: { scratch: string | null; code: SentCode; limit: number; hosts: string[]; named: boolean };
+  keys: { scratch: string | null; code: SentCode; limit: number; hosts: string[]; named: boolean; since: boolean };
   load: { scratch: string | null; tables: Record<string, Record<string, unknown>[]>; code: SentCode; limit: number; hosts: string[]; named: boolean };
   hasState: { scratch: string | null };
   copyState: { from: string | null; to: string | null };

@@ -10,6 +10,8 @@ export interface Migration {
 
 const MIGRATION_NAME = /^\d{3}_[a-z0-9_]+\.sql$/;
 const DESTRUCTIVE = /\b(drop\s+table|drop\s+column|delete\s+from|truncate)\b/i;
+/** The SQL with its comments as spaces (`DELETE/**\/FROM` is a DELETE). The lint reads both: a "--" in a string isn't a comment. */
+const withoutComments = (sql: string) => sql.replace(/\/\*[\s\S]*?(\*\/|$)/g, " ").replace(/--[^\n]*/g, " ");
 
 /** The migrations/ directory of an implementation, in order. */
 export function migrationsOf(files: Files): Migration[] {
@@ -23,7 +25,7 @@ export function migrationProblems(migrations: Migration[], base: Migration[]): s
   const out: string[] = [];
   for (const m of migrations) {
     if (!MIGRATION_NAME.test(m.name)) out.push(`migration ${m.name}: name must match NNN_snake_case.sql`);
-    if (DESTRUCTIVE.test(m.sql)) out.push(`migration ${m.name}: destructive statements are not allowed`);
+    if (DESTRUCTIVE.test(m.sql) || DESTRUCTIVE.test(withoutComments(m.sql))) out.push(`migration ${m.name}: destructive statements are not allowed`);
     // Durable Object SQL manages transactions itself (each migration is applied atomically).
     if (/^\s*(begin|commit|rollback|savepoint|release)\b/im.test(m.sql)) out.push(`migration ${m.name}: transaction statements (BEGIN/COMMIT) are not allowed; each migration already runs atomically`);
     // A shipped one ran already; it can't be edited, so it isn't held to a rule added after it.
