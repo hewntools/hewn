@@ -13,7 +13,7 @@ import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
-import { KEY_LOCKED } from "./builds.ts";
+import { KEY_LOCKED, OWNERS_WORK_LOCKED } from "./builds.ts";
 import { wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
 import { breather, Domain } from "./context.ts";
@@ -209,7 +209,7 @@ export class Validation extends Domain {
     const own = !locked && (!opts.check || !blind) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
     const stored = ownValuesIn(files, own);
     if (stored.length && !opts.check) this.d.builds.lockForKey(build, behind.agents, stored.map((f) => f.label));
-    let storedFailure: string | undefined = locked ? KEY_LOCKED : undefined;
+    let storedFailure: string | undefined = locked ? (byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED) : undefined;
     if (stored.length) {
       const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));
       if (opts.check) storedFailure = detail;

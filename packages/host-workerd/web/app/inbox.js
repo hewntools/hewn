@@ -80,10 +80,10 @@ async function openNeed(n) {
     } else if (n.kind === "builder-model") go("#/settings/ai");
     else if (n.kind === "key-lock") {
       // Whether the agent may build again. The build it's about is in the Inbox too: its log says where the key was.
-      const who = n.detail.split(" put one of")[0].replace(/ \(disconnected\)$/, "");
+      const who = n.agentName ?? n.agentId;
       const ok = await confirmDialog({
         title: `Let ${who} build again?`,
-        body: `Work of its on ${n.title} had one of your stored keys in the tool's files; that failed build's log says where. A key turning up there can be how an agent confirms a guess, so change that key where you got it. Until you say so, it can't build or hand over a tool. If you didn't expect this, disconnect it on Agents instead.`,
+        body: `One of your stored keys turned up in the files of work it had a hand in, on ${n.title}; that failed build's log says where. A key turning up there can be how an agent confirms a guess, so change that key where you got it. Until you say so, it can't build or hand over a tool, and your own changes to its work wait too. If you didn't expect this, disconnect it on Agents instead.`,
         confirm: "Let it build again",
         cancel: "Not now",
       });

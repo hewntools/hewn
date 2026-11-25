@@ -1013,6 +1013,8 @@ export interface InboxItem {
   id: string;
   capabilityId?: string;
   agentId?: string;
+  /** "key-lock": the agent's name, for the dialog. */
+  agentName?: string;
   buildId?: string;
   title: string;
   detail: string;
@@ -1057,7 +1059,7 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   // An agent whose work held one of your stored keys builds nothing until you look, connected or not (a lock stays
   // with its id). Which keys: yours to change, since a hit confirms a guess.
   for (const [agentId, l] of Object.entries(platform.keyLocks(owner)))
-    needs.push({ kind: "key-lock", id: agentId, agentId, buildId: l.buildId, capabilityId: l.capabilityId, title: nameOf(l.capabilityId), detail: `${who(agentId)}${agents.has(agentId) ? "" : " (disconnected)"} put one of your stored keys in it${l.keys?.length ? ` (${l.keys.join(", ")}): change ${l.keys.length === 1 ? "it" : "them"}` : ""}; it can't build until you look`, severity: "danger", action: "Look…", at: l.at });
+    needs.push({ kind: "key-lock", id: agentId, agentId, agentName: who(agentId), buildId: l.buildId, capabilityId: l.capabilityId, title: nameOf(l.capabilityId), detail: `one of your stored keys${l.keys?.length ? ` (${l.keys.join(", ")})` : ""} turned up in work ${who(agentId)}${agents.has(agentId) ? "" : " (disconnected)"} had a hand in: change ${(l.keys?.length ?? 1) > 1 ? "them" : "it"}. ${who(agentId)} can't build, and your own changes to its work wait, until you look`, severity: "danger", action: "Look…", at: l.at });
   for (const p of platform.pendingAgents(owner))
     needs.push({ kind: "agent", id: p.id, title: p.clientName, detail: p.reconnects ? `wants to connect again as ${p.reconnects}` : "wants to connect", severity: "warn", action: "Review", at: p.createdAt });
   for (const b of builds.filter((x) => x.status === "review"))

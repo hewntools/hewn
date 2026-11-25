@@ -6,7 +6,7 @@
 // Sharing refuses a key shape as it refuses the owner's own keys: no Hewn would install it.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,9 +15,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER, WEB_USER } from "@hewntools/core/auth.ts";
 import { bytes, contentHash, decodeVersion, encodeVersion } from "@hewntools/core/files.ts";
+import { packBundle } from "@hewntools/core/bundle.ts";
 import type { FileEntry } from "@hewntools/core/platform.ts";
 import { OWN_KEY_FOUND } from "@hewntools/core/platform/validation.ts";
-import { KEY_LOCKED } from "@hewntools/core/platform/builds.ts";
+import { KEY_LOCKED, OWNERS_WORK_LOCKED } from "@hewntools/core/platform/builds.ts";
 import { installFrom, installSeed, platformWith, SEED, serve, setup } from "./helpers.ts";
 
 const CLI = fileURLToPath(new URL("../packages/cli/src/cli.ts", import.meta.url));
@@ -116,6 +117,19 @@ describe("the owner's stored keys", () => {
   });
   afterEach(() => t.cleanup());
   const holding = () => plus("tests/notes.txt", "a fixture", `password: ${STORED}`);
+  /** A tool the owner's builder made: the running log's files, under the new tool's id. */
+  const ownTool = async () => {
+    const b = await t.build(
+      () => t.platform.create(USER, { name: "Own Log", purpose: "runs", requirements: "runs" }),
+      ((ws: string, job: { capabilityId: string }) => {
+        cpSync(SEED, ws, { recursive: true });
+        const path = join(ws, "capability.json");
+        writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), id: job.capabilityId, name: "Own Log" }, null, 2));
+      }) as never,
+    );
+    assert.equal(b.status, "promoted", b.log.join("\n"));
+    return b.capabilityId;
+  };
 
   test("a client's check never looks for them: it can't answer whether a guess is one", async () => {
     const r = await t.platform.checkFiles(t.claude, { files: holding(), capabilityId: "running-log" });
@@ -149,12 +163,14 @@ describe("the owner's stored keys", () => {
   });
 
   test("the owner's own build: its check names the file, the line and which key; its failure, which an agent may read, says only that one is there", async () => {
+    // A tool the owner's builder made (not one installed from files: the check is blind on those).
+    const own = await ownTool();
     const seen: string[] = [];
     t.queue((async (ws: string, job: { check?: (id: string) => Promise<unknown> }) => {
       writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`);
       seen.push(JSON.stringify(await job.check!("1")));
     }) as never);
-    const b = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a fixture" })).buildId);
+    const b = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: own, request: "a fixture" })).buildId);
     assert.ok(seen[0].includes(`tests/notes.txt:2: ${LABEL}`) && !seen[0].includes(STORED), seen[0]);
     assert.equal(b.status, "failed");
     // An agent that can see the tool can read its builds: only the generic line.
@@ -236,15 +252,12 @@ describe("the owner's stored keys", () => {
     t.queue((ws: string) => writeFileSync(join(ws, "tests", "notes.txt"), `a fixture\npassword: ${STORED}\n`));
     const agents = await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a fixture" })).buildId);
     assert.equal(agents.status, "failed");
-    // While the agent is locked, the owner's build on its work meets the lock too: nothing more is learned from it.
-    t.queue(() => {});
-    const early = await t.platform.settle((await t.platform.retryBuild(USER, agents.buildId, { fix: true })).buildId);
-    assert.ok(JSON.stringify(t.platform.getBuild(t.claude, early.buildId)).includes(KEY_LOCKED));
+    // While the agent is locked, the owner's build on its work waits too, refused before any builder runs.
+    await assert.rejects(t.platform.retryBuild(USER, agents.buildId, { fix: true }), (e: unknown) => (e as Error).message === OWNERS_WORK_LOCKED);
     t.platform.acknowledgeKeyLock(USER, "claude-code");
     const seen: string[] = [];
     t.queue((async (_ws: string, job: { check?: (id: string) => Promise<unknown> }) => seen.push(JSON.stringify(await job.check!("1")))) as never);
-    // Retried again: the earlier fix is the one to carry on from now, and it carries on from the agent's.
-    const fix = await t.platform.settle((await t.platform.retryBuild(USER, early.buildId, { fix: true })).buildId);
+    const fix = await t.platform.settle((await t.platform.retryBuild(USER, agents.buildId, { fix: true })).buildId);
     assert.ok(!seen[0].includes("notes.txt:2") && !seen[0].includes(LABEL), seen[0]);
     assert.equal(fix.status, "failed");
     assert.ok(JSON.stringify(t.platform.getBuild(t.claude, fix.buildId)).includes(OWN_KEY_FOUND));
@@ -286,7 +299,7 @@ describe("the owner's stored keys", () => {
       const needs = JSON.parse((await http("/api/inbox")).body).needs as { kind: string; title: string; detail: string }[];
       const item = needs.find((n) => n.kind === "key-lock")!;
       assert.equal(item.title, "Running Log");
-      assert.match(item.detail, /put one of your stored keys in it/);
+      assert.match(item.detail, /^one of your stored keys \(your Site Connection key \(API_KEY\)\) turned up in work claude-code had a hand in: change it\. claude-code can't build, and your own changes to its work wait, until you look$/);
       assert.equal((await http("/api/agents/claude-code/key-lock", "DELETE")).status, 200);
       assert.deepEqual(t.platform.keyLocks(USER), {});
       // Locked again, then disconnected: the lock stays with its id, and the Inbox still says so, and which key.
@@ -295,7 +308,7 @@ describe("the owner's stored keys", () => {
       t.platform.updateAgent(USER, "claude-code", "revoke");
       const after = JSON.parse((await http("/api/inbox")).body).needs as { kind: string; detail: string }[];
       const still = after.find((n) => n.kind === "key-lock")!;
-      assert.match(still.detail, /\(disconnected\) put one of your stored keys in it \(your Site Connection key \(API_KEY\)\): change it/);
+      assert.match(still.detail, /turned up in work claude-code \(disconnected\) had a hand in: change it/);
     } finally {
       await new Promise((r) => server.close(r));
     }
@@ -378,6 +391,35 @@ describe("the owner's stored keys", () => {
     assert.ok(fix.request.fixOf === held.buildId, JSON.stringify(fix.request));
     assert.ok(!seen[0].includes("Site Connection"), seen[0]);
     assert.equal(fix.status, "failed");
+  });
+
+  test("a tool installed from a file: the owner's builder's check on it is blind to the owner's keys", async () => {
+    const files = Object.fromEntries(entriesOf(resolve(import.meta.dirname, "fixtures/ui-counter")).map((f) => [f.path, bytes(f.content)]));
+    const zip = packBundle(files, { format: 1, hewn: "t", abi: "2.0", exportedAt: new Date().toISOString(), tool: { id: "ui-counter", version: 1, hash: "d".repeat(64) } });
+    const staged = await t.platform.stageBundle(USER, zip);
+    const installed = await t.platform.settle((await t.platform.installBundle(USER, staged.token, { name: "Counter" })).buildId);
+    assert.equal(installed.status, "promoted", installed.log.join("\n"));
+    const seen: string[] = [];
+    t.queue((async (ws: string, job: { check?: (id: string) => Promise<unknown> }) => {
+      writeFileSync(join(ws, "tests", "notes.txt"), `password: ${STORED}\n`);
+      seen.push(JSON.stringify(await job.check!("1")));
+    }) as never);
+    const b = await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: installed.capabilityId, request: "a note" })).buildId);
+    assert.ok(!seen[0].includes("notes.txt") && !seen[0].includes(LABEL), seen[0]);
+    assert.equal(b.status, "failed");
+    assert.deepEqual(t.platform.keyLocks(USER), {}, "no agent had a hand in it");
+  });
+
+  test("whose work: every mark is followed, not only the first; and the versions it's built on", () => {
+    const reg = t.platform.registry;
+    const row = (id: string, requestedBy: string, request: Record<string, unknown> = {}) => (reg.insertBuild({ id, capabilityId: "running-log", kind: "modify", request, requestedBy, baseVersion: 1, builder: "script" }), reg.getBuild(id)!);
+    row("b-owners", USER.id);
+    row("b-agents", "claude-code");
+    const both = row("b-both", WEB_USER.id, { retryOf: "b-owners", fixOf: "b-agents" });
+    const behind = (b: unknown) => (t.platform as unknown as { d: { builds: { behind: (b: unknown) => { agents: Set<string>; foreign: boolean } } } }).d.builds.behind(b);
+    assert.deepEqual([...behind(both).agents], ["claude-code"]);
+    // The running log's v1 came from files (an install from a folder): foreign, so blind.
+    assert.equal(behind(both).foreign, true);
   });
 
   test("settings' values are never looked for: a city in a tool's files is no key", async () => {
