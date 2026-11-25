@@ -7,8 +7,8 @@
 // API requests. Existing `fetch("/api/invoke")` code just works: the shim sends it to this UI's
 // API (<hewn>/tools/<id>/~<key>/api/invoke).
 (() => {
-  // /tools/<id>/~<key>/: the UI key is part of the base.
-  const base = /^\/tools\/[a-z0-9][a-z0-9-]*\/(?:~[A-Za-z0-9_-]+\/)?/.exec(location.pathname)?.[0] ?? "/";
+  // /tools/<id>/~<key>/ (a held build's Try it: /try/<build>/~<key>/): the key is part of the base.
+  const base = /^\/(?:tools\/[a-z0-9][a-z0-9-]*|try\/b-[a-z0-9]+)\/(?:~[A-Za-z0-9_-]+\/)?/.exec(location.pathname)?.[0] ?? "/";
   const NAME = `hewn_session:${base}:`;
   let memory = null;
   // The web client's light or dark (Settings › General), when it isn't the system's: a sandboxed

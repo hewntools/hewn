@@ -134,6 +134,9 @@ a.spec-name:hover { text-decoration: underline; }
 body.app-mode #app { height: 100vh; }
 .app-title input.rename { max-width: 260px; min-height: 28px; padding: 2px 8px; }
 .app-frame { display: block; width: 100%; flex: 1; min-height: 0; border: 0; border-top: 1px solid var(--border); background: var(--bg); }
+/* Try it (build.js tryPage): the bar, then the candidate's screen filling the rest. */
+.try-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.try-bar { margin: 0 16px 12px; }
 .run { flex: 1; display: flex; gap: var(--s5); padding: var(--s6); max-width: 1040px; width: 100%; margin: 0 auto; }
 .run-main { flex: 1; display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .run-form, .result { padding: 20px; }

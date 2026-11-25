@@ -2,7 +2,7 @@
 // A build: its page, or the panel in the change drawer.
 import { actorLabel, api, appIcon, builderLabel, caps, confirmDialog, enc, errorBox, fail, h, invalidateCaps, isOutdated, kindTag, setWallpaper, shown, skeleton, stepRow, tintOf, toast } from "../kit.js";
 import { AGENT_CATALOG, agentTile, catalogOf } from "./agents.js";
-import { shotUrl } from "./appearance.js";
+import { shotUrl, withTheme } from "./appearance.js";
 import { go, hues, moment, onLeave, put, sandboxNotice, topBar, view } from "./frame.js";
 import { grantsSheet, signInDialog } from "./grants.js";
 import { modelWords } from "./home.js";
@@ -15,7 +15,7 @@ import { changeList, reviewChanges, reviewOp, reviewRequest, reviewTitle, review
 import { openCapability, openChange } from "./tool-actions.js";
 import { addWidgetSheet, widgetPreview } from "./widgets.js";
 
-export { askedBy, buildModelWords, buildPage, buildPanel, chargeWords, installedFrom, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
+export { askedBy, buildModelWords, buildPage, buildPanel, tryPage, chargeWords, installedFrom, kindWord, LIVE_BUILD, milestones, mmss, retryable, unresolvedFailures, waitingPill };
 
 // ---------- B3 / B4 / H2–H6: a build (its page, or in the change drawer) ----------
 
@@ -102,6 +102,33 @@ function milestones(b) {
 async function buildPage(id) {
   const panel = buildPanel(id, {});
   view(...moment({ left: "-60px", bottom: "-20px" }, topBar(""), sandboxNotice(), h("div", { class: "build-center" }, panel.el)));
+}
+
+/**
+ * Try it: a held build's screen on a copy of the owner's data, for an hour (core platform/trying.ts). Framed as a
+ * tool's own screen is (sandboxed, an opaque origin); what's done in it stays in the copy, which goes when the owner
+ * decides or the hour is up.
+ */
+async function tryPage(id) {
+  let t;
+  try {
+    t = await api(`/builds/${enc(id)}/try`, { method: "POST" });
+  } catch (e) {
+    return view(topBar(""), h("main", { class: "try-layout" }, errorBox(e), h("a", { class: "btn self-center", href: `#/b/${enc(id)}` }, "Back to the review")));
+  }
+  const [b, all] = await Promise.all([api(`/builds/${enc(id)}`), caps().catch(() => new Map())]);
+  const c = all.get(b.capabilityId) ?? { id: b.capabilityId, name: b.request?.name ?? b.capabilityId };
+  const left = h("span", { class: "small muted" });
+  const tick = () => {
+    const min = Math.ceil((t.endsAt - Date.now()) / 60_000);
+    put(left, min > 0 ? `Ends in ${min} min` : "Ended");
+  };
+  const frame = h("iframe", { class: "app-frame", src: withTheme(`/try/${enc(id)}/auth?ticket=${enc(t.ticket)}`), title: `${c.name}, to try`, sandbox: "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals" });
+  const bar = h("div", { class: "notice info try-bar" }, h("span", { class: "grow" }, `Trying ${b.kind === "create" ? "the new tool" : "the change"} on a copy of your data. Nothing you do here is kept.`), left, h("a", { class: "btn", href: `#/b/${enc(id)}` }, "Back to the review"));
+  view(topBar(""), h("main", { class: "try-layout" }, bar, frame));
+  tick();
+  const timer = setInterval(tick, 30_000);
+  onLeave(() => clearInterval(timer));
 }
 
 /**
@@ -441,6 +468,8 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
       };
       const yes = h("button", { class: "primary" }, "Allow");
       const no = h("button", {}, "Don't allow");
+      // Its screen in your hands, on a copy of your data, before you decide.
+      const tryIt = (b.review.shots?.length > 0 || b.screenshot) && h("a", { class: "btn", href: `#/b/${enc(id)}/try` }, "Try it");
       yes.addEventListener("click", decide(true, yes));
       no.addEventListener("click", decide(false, no));
       const changes = reviewChanges(b.review);
@@ -482,7 +511,7 @@ function buildPanel(id, { compact = false, onPromoted } = {}) {
         shot && [h("div", { class: "eyebrow" }, "The screen after the change (rendered with no data)"), h("img", { class: "build-shot", src: shotUrl(id), alt: "The screen as rendered during validation" })],
         shownFiles && files,
         reviewRequest(b, all),
-        h("div", { class: "row tight wrap" }, yes, fix, no, cap().version && h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
+        h("div", { class: "row tight wrap" }, yes, tryIt, fix, no, cap().version && h("a", { class: "btn", href: `#/${cap().ui ? "app" : "run"}/${enc(b.capabilityId)}` }, "Later")),
         logBlock(false),
       );
     };

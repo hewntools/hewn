@@ -1889,8 +1889,9 @@ export class Builds extends Domain {
     return this.buildView(this.mustBuild(buildId));
   }
 
-  /** The review card's renders go once the owner has decided. */
+  /** The review card's renders go once the owner has decided, and its Try it with them. */
   private async dropReviewShots(build: BuildRow) {
+    await this.d.trying.end(build.id, "the owner decided");
     for (const name of build.review?.shots ?? []) await this.blobs.delete(reviewShotKey(build.id, name)).catch(() => {});
   }
 
@@ -1930,7 +1931,7 @@ export class Builds extends Domain {
   }
 
   /** A frozen candidate, checked against its hash. */
-  private async loadCandidate(hash: string): Promise<{ files: Files; bundle: string }> {
+  async loadCandidate(hash: string): Promise<{ files: Files; bundle: string }> {
     const raw = await this.blobs.get(`versions/${hash}.json`);
     if (!raw) throw new Error("the candidate is missing from storage");
     const v = decodeVersion(raw);

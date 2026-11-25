@@ -682,6 +682,8 @@ export class HewnDO extends DurableObject<Env> {
   private runDue() {
     this.idleGc.work();
     const pass = this.catchingUp.then(async () => {
+      // A Try it past its hour (by the wall clock, also across a suspend) goes before anything else runs.
+      await this.platform.sweepTries();
       const ran = await this.platform.runDueSchedules();
       await this.secrets.flush();
       await this.armAlarm();

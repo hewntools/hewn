@@ -40,7 +40,7 @@ const sessionCookie = (site: Site, session: string, maxAge = SESSION_MAX_AGE) =>
 
 // No inline scripts: the owner surface holds owner authority, so XSS must have nowhere to run.
 const webCsp = (site: Site) =>
-  `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src ${site.web}/tools/; frame-ancestors 'none'; form-action 'self'; base-uri 'none'`;
+  `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src ${site.web}/tools/ ${site.web}/try/; frame-ancestors 'none'; form-action 'self'; base-uri 'none'`;
 export const WEB_CSP = webCsp(localSite(0));
 
 export const webOrigin = (port: number) => localSite(port).web;
@@ -536,6 +536,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
     if (sub === "feedback" && method === "POST") return platform.setBuildFeedback(owner, id, pick(await readJson(req), ["score", "note"]));
     if (sub === "retry" && method === "POST") return platform.retryBuild(owner, id);
     if (sub === "fix" && method === "POST") return platform.retryBuild(owner, id, { fix: true });
+    // Try it: a held build's screen on a copy of the owner's data, for an hour (core platform/trying.ts).
+    if (sub === "try" && method === "POST") return platform.tryBuild(owner, id);
     if (sub === "cancel" && method === "POST") return platform.cancelBuild(owner, id);
     if (sub === "discard" && method === "POST") return platform.discardBuild(owner, id);
     if (sub === "approve" && method === "POST") return platform.approveBuild(owner, id);
