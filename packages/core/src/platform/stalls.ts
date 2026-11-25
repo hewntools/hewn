@@ -55,6 +55,15 @@ export type StallRole = (running: { capabilityId: string; state: string }) => { 
 /** The last stall told (not under `stalls:`, where a tool's id could be "last"). */
 const LAST_STALL = "stall:last";
 const key = (capabilityId: string) => `stalls:${capabilityId}`;
+/**
+ * What the no-loss check passes as its calls' `via` (validation's reads on a copy): the version a build replaces
+ * (`NO_LOSS_BASE_VIA`, not the candidate's code), and the candidate's own reads after its migrations (`NO_LOSS_VIA`).
+ */
+export const NO_LOSS_VIA = "in the no-loss check";
+export const NO_LOSS_BASE_VIA = "in the no-loss check, on the version it replaces";
+/** A tool's operations that ever stalled, kept past the stall window: the no-loss check never calls them. */
+const stalledOpsKey = (capabilityId: string) => `stalled-ops:${capabilityId}`;
+
 /** The build a scratch state is for ("test:<build>", "sample:<build>" …). */
 const BUILD_STATE = /^(?:test|visual|dryrun|sample|real):(.+)$/;
 
@@ -69,6 +78,20 @@ export class Stalls extends Domain {
 
   forgetRun(buildId: string) {
     this.runs.delete(buildId);
+  }
+
+  /**
+   * A tool's operations ("spin@1") that ever stalled: in a call of the tool's own, or in the no-loss check's read of
+   * the version a build replaces. That check skips these, so an old read that loops restarts Hewn's tools once at
+   * most, and never again.
+   */
+  stalledOps(capabilityId: string): Set<string> {
+    return new Set(this.registry.getKv<string[]>(stalledOpsKey(capabilityId)) ?? []);
+  }
+
+  private noteStalledOp(capabilityId: string, what: string) {
+    const ops = this.stalledOps(capabilityId);
+    if (!ops.has(what)) this.registry.setKv(stalledOpsKey(capabilityId), [...ops, what]);
   }
 
   /** Run tool code, written down while it runs. `state`: "" for the tool's own data, else the scratch state's name. */
@@ -115,6 +138,13 @@ export class Stalls extends Domain {
         continue;
       }
       const build = BUILD_STATE.exec(r.state)?.[1];
+      // The no-loss check's read of the version the build replaces stalled: not the candidate's code, so the build goes
+      // on without it, and not the live tool's call, so no strike. That read is never called there again.
+      if (build && r.caller === NO_LOSS_BASE_VIA) {
+        this.noteStalledOp(r.capabilityId, r.what);
+        this.logger(`${r.capabilityId} (${r.what}, ${ranBy(r.caller)}) was running when Hewn's tools stopped responding: the check leaves it out from now on`);
+        continue;
+      }
       if (build) {
         const line = stallLine(r.what, r.caller);
         this.runs.set(build, line);
@@ -136,6 +166,7 @@ export class Stalls extends Domain {
 
   /** One more stall for a tool (`what` of it was running): true when that suspends it. */
   private strike(capabilityId: string, at: string, what: string): boolean {
+    this.noteStalledOp(capabilityId, what);
     const old = this.registry.getKv<StallRecord>(key(capabilityId)) ?? {};
     const since = Date.parse(at) - STALL_WINDOW_MS;
     const stalls = [...stallsOf(old).filter((s) => Date.parse(s.at) > since), { at, what }];

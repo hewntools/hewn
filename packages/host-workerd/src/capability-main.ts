@@ -11,7 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { lockStorage } from "./hewn-guard.js";
 // @ts-expect-error provided at load time: the capability's own bundle
 import * as capability from "./capability.js";
-import { type AbiDb, applyMigrations, capError, capLines, countTables, dumpTables, exportedOperations, loadTables, runOperation } from "@hewntools/core/abi.ts";
+import { type AbiDb, applyMigrations, capError, capLines, countTables, dumpTables, exportedOperations, loadTables, runOperation, tableKeys } from "@hewntools/core/abi.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 
 const mod = capability as { operations?: Record<string, any> };
@@ -71,6 +71,10 @@ export class Capability extends DurableObject {
 
   count() {
     return countTables(this.db());
+  }
+
+  keys() {
+    return tableKeys(this.db());
   }
 
   load(tables: Record<string, Record<string, unknown>[]>): number {

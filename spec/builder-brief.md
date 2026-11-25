@@ -335,6 +335,7 @@ Before you stop, answer these in a message (from your screenshots, when you have
 - No `DROP TABLE`, `DROP COLUMN`, `DELETE FROM`, `TRUNCATE` or `BEGIN`/`COMMIT` in migrations (each file already runs atomically).
 - A migration ends with its last statement's `;`: a comment or a second `;` after it fails ("SQL code did not contain a statement").
 - Before promotion, migrations dry-run on a copy of live state, and live state is backed up before they apply.
+- No row goes missing: around your migrations Hewn checks every table keeps each row's primary key (its `rowid` without one) and that no rows go in all, and that each `read` with no required input still returns every record (`id`) it did. Rebuild a table by copying every row with its key; a dedupe or a purge is a `destructive` operation, never a migration.
 
 ### tests/cases.json
 

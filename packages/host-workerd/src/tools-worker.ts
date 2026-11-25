@@ -124,6 +124,8 @@ function run(env: Env, host: CapabilityHost, method: HostMethod, b: any, code: C
       return host.dump(b.scratch, code, b.limit, b.hosts, b.named);
     case "count":
       return host.count(b.scratch, code, b.limit, b.hosts, b.named);
+    case "keys":
+      return host.keys(b.scratch, code, b.limit, b.hosts, b.named);
     case "load":
       return host.load(b.scratch, b.tables, code, b.limit, b.hosts, b.named);
     case "hasState":
@@ -313,6 +315,10 @@ export class CapabilityHost extends DurableObject<Env> {
 
   async count(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<Record<string, number>> {
     return this.on(scratch, code, hosts, named, limit, (f) => f.count());
+  }
+
+  async keys(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<Record<string, string[]>> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.keys());
   }
 
   async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<number> {

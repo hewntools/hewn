@@ -551,7 +551,9 @@ export class Registry {
     const model = one<{ usd: number | null; input: number | null; output: number | null; calls: number }>(`
       SELECT sum(cost_usd) AS usd, sum(input_tokens) AS input, sum(output_tokens) AS output, count(*) AS calls
       FROM model_calls WHERE month = ?`, month);
-    return { tools, builds, buildTime, calls24h: calls(since24h), calls7d: calls(since7d), model };
+    // Failed builds' logs, for the count of those Hewn's checks caught on a copy (`explainFailure(...).caught`).
+    const failedLogs = all<{ log: string }>("SELECT log FROM builds WHERE status = 'failed'").map((r) => JSON.parse(r.log) as string[]);
+    return { tools, builds, buildTime, calls24h: calls(since24h), calls7d: calls(since7d), model, failedLogs };
   }
 
   // ---------- platform settings (JSON values) ----------

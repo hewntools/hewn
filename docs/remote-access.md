@@ -106,7 +106,7 @@ If you run Hewn on a machine you can suspend and wake (a VM that sleeps when unu
 
 Set `HEWN_METRICS_PORT` in `hewn serve`'s environment to serve Prometheus text at `GET /metrics` on that port, for whoever runs Hewn to scrape. It listens on all interfaces, so let only your scraper reach it. Off unless set, and pulled only: Hewn sends it nowhere. It has counts and sums, never what's in your tools, and its labels are fixed categories: no tool, widget or agent is ever named, so what you called your tools stays with you, also in whatever stores the scraped series:
 
-- `hewn_info` (the version), `hewn_tools` by state, `hewn_builds` by status, and the time of builds promoted in the last 7 days.
+- `hewn_info` (the version), `hewn_tools` by state, `hewn_builds` by status, `hewn_builds_caught` (builds Hewn's checks on a copy stopped for the tool's data), and the time of builds promoted in the last 7 days.
 - `hewn_calls`: tool calls in the last 24 hours and 7 days, by the kind of caller that called them directly (`caller`): `user` (you), `agent` (any connected agent), `ui` (a tool's own page), `widget`, `schedule`, or `capability` (another tool); and how they went (`outcome`: `ok` or `error`).
 - `hewn_tools_used`: how many different tools were called in the last 24 hours, by the same kinds of caller. A tool called many times counts once; never which tools.
 - Model spend, tokens and calls this month; connected agents (and those active in the last 7 days); schedules by status, and those failing.

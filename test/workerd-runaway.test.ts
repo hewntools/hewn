@@ -48,12 +48,28 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     assert.equal(ran.lastOutcome, "ok");
     assert.equal(await rows("schedule"), 1);
 
+    const restarts = h.sv.toolsRestarts();
     h.queue((ws) => writeFileSync(join(ws, "migrations", "002_note.sql"), "ALTER TABLE ticks ADD COLUMN note TEXT;"));
     const changed = await h.sv.admin("modify", { capabilityId: "runaway", request: "add a note", wait: true });
     assert.equal(changed.status, "promoted", changed.log.join("\n"));
+    // Its no-loss check called the old version's reads, and spin@1 never stops: the tools were restarted once, and
+    // the change went on without it (the old version's code, not the change's).
+    assert.ok(changed.log.some((l: string) => /no-loss check: spin@1 left out \(it worked for more than 10 seconds without a pause, so Hewn's tools were restarted\)/.test(l)), changed.log.join("\n"));
+    assert.ok(changed.log.some((l: string) => /no data lost by the migrations on a copy of the tool's data/.test(l)), changed.log.join("\n"));
+    await until(() => h.sv.toolsRestarts() === restarts + 1);
     assert.equal(await rows("schedule"), 1, "the data came through the migration");
     await h.invoke("runaway", "tick", { tag: "after-change" });
     assert.equal(await rows("after-change"), 1);
+
+    // The next change's check leaves spin@1 out from the start: no second restart.
+    h.queue((ws) => writeFileSync(join(ws, "migrations", "003_mood.sql"), "ALTER TABLE ticks ADD COLUMN mood TEXT;"));
+    const again = await h.sv.admin("modify", { capabilityId: "runaway", request: "add a mood", wait: true });
+    assert.equal(again.status, "promoted", again.log.join("\n"));
+    assert.ok(again.log.some((l: string) => /no-loss check: spin@1 left out \(it stalled before\)/.test(l)), again.log.join("\n"));
+    assert.ok(again.log.some((l: string) => /no data lost by the migrations on a copy of the tool's data/.test(l)), again.log.join("\n"));
+    await sleep(1000);
+    assert.equal(h.sv.toolsRestarts(), restarts + 1, "spin@1 wasn't called again");
+    assert.equal(await rows("after-change"), 1, "the data came through both migrations");
   });
 
   test("a call past its deadline is stopped, and calls running on the same tool stop with it", { timeout: CALL_DEADLINE_MS + 30_000 }, async () => {

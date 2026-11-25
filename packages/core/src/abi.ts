@@ -189,6 +189,45 @@ export function dumpTables(db: AbiDb): Record<string, Record<string, unknown>[]>
   return out;
 }
 
+/**
+ * Every user table's rows by key, for the no-loss invariant (validation): each row's primary key as JSON, or its
+ * rowid where the table has none. Keys only, never the rest of a row; they stay in Hewn and are only counted.
+ */
+export function tableKeys(db: AbiDb): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const name of userTables(db)) {
+    const pk = db
+      .prepare(`PRAGMA table_info(${quoted(name)})`)
+      .all()
+      .filter((c) => Number(c.pk) > 0)
+      .sort((a, b) => Number(a.pk) - Number(b.pk))
+      .map((c) => String(c.name));
+    const cols = pk.length ? pk.map(quoted).join(", ") : "rowid AS rowid";
+    out[name] = db.prepare(`SELECT ${cols} FROM ${quoted(name)}`).all().map((r) => JSON.stringify(pk.length ? pk.map((k) => r[k]) : [r.rowid]));
+  }
+  return out;
+}
+
+/**
+ * The no-loss invariant's rules, before and after a version's migrations (`tableKeys` of each): a table there
+ * both times keeps every key it had (a lost or renumbered one is lost), and the rows across all tables never
+ * drop (a dropped table's rows must reappear elsewhere: a rename, a merge or a split passes). In words, names
+ * and counts only.
+ */
+export function lostRows(before: Record<string, string[]>, after: Record<string, string[]>): string[] {
+  const problems: string[] = [];
+  for (const [table, keys] of Object.entries(before)) {
+    if (!(table in after) || !keys.length) continue;
+    const kept = new Set(after[table]);
+    const lost = keys.filter((k) => !kept.has(k)).length;
+    if (lost) problems.push(`\`${table}\` would lose ${lost} of its ${keys.length} rows${after[table].length >= keys.length ? " (their keys change)" : ""}`);
+  }
+  const total = (m: Record<string, string[]>) => Object.values(m).reduce((n, k) => n + k.length, 0);
+  const [was, is] = [total(before), total(after)];
+  if (is < was) problems.push(`${was - is} fewer rows across its tables (${was} before, ${is} after)`);
+  return problems;
+}
+
 /** Rows per user table (Info › Data): counts only, no rows leave the state. */
 export function countTables(db: AbiDb): Record<string, number> {
   return Object.fromEntries(userTables(db).map((name) => [name, Number(db.prepare(`SELECT COUNT(*) AS n FROM ${quoted(name)}`).get()?.n ?? 0)]));

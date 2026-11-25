@@ -487,6 +487,7 @@ function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools:
     listStates: (capabilityId, prefix) => toTools("reading its data", () => host(capabilityId).listStates({ prefix })),
     dumpState: (state, code) => toTools("reading its data", () => host(state.capabilityId).dump({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
     countState: (state, code) => toTools("reading its data", () => host(state.capabilityId).count({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
+    keysState: (state, code) => toTools("reading its data", () => host(state.capabilityId).keys({ scratch: state.scratch ?? null, code, limit: data.limit(state.capabilityId), ...dataIsolate(state, code) }), true),
     loadState: (state, tables, code) => limited(state.capabilityId, "loading its data", (limit) => host(state.capabilityId).load({ scratch: state.scratch ?? null, tables, code, limit, ...dataIsolate(state, code) })),
   };
 }

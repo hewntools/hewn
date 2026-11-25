@@ -35,7 +35,7 @@ As it works, the builder checks its own work: its `check` tool runs what Hewn ru
 Then Hewn:
 
 1. checks the manifest and the contracts
-2. runs the tool's tests, and its database migrations on a copy of your data
+2. runs the tool's tests, and its database migrations on a copy of your data, checking that no row of your data goes missing (when the tool has no data yet, on the old version filled with its sample data). If one would, the build stops before it goes live and says what would have been lost ("2 rows of runs would have been lost")
 3. renders its screen, empty and filled with its sample data (a new tool with a screen needs some), on a desktop and a phone screen, and checks it loads without errors
 4. for a new tool with a screen (or a [Polish](#polishing-a-tool)), has the builder look at its screen again, twice (below)
 5. makes it live if all of that passes

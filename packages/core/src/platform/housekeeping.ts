@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Housekeeping: the cleanup run at start and daily, and the aggregates for a host's metrics endpoint.
+import { explainFailure } from "../failure.ts";
 import { type Agent, requireOwner, USER } from "../auth.ts";
 import { Domain } from "./context.ts";
 
@@ -62,6 +63,8 @@ export class Housekeeping extends Domain {
       tools: { active: snap.tools.active ?? 0, archived: snap.tools.archived ?? 0, unversioned: snap.tools.unversioned ?? 0 },
       builds: Object.fromEntries(snap.builds.map((b) => [b.status, b.n])),
       buildSeconds7d: { count: snap.buildTime.n, sum: Math.round(snap.buildTime.seconds ?? 0) },
+      // How often Hewn's checks on a copy stopped a build for the tool's data: the copy saving the owner's data.
+      buildsCaught: snap.failedLogs.filter((log) => explainFailure(log).caught).length,
       calls24h: tally(snap.calls24h),
       calls7d: tally(snap.calls7d),
       toolsUsed24h: toolsUsed(snap.calls24h),
