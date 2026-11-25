@@ -23,7 +23,7 @@ describe("schedules", () => {
     assert.equal(s.status, "active");
     assert.ok(s.nextRunAt! > Date.now() && s.nextRunAt! <= Date.now() + HOUR);
     assert.deepEqual(await t.platform.runDueSchedules(Date.now()), [], "not due yet");
-    assert.deepEqual(await t.platform.runDueSchedules(s.nextRunAt!), [{ id: s.id, ok: true }]);
+    assert.deepEqual(await t.platform.runDueSchedules(s.nextRunAt!), [{ id: s.id, ok: true, what: `${s.capabilityId}/${s.operation}` }]);
     assert.equal((await runs()).length, 1);
     const after = t.platform.listSchedules(USER)[0];
     assert.equal(after.lastOutcome, "ok");

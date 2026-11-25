@@ -849,6 +849,42 @@ export const operations = {
     }
   });
 
+  await step("Home redrawn by its own poll (a tool added elsewhere) makes the page's own requests only: none counts as the owner's activity", async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1000, height: 900 } });
+    await ctx.addCookies(await page.context().cookies());
+    const p = await ctx.newPage();
+    try {
+      // The owner's requests: an API request without the refresh header, but for what the server leaves out itself
+      // (surface/index.ts's PAGE_OWN_FETCHES: a build's events, a tool's or a build's icon).
+      const PAGE_OWN_FETCHES = /^\/api\/(builds\/[^/]+\/events|(capabilities|builds)\/[^/]+\/icon)$/;
+      const owners: string[] = [];
+      p.on("request", (r: { url(): string; method(): string; headers(): Record<string, string> }) => {
+        const path = new URL(r.url()).pathname;
+        if (path.startsWith("/api/") && r.headers()["x-hewn-refresh"] !== "1" && !PAGE_OWN_FETCHES.test(path)) owners.push(`${r.method()} ${path}`);
+      });
+      await p.clock.install();
+      await p.goto(`${web}/#/`);
+      await p.locator(".home-grid").waitFor();
+      await p.waitForTimeout(1000);
+      owners.length = 0;
+      // A tool added elsewhere (an agent's, the CLI's): Home's next poll sees it and redraws.
+      const added = await sv.admin("install", { name: "Probe", purpose: "Probes", dir: join(FIX, "probe"), wait: true });
+      if (added.status !== "promoted") throw new Error(added.log.join("\n"));
+      for (let t = 0; t < 70_000; t += 5000) await p.clock.runFor(5000), await p.waitForTimeout(100);
+      await p.locator(".home-grid .tile", { hasText: "Probe" }).first().waitFor({ timeout: 5000 });
+      if (owners.length) throw new Error(`Home's own redraw asked as the owner: ${owners.join(", ")}`);
+      // The other way round: a redraw the owner causes (Edit Home, Done) asks as the owner.
+      await p.keyboard.press("e");
+      await p.getByRole("button", { name: "Done" }).click();
+      await p.waitForTimeout(1000);
+      if (!owners.includes("GET /api/home")) throw new Error(`the owner's redraw didn't ask as the owner: ${owners.join(", ")}`);
+    } finally {
+      // Gone again: the steps after this one see the tools they did before it.
+      await p.evaluate(() => fetch("/api/capabilities/probe", { method: "DELETE", headers: { "x-hewn-ui": "1" } })).catch(() => {});
+      await ctx.close();
+    }
+  });
+
   if (!real)
     await step("a build's page whose stream ends without done doesn't reconnect it; the page's tick opens it again after a minute and carries it to the end", async () => {
       let release!: () => void;
