@@ -16,14 +16,17 @@ import { buildHostFiles } from "@hewntools/cli/supervisor/bundle.ts";
 import { freePort } from "./workerd-helpers.ts";
 
 /**
- * What tool code sees with the flag and the guard that it doesn't see without them: one method on the context of its
- * own entrypoint. mapVirtualHost routes a host name to a Fetcher, and the only Fetchers a tool holds are its own.
+ * What tool code sees with the flag, --expose-gc and the guard that it doesn't see without them: one method on the
+ * context of its own entrypoint (mapVirtualHost routes a host name to a Fetcher, and the only Fetchers a tool holds
+ * are its own), and a `gc` global that is undefined and read-only (V8 makes the one --expose-gc adds non-configurable;
+ * the guard takes its value away).
  */
 const ADDED = [
   "entrypointCtx^.constructor.prototype.mapVirtualHost",
   "entrypointCtx^.mapVirtualHost",
   "entrypointCtx^.mapVirtualHost.length",
   "entrypointCtx^.mapVirtualHost.name",
+  "globalThis.gc",
 ];
 /** And what it no longer sees: nested facets, and deleteAll (the guard's own, flag or not). */
 const REMOVED = [
@@ -99,7 +102,7 @@ const MODULES = [
 ];
 
 let dir: string;
-let child: ChildProcess | undefined;
+const children: ChildProcess[] = [];
 const surfaces: { before?: string[]; now?: string[] } = {};
 
 before(async () => {
@@ -135,13 +138,17 @@ export class Host extends DurableObject {
 export default { fetch: (req, env) => env.HOST.get(env.HOST.idFromName("host")).fetch(req) };
 `,
   );
-  const port = await freePort();
-  writeFileSync(
-    join(dir, "config.capnp"),
-    `using Workerd = import "/workerd/workerd.capnp";
+  // Two workerds: the baseline as a tool ran before the limit (no flag, no guard, no --expose-gc), and one as the tools'
+  // process runs now (the flag, the guard, and --expose-gc for its release of replaced isolates).
+  const serve = async (which: "before" | "now") => {
+    const port = await freePort();
+    mkdirSync(join(dir, `do-${which}`), { recursive: true });
+    writeFileSync(
+      join(dir, `${which}.capnp`),
+      `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
-  services = [ (name = "main", worker = .host), (name = "do", disk = (path = ${JSON.stringify(join(dir, "do"))}, writable = true)) ],
-  sockets = [ (name = "http", address = "127.0.0.1:${port}", http = (), service = "main") ],
+  services = [ (name = "main", worker = .host), (name = "do", disk = (path = ${JSON.stringify(join(dir, `do-${which}`))}, writable = true)) ],
+  sockets = [ (name = "http", address = "127.0.0.1:${port}", http = (), service = "main") ],${which === "now" ? `\n  v8Flags = ["--expose-gc"],` : ""}
 );
 const host :Workerd.Worker = (
   modules = [ (name = "main.js", esModule = embed "main.js") ],
@@ -152,25 +159,24 @@ const host :Workerd.Worker = (
   bindings = [ (name = "HOST", durableObjectNamespace = "Host"), (name = "LOADER", workerLoader = (id = "tools")) ],
 );
 `,
-  );
-  child = spawn(workerdBinary(), ["serve", "--experimental", join(dir, "config.capnp")], { stdio: ["ignore", "ignore", "pipe"] });
-  let stderr = "";
-  child.stderr!.on("data", (b: Buffer) => void (stderr += b));
-  for (const which of ["before", "now"] as const) {
+    );
+    const child = spawn(workerdBinary(), ["serve", "--experimental", join(dir, `${which}.capnp`)], { stdio: ["ignore", "ignore", "pipe"] });
+    children.push(child);
+    let stderr = "";
+    child.stderr!.on("data", (b: Buffer) => void (stderr += b));
     for (let i = 0; ; i++) {
       const res = await fetch(`http://127.0.0.1:${port}/${which}`).catch(() => undefined);
-      if (res?.ok) {
-        surfaces[which] = (await res.json()) as string[];
-        break;
-      }
+      if (res?.ok) return void (surfaces[which] = (await res.json()) as string[]);
       if (res || i > 100) throw new Error(`${which}: ${res ? `${res.status} ${await res.text()}` : "workerd didn't start"}\n${stderr}`);
       await new Promise((r) => setTimeout(r, 100));
     }
-  }
+  };
+  await serve("before");
+  await serve("now");
 });
 
 after(() => {
-  child?.kill();
+  for (const c of children) c.kill();
   rmSync(dir, { recursive: true, force: true });
 });
 

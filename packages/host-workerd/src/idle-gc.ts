@@ -4,8 +4,9 @@
 // platform's RSS settles near a small machine's size). The supervisor asks every few seconds (/_admin/idle-gc); one
 // last-resort GC gives the heap back (25–100 ms) once the owner, their agents and the CLI have left Hewn alone a while.
 // What reaches it on no one's behalf (an open page's refreshes, every 15 s; refused or anonymous requests) never
-// leaves it quiet for long, so after only that it collects at most every few minutes. Only the platform's process has
-// `gc` (its config's `--expose-gc`); the tools' never does.
+// leaves it quiet for long, so after only that it collects at most every few minutes. This is the platform's process's
+// `gc` (its config's `--expose-gc`). The tools' process has one too, for its own release of replaced isolates
+// (tools-worker.ts, `flush`); no tool's code sees it (capability-guard.ts).
 import type { ActivityView } from "@hewntools/core/platform/activity.ts";
 
 /** Quiet this long after the last work before the platform collects. */
