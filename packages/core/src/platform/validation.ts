@@ -4,7 +4,7 @@
 // review. The check and the promotion are separate steps: a candidate can be checked and never promoted.
 import { USER, WEB_USER } from "../auth.ts";
 import { PlatformError } from "../errors.ts";
-import { dependencyProblems, readSample, SAMPLE_FILE } from "../bundle.ts";
+import { dependencyProblems, LOCKFILES, LONG_RANDOM, ownValuesIn, readSample, SAMPLE_FILE, scanFiles } from "../bundle.ts";
 import { bytes, contentHash, encodeVersion, text, versionFiles } from "../files.ts";
 import { abiAtLeast, type CapabilityManifest, contractBreaks, isConnection, type OperationManifest, opKey, sourceWords, stampSource, type ToolSource, validateManifest } from "../manifest.ts";
 import { viewErrors, widgetsBuildProblems } from "../widgets.ts";
@@ -13,6 +13,7 @@ import { migrationProblems, migrationsOf } from "../migrations.ts";
 import type { CallHandler, CheckResult, CheckWarning, CodeRef, ExecutionTarget, Files, StateRef, VisualCheckResult, VisualShot } from "../ports.ts";
 import type { BuildReview, BuildRow, GrantKind } from "../registry.ts";
 import type { SampleCall, TestCase } from "@hewntools/spec/cases.ts";
+import { KEY_LOCKED, OWNERS_WORK_LOCKED } from "./builds.ts";
 import { wantedGrants } from "./grants.ts";
 import { isPart, isPolish } from "../passes.ts";
 import { breather, Domain } from "./context.ts";
@@ -58,6 +59,12 @@ export const reviewShotKey = (buildId: string, name: string) => `screenshots/${b
  * quote that data, so it goes to the build's transcript, which only the owner reads.
  */
 export const DRY_RUN_FAILED = "the upgrade dry run failed on a copy of the tool's data: a migration doesn't apply to the data it holds now (make each one safe for the rows already there; the owner's build log has the error)";
+
+/**
+ * What a build says when one of the owner's stored keys is in its files: never where, or which, which the
+ * owner's build log has. Any build's, the owner's too: an agent that can see a tool can read its builds.
+ */
+export const OWN_KEY_FOUND = "a file holds one of the owner's stored keys; the owner's build log says where";
 
 /** How many times a builder may check its work in one attempt. */
 export const MAX_CHECKS = 10;
@@ -184,6 +191,47 @@ export class Validation extends Domain {
     const migrations = migrationsOf(files);
     const migrationErrors = migrationProblems(migrations, base ? migrationsOf(base.files) : []);
     if (migrationErrors.length) softFail("migrations rejected", migrationErrors);
+
+    // 4b. the secret scan, of its own files: a known key shape fails, and so does one of the owner's stored
+    // keys; a long random string warns, since a hash looks the same (not in npm's lockfile, whose integrity
+    // hashes all look random). Each named by its file and line, never its value. The owner's keys are looked
+    // for in a pass of their own, so what's said of a key shape is the same whether or not it's one of them,
+    // and only where the answer stays the owner's (security-and-authority.md): never in an agent's check,
+    // which would say whether a guess is one; a build is failed with OWN_KEY_FOUND alone, and where and which
+    // go to the owner's build log (a build's log is one an agent may read). The owner's own builder learns
+    // where from its check, to take it out.
+    const found = scanFiles(files);
+    const shapes = found.filter((f) => f.kind === "key" && f.label !== LONG_RANDOM);
+    const random = found.filter((f) => f.kind === "key" && f.label === LONG_RANDOM && !LOCKFILES.includes(f.file));
+    // Whose work this is, at any remove (its requester, its retries and fixes, the versions it's built on). A build
+    // of, or carrying on from, a locked-out agent's work gets the lock's answer, whatever its files hold: nothing more
+    // is learned from it. Checked and set with nothing awaited between, so of builds validating at once, one at most
+    // finds one. The owner's builder learns where one is from its check, unless an agent had a hand in the work (it
+    // could read what the builder did with it) or a version came from a file.
+    const behind = this.d.builds.behind(build);
+    const locked = !opts.check && this.d.builds.lockedOut(build, behind);
+    const blind = behind.agents.size > 0 || behind.foreign;
+    const own = !locked && (!opts.check || !blind) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
+    const stored = ownValuesIn(files, own);
+    if (stored.length && !opts.check) this.d.builds.lockForKey(build, behind, stored.map((f) => f.label));
+    let storedFailure: string | undefined = locked ? (byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED) : undefined;
+    if (stored.length) {
+      const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));
+      if (opts.check) storedFailure = detail;
+      else {
+        await this.workbench.note(build.id, `${new Date().toTimeString().slice(0, 8)} [platform] ${detail}`).catch(() => {});
+        storedFailure = OWN_KEY_FOUND;
+      }
+    }
+    if (shapes.length) softFail(`a key in its files (a tool gets its keys from its connection's secrets, never from its files; a test's fake is a word like "fake")`, shapes.map((f) => `${f.file}:${f.line}: ${f.label[0].toLowerCase()}${f.label.slice(1)}`));
+    if (storedFailure) softFail(storedFailure);
+    // One warning a file, at its first: a fixture full of hashes is one thing to look at.
+    for (const file of new Set(random.map((f) => f.file))) {
+      const here = random.filter((f) => f.file === file);
+      const what = here.length === 1 ? "a long random string" : `${here.length} long random strings, the first here`;
+      warnings.push({ check: "secret-scan", message: `${what}: if it's a key, it belongs in a connection's secrets, not in the tool's files (a hash or an id can stay)`, file, line: here[0].line });
+    }
+    if (!shapes.length && !stored.length) step(`secret scan: no keys in its files${random.length ? ` (${counted(random.length, "long random string")} to look at)` : ""}`);
 
     // 5. candidate test cases against fresh state
     const testState: StateRef = { capabilityId: id, scratch: `test:${build.id}` };
@@ -705,7 +753,7 @@ export function matches(expected: unknown, actual: unknown): boolean {
 }
 
 /** A build the owner started (the web client or the CLI): never held, and its log says things as they are. */
-const byOwner = (build: BuildRow) => build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
+export const byOwner = (build: BuildRow) => build.requestedBy === USER.id || build.requestedBy === WEB_USER.id;
 
 /** An agent's new tool held for the owner: everything in it is new. */
 const newToolReview = (manifest: CapabilityManifest, contentHash: string, views: Map<string, unknown>): BuildReview => ({ contentHash, connection: isConnection(manifest), newOperations: reviewOps(manifest.operations, views), approval: "wait" });

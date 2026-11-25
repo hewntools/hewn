@@ -724,6 +724,8 @@ async function route(platform: Platform, host: SurfaceHost, site: Site, owner: A
       const b = await readJson(req);
       return platform.updateAgent(owner, id, { ...(b.scopes ? { scopes: b.scopes as Scope[] } : {}), ...(b.capabilities ? { capabilities: b.capabilities } : {}), ...(b.approvalMode !== undefined ? { approvalMode: b.approvalMode } : {}) });
     }
+    // Its build held one of your stored keys, and you've looked: it may build again.
+    if (sub === "key-lock" && method === "DELETE") return (platform.acknowledgeKeyLock(owner, id), { ok: true });
     if (method === "DELETE") return platform.updateAgent(owner, id, "revoke");
   }
 
@@ -1007,10 +1009,12 @@ export const failureReason = (f?: { title: string; detail: string }) => (!f ? ""
 
 export interface InboxItem {
   /** "builder-model": the model the owner picked for building has a successor. "model-key": a provider's key the owner said expires. */
-  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "model-key" | "spend" | "connection" | "builder-model" | "suspended";
+  kind: "grant" | "build" | "review" | "agent" | "confirmation" | "schedule" | "model" | "model-key" | "spend" | "connection" | "builder-model" | "suspended" | "key-lock";
   id: string;
   capabilityId?: string;
   agentId?: string;
+  /** "key-lock": the agent's name, for the dialog. */
+  agentName?: string;
   buildId?: string;
   title: string;
   detail: string;
@@ -1052,6 +1056,10 @@ async function inbox(platform: Platform, host: SurfaceHost, owner: Agent, recent
   // An agent's destructive call blocks that agent: the most urgent.
   for (const c of platform.confirmations(owner))
     needs.push({ kind: "confirmation", id: c.id, capabilityId: c.capabilityId, agentId: c.agentId, title: nameOf(c.capabilityId), detail: `${who(c.agentId)} wants to run ${c.operation.split("@")[0]}`, severity: "danger", action: "Review", at: c.createdAt });
+  // An agent whose work held one of your stored keys builds nothing until you look, connected or not (a lock stays
+  // with its id). Which keys: yours to change, since a hit confirms a guess.
+  for (const [agentId, l] of Object.entries(platform.keyLocks(owner)))
+    needs.push({ kind: "key-lock", id: agentId, agentId, agentName: who(agentId), buildId: l.buildId, capabilityId: l.capabilityId, title: nameOf(l.capabilityId), detail: `one of your stored keys${l.keys?.length ? ` (${l.keys.join(", ")})` : ""} turned up in work ${who(agentId)}${agents.has(agentId) ? "" : " (disconnected)"} had a hand in: change ${(l.keys?.length ?? 1) > 1 ? "them" : "it"}. ${who(agentId)} can't build, and your own changes to its work wait, until you look`, severity: "danger", action: "Look…", at: l.at });
   for (const p of platform.pendingAgents(owner))
     needs.push({ kind: "agent", id: p.id, title: p.clientName, detail: p.reconnects ? `wants to connect again as ${p.reconnects}` : "wants to connect", severity: "warn", action: "Review", at: p.createdAt });
   for (const b of builds.filter((x) => x.status === "review"))

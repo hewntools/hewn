@@ -2,7 +2,7 @@
 // Builds: every change to a capability. Requests (create, modify, widgets, install), the order they
 // run in, the builder's attempts with their live steps, retries and cancels, the owner's review, and
 // what a build shows and keeps.
-import { type Agent, canSee, requireOwner, requireScope, type Scope } from "../auth.ts";
+import { type Agent, canSee, requireOwner, requireScope, type Scope, USER, WEB_USER } from "../auth.ts";
 import { type CodeFile, codeFiles, type CodeText, codeText } from "../code.ts";
 import { PlatformError } from "../errors.ts";
 import { type BuildFailure, explainFailure, testCounts } from "../failure.ts";
@@ -22,7 +22,7 @@ import { attachmentRefs } from "./attachments.ts";
 import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import { type Candidate, reviewShotKey, SCRATCH_KINDS, warningText } from "./validation.ts";
+import { byOwner, type Candidate, reviewShotKey, SCRATCH_KINDS, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
@@ -159,6 +159,21 @@ type RetryMarks = { retryOf?: string; autoRetryOf?: string; fixOf?: string; fixF
 
 /** Builds that run at once (per Hewn, so per owner); more wait their turn. */
 export const MAX_RUNNING_BUILDS = 5;
+/** What an agent is told while its last build, which held one of the owner's stored keys, waits for the owner's look. */
+export const KEY_LOCKED = "the owner needs to look at your last build first";
+/** What the owner is told of a build on work a locked-out agent had a hand in: it waits for their look too. */
+export const OWNERS_WORK_LOCKED = "an agent that worked on this tool is locked out: look at the Inbox first";
+/** The most builds and submissions an agent may start in an hour (counted in memory: a restart starts afresh). */
+export const BUILDS_PER_HOUR = 30;
+
+/** An agent whose build held one of the owner's stored keys: which build, of which tool, and when. */
+export interface KeyLock {
+  buildId: string;
+  capabilityId: string;
+  at: string;
+  /** Which of the owner's keys turned up (their labels: for the owner, to change them). */
+  keys?: string[];
+}
 
 /** What a build may be asked to run on: a model name as the builder's CLI takes it, and an effort. */
 export type ModelAsk = {
@@ -229,6 +244,8 @@ export class Builds extends Domain {
   private running = new Map<string, Promise<void>>();
   /** Abort handles of in-flight builds (cancel). */
   private aborts = new Map<string, AbortController>();
+  /** When each agent started its builds and submissions this past hour (`notKeyLocked`). */
+  private buildsBy = new Map<string, number[]>();
   /** Retries that carry on from the build they retry (its workspace), by why that one ended: their builder's first attempt is told so. */
   private carriedOn = new Map<string, "failed" | "stopped" | "held">();
   private progress = new Map<
@@ -475,6 +492,7 @@ export class Builds extends Domain {
   async manifestOnlyModify(owner: Agent, capabilityId: string, edit: (m: CapabilityManifest) => void, request: string): Promise<BuildView> {
     const cap = this.registry.getCapability(capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${capabilityId} is not active`);
+    this.ownersWorkNotLocked(owner, cap.id, cap.activeVersion);
     const base = await this.loadVersion(cap.id, cap.activeVersion);
     const manifest = JSON.parse(text(base.files["capability.json"])) as CapabilityManifest;
     edit(manifest);
@@ -497,6 +515,7 @@ export class Builds extends Domain {
     const cap = this.registry.getCapability(capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${capabilityId} is not active`);
     this.noChangeOnItsWay(capabilityId, "write the sample data");
+    this.ownersWorkNotLocked(owner, cap.id, cap.activeVersion);
     const base = await this.loadVersion(cap.id, cap.activeVersion);
     const buildId = newBuildId();
     this.registry.insertBuild({ id: buildId, capabilityId, kind: "modify", request: { capabilityId, request, filesOnly: Object.keys(changes) }, requestedBy: owner.id, baseVersion: cap.activeVersion, builder: "keep" });
@@ -515,6 +534,7 @@ export class Builds extends Domain {
    * `schedules`: the owner's approved schedules, set up once the build promotes (owner only).
    */
   async create(agent: Agent, req: { name: string; purpose: string; requirements: string; kind?: "capability" | "connection"; after?: string; widgets?: boolean; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string } & ModelAsk): Promise<BuildView & { widgetsBuildId?: string }> {
+    this.notKeyLocked(agent);
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
@@ -524,6 +544,7 @@ export class Builds extends Domain {
     if (req.held !== undefined) {
       if (typeof req.requirements !== "string" || !req.requirements.trim()) throw new PlatformError("invalid_request", "requirements: what to change in the held tool");
       const { held, marks } = await this.heldFix(agent, req.held, { kind: "create" });
+      this.ownersWorkNotLocked(agent, held.capabilityId, null, marks);
       const cap = this.registry.getCapability(held.capabilityId)!;
       this.oneCreateAtATime(agent, cap.id, held.id);
       const dependsOn = this.dependency(agent, req.after);
@@ -838,6 +859,8 @@ export class Builds extends Domain {
   /** Open a create build's workspace (skeleton, or seeded files) and start its builder. */
   private async startCreate(buildId: string, seed?: Files) {
     const b = this.mustBuild(buildId);
+    // The owner's build that waited its turn: the lock may have come meanwhile (`ownersWorkNotLocked`, as in startModify).
+    if (byOwner(b) && this.lockedOut(b)) return this.failBuild(buildId, OWNERS_WORK_LOCKED);
     // Started: no longer waiting (as in startModify).
     this.registry.updateBuild(buildId, { status: "open" });
     const req = b.request as unknown as CreateRequest;
@@ -907,6 +930,7 @@ export class Builds extends Domain {
   async submit(actor: Agent, entry: SubmitEntry): Promise<BuildView> {
     const change = entry.capabilityId !== undefined;
     requireScope(actor, change ? "modify" : "create");
+    this.notKeyLocked(actor);
     if (entry.builder === "bundle") requireOwner(actor);
     else if (entry.builder !== "submitted") throw new PlatformError("invalid_request", 'builder must be "submitted" or "bundle"');
     if (entry.builder === "submitted" && (entry.source || entry.sample || entry.summary)) throw new PlatformError("invalid_request", "only an install has a source, sample data to replay, or a reading");
@@ -981,12 +1005,14 @@ export class Builds extends Domain {
   /** `after`: a build to wait for first (e.g. adding the operation this change needs to a connection). `marks`: a retry's, from `retryBuild`. */
   async modify(agent: Agent, req: { capabilityId: string; request: string; after?: string; schedules?: ApprovedSchedule[]; conversation?: BuildTurn[]; held?: string } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
+    this.notKeyLocked(agent);
     await this.checkEffort(agent, req);
     this.d.schedules.checkApprovedSchedules(agent, req.schedules);
     const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const cap = this.visibleActive(agent, req.capabilityId);
     // The owner's change to a held one: it carries on from that change's files, and is held in turn.
     if (req.held !== undefined) marks = { ...marks, ...(await this.heldFix(agent, req.held, { kind: "modify", cap })).marks };
+    this.ownersWorkNotLocked(agent, cap.id, cap.activeVersion, marks);
     const builder = this.requireBuilder();
     const model = this.modelFor(agent, builder, req);
     const after = this.dependency(agent, req.after);
@@ -1015,10 +1041,12 @@ export class Builds extends Domain {
    */
   async addWidgets(agent: Agent, req: { capabilityId: string; request?: string; after?: string; conversation?: BuildTurn[] } & ModelAsk, marks: RetryMarks = {}): Promise<BuildView> {
     requireScope(agent, "modify");
+    this.notKeyLocked(agent);
     await this.checkEffort(agent, req);
     const conversation = this.checkConversation(agent, req.conversation) ?? this.retried(marks);
     const after = this.dependency(agent, req.after);
     const cap = after ? this.registry.getCapability(req.capabilityId) : this.visibleActive(agent, req.capabilityId);
+    if (cap) this.ownersWorkNotLocked(agent, cap.id, cap.activeVersion, marks);
     if (!cap || cap.archivedAt || !canSee(agent, cap.id)) throw new PlatformError("not_found", `no capability ${req.capabilityId}`);
     if (cap.activeVersion && isConnection(this.activeManifest(cap.id))) throw new PlatformError("invalid_request", `${cap.id} is a connection; connections have no widgets`);
     const builder = this.requireBuilder();
@@ -1053,6 +1081,7 @@ export class Builds extends Domain {
     if (req.note !== undefined && (typeof req.note !== "string" || (req.note.length > MAX_POLISH_NOTE && !marks.retryOf))) throw new PlatformError("invalid_request", `note: text of at most ${MAX_POLISH_NOTE} characters`);
     if (req.realData !== undefined && typeof req.realData !== "boolean") throw new PlatformError("invalid_request", "realData must be true or false");
     const cap = this.visibleActive(owner, req.capabilityId);
+    this.ownersWorkNotLocked(owner, cap.id, cap.activeVersion, marks);
     const manifest = this.activeManifest(cap.id);
     if (isConnection(manifest)) throw new PlatformError("invalid_request", `${cap.id} is a connection; it has no screen to polish`);
     if (!manifest.ui?.available) throw new PlatformError("invalid_request", `${cap.id} has no screen to polish`);
@@ -1091,6 +1120,9 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { status: "open" });
     const cap = this.registry.getCapability(b.capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${b.capabilityId} is no longer active`);
+    // The owner's build that waited its turn (queued, or after another): the lock may have come meanwhile. Refused
+    // before its builder runs, as `ownersWorkNotLocked` refuses a new one, on the version it would open from.
+    if (byOwner(b) && this.lockedOut({ ...b, baseVersion: cap.activeVersion })) return this.failBuild(buildId, OWNERS_WORK_LOCKED);
     const base = await this.loadVersion(cap.id, cap.activeVersion);
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
@@ -1260,6 +1292,8 @@ export class Builds extends Domain {
   async retryBuild(agent: Agent, buildId: string, opts: { fix?: boolean; auto?: boolean } = {}): Promise<BuildView> {
     const old = this.visibleBuild(agent, buildId);
     requireScope(agent, scopeOf(old.kind));
+    this.notKeyLocked(agent);
+    this.ownersWorkNotLocked(agent, old.capabilityId, old.baseVersion, { retryOf: old.id });
     if (old.status !== "failed" && old.status !== "cancelled") throw new PlatformError("conflict", `only failed or cancelled builds can be retried (this one is ${old.status})`);
     if (opts.fix && old.status !== "failed") throw new PlatformError("conflict", "only failed builds can be fixed; retry it instead");
     // Retried already (by hand, or by Hewn after a restart): one retry at a time, or two builds of the same request run at once.
@@ -1320,7 +1354,7 @@ export class Builds extends Domain {
    * Stop a build: the builder is stopped and nothing is promoted. Allowed for the owner and the
    * agent that requested it. A candidate already being validated finishes first.
    */
-  cancelBuild(agent: Agent, buildId: string): BuildView {
+  cancelBuild(agent: Agent, buildId: string, reason?: string): BuildView {
     const build = this.mustBuild(buildId);
     requireScope(agent, scopeOf(build.kind));
     if (agent.kind !== "user" && agent.id !== build.requestedBy) throw new PlatformError("forbidden", `only the owner or ${build.requestedBy} can cancel this build`);
@@ -1330,7 +1364,7 @@ export class Builds extends Domain {
     const continued = paused ? this.registry.retryOf(build.id) : undefined;
     if (continued) throw new PlatformError("conflict", `build ${buildId} was continued as ${continued}`);
     if (!paused && build.status !== "building" && build.status !== "open" && build.status !== "waiting" && build.status !== "review") throw new PlatformError("conflict", `build is already ${build.status}`);
-    const line = paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
+    const line = reason ? `CANCELLED: ${reason}` : paused ? `CANCELLED by ${agent.id} (stopped while paused)` : `CANCELLED by ${agent.id}`;
     this.registry.updateBuild(buildId, { status: "cancelled", log: [...build.log, line] });
     this.buildEvent(buildId, line, `build ${buildId} [${build.kind} ${build.capabilityId}]`);
     this.aborts.get(buildId)?.abort();
@@ -1652,6 +1686,9 @@ export class Builds extends Domain {
       const v = await this.validateCandidate(build, submitter, { measure: passes[0] === "craft" });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (!v.candidate) {
+        // A build that held one of the owner's keys (or ran into the lock) has no more attempts. Its last ends as
+        // any build's does, so the build itself says nothing the lock doesn't; the owner's says it in their words.
+        if (attempt < max && this.lockedOut(build)) return this.endRun(run, { end: byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED });
         feedback = v.log.join("\n");
         continue;
       }
@@ -1711,6 +1748,9 @@ export class Builds extends Domain {
     const { build, builder, signal, tag } = run;
     const buildId = build.id;
     if (signal.aborted) return "cancelled";
+    // Locked out since it was asked for (while it waited for a place, its workspace opened, or between attempts and
+    // passes): its builder doesn't run.
+    if (this.lockedOut(build)) return { end: byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED };
     // Every run of the builder is a new attempt for it, a pass's too: the session it resumes is the build's.
     const attempt = ++run.runs;
     this.registry.updateBuild(buildId, { status: "building", log: run.history });
@@ -1847,9 +1887,137 @@ export class Builds extends Domain {
       const v = await this.validateCandidate(run.build, `builder ${run.builder}`, { pass, measure });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (v.candidate) return { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
+      if (this.lockedOut(run.build)) return { end: byOwner(run.build) ? OWNERS_WORK_LOCKED : KEY_LOCKED };
       feedback = v.log.join("\n");
     }
     return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
+  }
+
+  // ---------- an agent whose build held one of the owner's keys ----------
+
+  /**
+   * One of the owner's stored keys turned up in a build (OWN_KEY_FOUND): every agent that had a hand in its work
+   * (`behind`), the owner's build of that work included, builds nothing more until the owner has looked
+   * (owner, 2026-11-21, "Lock the agent out"). One bit a submission is still a search, many guesses at a time (a
+   * whole PIN space fits in a file); this bounds it. Work no agent had a hand in locks nobody. A walk cut short
+   * can't name them all: then every agent that built this tool is locked out (as `lockedOut` fails closed).
+   */
+  lockForKey(build: BuildRow, behind: { agents: Set<string>; truncated: boolean }, keys: string[]) {
+    const locks = { ...this.keyLocks() };
+    const now = new Date().toISOString();
+    const agents = behind.truncated ? [...behind.agents, ...this.registry.buildRequesters(build.capabilityId).filter((a) => a !== USER.id && a !== WEB_USER.id)] : behind.agents;
+    const locked = [...new Set(agents)].filter((a) => !locks[a]);
+    if (!locked.length) return;
+    // Synchronously, before anything awaits: another validation of their builds sees the lock at once.
+    for (const a of locked) locks[a] = { buildId: build.id, capabilityId: build.capabilityId, at: now, keys: [...new Set(keys)] };
+    this.registry.setKv("keylocks", locks);
+    for (const a of locked) {
+      const name = this.agentStore.list().find((x) => x.id === a)?.name ?? a;
+      this.registry.addLifecycleEvent(build.capabilityId, "key-lock", `one of your stored keys turned up in work ${name} had a hand in: it can't build until you look`, a);
+      this.logger(`agent ${a} locked out of building: build ${build.id}, which carries on from its work, held one of the owner's stored keys`);
+    }
+    // Their other builds in flight stop (queued, waiting, building); one already validating meets the lock there.
+    for (const id of this.registry.recentBuilds(500)) {
+      const other = this.registry.getBuild(id);
+      if (!other || other.id === build.id || !locked.includes(other.requestedBy) || !["open", "waiting", "building"].includes(other.status)) continue;
+      try {
+        this.cancelBuild(USER, other.id, KEY_LOCKED);
+      } catch {
+        // ended meanwhile
+      }
+    }
+  }
+
+  /**
+   * Whether a build is, or carries on from, the work of an agent that's locked out (`lockForKey`). A walk cut short
+   * can't say whose work lies past it: while any agent is locked out, it might be that one's.
+   */
+  lockedOut(build: BuildRow, behind?: { agents: Set<string>; truncated: boolean }): boolean {
+    const locks = this.keyLocks();
+    // Nobody locked out, as nearly always: no walk.
+    if (!Object.keys(locks).length) return false;
+    const { agents, truncated } = behind ?? this.behind(build);
+    return truncated || [...agents].some((a) => !!locks[a]);
+  }
+
+  /**
+   * The owner's build on work a locked-out agent had a hand in waits until the owner has looked (the Inbox): it
+   * would only meet the lock at the end, after its builder ran in full. Also before anything else is changed for
+   * such a build (a model's grant).
+   */
+  ownersWorkNotLocked(actor: Agent, capabilityId: string, baseVersion: number | null, marks: RetryMarks = {}) {
+    if (actor.kind !== "user") return;
+    const probe = { id: "", capabilityId, kind: "modify", request: { ...marks }, requestedBy: actor.id, builder: null, baseVersion } as unknown as BuildRow;
+    if (this.lockedOut(probe)) throw new PlatformError("conflict", OWNERS_WORK_LOCKED);
+  }
+
+  /**
+   * Whose work a build carries on from, at any remove: the agents among its requester, every build it retries or
+   * fixes (each mark), and the builds that made the versions it's built on; `foreign`, a version installed from a
+   * file, a folder, given files or a link. The owner's builder on such a build doesn't learn where the owner's keys
+   * are, and a key found in it locks those agents: they can follow the chain and read what happened. `truncated`:
+   * the walk was cut short, so `agents` may miss some (`lockedOut` counts it as locked while anyone is).
+   */
+  behind(build: BuildRow): { agents: Set<string>; foreign: boolean; truncated: boolean } {
+    const agents = new Set<string>();
+    let foreign = false;
+    const seen = new Set<string>();
+    const todo: BuildRow[] = [build];
+    // Breadth first, its own marks before what it's built on; a walk cut short counts as foreign (blind), never as clean.
+    while (todo.length && seen.size < 2000) {
+      const b = todo.shift()!;
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      if (!byOwner(b)) agents.add(b.requestedBy);
+      // An install from given files ("keep" on a new tool) is as foreign as one from a folder; the owner's own edits
+      // (a "keep" change) aren't.
+      if (b.builder === "bundle" || b.builder?.startsWith("copy:") || (b.builder === "keep" && b.kind === "create")) foreign = true;
+      const r = b.request as RetryMarks & { autoRetryOf?: string };
+      for (const from of [r.retryOf, r.fixOf, r.autoRetryOf]) {
+        const x = from ? this.registry.getBuild(from) : undefined;
+        if (x) todo.push(x);
+      }
+      const made = b.baseVersion ? this.registry.getVersion(b.capabilityId, b.baseVersion)?.buildId : undefined;
+      const x = made ? this.registry.getBuild(made) : undefined;
+      if (x) todo.push(x);
+    }
+    const truncated = todo.some((b) => !seen.has(b.id));
+    return { agents, foreign: foreign || truncated, truncated };
+  }
+
+  /** The agents locked out, by id (`lockForKey`). */
+  keyLocks(): Record<string, KeyLock> {
+    return this.registry.getKv<Record<string, KeyLock>>("keylocks") ?? {};
+  }
+
+  /** The agents locked out, for the owner's Inbox. Owner only. */
+  keyLocksFor(owner: Agent): Record<string, KeyLock> {
+    requireOwner(owner);
+    return this.keyLocks();
+  }
+
+  /** The owner has looked: the agent may build again. Owner only. */
+  acknowledgeKeyLock(owner: Agent, agentId: string) {
+    requireOwner(owner);
+    const { [agentId]: lock, ...rest } = this.keyLocks();
+    if (!lock) throw new PlatformError("not_found", `${agentId} isn't locked out`);
+    this.registry.setKv("keylocks", rest);
+    const name = this.agentStore.list().find((a) => a.id === agentId)?.name ?? agentId;
+    this.registry.addLifecycleEvent(lock.capabilityId, "key-lock", `${name} may build again: you looked`, owner.id);
+  }
+
+  /**
+   * Refused, with nothing about why, while the agent is locked out; and past BUILDS_PER_HOUR of its builds and
+   * submissions (a build that fails costs it nothing else, so without a cap a sweep of them could still search).
+   */
+  private notKeyLocked(agent: Agent) {
+    if (agent.kind === "user") return;
+    if (this.keyLocks()[agent.id]) throw new PlatformError("forbidden", KEY_LOCKED);
+    const now = Date.now();
+    const recent = (this.buildsBy.get(agent.id) ?? []).filter((t) => now - t < 3600_000);
+    const limit = this.platform.buildsPerHour;
+    if (recent.length >= limit) throw new PlatformError("conflict", `No builds left this hour (${limit}). The next one frees up in ${Math.ceil((recent[0] + 3600_000 - now) / 60_000)} min.`);
+    this.buildsBy.set(agent.id, [...recent, now]);
   }
 
   /** Builds waiting for the owner's review (owner only). */

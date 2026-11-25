@@ -491,14 +491,16 @@ async function main() {
       if (!res.ok) throw new Error(out.message ?? out.error);
       const { check } = out;
       console.log(`${check.name} v${check.version}: ${check.files} files${check.sample ? `, sample data (${check.sample.calls} calls)` : ""}`);
-      for (const f of check.findings) console.log(`  ${f.kind === "secret" ? "✖" : "!"} ${f.file}:${f.line}  ${f.label}: ${f.masked}`);
+      for (const f of check.findings) console.log(`  ${f.blocks ? "✖" : "!"} ${f.file}:${f.line}  ${f.label}: ${f.masked}`);
       if (!check.findings.length) console.log("  nothing personal or key-shaped found");
       console.log("  never in it: your data, keys, settings, conversations, logs");
       // The license it goes under (Share… in Hewn picks another; it's remembered for the tool).
       if (check.license) console.log(`  license: ${check.license.id === "none" ? "all rights reserved (no license)" : `${check.license.id}, ${check.license.copyright}`}`);
-      if (check.blocked?.kind === "secret") {
+      // One of your own keys, or anything shaped like a key: no Hewn would install it.
+      if (check.blocked && check.blocked.kind !== "no-sample") {
         process.exitCode = 1;
-        return void console.error(`✖ your own keys are in it (✖ above: ${check.findings.filter((f: any) => f.kind === "secret").map((f: any) => `${f.file}:${f.line}`).join(", ")}). Remove them, then share again.`);
+        const keys = check.findings.filter((f: any) => f.blocks);
+        return void console.error(`✖ ${keys.every((f: any) => f.kind === "secret") ? "your own keys are" : "keys are"} in it (✖ above: ${keys.map((f: any) => `${f.file}:${f.line}`).join(", ")}). Remove them, then share again.`);
       }
       if (check.blocked?.kind === "no-sample") {
         process.exitCode = 1;

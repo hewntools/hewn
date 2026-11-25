@@ -125,6 +125,8 @@ export function registrySpec(spec: unknown): boolean {
 }
 
 const ONLY_REGISTRY = 'only versions from the npm registry are allowed (like "^1.2.0")';
+/** npm's lockfiles: what it installs, written by npm. */
+export const LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
 
 /**
  * Why npm, which runs on the machine itself and not in the builder's sandbox, mustn't install a
@@ -160,7 +162,7 @@ export function dependencyProblems(files: Files): string[] {
     };
     overrides(pkg.overrides, "");
   }
-  for (const path of ["package-lock.json", "npm-shrinkwrap.json"]) {
+  for (const path of LOCKFILES) {
     const lock = files[path] ? json(path) : null;
     if (!lock) continue;
     // lockfileVersion 2 and 3 list `packages` by path; 1 nests `dependencies`.
@@ -197,6 +199,7 @@ export function crc32(data: Uint8Array): number {
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+const latin1 = new TextDecoder("latin1");
 
 /** A zip of `files` (path → bytes), stored, sorted by path. */
 export function writeZip(files: Files, now = new Date()): Uint8Array {
@@ -367,6 +370,8 @@ export interface Finding {
   masked: string;
   /** The match itself, for Show. */
   text: string;
+  /** In a share check: this one stops the share (one of the owner's keys, or something shaped like a key). */
+  blocks?: true;
 }
 
 /** One of the owner's own stored values: a key ("secret", blocks a share) or a setting (warns). A plain string is a key. */
@@ -403,6 +408,11 @@ const KEYS: [string, RegExp][] = [
 ];
 /** Long runs of base64/hex-ish characters: hashes in fixtures make false positives, so they only warn. */
 const LONG = /[A-Za-z0-9+/_-]{32,}={0,2}/g;
+/** A long run's label: a key or a hash, nobody can tell, so it only ever warns. */
+export const LONG_RANDOM = "Long random string";
+/** A file written as base64 (PNG, JPEG, GIF, WebP, PDF, SVG, XML, WOFF, WOFF2): an image in a test isn't a key. */
+const BASE64_FILE = /^(?:iVBORw0KGgo|\/9j\/|R0lGOD|UklGR|JVBERi0|PHN2Zy|PD94bW|d09GR|d09GM)/;
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /** The patterns look at a line this much at a time (overlapping by OVERLAP), however long it is (minified code). */
 const SCAN_PIECE = 4096;
 const OVERLAP = 256;
@@ -413,6 +423,17 @@ function entropy(s: string): number {
   let h = 0;
   for (const n of counts.values()) h -= (n / s.length) * Math.log2(n / s.length);
   return h;
+}
+
+/**
+ * Whether a long run (`before`: what comes just before it on its line) looks like a key: varied
+ * enough, with digits all through. Not a word, a name or a path (a version number at most), an
+ * alphabet or a count ("abcdef…", "23456789"), a UUID, or a file written as base64.
+ */
+function randomLooking(s: string, before: string): boolean {
+  if (entropy(s) <= 3.5 || (s.match(/\d/g)?.length ?? 0) < 2 || before.endsWith("base64,") || BASE64_FILE.test(s) || UUID.test(s)) return false;
+  for (let i = 1, run = 1; i < s.length; i++) if ((run = s.charCodeAt(i) === s.charCodeAt(i - 1) + 1 ? run + 1 : 1) >= 6) return false;
+  return true;
 }
 
 /** "a••••@g••••.com", "sk-a••••", "Tod••••": enough to recognise, not enough to use. */
@@ -441,23 +462,11 @@ function indexOfBytes(data: Uint8Array, needle: Uint8Array, from = 0): number {
  */
 export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
   const out: Finding[] = [];
-  const named = new Map<string, { label: string; kind: "secret" | "setting" }>();
-  for (const o of own) {
-    const v = typeof o === "string" ? { value: o, label: "One of your own stored values", kind: "secret" as const } : { value: o.value, label: o.label, kind: o.kind ?? "secret" };
-    // The same value as a key and as a setting: a key, so it blocks.
-    if (v.value.length >= 6 && (!named.has(v.value) || (v.kind === "secret" && named.get(v.value)!.kind !== "secret"))) named.set(v.value, { label: v.label, kind: v.kind });
-  }
+  const named = ownNamed(own);
   const mine = [...named.keys()].sort((a, b) => b.length - a.length);
   for (const [file, data] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     if (data.includes(0)) {
-      for (const v of mine) {
-        const at = indexOfBytes(data, enc.encode(v));
-        if (at < 0) continue;
-        let line = 1;
-        for (let i = data.indexOf(10); i >= 0 && i < at; i = data.indexOf(10, i + 1)) line++;
-        const { label, kind } = named.get(v)!;
-        out.push({ file, line, kind, label, masked: mask(v), text: v });
-      }
+      out.push(...ownInBinary(file, data, named), ...shapesInBinary(file, data));
       continue;
     }
     const lines = dec.decode(data).split("\n");
@@ -473,11 +482,65 @@ export function scanFiles(files: Files, own: OwnValue[] = []): Finding[] {
       for (let at = 0; at === 0 || at + OVERLAP < text.length; at += SCAN_PIECE - OVERLAP) {
         const piece = text.slice(at, at + SCAN_PIECE);
         for (const [label, re] of KEYS) for (const m of piece.matchAll(re)) add("key", label, m[0]);
-        for (const m of piece.matchAll(LONG)) if (!seen.has(m[0]) && !/^[a-z_]+$/i.test(m[0]) && entropy(m[0]) > 3.5) add("key", "Long random string", m[0]);
+        for (const m of piece.matchAll(LONG)) if (!seen.has(m[0]) && randomLooking(m[0], piece.slice(Math.max(0, m.index - 7), m.index))) add("key", LONG_RANDOM, m[0]);
         const words = blankDrawings(piece);
         for (const [label, re, keep] of PII) for (const m of words.matchAll(re)) if (!keep || keep(m[0].trim())) add("pii", label, m[0].trim());
       }
     });
   }
   return out;
+}
+
+/**
+ * Where the owner's own values are in `files`, exactly, and nothing else: validation's pass for them,
+ * apart from the patterns, so that what's said of a key shape is the same whether or not it's one of them.
+ */
+export function ownValuesIn(files: Files, own: OwnValue[]): Finding[] {
+  const out: Finding[] = [];
+  const named = ownNamed(own);
+  const mine = [...named.keys()].sort((a, b) => b.length - a.length);
+  for (const [file, data] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
+    if (data.includes(0)) {
+      out.push(...ownInBinary(file, data, named));
+      continue;
+    }
+    dec
+      .decode(data)
+      .split("\n")
+      .forEach((text, i) => {
+        for (const v of mine) if (text.includes(v)) out.push({ file, line: i + 1, kind: named.get(v)!.kind, label: named.get(v)!.label, masked: mask(v), text: v });
+      });
+  }
+  return out;
+}
+
+/** The owner's values to look for, each named, from 6 characters (shorter ones are too common to mean anything). The same value as a key and a setting: a key. */
+function ownNamed(own: OwnValue[]): Map<string, { label: string; kind: "secret" | "setting" }> {
+  const named = new Map<string, { label: string; kind: "secret" | "setting" }>();
+  for (const o of own) {
+    const v = typeof o === "string" ? { value: o, label: "One of your own stored values", kind: "secret" as const } : { value: o.value, label: o.label, kind: o.kind ?? "secret" };
+    if (v.value.length >= 6 && (!named.has(v.value) || (v.kind === "secret" && named.get(v.value)!.kind !== "secret"))) named.set(v.value, { label: v.label, kind: v.kind });
+  }
+  return named;
+}
+
+/** The line `at` (a byte offset) is on. */
+const lineAt = (data: Uint8Array, at: number) => {
+  let line = 1;
+  for (let i = data.indexOf(10); i >= 0 && i < at; i = data.indexOf(10, i + 1)) line++;
+  return line;
+};
+
+/** The owner's values in a binary file (one with a NUL byte), byte for byte. */
+function ownInBinary(file: string, data: Uint8Array, named: Map<string, { label: string; kind: "secret" | "setting" }>): Finding[] {
+  return [...named.keys()].flatMap((v) => {
+    const at = indexOfBytes(data, enc.encode(v));
+    return at < 0 ? [] : [{ file, line: lineAt(data, at), ...named.get(v)!, masked: mask(v), text: v }];
+  });
+}
+
+/** Key shapes in a binary file, read byte for byte (a key is ASCII wherever it's kept): not the long random strings or personal data, which binary data is full of. */
+function shapesInBinary(file: string, data: Uint8Array): Finding[] {
+  const text = latin1.decode(data);
+  return KEYS.flatMap(([label, re]) => [...text.matchAll(re)].map((m): Finding => ({ file, line: lineAt(data, m.index), kind: "key", label, masked: mask(m[0]), text: m[0] })));
 }

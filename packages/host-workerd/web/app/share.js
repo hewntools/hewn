@@ -29,6 +29,8 @@ const shareButton = (c, { version } = {}) => h("button", { class: "with-icon", o
 
 /** What Ask builder asks for: sample data, written the way the brief says. */
 const ASK_SAMPLE = "Add sample data: sample/calls.json with made-up entries that show what the tool does (it fills an empty tool when someone installs it, and its screenshots).";
+/** A finding that stops the share: one of your own keys, or anything shaped like a key (no Hewn would install it). */
+const blocks = (f) => !!f.blocks;
 
 async function shareSheet(c, { version } = {}) {
   let check = await api(`/capabilities/${enc(c.id)}/share${version ? `?version=${version}` : ""}`);
@@ -44,11 +46,12 @@ async function shareSheet(c, { version } = {}) {
           fail(e);
         }
       });
-      // One of your own keys is a danger row (it stops the share) and stays masked; the rest warn, with Show.
+      // One of your own keys, or anything shaped like a key, is a danger row (it stops the share); your own stays masked.
+      // The rest warn. Show reveals what isn't yours.
       const finding = (f) => {
-        const key = f.kind === "secret";
+        const key = blocks(f);
         const sub = h("span", { class: "sub" }, `${f.label} · ${f.masked}`);
-        const show = !key && h("button", { class: "ghost sm" }, "Show");
+        const show = f.kind !== "secret" && h("button", { class: "ghost sm" }, "Show");
         if (show)
           show.addEventListener("click", () => {
             const open = show.textContent === "Show";
@@ -116,8 +119,8 @@ async function shareSheet(c, { version } = {}) {
       };
       const draw = () => {
         put(pick, check.versions.map((v) => h("option", { value: v, selected: v === check.version }, `v${v}`)));
-        const keys = check.findings.filter((f) => f.kind === "secret");
-        const warnings = check.findings.filter((f) => f.kind !== "secret");
+        const keys = check.findings.filter(blocks);
+        const warnings = check.findings.filter((f) => !blocks(f));
         const where = [...new Set(keys.map((f) => `${f.file}:${f.line}`))];
         const sampleRow = check.sample
           ? h("li", {}, h("span", { class: "dot ok" }), h("div", { class: "grow" }, h("span", {}, "Sample data"), h("span", { class: "sub" }, `sample/calls.json · ${plural(check.sample.calls, "call")} · always included`)))
@@ -139,7 +142,7 @@ async function shareSheet(c, { version } = {}) {
             h(
               "div",
               { class: "notice danger info-notice" },
-              h("span", { class: "grow" }, keys.length === 1 ? [h("span", { class: "mono" }, where[0]), ` is ${keys[0].label}. Remove it, then share again.`] : `${keys.length} of your own keys are in it (below). Remove them, then share again.`),
+              h("span", { class: "grow" }, keys.length === 1 ? [h("span", { class: "mono" }, where[0]), keys[0].kind === "secret" ? ` is ${keys[0].label}. Remove it, then share again.` : ` ${keys[0].label[0].toLowerCase()}${keys[0].label.slice(1)}. Remove it, then share again.`] : `${keys.length} ${keys.every((f) => f.kind === "secret") ? "of your own keys are" : "keys are"} in it (below). Remove them, then share again.`),
               h("button", { class: "sm", onclick: () => (close(), openChange(c, { m: `Remove the ${where.length > 1 ? "values" : "value"} hard-coded in ${where.join(", ")}; ${where.length > 1 ? "they" : "it"} must not be in the code. Read ${where.length > 1 ? "them" : "it"} from a setting or a key the tool asks for instead.` })) }, "Change…"),
             ),
           h(

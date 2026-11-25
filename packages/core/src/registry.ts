@@ -1307,7 +1307,7 @@ export class Registry {
   }
 
   /** Lifecycle actions for the activity timeline: delete, restore, rollback, purge …, and Hewn's own (stalled, suspend). */
-  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "held-up" | "suspend" | "resume" | "logs", detail: string, actor: string) {
+  addLifecycleEvent(capabilityId: string, action: "delete" | "restore" | "rollback" | "purge" | "schedule" | "start-over" | "sample" | "share" | "stalled" | "held-up" | "suspend" | "resume" | "logs" | "key-lock", detail: string, actor: string) {
     this.db.prepare("INSERT INTO lifecycle_events (capability_id, action, detail, actor, at) VALUES (?, ?, ?, ?, ?)").run(capabilityId, action, detail, actor, now());
   }
 
@@ -1364,6 +1364,11 @@ export class Registry {
 
   buildIdsFor(capabilityId: string): string[] {
     return this.db.prepare("SELECT id FROM builds WHERE capability_id = ?").all(capabilityId).map((r) => (r as Row).id as string);
+  }
+
+  /** Who asked for a capability's builds, each once. */
+  buildRequesters(capabilityId: string): string[] {
+    return this.db.prepare("SELECT DISTINCT requested_by FROM builds WHERE capability_id = ?").all(capabilityId).map((r) => (r as Row).requested_by as string);
   }
 
   /** The most recent build per capability (for Home badges). */

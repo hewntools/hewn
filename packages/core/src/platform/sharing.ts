@@ -7,7 +7,7 @@
 // install or Start over, and written by the owner as a new version. Owner only, but for what a
 // link serves (the token is the authority there).
 import { type Agent, requireOwner } from "../auth.ts";
-import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, type Finding, type HubListing, type OwnValue, packBundle, readSample, readSummary, SAMPLE_FILE, type SampleCall, sampleOrNull, scanFiles, type ShelfTool, type Sidecar, unpackBundle } from "../bundle.ts";
+import { BUNDLE_FORMAT, BundleError, type BundleSummary, dependencyProblems, type Finding, type HubListing, LONG_RANDOM, type OwnValue, packBundle, readSample, readSummary, SAMPLE_FILE, type SampleCall, sampleOrNull, scanFiles, type ShelfTool, type Sidecar, unpackBundle } from "../bundle.ts";
 import { PlatformError } from "../errors.ts";
 import { type Cells, cellsFromSvg } from "../glyph.ts";
 import { bytes, contentHash, text } from "../files.ts";
@@ -47,8 +47,11 @@ export interface ShareCheck {
   sample: { calls: number } | null;
   /** A connection: it shares without sample data. */
   connection: boolean;
-  /** Why it can't be shared: one of the owner's own keys in it (the first; `findings` has every one), or no sample data. */
-  blocked: { kind: "secret"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
+  /**
+   * Why it can't be shared: one of the owner's own keys in it, or something shaped like a key (which no Hewn
+   * would install: validation fails it), the first (`findings` has every one); or no sample data.
+   */
+  blocked: { kind: "secret" | "key"; file: string; line: number; label: string } | { kind: "no-sample" } | null;
   license: ShareLicense;
 }
 
@@ -200,9 +203,9 @@ export class Sharing extends Domain {
     const v = version ?? cap.activeVersion!;
     const files = await this.shareFiles(capabilityId, v);
     // The owner's own keys are never sent back whole, not even to the owner: masked only.
-    const findings = scanFiles(files, this.ownValues()).map((f) => (f.kind === "secret" ? { ...f, text: f.masked } : f));
+    const findings = scanFiles(files, this.ownValues()).map((f) => ({ ...f, ...(f.kind === "secret" ? { text: f.masked } : {}), ...(f.kind === "secret" || keyShaped(f) ? { blocks: true as const } : {}) }));
     const sample = sampleOrNull(files);
-    const secret = findings.find((f) => f.kind === "secret");
+    const secret = findings.find((f) => f.kind === "secret") ?? findings.find((f) => f.blocks);
     // A connection has no data of its own to show (its sign-in never travels), so it shares without sample data.
     const connection = isConnection(this.registry.getVersion(capabilityId, v)!.manifest);
     return {
@@ -214,7 +217,7 @@ export class Sharing extends Domain {
       findings,
       sample: sample ? { calls: sample.length } : null,
       connection,
-      blocked: secret ? { kind: "secret", file: secret.file, line: secret.line, label: secret.label } : !sample && !connection ? { kind: "no-sample" } : null,
+      blocked: secret ? { kind: secret.kind === "secret" ? "secret" : "key", file: secret.file, line: secret.line, label: secret.label } : !sample && !connection ? { kind: "no-sample" } : null,
       license: this.shareLicense(capabilityId, v),
     };
   }
@@ -356,10 +359,10 @@ export class Sharing extends Domain {
 
   /**
    * The owner's own stored values, each named: every tool's keys and the model providers' (these
-   * block a share), and every tool's settings (these warn: a setting may well be a city or a site
-   * anyone could write, and it's the owner's call).
+   * block a share, and fail validation), and every tool's settings (these warn when sharing: a setting
+   * may well be a city or a site anyone could write, and it's the owner's call).
    */
-  private ownValues(): OwnValue[] {
+  ownValues(): OwnValue[] {
     const out: OwnValue[] = [];
     for (const c of [...this.registry.listActiveCapabilities(), ...this.registry.listArchivedCapabilities()]) {
       const name = c.displayName ?? c.name;
@@ -694,13 +697,17 @@ function numbered(raw: string, room: number): { text: string; bytes: number; lin
 
 /** A share check that lets the version go, or the reason it can't (the same for a file and a link). */
 function refuseBlocked(check: ShareCheck): ShareCheck {
-  if (check.blocked?.kind === "secret") {
-    const keys = check.findings.filter((f) => f.kind === "secret");
-    throw new PlatformError("conflict", `${keys.map((f) => `${f.file}:${f.line} is ${f.label}`).join("; ")}. Remove ${keys.length > 1 ? "them" : "it"}, then share again.`, { blocked: check.blocked });
+  if (check.blocked?.kind === "secret" || check.blocked?.kind === "key") {
+    const keys = check.findings.filter((f) => f.blocks);
+    const what = (f: Finding) => (f.kind === "secret" ? `is ${f.label}` : `${f.label[0].toLowerCase()}${f.label.slice(1)}`);
+    throw new PlatformError("conflict", `${keys.map((f) => `${f.file}:${f.line} ${what(f)}`).join("; ")}. Remove ${keys.length > 1 ? "them" : "it"}, then share again${keys.some((f) => f.kind !== "secret") ? " (a tool with a key in it doesn't install anywhere)" : ""}.`, { blocked: check.blocked });
   }
   if (check.blocked?.kind === "no-sample") throw new PlatformError("conflict", `${check.id} has no sample data (${SAMPLE_FILE}), and a tool needs it to be shared. Ask the builder to add some, or write it yourself.`, { blocked: check.blocked });
   return check;
 }
+
+/** Shaped like a key (an API key, a token, a private key; not a long random string, which only warns): it blocks a share, as validation fails it. */
+const keyShaped = (f: Finding) => f.kind === "key" && f.label !== LONG_RANDOM;
 
 /** A bundle's files, sidecar and manifest, or the reason it can't be installed here. */
 function refuseUnreadable(zip: Uint8Array): { files: Files; sidecar: Sidecar; manifest: CapabilityManifest } {

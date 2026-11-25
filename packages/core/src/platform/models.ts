@@ -331,6 +331,8 @@ export class Models extends Domain {
     }
     if (modelGrant(next) === modelGrant(cur)) throw new PlatformError("invalid_request", `${capabilityId} already uses ${next.tier ? `the ${next.tier} tier` : next.model}`);
     const grant = modelGrant(next);
+    // Refused before the grant is approved: a locked-out agent's work would leave a grant no version uses.
+    this.d.builds.ownersWorkNotLocked(owner, capabilityId, this.registry.getCapability(capabilityId)?.activeVersion ?? null);
     this.registry.approveGrant(capabilityId, "model", grant.slice("model:".length), owner.id);
     this.registry.addGrantEvent(capabilityId, "approve", grant, owner.id);
     const what = next.tier ? `the ${next.tier} tier` : next.model;

@@ -24,7 +24,7 @@ import { Invocation, type InvokeRequest } from "./platform/invocation.ts";
 import { Schedules, type ApprovedSchedule } from "./platform/schedules.ts";
 import type { BundleSummary, ShelfTool } from "./bundle.ts";
 import { type BundleOrigin, type BundlePreview, type HubCard, type HubDetail, Sharing, type ShareCheck, type ShareLicense } from "./platform/sharing.ts";
-import { Builds, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
+import { Builds, BUILDS_PER_HOUR, type BuildView, type BuildStepState, MAX_RUNNING_BUILDS, type ModelAsk, type BuildReport, type SubmitEntry } from "./platform/builds.ts";
 import { CHECKS_PER_HOUR, type ClientCheck, type Pack, PACK_LINK_MS, PACK_PAGE_BYTES, Submissions } from "./platform/submissions.ts";
 import type { CodeFile, CodeText } from "./code.ts";
 import { Validation } from "./platform/validation.ts";
@@ -152,6 +152,8 @@ export class Platform {
   packPageBytes = PACK_PAGE_BYTES;
   /** How long a pack's download link works (once). */
   packLinkMs = PACK_LINK_MS;
+  /** The most builds and submissions an agent may start in an hour (tests make it small). */
+  buildsPerHour = BUILDS_PER_HOUR;
   /** Heartbeat interval for builder liveness logging. */
   heartbeatMs = 10_000;
   /** How long a build waits after losing its builder connection before counting the attempt. */
@@ -427,6 +429,8 @@ export class Platform {
   buildReport(owner: Agent, opts?: { days?: number }): BuildReport { return this.d.builds.buildReport(owner, opts); }
   buildTranscript(owner: Agent, buildId: string): Promise<string | undefined> { return this.d.builds.buildTranscript(owner, buildId); }
   buildsInReview(owner: Agent): BuildView[] { return this.d.builds.buildsInReview(owner); }
+  keyLocks(owner: Agent) { return this.d.builds.keyLocksFor(owner); }
+  acknowledgeKeyLock(owner: Agent, agentId: string) { return this.d.builds.acknowledgeKeyLock(owner, agentId); }
   approveBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.approveBuild(owner, buildId); }
   rejectBuild(owner: Agent, buildId: string): Promise<BuildView> { return this.d.builds.rejectBuild(owner, buildId); }
   reviewCode(owner: Agent, buildId: string): Promise<{ version: number; base: number | null; files: CodeFile[] }> { return this.d.builds.reviewCode(owner, buildId); }
