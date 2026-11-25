@@ -142,9 +142,10 @@ function readyNote(c, { setVersion, reload, drawerSays }) {
     el = toast(`v${live} is ready`, { action: ["Reload", () => ((el = null), reload())], ms: Infinity, dismiss: true });
   };
   /** Read the tool's live version; `reloaded`: the screen shows it now. */
-  const refresh = async ({ reloaded = false } = {}) => {
+  // `auto`: the Inbox's poll saw a build end (the page's own look, not the owner's).
+  const refresh = async ({ reloaded = false, auto = false } = {}) => {
     invalidateCaps();
-    const now = (await caps(true).catch(() => new Map())).get(c.id);
+    const now = (await caps(true, { poll: auto }).catch(() => new Map())).get(c.id);
     if (!now?.version) return;
     live = now.version;
     setVersion(live);
@@ -158,7 +159,7 @@ function readyNote(c, { setVersion, reload, drawerSays }) {
     const now = new Set((e.detail?.building ?? []).filter((b) => b.capabilityId === c.id).map((b) => b.buildId));
     const ended = [...inFlight].some((id) => !now.has(id));
     inFlight = now;
-    if (ended) void refresh();
+    if (ended) void refresh({ auto: true });
   };
   const onVisible = () => !document.hidden && void refresh();
   window.addEventListener("hewn:inbox", onInbox);

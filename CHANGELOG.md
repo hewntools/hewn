@@ -7,6 +7,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 ### New
 
 - **A check can warn,** about something worth your look that doesn't fail the tool. A new tool or change waiting for you shows each warning on its card, its file and line open the file there, and **Ask builder to fix** puts the warnings in a message for you to send; the fix comes back to the card. This release's new checks are the first to warn. See [Changing a tool](docs/building-tools.md#changing-a-tool).
+- **A shared tool carries a license.** Share… has a License row: MIT (a tool built on your Hewn starts there), Apache 2.0, GPL 3.0 or later, CC0 or all rights reserved, each in a line of plain words. Hewn writes it into the file as the manifest's `license` (ABI 2.7) and a `LICENSE` file with a copyright line, never as a new version, and the install sheet shows it. See [License](docs/sharing.md#license).
 
 ### Safety and limits
 
@@ -14,7 +15,12 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Fixes
 
+- Hewn notices a Mac's wake from sleep (it went unnoticed before), and `hewn.log` says what the catch-up ran.
+- With `HEWN_SCHEDULES=off`, a restored copy no longer starts the builds that were running or waiting when the backup was made: they stay stopped, saying why.
+- An open Home redrawing itself after its poll found a change no longer counts as your activity, so it doesn't delay Hewn giving memory back or a host suspending it.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
+- `hewn serve` no longer exits when its metrics port is asked for the status while workerd restarts.
+- On a machine short of CPU, an unresponsive workerd is restarted at growing intervals, up to 2 minutes, instead of about every 15 seconds. See [Troubleshooting](docs/troubleshooting.md#tools).
 - On Linux, a restart of Hewn's tools no longer leaves the old tools' workerd running in the background. See [Troubleshooting](docs/troubleshooting.md#tools).
 
 ## 0.4.12 (2026-11-19)

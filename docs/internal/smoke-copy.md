@@ -44,7 +44,7 @@ For copies and drills, never an owner's own Hewn. Both are read by `hewn serve` 
 | `HEWN_NETWORK=off` | Tools' Egress refuses every fetch (`egress denied: the network is off…`), and the tools' workerd has no network. |
 | `HEWN_NETWORK=get` | Tools' Egress lets only GET and HEAD to approved hosts out (not an upgrade to a WebSocket); anything else is refused before it's sent. |
 
-With either network mode, the platform's own fetches are off too (its `internet` service allows nothing): model providers, a connection's sign-in, an install from a link, the model catalog; and no tunnel starts. `hewn status` and `/control/status` say when either switch is on. Neither stops a build that was running when the backup was made from starting again at start, on the builder the settings name: the harness's stubs make that harmless; a `hewn serve` of a copy doesn't have them.
+With either network mode, the platform's own fetches are off too (its `internet` service allows nothing): model providers, a connection's sign-in, an install from a link, the model catalog; and no tunnel starts. `hewn status` and `/control/status` say when either switch is on. With `HEWN_SCHEDULES=off`, a build that was running when the backup was made isn't started again at start, and one waiting behind it fails too, each saying why (`Builds.recoverInterruptedBuilds`); without it, they would start on the builder the settings name. `HEWN_NETWORK` alone doesn't stop them.
 
 ## The fixed checks
 

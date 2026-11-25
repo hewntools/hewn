@@ -494,6 +494,8 @@ async function main() {
       for (const f of check.findings) console.log(`  ${f.kind === "secret" ? "✖" : "!"} ${f.file}:${f.line}  ${f.label}: ${f.masked}`);
       if (!check.findings.length) console.log("  nothing personal or key-shaped found");
       console.log("  never in it: your data, keys, settings, conversations, logs");
+      // The license it goes under (Share… in Hewn picks another; it's remembered for the tool).
+      if (check.license) console.log(`  license: ${check.license.id === "none" ? "all rights reserved (no license)" : `${check.license.id}, ${check.license.copyright}`}`);
       if (check.blocked?.kind === "secret") {
         process.exitCode = 1;
         return void console.error(`✖ your own keys are in it (✖ above: ${check.findings.filter((f: any) => f.kind === "secret").map((f: any) => `${f.file}:${f.line}`).join(", ")}). Remove them, then share again.`);

@@ -84,28 +84,44 @@ export function prometheusText(s: Snapshot, appVersion: string, idle?: IdleStatu
 /**
  * Serve GET /metrics on all interfaces at `port`, asking the platform through the admin channel, and GET /status: the
  * idle report (`?after=<seconds>`: the host's own quiet time). Neither counts as activity.
+ * Every answer is made in full before anything is written, and written once: these are asked while workerd restarts
+ * (a host scrapes every few seconds), and a second writeHead after a failed first answer threw out of the handler and
+ * ended the supervisor with it.
  */
 export function startMetrics(o: { port: number; url: string; adminToken: string; version: string; log: (m: string) => void; status: (afterSeconds?: number) => Promise<IdleStatus> }) {
-  const server = http.createServer(async (req, res) => {
+  const answer = (res: http.ServerResponse, status: number, type: string | undefined, body?: string) => {
+    if (res.headersSent || res.writableEnded || res.destroyed) return;
+    res.writeHead(status, type ? { "content-type": type } : {}).end(body);
+  };
+  const handle = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://x");
     if (req.method === "GET" && url.pathname === "/status") {
+      let body: string;
       try {
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(await o.status(afterParam(url.searchParams.get("after")))));
+        body = JSON.stringify(await o.status(afterParam(url.searchParams.get("after"))));
       } catch (e) {
-        res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: `status unavailable: ${(e as Error).message}` }));
+        return answer(res, 503, "application/json", JSON.stringify({ error: `status unavailable: ${(e as Error).message}` }));
       }
-      return;
+      return answer(res, 200, "application/json", body);
     }
-    if (req.method !== "GET" || req.url !== "/metrics") { res.writeHead(404).end(); return; }
+    if (req.method !== "GET" || req.url !== "/metrics") return answer(res, 404, undefined);
+    let body: string;
     try {
-      const r = await fetch(`${o.url}/_admin/call`, { method: "POST", headers: { "x-hewn-admin": o.adminToken, "content-type": "application/json" }, body: JSON.stringify({ method: "metrics" }) });
+      const r = await fetch(`${o.url}/_admin/call`, { method: "POST", headers: { "x-hewn-admin": o.adminToken, "content-type": "application/json" }, body: JSON.stringify({ method: "metrics" }), signal: AbortSignal.timeout(5000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { result } = (await r.json()) as { result: Snapshot };
       const idle = await o.status().catch(() => undefined);
-      res.writeHead(200, { "content-type": "text/plain; version=0.0.4" }).end(prometheusText(result, o.version, idle));
+      body = prometheusText(result, o.version, idle);
     } catch (e) {
-      res.writeHead(503, { "content-type": "text/plain" }).end(`metrics unavailable: ${(e as Error).message}\n`);
+      return answer(res, 503, "text/plain", `metrics unavailable: ${(e as Error).message}\n`);
     }
+    answer(res, 200, "text/plain; version=0.0.4", body);
+  };
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((e) => {
+      o.log(`metrics: ${(e as Error).message}`);
+      try { answer(res, 500, "text/plain", "metrics error\n"); } catch { res.destroy(); }
+    });
   });
   server.listen(o.port, "::", () => o.log(`metrics on :${o.port}/metrics, the idle report on :${o.port}/status`));
   return server;
