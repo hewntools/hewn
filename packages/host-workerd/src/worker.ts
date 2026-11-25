@@ -365,7 +365,8 @@ const RESTART_WAIT_MS = 10_000;
  * sent until a new one answers.
  */
 function workerdRuntime(env: Env, data: DataLimits, liveHosts: LiveHosts, tools: ToolsSide): CapabilityRuntime {
-  const host = toolsChannel(env.TOOLS, env.TOOLS_TOKEN);
+  // A dropped read is sent once more only while the tools aren't away (tools-channel.ts).
+  const host = toolsChannel(env.TOOLS, env.TOOLS_TOKEN, { retry: () => !tools.away() });
   /** The tool's calls' hosts when this is its live state running its active version (null: it isn't). */
   const liveOf = (state: StateRef, code: CodeRef) => (state.scratch ? null : liveHosts(state.capabilityId, code));
   // Data ops run with the hosts the tool's calls have, so on the live state they share the calls' isolate
