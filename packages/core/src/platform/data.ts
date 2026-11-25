@@ -93,6 +93,8 @@ export class Data extends Domain {
       await this.blobs.delete(`transcripts/${b}.log`);
       await this.blobs.delete(`screenshots/${b}.png`);
       await this.blobs.delete(`screenshots/${b}-dark.png`);
+      await this.blobs.delete(`screenshots/${b}-widgets.png`);
+      await this.blobs.delete(`screenshots/${b}-widgets-dark.png`);
       for (const name of REVIEW_SHOTS) await this.blobs.delete(reviewShotKey(b, name));
     }
     for (const h of hashes) await this.blobs.delete(`versions/${h}.json`);

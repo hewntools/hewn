@@ -431,6 +431,10 @@ describe("visual validation: widgets", () => {
     assert.deepEqual([done.screenshot, done.widgetSheet], [true, true]);
     const blob = (name: string) => readFileSync(join(t.home.root, "blobs", "screenshots", name), "utf8");
     assert.deepEqual([blob(`${done.buildId}.png`), blob(`${done.buildId}-widgets.png`)], ["ui", "sheet"], "the screen's screenshot stays the screen's");
+    // Purged, the tool takes all of them with it.
+    platform.archive(USER, done.capabilityId);
+    await platform.purge(USER, done.capabilityId, done.capabilityId);
+    assert.deepEqual(readdirSync(join(t.home.root, "blobs", "screenshots")).filter((f) => f.startsWith(done.buildId)), []);
     platform.close();
   });
 
