@@ -26,7 +26,7 @@ function fakeBuilder(name: string, write: (job: BuildJob) => void | Promise<void
   };
 }
 
-const withBuilder = (home: Home, b: () => CapabilityBuilder, opts: { attempts?: number; logger?: (m: string) => void } = {}) => platformWith(home, b, opts);
+const withBuilder = (home: Home, b: () => CapabilityBuilder, opts: { attempts?: number; logger?: (m: string) => void; schedulesOff?: boolean } = {}) => platformWith(home, b, opts);
 
 describe("platform-assigned builder", () => {
   let t: ReturnType<typeof setup>;
@@ -379,6 +379,46 @@ describe("platform-assigned builder", () => {
     assert.equal(b.status, "failed");
     assert.match(b.log.at(-1)!, /interrupted/);
     restarted.close();
+  });
+
+  test("the scratch states validation runs cut off by a restart left go at the restart: a build's, its check's, a client's check's", async () => {
+    await installSeed(t.platform);
+    useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
+    const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index" });
+    // As a crash mid-validation leaves them: the build's, its builder's check's, a client's check's. A backup stays.
+    const left = [`test:${opened.buildId}`, `dryrun:${opened.buildId}`, `dryrun:${opened.buildId}-check`, "sample:chk-1a2b3c4d-check", "backup:before-v2-1"];
+    for (const scratch of left) await platform.runtime.copyState({ capabilityId: "running-log" }, { capabilityId: "running-log", scratch });
+    const restarted = nodePlatform(t.home);
+    await restarted.recoverInterruptedBuilds();
+    assert.deepEqual(await restarted.runtime.listStates("running-log", ""), ["backup:before-v2-1"]);
+    restarted.close();
+  });
+
+  test("a copy of a Hewn (schedules off) leaves an interrupted build stopped, saying why, and a waiting one too: a Retry isn't queued behind it", async () => {
+    await installSeed(t.platform);
+    useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
+    const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index" });
+    const waiting = await platform.modify(t.claude, { capabilityId: "running-log", request: "after it" });
+    const ran: string[] = [];
+    const logs: string[] = [];
+    const copy = withBuilder(t.home, () => fakeBuilder("fake", (job) => void ran.push(job.workspace)), { schedulesOff: true, logger: (m) => void logs.push(m) });
+    assert.deepEqual(await copy.recoverInterruptedBuilds(), [], "not retried");
+    const b = copy.getBuild(t.claude, opened.buildId);
+    assert.equal(b.status, "failed");
+    assert.equal(b.log.at(-1), "FAILED: interrupted by platform restart; not started again: schedules are off in this Hewn (HEWN_SCHEDULES=off), so it starts no build by itself");
+    assert.deepEqual([b.failure?.title, b.failure?.detail], ["Interrupted by a restart", "Hewn restarted before this finished, and didn't start it again: schedules are off in this Hewn (a copy), so it starts no build by itself."]);
+    // The one waiting behind it fails the same way: nothing here would release it, and a Retry or a new change would queue behind it.
+    const w = copy.getBuild(t.claude, waiting.buildId);
+    assert.equal(w.status, "failed");
+    assert.equal(w.log.at(-1), b.log.at(-1));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(ran, [], "the builder never ran");
+    assert.ok(logs.some((l) => l === `build ${opened.buildId} not retried: schedules are off (HEWN_SCHEDULES=off)`), logs.join("\n"));
+    // The owner's own Retry runs (their click, not Hewn's), queued behind nothing.
+    const retry = await copy.retryBuild(USER, opened.buildId);
+    assert.notEqual(copy.getBuild(USER, retry.buildId).status, "waiting", "the owner's Retry isn't queued behind anything");
+    await settled(copy, retry.buildId);
+    copy.close();
   });
 
   test("an interrupted platform build is retried once after the restart", async () => {

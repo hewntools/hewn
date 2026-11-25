@@ -22,7 +22,7 @@ import { attachmentRefs } from "./attachments.ts";
 import { ownerInstructionFiles, ownerInstructionsNote } from "./instructions.ts";
 import type { ApprovedSchedule } from "./schedules.ts";
 import { Domain, type Shared } from "./context.ts";
-import { type Candidate, reviewShotKey, warningText } from "./validation.ts";
+import { type Candidate, reviewShotKey, SCRATCH_KINDS, warningText } from "./validation.ts";
 import { candidateFiles } from "./submissions.ts";
 import { skillText } from "../skill.ts";
 import type { PlatformOptions } from "../platform.ts";
@@ -214,6 +214,9 @@ const MAX_REPLY_CHARS = 100_000;
 export const archivedConflict = (c: { id: string; name: string; displayName?: string | null }) =>
   new PlatformError("conflict", `'${c.id}' was deleted by the owner and is kept with its data; use another id, or ask the owner to restore it`, { archived: { id: c.id, name: c.displayName ?? c.name } });
 
+/** Why an interrupted build wasn't started again (its log line; failure.ts explains it). */
+export const NOT_IN_A_COPY = "not started again: schedules are off in this Hewn (HEWN_SCHEDULES=off), so it starts no build by itself";
+
 export class Builds extends Domain {
   private buildModelFor: (builder: string) => { model?: string; effort?: string };
   private agentBuildModels?: (builder: string) => string[];
@@ -235,8 +238,12 @@ export class Builds extends Domain {
   /** Pipeline step of each in-flight build (see BuildStep). */
   private steps = new Map<string, { capabilityId: string; step: BuildStep; tests?: { passed: number; total: number }; since: number; spent: Partial<Record<BuildStep, number>>; passes?: Pass[] }>();
 
-  constructor(s: Shared, opts: Pick<PlatformOptions, "brief" | "designSystem" | "buildModel" | "agentBuildModels" | "modelEfforts">) {
+  /** HEWN_SCHEDULES=off: a copy of someone's Hewn starts no build by itself (an interrupted one, a waiting one). */
+  private copy: boolean;
+
+  constructor(s: Shared, opts: Pick<PlatformOptions, "brief" | "designSystem" | "buildModel" | "agentBuildModels" | "modelEfforts" | "schedulesOff">) {
     super(s);
+    this.copy = opts.schedulesOff === true;
     this.brief = opts.brief;
     this.briefId = `${spec.version}+${sha256(opts.brief).slice(0, 12)}`;
     this.designSystem = opts.designSystem;
@@ -248,15 +255,24 @@ export class Builds extends Domain {
   /**
    * Call once at start: builds left mid-flight by a previous process are failed, and started
    * again once (not a retry that was itself interrupted). The retry runs as the original
-   * requester, with only the scope that request needed.
+   * requester, with only the scope that request needed. With schedules off (a copy of someone's
+   * Hewn, a restore drill) none is started again, and none waiting starts: each would run on
+   * their builder and their plan.
    */
   async recoverInterruptedBuilds(): Promise<string[]> {
     const retried: string[] = [];
-    for (const id of this.registry.failInterruptedBuilds()) {
+    const interrupted = this.registry.failInterruptedBuilds();
+    await this.sweepScratch(interrupted.map((id) => this.mustBuild(id).capabilityId));
+    for (const id of interrupted) {
       this.logger(`build ${id} marked failed: interrupted by restart`);
       const b = this.mustBuild(id);
       // An install from a file, or a client's submission, has no builder to run again: the file is installed again, the client submits again.
       if (!b.builder || b.builder === "bundle" || b.builder === "submitted" || (b.request as { autoRetryOf?: string }).autoRetryOf || !this.platform.builderFor()) continue;
+      if (this.copy) {
+        this.registry.updateBuild(id, { log: [...b.log.slice(0, -1), `FAILED: interrupted by platform restart; ${NOT_IN_A_COPY}`] });
+        this.logger(`build ${id} not retried: schedules are off (HEWN_SCHEDULES=off)`);
+        continue;
+      }
       const owner = b.requestedBy === "web" || b.requestedBy === "user";
       // An agent's retry sees only the tools it may use now: the owner may have switched it off for this one since.
       const now = owner ? undefined : this.agentStore.get(b.requestedBy);
@@ -269,8 +285,36 @@ export class Builds extends Domain {
         this.logger(`build ${id} not retried: ${(e as Error).message}`);
       }
     }
-    await this.resumeWaitingBuilds();
+    if (this.copy) {
+      // Nothing would release them (what they wait for won't run here), and a Retry or a new change would queue behind
+      // them: they fail as the interrupted ones do. Not through failBuild, which would start their own dependents.
+      for (const b of this.registry.waitingBuilds()) {
+        this.registry.updateBuild(b.id, { status: "failed", log: [...b.log, `FAILED: interrupted by platform restart; ${NOT_IN_A_COPY}`] });
+        this.logger(`build ${b.id} (waiting) not started: schedules are off (HEWN_SCHEDULES=off)`);
+      }
+    } else await this.resumeWaitingBuilds();
     return retried;
+  }
+
+  /**
+   * At start: the scratch states no validation runs on any more, on every live tool and on the tools of the builds the
+   * restart interrupted (a new tool's, too: its host was made when its validation began, or is made empty here). A
+   * build's, its builder's check's (`<build>-check`) and a client's check's (`chk-…`) are each a copy of tool data, a
+   * Polish's of the owner's. Each is listed first and dropped unless its run is going on (a build, a check started
+   * since). Nothing else is named `<kind>:<id>`.
+   */
+  private async sweepScratch(alsoTools: string[]) {
+    const tools = new Set([...this.registry.listActiveCapabilities().map((c) => c.id), ...alsoTools]);
+    const scratch = new RegExp(`^(?:${SCRATCH_KINDS.join("|")}):(.+?)(?:-check)?$`);
+    for (const id of tools) {
+      const names = await this.runtime.listStates(id, "").catch(() => [] as string[]);
+      for (const name of names) {
+        const run = scratch.exec(name)?.[1];
+        if (!run || this.d.submissions.isChecking(run) || ["building", "validating"].includes(this.registry.getBuild(run)?.status ?? "")) continue;
+        await this.runtime.dropState({ capabilityId: id, scratch: name }).catch(() => {});
+        this.logger(`dropped ${id}'s scratch state ${name}: its validation was cut off by a restart`);
+      }
+    }
   }
 
   /** Waiting builds whose dependency ended (or was retried) while Hewn was down: start, fail or re-point them. */

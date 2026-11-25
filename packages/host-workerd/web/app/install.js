@@ -9,6 +9,7 @@ import { go, put, settings } from "./frame.js";
 import { codeBrowser } from "./files.js";
 import { reachText } from "./grants.js";
 import { titleCase } from "./models.js";
+import { licenseWords } from "./share.js";
 
 export { bundleTile, installFromFileOrLink, installSheet, sourceSheet };
 
@@ -264,6 +265,8 @@ function installSheet(p, { from }) {
         p.summaryBy === "yours" && unreadNote(p.unread),
         sourceLink(p),
         h("div", {}, h("div", { class: "eyebrow share-eyebrow" }, "It will ask for"), h("ul", { class: "list" }, asksRows(p.asks))),
+        // The license it comes with (its LICENSE file says the rest).
+        h("div", { class: "small faint" }, p.license ? `License: ${licenseWords(p.license)}` : "No license: all rights reserved by its authors"),
         h("label", { class: "field flush" }, h("span", { class: "label" }, "Name"), name),
         p.sample && h("label", { class: "check" }, sample, " Start with sample data ", h("span", { class: "faint" }, `· ${p.sample} example ${p.sample === 1 ? "entry" : "entries"}`)),
         status,

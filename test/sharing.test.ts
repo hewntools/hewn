@@ -356,7 +356,7 @@ describe("sharing: a tool as a file", () => {
     assert.deepEqual(other.platform.registry.getCapability("running-log")!.source, source);
     const installed = other.platform.activeManifest("running-log");
     assert.deepEqual(installed.source, source);
-    assert.equal(installed.abi, "2.5", "an older Hewn refuses it with the reason");
+    assert.equal(installed.abi, "2.7", "shared under MIT, it needs ABI 2.7 (`license`): an older Hewn refuses it with the reason");
     assert.equal(other.platform.registry.getBuild(started.buildId)!.builder, "bundle", "no builder ran");
     assert.ok(other.platform.registry.lifecycleEvents().some((e) => e.action === "sample" && e.detail === "Sample data: 3 calls"));
     // The files are the exporter's, but for the manifest the install stamps.
@@ -437,7 +437,7 @@ describe("sharing: a tool as a file", () => {
     const sidecar: Sidecar = { format: 1, hewn: "9.9.9", abi: "2.9", exportedAt: "2026-10-26T00:00:00Z", tool: { id: "future", version: 1, hash: "c".repeat(64) } };
     const manifest = { id: "future", name: "Future Tool", purpose: "x", abi: "2.9", operations: [] };
     const zip = packBundle({ "capability.json": bytes(JSON.stringify(manifest)) }, sidecar);
-    await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.6\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
+    await assert.rejects(t.platform.stageBundle(USER, zip), (e: any) => /Future Tool needs Hewn ABI 2\.9; this Hewn has 2\.7\. Upgrade Hewn/.test(e.message) && e.details?.refusal === "newer");
     // A newer bundle format is the same case: the sheet offers hewn upgrade, not "unreadable".
     const format2 = packBundle({ "capability.json": bytes(JSON.stringify({ ...manifest, abi: "2.0" })) }, { ...sidecar, format: 2 });
     await assert.rejects(t.platform.stageBundle(USER, format2), (e: any) => /shared from a newer Hewn \(bundle format 2/.test(e.message) && e.details?.refusal === "newer");

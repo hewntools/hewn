@@ -44,7 +44,7 @@ Call chains have 30 seconds, with up to 120 seconds of model waiting excluded; w
 
 ### capability.json
 
-Set `"abi"` to the lowest Hewn ABI (`major.minor`) whose features you use; this Hewn implements 2.6. Features after 2.0 are marked "(ABI 2.x)"; if you use none, write `"abi": "2.0"`. Using a feature newer than you declare fails validation.
+Set `"abi"` to the lowest Hewn ABI (`major.minor`) whose features you use; this Hewn implements 2.7. Features after 2.0 are marked "(ABI 2.x)"; if you use none, write `"abi": "2.0"`. Using a feature newer than you declare fails validation.
 
 Keep `id` equal to the tool's id: for a change, the `capabilityId` you packed; for a new tool, its name in lowercase letters, digits and dashes ("Plant Care" → `plant-care`). Each operation has `name` (snake_case), `description`, `version` (contract major, integer ≥1), `inputSchema` and `outputSchema` (JSON Schema 2020-12; input must be `type: object`), and `sideEffect`:
 
@@ -56,7 +56,7 @@ Set `"hue"` (integer 0–359, OKLCH) to the colour the subject is known for (e.g
 
 `"saturation"` (ABI 2.4; integer 0–150, default 100) is how colourful the tile is. Set it only for a brand, with the brand's hue: `0` for a black-and-white service (Ghost, Notion, the BBC: black or white on grey), 30–60 for a muted brand, up to 150 for a loud one (Todoist red).
 
-Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them.
+Never write `"source"` (ABI 2.5), or `hub` and `minVersion` in `requires.capabilities`: the platform writes them. Leave `"license"` (ABI 2.7) as you found it, and a `LICENSE` file too: the owner picks the license when they share the tool.
 
 Read `capability.json` back whole after each edit: a trailing comma or unquoted key fails the first step.
 
