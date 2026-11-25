@@ -521,6 +521,7 @@ export class Builds extends Domain {
     if (req.held !== undefined) {
       if (typeof req.requirements !== "string" || !req.requirements.trim()) throw new PlatformError("invalid_request", "requirements: what to change in the held tool");
       const { held, marks } = await this.heldFix(agent, req.held, { kind: "create" });
+      this.ownersWorkNotLocked(agent, held.capabilityId, null, marks);
       const cap = this.registry.getCapability(held.capabilityId)!;
       this.oneCreateAtATime(agent, cap.id, held.id);
       const dependsOn = this.dependency(agent, req.after);
@@ -835,6 +836,8 @@ export class Builds extends Domain {
   /** Open a create build's workspace (skeleton, or seeded files) and start its builder. */
   private async startCreate(buildId: string, seed?: Files) {
     const b = this.mustBuild(buildId);
+    // The owner's build that waited its turn: the lock may have come meanwhile (`ownersWorkNotLocked`, as in startModify).
+    if (byOwner(b) && this.lockedOut(b)) return this.failBuild(buildId, OWNERS_WORK_LOCKED);
     // Started: no longer waiting (as in startModify).
     this.registry.updateBuild(buildId, { status: "open" });
     const req = b.request as unknown as CreateRequest;
@@ -1055,6 +1058,7 @@ export class Builds extends Domain {
     if (req.note !== undefined && (typeof req.note !== "string" || (req.note.length > MAX_POLISH_NOTE && !marks.retryOf))) throw new PlatformError("invalid_request", `note: text of at most ${MAX_POLISH_NOTE} characters`);
     if (req.realData !== undefined && typeof req.realData !== "boolean") throw new PlatformError("invalid_request", "realData must be true or false");
     const cap = this.visibleActive(owner, req.capabilityId);
+    this.ownersWorkNotLocked(owner, cap.id, cap.activeVersion, marks);
     const manifest = this.activeManifest(cap.id);
     if (isConnection(manifest)) throw new PlatformError("invalid_request", `${cap.id} is a connection; it has no screen to polish`);
     if (!manifest.ui?.available) throw new PlatformError("invalid_request", `${cap.id} has no screen to polish`);
@@ -1093,6 +1097,9 @@ export class Builds extends Domain {
     this.registry.updateBuild(buildId, { status: "open" });
     const cap = this.registry.getCapability(b.capabilityId);
     if (!cap?.activeVersion || cap.archivedAt) throw new PlatformError("not_found", `${b.capabilityId} is no longer active`);
+    // The owner's build that waited its turn (queued, or after another): the lock may have come meanwhile. Refused
+    // before its builder runs, as `ownersWorkNotLocked` refuses a new one, on the version it would open from.
+    if (byOwner(b) && this.lockedOut({ ...b, baseVersion: cap.activeVersion })) return this.failBuild(buildId, OWNERS_WORK_LOCKED);
     const base = await this.loadVersion(cap.id, cap.activeVersion);
     this.registry.updateBuild(buildId, { baseVersion: cap.activeVersion });
     const request = (b.request as { request?: string }).request ?? "";
@@ -1656,9 +1663,9 @@ export class Builds extends Domain {
       const v = await this.validateCandidate(build, submitter, { measure: passes[0] === "craft" });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (!v.candidate) {
-        // An agent's build that held one of the owner's keys (or ran into the lock) has no more attempts. Its last
-        // ends as any build's does, so the build itself says nothing the lock doesn't.
-        if (attempt < max && this.lockedOut(build)) return this.endRun(run, { end: KEY_LOCKED });
+        // A build that held one of the owner's keys (or ran into the lock) has no more attempts. Its last ends as
+        // any build's does, so the build itself says nothing the lock doesn't; the owner's says it in their words.
+        if (attempt < max && this.lockedOut(build)) return this.endRun(run, { end: byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED });
         feedback = v.log.join("\n");
         continue;
       }
@@ -1854,7 +1861,7 @@ export class Builds extends Domain {
       const v = await this.validateCandidate(run.build, `builder ${run.builder}`, { pass, measure });
       run.history.push(...v.log.map((l) => `${label}: ${l}`));
       if (v.candidate) return { candidate: v.candidate, label, ...(v.tests ? { tests: v.tests } : {}) };
-      if (this.lockedOut(run.build)) return { end: KEY_LOCKED };
+      if (this.lockedOut(run.build)) return { end: byOwner(run.build) ? OWNERS_WORK_LOCKED : KEY_LOCKED };
       feedback = v.log.join("\n");
     }
     return { end: `no valid candidate after ${max} ${max === 1 ? "try" : "tries"} of the ${pass} pass` };
@@ -1893,17 +1900,21 @@ export class Builds extends Domain {
     }
   }
 
-  /** Whether a build is, or carries on from, the work of an agent that's locked out (`lockForKey`). */
+  /**
+   * Whether a build is, or carries on from, the work of an agent that's locked out (`lockForKey`). A walk cut short
+   * can't say whose work lies past it: while any agent is locked out, it might be that one's.
+   */
   lockedOut(build: BuildRow, behind = this.behind(build)): boolean {
     const locks = this.keyLocks();
-    return [...behind.agents].some((a) => !!locks[a]);
+    return [...behind.agents].some((a) => !!locks[a]) || (behind.truncated && Object.keys(locks).length > 0);
   }
 
   /**
    * The owner's build on work a locked-out agent had a hand in waits until the owner has looked (the Inbox): it
-   * would only meet the lock at the end, after its builder ran in full.
+   * would only meet the lock at the end, after its builder ran in full. Also before anything else is changed for
+   * such a build (a model's grant).
    */
-  private ownersWorkNotLocked(actor: Agent, capabilityId: string, baseVersion: number | null, marks: RetryMarks = {}) {
+  ownersWorkNotLocked(actor: Agent, capabilityId: string, baseVersion: number | null, marks: RetryMarks = {}) {
     if (actor.kind !== "user") return;
     const probe = { id: "", capabilityId, kind: "modify", request: { ...marks }, requestedBy: actor.id, builder: null, baseVersion } as unknown as BuildRow;
     if (this.lockedOut(probe)) throw new PlatformError("conflict", OWNERS_WORK_LOCKED);
@@ -1912,10 +1923,11 @@ export class Builds extends Domain {
   /**
    * Whose work a build carries on from, at any remove: the agents among its requester, every build it retries or
    * fixes (each mark), and the builds that made the versions it's built on; `foreign`, a version installed from a
-   * file or a link. The owner's builder on such a build doesn't learn where the owner's keys are, and a key found in
-   * it locks those agents: they can follow the chain and read what happened.
+   * file, a folder, given files or a link. The owner's builder on such a build doesn't learn where the owner's keys
+   * are, and a key found in it locks those agents: they can follow the chain and read what happened. `truncated`:
+   * the walk was cut short, so `agents` may miss some (`lockedOut` counts it as locked while anyone is).
    */
-  behind(build: BuildRow): { agents: Set<string>; foreign: boolean } {
+  behind(build: BuildRow): { agents: Set<string>; foreign: boolean; truncated: boolean } {
     const agents = new Set<string>();
     let foreign = false;
     const seen = new Set<string>();
@@ -1926,7 +1938,9 @@ export class Builds extends Domain {
       if (seen.has(b.id)) continue;
       seen.add(b.id);
       if (!byOwner(b)) agents.add(b.requestedBy);
-      if (b.builder === "bundle" || b.builder?.startsWith("copy:")) foreign = true;
+      // An install from given files ("keep" on a new tool) is as foreign as one from a folder; the owner's own edits
+      // (a "keep" change) aren't.
+      if (b.builder === "bundle" || b.builder?.startsWith("copy:") || (b.builder === "keep" && b.kind === "create")) foreign = true;
       const r = b.request as RetryMarks & { autoRetryOf?: string };
       for (const from of [r.retryOf, r.fixOf, r.autoRetryOf]) {
         const x = from ? this.registry.getBuild(from) : undefined;
@@ -1936,8 +1950,8 @@ export class Builds extends Domain {
       const x = made ? this.registry.getBuild(made) : undefined;
       if (x) todo.push(x);
     }
-    if (todo.length) foreign = true;
-    return { agents, foreign };
+    const truncated = todo.some((b) => !seen.has(b.id));
+    return { agents, foreign: foreign || truncated, truncated };
   }
 
   /** The agents locked out, by id (`lockForKey`). */

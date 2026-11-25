@@ -130,6 +130,21 @@ describe("the owner's stored keys", () => {
     assert.equal(b.status, "promoted", b.log.join("\n"));
     return b.capabilityId;
   };
+  const fixture = (name: string) => resolve(import.meta.dirname, "fixtures", name);
+  /** A fixture's files as a new tool under another id and name. */
+  const renamed = (name: string, id: string, title: string) => entriesOf(fixture(name)).map((f) => (f.path === "capability.json" ? { ...f, content: f.content.replace(`"${name}"`, `"${id}"`).replace(/"name": "[^"]*"/, `"name": "${title}"`) } : f));
+  /** A version of the tool the agent wrote: its submission, allowed by the owner. */
+  const agentsVersion = async (capabilityId: string, dir = SEED) => {
+    const held = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: [...entriesOf(dir), { path: "tests/notes.txt", content: "a note\n" }], capabilityId, request: "a note" })).buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    assert.equal((await t.platform.approveBuild(USER, held.buildId)).status, "promoted");
+  };
+  /** The agent locked out: a new tool it submits holds one of the owner's keys. */
+  const lockAgent = async () => {
+    await t.platform.settle((await t.platform.submitFiles(t.claude, { files: [...renamed("ui-counter", "keyed", "Keyed"), { path: "tests/notes.txt", content: `password: ${STORED}\n` }], request: "a counter" })).buildId);
+    assert.deepEqual(Object.keys(t.platform.keyLocks(USER)), ["claude-code"]);
+  };
+  const ownersWorkLocked = (e: unknown) => (e as { code?: string }).code === "conflict" && (e as Error).message === OWNERS_WORK_LOCKED;
 
   test("a client's check never looks for them: it can't answer whether a guess is one", async () => {
     const r = await t.platform.checkFiles(t.claude, { files: holding(), capabilityId: "running-log" });
@@ -279,6 +294,56 @@ describe("the owner's stored keys", () => {
     }
   });
 
+  test("locked out: the owner's own builds on its work are refused before anything runs (a change, widgets, sample data, Polish, deleting a widget, another model)", async () => {
+    for (const name of ["ui-counter", "widget-counter", "word-explainer"]) await installFrom(t.platform, fixture(name));
+    await agentsVersion("running-log");
+    for (const name of ["ui-counter", "widget-counter", "word-explainer"]) await agentsVersion(name, fixture(name));
+    await lockAgent();
+    const builds = t.platform.registry.recentBuilds(500).length;
+    await assert.rejects(t.platform.modify(USER, { capabilityId: "running-log", request: "a change" }), ownersWorkLocked);
+    await assert.rejects(t.platform.addWidgets(USER, { capabilityId: "running-log", request: "a widget" }), ownersWorkLocked);
+    await assert.rejects(t.platform.setSample(USER, "running-log", readFileSync(join(SEED, "sample", "calls.json"), "utf8")), ownersWorkLocked);
+    await assert.rejects(t.platform.polish(USER, { capabilityId: "ui-counter" }), ownersWorkLocked);
+    await assert.rejects(t.platform.removeWidget(USER, "widget-counter", "count"), ownersWorkLocked);
+    await assert.rejects(t.platform.setCapabilityModel(USER, "word-explainer", { tier: "standard" }), ownersWorkLocked);
+    assert.ok(!t.platform.registry.grants("word-explainer").has("model:standard"), "no grant approved for a version never made");
+    assert.equal(t.platform.registry.recentBuilds(500).length, builds, "no build opened");
+  });
+
+  test("locked out: the owner's fix of its held new tool (Ask builder to fix, from the New page) is refused; the tool stays held", async () => {
+    const held = await t.platform.settle((await t.platform.submitFiles(t.claude, { files: [...renamed("ui-counter", "held-counter", "Held Counter"), { path: "tests/notes.txt", content: `hash: ${RANDOM}\n` }], request: "a counter" })).buildId);
+    assert.equal(held.status, "review", held.log.join("\n"));
+    await lockAgent();
+    await assert.rejects(t.platform.create(WEB_USER, { name: "Held Counter", purpose: "a counter", requirements: "fix the warnings", held: held.buildId }), ownersWorkLocked);
+    assert.equal(t.platform.registry.getBuild(held.buildId)!.status, "review");
+  });
+
+  test("the owner's builds on its work when the lock comes: one validating ends in the owner's words; one queued behind it is refused before its builder runs", async () => {
+    t.cleanup();
+    t = setup({ attempts: 2 });
+    await installSeed(t.platform);
+    await installFrom(t.platform, fixture("site-connection"));
+    await t.platform.setSecret(USER, "site-connection", "API_KEY", STORED);
+    await agentsVersion("running-log");
+    let open!: () => void;
+    const opened = new Promise<void>((ok) => (open = ok));
+    let ran = 0;
+    t.queue((() => opened) as never, () => void ran++, () => void ran++);
+    const first = await t.platform.modify(USER, { capabilityId: "running-log", request: "first" });
+    const queued = await t.platform.modify(USER, { capabilityId: "running-log", request: "second" });
+    assert.equal(t.platform.registry.getBuild(queued.buildId)!.status, "waiting");
+    await lockAgent();
+    open();
+    const ran1 = await t.platform.settle(first.buildId);
+    assert.equal(ran1.status, "failed");
+    assert.match(ran1.log.join("\n"), new RegExp(`FAILED: ${OWNERS_WORK_LOCKED}`));
+    assert.ok(!ran1.log.join("\n").includes(KEY_LOCKED), ran1.log.join("\n"));
+    const ran2 = await t.platform.settle(queued.buildId);
+    assert.equal(ran2.status, "failed");
+    assert.match(ran2.log.join("\n"), new RegExp(`FAILED: ${OWNERS_WORK_LOCKED}`));
+    assert.equal(ran, 0, "no further attempt, and the queued build's builder never ran");
+  });
+
   test("the Inbox names the agent and the tool; DELETE /api/agents/:id/key-lock lifts it, the owner's only; disconnecting the agent clears the item", async () => {
     await t.platform.settle((await t.platform.submitFiles(t.claude, { files: holding(), capabilityId: "running-log", request: "a fixture" })).buildId);
     const server = await serve(t.platform, t.home);
@@ -296,9 +361,10 @@ describe("the owner's stored keys", () => {
       });
     try {
       cookie = String((await new Promise<{ headers: Record<string, unknown> }>((res) => request({ host: "127.0.0.1", port, path: `/auth?ticket=${t.platform.createWebTicket(USER)}`, headers: { host: `hewn.localhost:${port}` } }, (m) => (m.resume(), res({ headers: m.headers }))).end())).headers["set-cookie"]).split(";")[0];
-      const needs = JSON.parse((await http("/api/inbox")).body).needs as { kind: string; title: string; detail: string }[];
+      const needs = JSON.parse((await http("/api/inbox")).body).needs as { kind: string; title: string; detail: string; agentName: string }[];
       const item = needs.find((n) => n.kind === "key-lock")!;
       assert.equal(item.title, "Running Log");
+      assert.equal(item.agentName, "claude-code");
       assert.match(item.detail, /^one of your stored keys \(your Site Connection key \(API_KEY\)\) turned up in work claude-code had a hand in: change it\. claude-code can't build, and your own changes to its work wait, until you look$/);
       assert.equal((await http("/api/agents/claude-code/key-lock", "DELETE")).status, 200);
       assert.deepEqual(t.platform.keyLocks(USER), {});
@@ -420,6 +486,27 @@ describe("the owner's stored keys", () => {
     assert.deepEqual([...behind(both).agents], ["claude-code"]);
     // The running log's v1 came from files (an install from a folder): foreign, so blind.
     assert.equal(behind(both).foreign, true);
+    // An install from given files is foreign too; the owner's own edit (a change with no builder) isn't.
+    reg.insertBuild({ id: "b-given", capabilityId: "running-log", kind: "create", request: {}, requestedBy: USER.id, baseVersion: null, builder: "keep" });
+    reg.insertBuild({ id: "b-edit", capabilityId: "running-log", kind: "modify", request: {}, requestedBy: USER.id, baseVersion: null, builder: "keep" });
+    assert.equal(behind(reg.getBuild("b-given")).foreign, true);
+    assert.equal(behind(reg.getBuild("b-edit")).foreign, false);
+  });
+
+  test("whose work, past 2000 builds: the walk stops; what it couldn't see counts as foreign, and as locked while any agent is", async () => {
+    const reg = t.platform.registry;
+    const builds = (t.platform as unknown as { d: { builds: { behind: (b: unknown) => { agents: Set<string>; foreign: boolean }; lockedOut: (b: unknown) => boolean } } }).d.builds;
+    reg.transaction(() => {
+      reg.insertBuild({ id: "c-0", capabilityId: "running-log", kind: "modify", request: {}, requestedBy: "claude-code", baseVersion: null, builder: "script" });
+      for (let i = 1; i <= 2000; i++) reg.insertBuild({ id: `c-${i}`, capabilityId: "running-log", kind: "modify", request: { retryOf: `c-${i - 1}` }, requestedBy: USER.id, baseVersion: null, builder: "script" });
+    });
+    const last = reg.getBuild("c-2000")!;
+    assert.equal(builds.behind(last).agents.size, 0, "the agent's build is past the bound");
+    assert.equal(builds.behind(last).foreign, true);
+    assert.equal(builds.lockedOut(last), false, "nobody is locked out");
+    await lockAgent();
+    assert.equal(builds.lockedOut(last), true);
+    assert.equal(builds.behind(reg.getBuild("c-1")!).foreign, false, "a walk that ends isn't");
   });
 
   test("settings' values are never looked for: a city in a tool's files is no key", async () => {
