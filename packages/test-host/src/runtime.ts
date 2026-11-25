@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { format } from "node:util";
 import { pathToFileURL } from "node:url";
-import { type AbiDb, applyMigrations, CALL_TIMEOUT_MS, capLines, countTables, dumpTables, exportedOperations, loadTables, runOperation } from "@hewntools/core/abi.ts";
+import { type AbiDb, applyMigrations, CALL_TIMEOUT_MS, capLines, countTables, dumpTables, exportedOperations, keysSince, loadTables, markKeys, runOperation } from "@hewntools/core/abi.ts";
 import { deadlineOf, deadlineTimer } from "@hewntools/core/deadline.ts";
 import { PlatformError } from "@hewntools/core/errors.ts";
 import type { CapabilityRuntime, CodeRef, StateRef } from "@hewntools/core/ports.ts";
@@ -182,6 +182,13 @@ export function inProcessRuntime(home: { root: string; capabilities: string }): 
     async countState(state) {
       if (!existsSync(statePathOf(home.capabilities, state))) return {};
       return withDb(state, (db) => countTables(db));
+    },
+    async markKeys(state) {
+      if (existsSync(statePathOf(home.capabilities, state))) withDb(state, (db) => markKeys(db));
+    },
+    async keysSince(state) {
+      if (!existsSync(statePathOf(home.capabilities, state))) return { tables: {}, added: {}, rows: { before: 0, now: 0 } };
+      return withDb(state, (db) => keysSince(db));
     },
   };
 }

@@ -11,6 +11,7 @@ import { afterParam, BUSY_REASONS, type IdleStatus } from "./idle.ts";
 type Snapshot = {
   tools: { active: number; archived: number; unversioned: number };
   builds: Record<string, number>;
+  buildsCaught?: number;
   buildSeconds7d: { count: number; sum: number };
   calls24h: Record<string, { ok: number; error: number }>;
   calls7d: Record<string, { ok: number; error: number }>;
@@ -62,6 +63,7 @@ export function prometheusText(s: Snapshot, appVersion: string, idle?: IdleStatu
   metric("hewn_info", "Hewn version", "gauge", [[{ version: version(appVersion) }, 1]]);
   metric("hewn_tools", "Tools by state", "gauge", [[{ state: "active" }, s.tools.active], [{ state: "archived" }, s.tools.archived], [{ state: "unversioned" }, s.tools.unversioned]]);
   metric("hewn_builds", "Builds by status, all time", "gauge", allowed(s.builds, buildStatus, plus).map(([status, n]) => [{ status }, n]));
+  metric("hewn_builds_caught", "Failed builds Hewn's checks stopped for what they would do to the tool's data (rows lost on a copy, a migration that didn't apply to it, an operation deleting rows it doesn't declare), among the builds Hewn still keeps", "gauge", [[{}, s.buildsCaught ?? 0]]);
   metric("hewn_build_seconds_7d_sum", "Total time of builds promoted in the last 7 days", "gauge", [[{}, s.buildSeconds7d.sum]]);
   metric("hewn_build_seconds_7d_count", "Builds promoted in the last 7 days", "gauge", [[{}, s.buildSeconds7d.count]]);
   metric("hewn_calls", "Tool calls by the kind of caller that called them directly, and outcome, from the call logs", "gauge", [...calls("24h", s.calls24h), ...calls("7d", s.calls7d)]);

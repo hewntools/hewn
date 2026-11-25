@@ -15,6 +15,7 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 
 ### Safety and limits
 
+- **No row of your data goes missing in a change.** Around a change's database migrations, on a copy of your data, Hewn checks every row keeps its key and its reads still return every record; if not, the build stops before it goes live and says what would have been lost. An agent's own check does the same on the tool's sample data. See [The build](docs/building-tools.md#the-build).
 - **A call may not work for more than 10 seconds without a pause.** Until now Hewn's tools were restarted after about 5 seconds of a call's code never letting go; now it's a rule at 10, and a build that breaks it fails saying which operation and on which test or sample call ("`import_feed@1` worked for more than 10 seconds without a pause, on test 'big feed'"). See [Runtime](spec/tools.md#runtime).
 
 ### Fixes

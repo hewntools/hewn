@@ -446,7 +446,8 @@ describe("a migration that fails on the tool's data: the error is the owner's", 
     t.queue(checking as never);
     await t.platform.settle((await t.platform.modify(t.claude, { capabilityId: "running-log", request: "a migration" })).buildId);
     assert.ok(!seen[0].includes(NOTE), seen[0]);
-    assert.match(seen[0], /the upgrade dry run failed on a copy of the tool's data/);
+    // An agent's builder checks on sample data (validation.ts checksFor): the owner's never comes into it.
+    assert.match(seen[0], /the upgrade dry run failed on its sample data in the version it replaces/);
     t.queue(checking as never);
     await t.platform.settle((await t.platform.modify(WEB_USER, { capabilityId: "running-log", request: "a migration" })).buildId);
     assert.match(seen[1], new RegExp(NOTE));

@@ -18,6 +18,7 @@ import { CALL_TOKEN_HEADER, type CallbackKind, type Callbacks, CODES_KEPT, EGRES
 import RUNTIME from "./capability-runtime.js";
 // @ts-expect-error text module
 import GUARD from "./capability-guard.js";
+import type { KeysSince } from "@hewntools/core/abi.ts";
 
 interface Env {
   CAPS: DurableObjectNamespace;
@@ -124,6 +125,8 @@ function run(env: Env, host: CapabilityHost, method: HostMethod, b: any, code: C
       return host.dump(b.scratch, code, b.limit, b.hosts, b.named);
     case "count":
       return host.count(b.scratch, code, b.limit, b.hosts, b.named);
+    case "keys":
+      return host.keys(b.scratch, code, b.limit, b.hosts, b.named, !!b.since);
     case "load":
       return host.load(b.scratch, b.tables, code, b.limit, b.hosts, b.named);
     case "hasState":
@@ -313,6 +316,10 @@ export class CapabilityHost extends DurableObject<Env> {
 
   async count(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<Record<string, number>> {
     return this.on(scratch, code, hosts, named, limit, (f) => f.count());
+  }
+
+  async keys(scratch: string | null, code: CodeRef, limit = 0, hosts: string[] = [], named = false, since = false): Promise<KeysSince | null> {
+    return this.on(scratch, code, hosts, named, limit, (f) => f.keys(since));
   }
 
   async load(scratch: string | null, tables: Record<string, Record<string, unknown>[]>, code: CodeRef, limit = 0, hosts: string[] = [], named = false): Promise<number> {

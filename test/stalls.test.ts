@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { USER } from "@hewntools/core/auth.ts";
 import type { Platform } from "@hewntools/core/platform.ts";
 import { nodePlatform } from "@hewntools/test-host/index.ts";
+import { NO_LOSS_BASE_VIA, NO_LOSS_VIA } from "@hewntools/core/platform/stalls.ts";
 import { FIXTURES, installFrom, installSeed, setup } from "./helpers.ts";
 
 const code = (p: Platform, capabilityId: string, what: string, state = "", caller = "codex") => p.registry.codeStarted({ capabilityId, state, what, caller });
@@ -77,6 +78,40 @@ describe("stalls", () => {
     // The same stall, said again (a restart of the restart): nothing more.
     code(p, "runaway", "spin@1");
     assert.deepEqual(restart(min(0)).out.tools, []);
+  });
+
+  test("a stall in the no-loss check's read of the version a build replaces blames neither the build nor the live tool, and that read is never called there again", () => {
+    code(t.platform, "runaway", "spin@1", "dryrun:b-1", NO_LOSS_BASE_VIA);
+    const { p, out } = restart(min(0));
+    assert.deepEqual(out, { tools: [], suspended: [], builds: [] }, "the build goes on");
+    assert.equal((p as any).d.stalls.stalledRun("b-1"), undefined);
+    assert.deepEqual(stalled(p, "runaway"), [], "nothing in the live tool's log");
+    assert.equal(p.registry.getKv("stalls:runaway"), undefined, "no strike toward suspending it");
+    assert.deepEqual([...(p as any).d.stalls.stalledOps("runaway")], ["spin@1"]);
+  });
+
+  test("a stall in the candidate's own read in the no-loss check is the build's, as any of its code's", () => {
+    code(t.platform, "runaway", "spin@1", "dryrun:b-1", NO_LOSS_VIA);
+    const { p, out } = restart(min(0));
+    assert.deepEqual(out, { tools: [], suspended: [], builds: ["b-1"] });
+    assert.equal((p as any).d.stalls.stalledRun("b-1"), "spin@1 worked for more than 10 seconds without a pause, in the no-loss check");
+    assert.equal(p.registry.getKv("stalls:runaway"), undefined, "no strike toward suspending it");
+    assert.deepEqual([...(p as any).d.stalls.stalledOps("runaway")], [], "the live version's read isn't marked for it");
+  });
+
+  test("a stall in an agent's build's own read in the no-loss check doesn't name the read: the owner's build log does", async () => {
+    t.platform.registry.insertBuild({ id: "b-2", capabilityId: "runaway", kind: "modify", request: { request: "x" } as any, requestedBy: t.claude.id, baseVersion: 1, builder: "script" });
+    code(t.platform, "runaway", "spin@1", "dryrun:b-2", NO_LOSS_VIA);
+    const { p } = restart(min(0));
+    assert.equal((p as any).d.stalls.stalledRun("b-2"), "a read of it worked for more than 10 seconds without a pause, in the no-loss check");
+    await new Promise((r) => setTimeout(r, 50));
+    assert.match((await p.workbench.transcript("b-2")) ?? "", /spin@1 worked for more than 10 seconds without a pause, in the no-loss check/);
+  });
+
+  test("a live call that stalls is remembered past the stall window, for the no-loss check to leave out", () => {
+    code(t.platform, "runaway", "spin@1");
+    const { p } = restart(min(0));
+    assert.deepEqual([...(p as any).d.stalls.stalledOps("runaway")], ["spin@1"]);
   });
 
   test("when the host can tell which code held the tools, only that tool is told and struck; the rest was waiting", () => {

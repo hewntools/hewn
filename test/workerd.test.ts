@@ -97,6 +97,11 @@ describe("workerd host (integration)", () => {
     assert.equal(ok.status, "promoted", ok.log.join("\n"));
     assert.ok(ok.log.some((l: string) => /upgrade dry-run ok \(002_shoe\.sql\)/.test(l)), "dry run on a copy of live state");
     assert.equal((await invoke("running-log", "list_runs")).result.runs.length, 1, "data survived the new version");
+    assert.ok(ok.log.some((l: string) => /no data lost by the migrations on a copy of the tool's data \(1 rows kept\)/.test(l)), ok.log.join("\n"));
+    // A migration that would lose the row (a table rebuilt without it) is stopped on the copy, measured through the tools' process.
+    const lossy = await modify("running-log", (ws) => writeFileSync(join(ws, "migrations", "003_rebuild.sql"), "ALTER TABLE runs RENAME TO runs_v1;\nCREATE TABLE runs AS SELECT * FROM runs_v1 WHERE 0;"));
+    assert.equal(lossy.status, "failed", lossy.log.join("\n"));
+    assert.match(lossy.log.join("\n"), /migration 003_rebuild\.sql would lose data on a copy of the tool's data:\n {2}- `runs` would lose 1 of its 1 rows/);
 
     const breaking = await modify("running-log", (ws) => editJson(join(ws, "capability.json"), (m) => m.operations[0].inputSchema.required.push("notes")));
     assert.equal(breaking.status, "failed");
