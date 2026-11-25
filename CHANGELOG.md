@@ -20,6 +20,8 @@ Hewn follows semver for the CLI and your data: `hewn upgrade` stays within a 0.x
 - With `HEWN_SCHEDULES=off`, a restored copy no longer starts the builds that were running or waiting when the backup was made: they stay stopped, saying why.
 - An open Home redrawing itself after its poll found a change no longer counts as your activity, so it doesn't delay Hewn giving memory back or a host suspending it.
 - A migration with a comment or a second `;` after its last statement now fails validation by name, instead of passing the tests and failing at promotion. See [Migrations](spec/tools.md#migrations).
+- `hewn serve` no longer exits when its metrics port is asked for the status while workerd restarts.
+- On a machine short of CPU, an unresponsive workerd is restarted at growing intervals, up to 2 minutes, instead of about every 15 seconds. See [Troubleshooting](docs/troubleshooting.md#tools).
 
 ## 0.4.12 (2026-11-19)
 
