@@ -11,7 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { lockStorage } from "./hewn-guard.js";
 // @ts-expect-error provided at load time: the capability's own bundle
 import * as capability from "./capability.js";
-import { type AbiDb, applyMigrations, capError, capLines, countTables, dumpTables, exportedOperations, keysSince, type KeysSince, loadTables, markKeys, runOperation } from "@hewntools/core/abi.ts";
+import { type AbiDb, applyMigrations, capError, capLines, countTables, dumpTables, exportedOperations, keysSince, type KeysSince, loadTables, markKeys, runOperation, thrownOf } from "@hewntools/core/abi.ts";
 import type { Migration } from "@hewntools/core/migrations.ts";
 
 const mod = capability as { operations?: Record<string, any> };
@@ -27,6 +27,16 @@ for (const [method, prefix] of [["log", "| "], ["info", "| "], ["debug", "| "], 
     else original(...args);
   };
 }
+
+// The calls (each one's console sink stands for it) that reached past their input, the network included: what one
+// threw is read with that (abi.ts Thrown).
+const reached = new WeakSet<string[]>();
+const fetchOf = globalThis.fetch.bind(globalThis);
+globalThis.fetch = ((...args: Parameters<typeof fetch>) => {
+  const sink = logs.getStore();
+  if (sink) reached.add(sink);
+  return fetchOf(...args);
+}) as typeof fetch;
 
 type SqlStorage = DurableObjectState["storage"]["sql"];
 
@@ -92,11 +102,11 @@ export class Capability extends DurableObject {
     const lines: string[] = [];
     try {
       const { output, secretUpdates, inserted } = await logs.run(lines, () =>
-        runOperation(mod, key, input, { db: this.db(), secrets, config, caller, call: (id, op, i) => call(id, op, i), ...(model ? { model: (req) => model(req) } : {}), readOnly }),
+        runOperation(mod, key, input, { db: this.db(), secrets, config, caller, call: (id, op, i) => call(id, op, i), ...(model ? { model: (req) => model(req) } : {}), readOnly, reached: () => reached.add(lines) }),
       );
       return { ok: true as const, output, secretUpdates, logs: capLines(lines), inserted };
     } catch (e) {
-      return { ok: false as const, error: capError((e as Error)?.message ?? String(e)), logs: capLines(lines) };
+      return { ok: false as const, error: capError((e as Error)?.message ?? String(e)), logs: capLines(lines), ...thrownOf(e, reached.has(lines)) };
     }
   }
 }

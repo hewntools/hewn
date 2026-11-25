@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { CALL_DEADLINE_MS } from "@hewntools/core/platform.ts";
-import { editText, FIXTURES } from "./helpers.ts";
+import { editJson, editText, FIXTURES } from "./helpers.ts";
 import { signedIn, startTestHost, type TestHost } from "./workerd-helpers.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -157,6 +157,29 @@ describe("code that doesn't stop on its own (workerd host)", () => {
     assert.equal((await h.sv.admin("readiness", { capabilityId: "runaway" })).ready, true);
     await h.invoke("runaway", "tick", { tag: "still-live" });
     assert.equal(await rows("still-live"), 1);
+  });
+
+  /** Runaway with one operation more: its manifest entry and its code. */
+  const withOp = (name: string, inputSchema: object, code: string) => (ws: string) => {
+    editJson(join(ws, "capability.json"), (m) => m.operations.push({ name, description: name, version: 1, sideEffect: "write", inputSchema, outputSchema: { type: "object" } }));
+    editText(join(ws, "src", "index.ts"), (t) => t.replace(/\n};\s*$/, `\n  ${code}\n};\n`));
+  };
+
+  test("Hewn's schema fuzz on workerd: a crash names the operation and the input; a loop on the 10 KB input is a stall that names it", async () => {
+    h.queue(withOp("tidy", { type: "object", properties: { note: { type: ["string", "null"] } } }, `"tidy@1"(input: any) { return input.note === undefined ? {} : { note: input.note.trim() }; },`));
+    const crashed = await h.sv.admin("modify", { capabilityId: "runaway", request: "tidy notes", wait: true });
+    assert.equal(crashed.status, "failed", crashed.log.join("\n"));
+    assert.match(crashed.log.join("\n"), /- tidy@1 crashed on null in `note`: TypeError: Cannot read properties of null \(reading 'trim'\)/);
+
+    const before = { platform: h.sv.restarts(), tools: h.sv.toolsRestarts() };
+    h.queue(withOp("chew", { type: "object", properties: { text: { type: "string" } } }, `"chew@1"(input: any) { if ((input.text ?? "").length > 5000) for (;;) {} return {}; },`));
+    const stalled = await h.sv.admin("modify", { capabilityId: "runaway", request: "chew text", wait: true });
+    assert.equal(stalled.status, "failed", stalled.log.join("\n"));
+    assert.match(stalled.log.join("\n"), /FAILED: chew@1 worked for more than 10 seconds without a pause, on the 10 KB input in `text`, so Hewn's tools were restarted/);
+    await until(() => h.sv.toolsRestarts() === before.tools + 1);
+    assert.equal(h.sv.restarts(), before.platform, "the platform wasn't restarted");
+    await h.invoke("runaway", "tick", { tag: "after-fuzz" });
+    assert.equal(await rows("after-fuzz"), 1, "the live tool runs on");
   });
 });
 

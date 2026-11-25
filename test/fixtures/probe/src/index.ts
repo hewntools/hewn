@@ -32,7 +32,9 @@ export const operations = {
     }
     return { unknown: input.what };
   },
-  async "spin@1"() {
+  // Hewn's schema fuzz (caller "fuzz") gets an answer: the loop is for the tests that call it.
+  async "spin@1"(_: unknown, ctx: any) {
+    if (ctx.caller?.id === "fuzz") return {};
     for (;;) {}
   },
 };

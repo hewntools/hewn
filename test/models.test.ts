@@ -353,6 +353,8 @@ describe("model port: the platform", () => {
       m.id = "no-model";
       m.name = "No Model";
       delete m.requires;
+      // Only the probe: the rest call the model without asking for it, a crash Hewn's schema fuzz finds.
+      m.operations = m.operations.filter((o: { name: string }) => o.name === "probe");
       writeFileSync(join(dir, "tests/cases.json"), JSON.stringify([{ name: "no model", operation: "probe", input: {}, expect: { hasModel: false } }]));
     });
     try {

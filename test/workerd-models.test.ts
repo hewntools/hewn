@@ -33,6 +33,8 @@ describe("model port on the workerd host", () => {
       m.id = "no-model";
       m.name = "No Model";
       delete m.requires;
+      // Only the probe: the rest call the model without asking for it, a crash Hewn's schema fuzz finds.
+      m.operations = m.operations.filter((o: { name: string }) => o.name === "probe");
       writeFileSync(join(dir, "capability.json"), JSON.stringify(m));
       writeFileSync(join(dir, "tests/cases.json"), JSON.stringify([{ name: "no model", operation: "probe", input: {}, expect: { hasModel: false } }]));
       const r = await h.sv.admin("install", { name: "No Model", purpose: "p", dir, wait: true });

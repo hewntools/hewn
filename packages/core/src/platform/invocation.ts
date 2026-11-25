@@ -132,8 +132,9 @@ export class Invocation extends Domain {
         if (!(err.details as { heldUp?: boolean } | undefined)?.heldUp) this.noteFailure(cap.id, { caller: trace[0], operation: req.operationVersion ? `${req.operation}@${req.operationVersion}` : req.operation, error: err.message, input: redact(JSON.stringify(maskInput(req.input ?? {})) ?? "{}"), logs });
       }
       if (err.details && typeof err.details === "object" && "logs" in err.details) {
-        const { logs: _omit, ...rest } = err.details as Record<string, unknown>;
-        err.details = Object.keys(rest).length ? rest : undefined; // capability logs are for the user, not agents
+        // Capability logs are for the user, not agents; what it threw (abi.ts thrownOf) is the schema fuzz's.
+        const { logs: _omit, thrown: _thrown, reached: _reached, ...rest } = err.details as Record<string, unknown>;
+        err.details = Object.keys(rest).length ? rest : undefined;
       }
       throw e;
     } finally {

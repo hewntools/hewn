@@ -114,6 +114,8 @@ function explainLog(log: string[]): BuildFailure {
   if (/the upgrade dry run failed/.test(msg)) return { ...say("Stopped before it went live", "A migration didn't apply to the data the tool holds now."), caught: true };
   const deletes = /(\S+) leaves .+ with fewer rows and adds none: declare it destructive/.exec(msg);
   if (deletes) return { ...say("Stopped before it went live", `${deletes[1]} deletes rows without saying so: it must be declared destructive, so the owner confirms it.`), caught: true };
+  // Hewn's schema fuzz (fuzz.ts): its first problem names the operation and the input.
+  if (/^Hewn's own tests called each operation with inputs/.test(msg)) return say("Hewn's own tests found a problem", `${first(msg)}.`);
   const tests = /(\d+) of (\d+) test cases failed/.exec(msg);
   if (tests) return say(`${tests[1]} of ${tests[2]} tests didn't pass`, testDetail(first(msg)));
   if (/^test '/.test(msg)) return say("A test didn't pass", testDetail(msg));
