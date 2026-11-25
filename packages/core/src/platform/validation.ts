@@ -213,7 +213,7 @@ export class Validation extends Domain {
     const blind = behind.agents.size > 0 || behind.foreign;
     const own = !locked && (!opts.check || !blind) ? this.d.sharing.ownValues().filter((o) => typeof o !== "string" && o.kind === "secret") : [];
     const stored = ownValuesIn(files, own);
-    if (stored.length && !opts.check) this.d.builds.lockForKey(build, behind.agents, stored.map((f) => f.label));
+    if (stored.length && !opts.check) this.d.builds.lockForKey(build, behind, stored.map((f) => f.label));
     let storedFailure: string | undefined = locked ? (byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED) : undefined;
     if (stored.length) {
       const detail = listed("one of the owner's stored keys is in its files (take it out: a tool gets its keys from its connection's secrets, never from its files)", stored.map((f) => `${f.file}:${f.line}: ${f.label}`));

@@ -1748,6 +1748,9 @@ export class Builds extends Domain {
     const { build, builder, signal, tag } = run;
     const buildId = build.id;
     if (signal.aborted) return "cancelled";
+    // Locked out since it was asked for (while it waited for a place, its workspace opened, or between attempts and
+    // passes): its builder doesn't run.
+    if (this.lockedOut(build)) return { end: byOwner(build) ? OWNERS_WORK_LOCKED : KEY_LOCKED };
     // Every run of the builder is a new attempt for it, a pass's too: the session it resumes is the build's.
     const attempt = ++run.runs;
     this.registry.updateBuild(buildId, { status: "building", log: run.history });
@@ -1894,14 +1897,16 @@ export class Builds extends Domain {
 
   /**
    * One of the owner's stored keys turned up in a build (OWN_KEY_FOUND): every agent that had a hand in its work
-   * (`agents`: `behind`), the owner's build of that work included, builds nothing more until the owner has looked
+   * (`behind`), the owner's build of that work included, builds nothing more until the owner has looked
    * (owner, 2026-11-21, "Lock the agent out"). One bit a submission is still a search, many guesses at a time (a
-   * whole PIN space fits in a file); this bounds it. Work no agent had a hand in locks nobody.
+   * whole PIN space fits in a file); this bounds it. Work no agent had a hand in locks nobody. A walk cut short
+   * can't name them all: then every agent that built this tool is locked out (as `lockedOut` fails closed).
    */
-  lockForKey(build: BuildRow, agents: Iterable<string>, keys: string[]) {
+  lockForKey(build: BuildRow, behind: { agents: Set<string>; truncated: boolean }, keys: string[]) {
     const locks = { ...this.keyLocks() };
     const now = new Date().toISOString();
-    const locked = [...agents].filter((a) => !locks[a]);
+    const agents = behind.truncated ? [...behind.agents, ...this.registry.buildRequesters(build.capabilityId).filter((a) => a !== USER.id && a !== WEB_USER.id)] : behind.agents;
+    const locked = [...new Set(agents)].filter((a) => !locks[a]);
     if (!locked.length) return;
     // Synchronously, before anything awaits: another validation of their builds sees the lock at once.
     for (const a of locked) locks[a] = { buildId: build.id, capabilityId: build.capabilityId, at: now, keys: [...new Set(keys)] };
@@ -1927,9 +1932,12 @@ export class Builds extends Domain {
    * Whether a build is, or carries on from, the work of an agent that's locked out (`lockForKey`). A walk cut short
    * can't say whose work lies past it: while any agent is locked out, it might be that one's.
    */
-  lockedOut(build: BuildRow, behind = this.behind(build)): boolean {
+  lockedOut(build: BuildRow, behind?: { agents: Set<string>; truncated: boolean }): boolean {
     const locks = this.keyLocks();
-    return [...behind.agents].some((a) => !!locks[a]) || (behind.truncated && Object.keys(locks).length > 0);
+    // Nobody locked out, as nearly always: no walk.
+    if (!Object.keys(locks).length) return false;
+    const { agents, truncated } = behind ?? this.behind(build);
+    return truncated || [...agents].some((a) => !!locks[a]);
   }
 
   /**

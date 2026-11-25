@@ -1366,6 +1366,11 @@ export class Registry {
     return this.db.prepare("SELECT id FROM builds WHERE capability_id = ?").all(capabilityId).map((r) => (r as Row).id as string);
   }
 
+  /** Who asked for a capability's builds, each once. */
+  buildRequesters(capabilityId: string): string[] {
+    return this.db.prepare("SELECT DISTINCT requested_by FROM builds WHERE capability_id = ?").all(capabilityId).map((r) => (r as Row).requested_by as string);
+  }
+
   /** The most recent build per capability (for Home badges). */
   latestBuilds(): Map<string, { id: string; status: BuildStatus; builder: string | null; discardedAt: string | null }> {
     const out = new Map<string, { id: string; status: BuildStatus; builder: string | null; discardedAt: string | null }>();
