@@ -30,6 +30,7 @@ export const ABI_FEATURES: AbiFeature[] = [
   { name: '"source"', since: "2.5", used: (m) => m.source !== undefined },
   { name: '"hub" and "minVersion" in requires.capabilities', since: "2.5", used: (m) => (m.requires?.capabilities ?? []).some((c) => c.hub !== undefined || c.minVersion !== undefined) },
   { name: '"suggested" in config', since: "2.6", used: (m) => (m.config ?? []).some((c) => c.suggested !== undefined) },
+  { name: '"license"', since: "2.7", used: (m) => m.license !== undefined },
 ];
 
 /** ctx members added after 2.0, each exposed only to code whose manifest declares at least `since`. */
@@ -43,7 +44,7 @@ const parseAbi = (v: string) => {
   const m = /^(\d+)\.(\d+)$/.exec(v);
   return m ? { major: Number(m[1]), minor: Number(m[2]) } : undefined;
 };
-const abiBelow = (a: string, b: string) => {
+export const abiBelow = (a: string, b: string) => {
   const x = parseAbi(a)!, y = parseAbi(b)!;
   return x.major < y.major || (x.major === y.major && x.minor < y.minor);
 };

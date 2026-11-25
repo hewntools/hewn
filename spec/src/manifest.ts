@@ -71,6 +71,12 @@ export interface CapabilityManifest {
    */
   source?: ToolSource;
   /**
+   * The license the tool is shared under (ABI 2.7): an SPDX id such as "MIT" or "Apache-2.0", or an expression of
+   * them. Unset: all rights reserved. The host writes it when the owner shares the tool, with a LICENSE file beside
+   * the manifest; a builder leaves it alone.
+   */
+  license?: string;
+  /**
    * Non-secret settings the owner fills in (ABI 2.1), e.g. a site URL. Code reads them as
    * `ctx.config.NAME`; `requires.hosts` may name one as `config:NAME` (its host). `suggested`
    * (ABI 2.6): the value the setup form opens with, for a setting with an obvious answer. The

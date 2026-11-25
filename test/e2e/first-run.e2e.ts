@@ -212,6 +212,8 @@ try {
     await code.waitFor({ state: "detached" });
     await page.locator(".info-head").getByRole("button", { name: "Install", exact: true }).click();
     const sheet = page.locator("dialog[open]", { hasText: "Install Plant Log" });
+    // Hewn's own tools are Apache-2.0: the sheet says so.
+    await sheet.getByText("License: Apache 2.0").waitFor();
     await sheet.getByText(/From Hewn's tools · Official/).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-hub-install.png" });
     await sheet.getByRole("button", { name: "Cancel" }).click();
@@ -662,6 +664,14 @@ export const operations = {
     await sheet.getByText(/sample\/calls\.json · \d+ calls? · /).waitFor();
     if ((await sheet.getByLabel("Version").inputValue()) !== "2") throw new Error("Info's Share… isn't on the live version");
     if (await sheet.getByRole("button", { name: "Download" }).isDisabled()) throw new Error("Download is off");
+    // From a file without a license: all rights reserved, and the row says why; picking MIT shows the copyright line, never the owner's name on it.
+    await sheet.getByText("It arrived without a license.", { exact: false }).waitFor();
+    if ((await sheet.getByLabel("License").inputValue()) !== "none") throw new Error("a tool from a file without a license isn't at all rights reserved");
+    await sheet.getByLabel("License").selectOption("MIT");
+    await sheet.getByText(/^Copyright \(c\) \d{4} the .+ authors$/).waitFor();
+    await sheet.getByText("Someone else's work: the notice it came with goes with it.").waitFor();
+    await sheet.getByLabel("License").selectOption("none");
+    await sheet.getByText("It arrived without a license.", { exact: false }).waitFor();
     await page.screenshot({ path: "/tmp/e2e-fr-share.png" });
     await sheet.getByRole("button", { name: "Done" }).click();
     await page.goto(`${web}/#/c/shared-log/v/1`);
