@@ -80,6 +80,8 @@ export interface SupervisorOptions {
   /** Confine builders away from the platform home. */
   sandboxBuilders?: () => boolean;
   log?: (line: string) => void;
+  /** Tests only: the tools process's V8 inspector on this address ("127.0.0.1:9229"), to count its isolates. */
+  toolsInspector?: string;
   /** Health check cadence and the stall that triggers a restart. */
   watchdog?: { intervalMs: number; stallMs: number } | false;
   /**
@@ -238,7 +240,8 @@ const config :Workerd.Config = (
       o.publicListen && o.publicListen !== "0.0.0.0" ? `\n    (name = "public-network", address = "${o.publicListen}:${o.publicPort}", http = (), service = (name = "main", entrypoint = "Public")),` : ""
     }
   ],
-  # gc() for the idle GC (the supervisor's tick, /_admin/idle-gc). This process only: the tools' never has it.
+  # gc() for the idle GC (the supervisor's tick, /_admin/idle-gc). The tools' process has it too, for its own release
+  # of replaced isolates; there the guard takes it off every tool's global before the tool's code runs.
   v8Flags = ["--expose-gc"],
 );
 const hewn :Workerd.Worker = (
@@ -295,6 +298,9 @@ const config :Workerd.Config = (
   sockets = [
     (name = "tools", address = "${o.channel.tools}", http = (), service = "main"),
   ],
+  # gc() for CapabilityHost's release of replaced isolates (tools-worker.ts, \`flush\`). Tool isolates get it too: the
+  # guard (capability-guard.ts) redefines theirs as undefined and read-only before their code runs, and checks it.
+  v8Flags = ["--expose-gc"],
 );
 const tools :Workerd.Worker = (
   modules = [
@@ -311,7 +317,7 @@ const tools :Workerd.Worker = (
     (name = "TOOLS_TOKEN", fromEnvironment = "HEWN_TOOLS_TOKEN"),${o.network ? `\n    (name = "NETWORK", text = "${o.network}"),` : ""}
   ],
   durableObjectNamespaces = [
-    (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true),
+    (className = "CapabilityHost", uniqueKey = "${o.keys.capability}", enableSql = true, preventEviction = true),
   ],
   durableObjectStorage = (localDisk = "do-storage"),
 );
@@ -650,7 +656,7 @@ export async function startSupervisor(o: SupervisorOptions): Promise<Supervisor>
   // The tools' own storage (made before each start): the tools process can write nowhere else in the data dir.
   const toolsStorage = join(data, "do", STORAGE_KEYS.capability);
   const platformBase = [bin, "serve", "--experimental", join(data, "config.capnp")];
-  const toolsBase = [bin, "serve", "--experimental", join(data, "tools.capnp")];
+  const toolsBase = [bin, "serve", "--experimental", join(data, "tools.capnp"), ...(o.toolsInspector ? ["--inspector-addr", o.toolsInspector] : [])];
   const platformCommand = o.sandbox ? sandboxed(platformBase, { readable: [binDir, ...Object.values(assetDirs()).map((d) => realpathSync(d))], writable: [data], profile: join(data, "workerd.sb") }) : platformBase;
   const toolsCommand = o.sandbox ? sandboxed(toolsBase, toolsSandbox(o.home.root, data, binDir)) : toolsBase;
   const url = `http://127.0.0.1:${o.port}`;

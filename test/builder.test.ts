@@ -381,6 +381,19 @@ describe("platform-assigned builder", () => {
     restarted.close();
   });
 
+  test("the scratch states validation runs cut off by a restart left go at the restart: a build's, its check's, a client's check's", async () => {
+    await installSeed(t.platform);
+    useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
+    const opened = await platform.modify(t.claude, { capabilityId: "running-log", request: "index" });
+    // As a crash mid-validation leaves them: the build's, its builder's check's, a client's check's. A backup stays.
+    const left = [`test:${opened.buildId}`, `dryrun:${opened.buildId}`, `dryrun:${opened.buildId}-check`, "sample:chk-1a2b3c4d-check", "backup:before-v2-1"];
+    for (const scratch of left) await platform.runtime.copyState({ capabilityId: "running-log" }, { capabilityId: "running-log", scratch });
+    const restarted = nodePlatform(t.home);
+    await restarted.recoverInterruptedBuilds();
+    assert.deepEqual(await restarted.runtime.listStates("running-log", ""), ["backup:before-v2-1"]);
+    restarted.close();
+  });
+
   test("a copy of a Hewn (schedules off) leaves an interrupted build stopped, saying why, and a waiting one too: a Retry isn't queued behind it", async () => {
     await installSeed(t.platform);
     useBuilder(fakeBuilder("fake", () => new Promise(() => {})));
